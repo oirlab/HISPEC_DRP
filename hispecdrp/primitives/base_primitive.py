@@ -1,9 +1,6 @@
-"""
-base_primitive.py
-Defines the base primitive class for HISPEC.
-"""
 
 import traceback
+import logging
 
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
@@ -12,72 +9,61 @@ from keckdrpframework.models.event import Event
 from keckdrpframework.models.processing_context import ProcessingContext
 from keckdrpframework.config.framework_config import ConfigClass
 
-import logging
-logger = logging.getLogger("HISPEC")
+from ..utils.logging import get_logger
 
 
 class HISPECPrimitive(BasePrimitive):
-    """
-    Base primitive for HISPEC.
-
-    Class Attributes:
-        default_args (dict) : A python dictionary.
-
-    Attributes:
-        action (Action): The action.
-        context (ProcessingContext): The processing context.
-        args (Arguments): The current Arguments object that will be used in _perform.
-    """
-
-    default_args = {}
+    
+    default_args = {
+        "skip" : False,
+    }
 
     def __init__(
             self,
-            action : Action | None = None,
-            context : ProcessingContext | None = None,
+            config_file : str | None = None,
             **kwargs
         ):
         """
         Arguments:
-            action (Action | None): A default action will be created if not provided.
-            context (ProcessingContext | None): A default context will be created if not provided.
-            **kwargs: Any keyword arguments to set in `self.args`. See documentation on [primitive parameters](url).
+            config_file (str | None): The configuration file to further specify default parameters.
+            **kwargs: Any additional keyword arguments to set or override in `self.args`.
         """
 
-        # Default action
-        if action is None:
-            name = self.__class__.__name__
-            args = Arguments()
-            event = Event(name, args)
-            action = Action(event, (name, None, None), args)
+        # Default config
 
-        # Default context
-        if context is None:
-            config = ConfigClass()
-            event_queue, event_queue_hi = None, None
-            context = ProcessingContext(event_queue, event_queue_hi, logger, config)
+        # Get a default Context and action
+        super().__init__(action=None, context=None)
 
-        # Super init
-        super().__init__(action, context)
-
-        # Store logger at top level
-        self.logger = context.logger
+        # Logger
+        self.logger = get_logger(self)
 
         # Set the default args
         self.set_args(**kwargs)
 
-        # Default output
+        # Initialize output to None
         self.output = None
 
+    @classmethod
+    def from_action_context(
+            cls,
+            action : Action | None = None,
+            context : ProcessingContext | None = None,
+        ):
+        # This will interface with the Keck framework specific pipeline
+        # context = ProcessingContext(event_queue, event_queue_hi, logger, config)
+        raise NotImplementedError(f"class method from_action_context not implemented for {cls.__name__}")
     
     def _perform(self):
-        raise NotImplementedError(f"instance method _perform not implemented for class {self.__class__.__name__}")
+        raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
 
 
     def apply(self, **kwargs):
         try:
             self.set_args(**kwargs)
-            if self._pre_condition():
+            self.logger = self.get_logger(self.__class__.__name__, self.args)
+            if not self._pre_condition():
+                self.logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.args}:")
+            else:
                 self.logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.args}:")
                 output = self._perform()
                 if self._post_condition():
@@ -87,6 +73,10 @@ class HISPECPrimitive(BasePrimitive):
             self.logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
             raise e
         return None
+    
+    def default_context(self, logger : logging.Logger | None = None):
+        self.context = ProcessingContext(None, None, logger)
+        return self.context
 
 
     def set_args(self, **kwargs) -> Arguments:
@@ -105,7 +95,6 @@ class HISPECPrimitive(BasePrimitive):
             self.args.update(**kwargs)
         return self.args
 
-
     def reset_args(self, **kwargs) -> Arguments:
         """
         Coalesces the user input into a single `Arguments` object from scratch with the following priorities:
@@ -115,7 +104,7 @@ class HISPECPrimitive(BasePrimitive):
             1. `kwargs`
         And is stored in `self.args`.
         """
-        self.args = Arguments()
+        self.args = Arguments(name=kwargs.get('name', None))
         self.args.update(**self.default_args)
         if self.context.config.has_section("ARGUMENT"):
             self.args.update(**self.context.config["ARGUMENT"])
@@ -129,7 +118,31 @@ class HISPECPrimitive(BasePrimitive):
         """
         return self.apply(**kwargs)
     
+
+    def _pre_condition(self):
+        return not super()._pre_condition() or not self.args.skip
     
+
     def __repr__(self):
-        return f"{self.__class__.__name__}\n{self.args}"
+        if hasattr(self, "args"):
+            return f"{self.__class__.__name__} with Arguments: {self.args}"
+        else:
+            return self.__class__.__name__
+
+
+    def hasarg(self, key: str):
+        return hasattr(self.args, key)
+
+
+    def get_calibration_file(self, kind : str, **kwargs):
+        """
+        This will implement the function 
+        """
+        raise NotImplementedError(f"instance method get_calibration_file not implemented for class {self.__class__.__name__}")
     
+
+    def __init_subclass__(cls):
+        subclasses = cls.mro()[::-1]
+        for _cls in subclasses:
+            if hasattr(_cls, "default_args"):
+                cls.default_args.update(_cls.default_args)

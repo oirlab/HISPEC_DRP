@@ -47,6 +47,7 @@ dependencies = [
   "matplotlib",
   "astropy",
   "pandas",
+  "gitpython",
   "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#dev"
 ]
 
