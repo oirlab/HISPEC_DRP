@@ -53,7 +53,7 @@ dependencies = [
 
 # [project.optional-dependencies]
 # dev = ["check-manifest"]
-# test = ["coverage"]
+test = ["pytest", "pytest-cov"]
 
 [project.urls]
 "Documentation" = "https://github.com/oirlab/HISPEC_DRP"
