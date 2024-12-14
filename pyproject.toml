@@ -51,7 +51,7 @@ dependencies = [
   "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#dev"
 ]
 
-# [project.optional-dependencies]
+[project.optional-dependencies]
 # dev = ["check-manifest"]
 test = ["pytest", "pytest-cov"]
 
