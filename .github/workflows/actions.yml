@@ -31,6 +31,7 @@ jobs:
           pip install .
     - name: Run tests
       run: |
+          pip install .[test]
           pytest
     # - name: Build docs
     #   if: ${{ matrix.python-version==3.11 }}
