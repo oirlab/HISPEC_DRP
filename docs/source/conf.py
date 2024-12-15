@@ -39,6 +39,6 @@ html_static_path = ['_static']
 
 
 # Version
-version = '.'.join(hispecdrp.__version__.split('.')[:-1])
+version = hispecdrp.__version__
 # The full version, including alpha/beta/rc tags.
-release = kpfpipe.__version__
+#release = hispecdrp.__version__
