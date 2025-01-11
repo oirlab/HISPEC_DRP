@@ -51,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov"]
-docs = ["sphinx", "multiversion @ git+https://github.com/sphinx-contrib/multiversion.git"]
+docs = ["sphinx", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion"]
 
 [project.urls]
 # "Documentation" = ""

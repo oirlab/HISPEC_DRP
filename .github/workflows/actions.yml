@@ -2,9 +2,9 @@ name: GitHub Actions
 
 on:
   push:
-    branches: [master]
+    branches: [implement_core_pipeline]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 
 jobs:
@@ -30,4 +30,18 @@ jobs:
     - name: Run tests
       run: |
           pip install .[test]
-          pytest
+          pytest tests/test_*.py
+    - name: Build docs
+      if: ${{ matrix.python-version==3.11 }}
+      run: |
+          pip install .[docs]
+          cd docs
+          make html
+    # - name: Deploy docs
+    #   if: ${{ matrix.python-version==3.11 && contains(github.ref, 'master') }}
+    #   uses: JamesIves/github-pages-deploy-action@v4
+    #   with:
+    #     branch: master
+    #     folder: docs/_build/html
+    #     repository-name: oirlab/hispecdrp
+    #     token: ${{ secrets.PAT }}
