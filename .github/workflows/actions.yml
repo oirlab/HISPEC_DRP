@@ -2,7 +2,7 @@ name: GitHub Actions
 
 on:
   push:
-    branches: [implement_core_pipeline]
+    branches: [main]
   pull_request:
     branches: [ main ]
 
