@@ -1,0 +1,47 @@
+name: GitHub Actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [ main ]
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install the package and dependencies
+      run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install .
+    - name: Run tests
+      run: |
+          pip install .[test]
+          pytest tests/test_*.py
+    - name: Build docs
+      if: ${{ matrix.python-version==3.11 }}
+      run: |
+          pip install .[docs]
+          cd docs
+          make html
+    # - name: Deploy docs
+    #   if: ${{ matrix.python-version==3.11 && contains(github.ref, 'master') }}
+    #   uses: JamesIves/github-pages-deploy-action@v4
+    #   with:
+    #     branch: master
+    #     folder: docs/_build/html
+    #     repository-name: oirlab/hispecdrp
+    #     token: ${{ secrets.PAT }}
