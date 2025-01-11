@@ -61,3 +61,6 @@ docs = ["sphinx", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion"]
 [tool.setuptools]
 packages = ["hispecdrp"]
 # package-data = {"sample" = ["*.dat"]}
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
