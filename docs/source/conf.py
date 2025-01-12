@@ -13,8 +13,8 @@ import hispecdrp
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'HISPEC DRP'
-copyright = '2024, Bryson Cale, JB Ruffio'
-author = 'Bryson Cale, JB Ruffio'
+copyright = '2025, HISPEC DRP Team'
+author = 'HISPEC DRP Team'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -37,7 +37,7 @@ exclude_patterns = []
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
+html_theme = 'sphinxawesome_theme'
 html_static_path = ['_static']
 
 
@@ -45,3 +45,6 @@ html_static_path = ['_static']
 version = hispecdrp.__version__
 # The full version, including alpha/beta/rc tags.
 #release = hispecdrp.__version__
+
+# URL
+html_baseurl = 'https://oirlab.github.io/HISPEC_DRP/'

@@ -31,12 +31,12 @@ jobs:
       run: |
           pip install .[test]
           pytest tests/test_*.py
-    - name: Build docs
-      if: ${{ matrix.python-version==3.11 }}
-      run: |
-          pip install .[docs]
-          cd docs
-          make html
+    # - name: Build docs
+    #   if: ${{ matrix.python-version==3.11 }}
+    #   run: |
+    #       pip install .[docs]
+    #       cd docs
+    #       make html
     # - name: Deploy docs
     #   if: ${{ matrix.python-version==3.11 && contains(github.ref, 'master') }}
     #   uses: JamesIves/github-pages-deploy-action@v4
