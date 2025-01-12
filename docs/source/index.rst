@@ -2,7 +2,7 @@
 HISPEC DRP Documentation
 ************************
 
-The HISPEC Data Reduction Pipeline is designed to process data from the HISPEC instrument at W.M. Keck Observatory.
+The HISPEC Data Reduction Pipeline is designed to process data from the HISPEC instrument at W.M. Keck Observatory. This site will be under active development as the pipeline is created.
 
 Installation
 ============
