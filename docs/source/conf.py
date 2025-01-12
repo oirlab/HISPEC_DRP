@@ -38,6 +38,9 @@ exclude_patterns = []
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = 'sphinxawesome_theme'
+from sphinxawesome_theme.postprocess import Icons
+
+html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
 
 
