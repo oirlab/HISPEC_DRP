@@ -54,13 +54,19 @@ test = ["pytest", "pytest-cov"]
 docs = ["sphinx", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
 
 [project.urls]
-# "Documentation" = ""
+"Documentation" = "https://oirlab.github.io/HISPEC_DRP/"
 "Source" = "https://github.com/oirlab/HISPEC_DRP"
 
-
 [tool.setuptools]
-packages = ["hispecdrp"]
-# package-data = {"sample" = ["*.dat"]}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hispecdrp*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+hispecdrp = ["datamodels/schemas/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
