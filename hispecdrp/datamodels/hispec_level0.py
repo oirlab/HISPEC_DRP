@@ -1,13 +1,29 @@
 
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
+import numpy as np
 
 class HISPECL0(HISPECDataModel):
 
-    extensions = {
-        'DATA': fits.ImageHDU,
-        'ERR_ALL': fits.ImageHDU,
-        'ERR_FLOOR': fits.ImageHDU,
-        'DQ': fits.ImageHDU,
-        'MID_TIME': fits.ImageHDU
+    EXTENSIONS = {
+        'DATA': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float32
+        },
+        'ERR_ALL': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float32
+        },
+        'ERR_FLOOR': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float32
+        },
+        'DQ': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.uint32
+        },
+        'MID_TIME': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
     }

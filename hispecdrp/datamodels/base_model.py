@@ -1,145 +1,363 @@
 import os
+import astropy.table
 from astropy.io import fits
 import pandas as pd
-import numpy as np
-from typing import Type
-import datetime
-import git
+import copy
+from typing import TypeVar
+from . import schema
+from .meta_dict import MetaDict
+
+# Receipt columns
+_RECEIPT_COLS = {
+    'Time' : str,
+    'Code_Release' : str,
+    'Branch_Name' : str,
+    'Commit_Hash' : str,
+    'Class' : str,
+    'Datamodel' : str,
+    'Arguments' : str,
+    'Status' : str,
+}
+
+# So that dict[str, A] <: dict[str, B] when A <: B
+_VALID_HDU = TypeVar('T', bound=fits.hdu.base._ValidHDU, covariant=True)
+
 
 class DataModel:
+    """
+    Base class for data models.
+    Class Attributes:
+        EXTENSIONS (dict): Extensions and their properties.
+        INHERIT_EXTENSIONS (bool): Whether to inherit extensions from parent class. Defaults to True.
+        HEADER_SCHEMAS (list): List of schema files to load for the header.
+        INHERIT_SCHEMAS (bool): Whether to inherit schemas from parent class. Defaults to True.
+    """
 
-    extensions = {
-        'PRIMARY': fits.PrimaryHDU,
-        'RECEIPT': fits.BinTableHDU,
+    EXTENSIONS = {
+        'PRIMARY': {
+            'hdu_type' : fits.PrimaryHDU,
+        },
+        'RECEIPT': {
+            'hdu_type' : fits.BinTableHDU,
+            'columns' : _RECEIPT_COLS
+        }
     }
+    INHERIT_EXTENSIONS = True
 
-    RECEIPT_COLS = [
-        'Time',
-        'Code_Release',
-        'Branch_Name',
-        'Commit_Hash',
-        'Class',
-        'Datamodel',
-        'Arguments',
-        'Status'
-    ]
+    HEADER_SCHEMAS = []
+    INHERIT_SCHEMAS = True
 
-    HDU_TYPE_MAP = {
-        fits.ImageHDU: np.array,
-        fits.BinTableHDU: pd.DataFrame
-    }
+    _ALLOWED_ATTRIBUTES = []
 
+    def __init__(
+            self,
+            filename : str | None = None,
+            data : dict | None = None,
+            meta : MetaDict | None = None,
+            extensions : str | list[str] | None = None,
+            validate_metadata : bool = True
+        ):
+        """
+        Initialize a DataModel object.
 
-    def __init__(self, filename : str | None, extensions : str | list[str] | None = None):
+        Args:
+            data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
+                Keys should match the schema's extension names. Defaults to None.
+            meta (dict, optional): Dictionary containing metadata.
+                Keys should match the schema's property paths. Defaults to None.
+            filename (str, optional): Path to a FITS file to load. Defaults to None.
+            extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
+            validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
+        """
+        # TODO: Implement hdu_list input.
+
+        # Set the optional filename
         self.filename = filename
-        self.read_headers(extensions=extensions)
-        self.read_data(extensions=extensions)
-        self.receipt = pd.DataFrame()
+
+        # Load and merge the schemas
+        self.load_schemas()
+
+        # If given a file, load the header and data from that
+        if self.filename is not None and os.path.isfile(self.filename):
+            self.set_meta_from_headers(extensions=extensions, validate=validate_metadata)
+            self.read_data(extensions=extensions)
+        else:
+            # If given starting (meta)data, set that.
+            self.init_meta(meta)
+            self.init_data(data)
+
+        # Add Receipt HDU if one not provided
+        if 'RECEIPT' not in self._data:
+            self._data['RECEIPT'] = pd.DataFrame({name : pd.Series(dtype=dtype) for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()})
+            
+        # Defaults
+        if self.meta.data_level is None:
+            self.meta.data_level = self.default_level
 
 
     @property
     def dirname(self):
-        return os.path.dirname(self)
+        """
+        Returns the directory of the DataModel if present.
+        """
+        return os.path.dirname(self.filename) if self.filename else None
 
 
     @property
     def basename(self):
-        return os.path.basename(self.filename)
-
-    @property
-    def file_ext(self):
-        return os.path.splitext(self.filename)[1]
-    
-    @property
-    def extnames(self):
-        return list(self.extensions.keys())
-
-
-    def read_headers(self) -> dict[str, fits.Header]:
-        self.headers = {}
-        with fits.open(self.filename, memmap=True) as hdulist:
-            for extname in self.extensions:
-                self.headers[extname] = hdulist[extname].header
-        return self.headers
-    
-
-    def read_data(self, extensions : str | list[str] | None = None) -> dict[str, fits.hdu.base._ValidHDU]:
-        if extensions is None:
-            extensions = list(self.extensions.keys())
-        if isinstance(extensions, str):
-            extensions = [extensions]
-        extensions = [e.upper() for e in extensions]
-        self.data = {}
-        with fits.open(self.filename, memmap=True) as hdulist:
-            for hdu in hdulist:
-                if hdu.name in extensions:
-                    hdu = hdulist[hdu.name]
-                    data = hdu.data
-                    init = self.HDU_TYPE_MAP[type(data)]
-                    self.data[hdu.name] = init(data)
-        return self.data
-
-
-    @classmethod
-    def from_file(cls, filename : str, extensions : str | list[str] | None = None):
-        return cls(filename, extensions=extensions)
-    
-
-    def save(self, filename_out : str | None):
-        if filename_out is None:
-            filename_out = self.filename
-        hdulist = fits.HDUList()
-        hdulist.append(fits.PrimaryHDU(self.headers['PRIMARY']))
-        for extname, data in self.data.values():
-            init = self.extensions[extname]
-            hdu = init(data=data, name=extname, header=self.headers[extname])
-            hdulist.append(hdu)
-        hdulist.writeto(filename_out)
-
-
-    def get_calibration_file(self, kind : str, **kwargs):
-        pass
-
-    def add_receipt_entry(self, primitive, status : str | None):
         """
-        Taken from KPF DRP and modified:
-            https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/kpfpipe/models/base_model.py
+        Returns the base filename of the DataModel if present.
         """
-        time = datetime.datetime.now().isoformat()
+        return os.path.basename(self.filename) if self.filename else None
+    
 
-        # Get version info
-        repo = git.Repo(search_parent_directories=True)
-        git_commit_hash = repo.head.object.hexsha
-        git_branch = repo.active_branch.name
-        git_tag = str(repo.tags[-1])
-
-        # add the row to the bottom of the table
-        row = {
-            'Time' : time,
-            'Code_Release': git_tag,
-            'Branch_Name': git_branch,
-            'Commit_Hash': git_commit_hash,
-            'Class': f"{primitive.__class__.__module__}.{primitive.__class__.__name__}",
-            'Filename' : self.filename,
-            'Arguments': repr(primitive.args),
-            'Status' : status
-        }
-        self.receipt.append(row, ignore_index=True)
+    def set_meta_from_headers(
+            self,
+            extensions : str | list[str] | None = None,
+            validate : bool = False,
+        ) -> dict[str, fits.Header]:
+        """
+        Set the metadata from the headers of the FITS file.
         
-        # Add DRPTAG and DRPHASH to primary header
-        # NOTE: MOVE THIS SOMEWHERE ELSE
-        self.header['PRIMARY']['DRPTAG'] = git_tag
-        self.header['PRIMARY']['DRPHASH'] = git_commit_hash
+        Args:
+            extensions (str, list[str], optional): List of extensions to read. Defaults to None.
+            validate (bool, optional): Whether to validate the metadata against the schema. Defaults to False.
+        """
+        extensions = self._resolve_extensions(extensions)
+        self.meta = MetaDict(_schema=self.schema, _validate=validate)
+        with fits.open(self.filename, memmap=True) as hdulist:
+            for path, entry in schema.walk_schema(self.schema):
+                fits_hdu = entry.get('fits_hdu', 'PRIMARY')
+                fits_keyword = entry.get('fits_keyword')
+                header = hdulist[fits_hdu].header
+                if fits_keyword in header:
+                    val = header[fits_keyword]
+                    self.meta[path] = val
+        return self.meta
+    
+
+    def read_data(
+            self,
+            extensions : str | list[str] | None = None,
+            do_not_scale_image_data : bool = True,
+        ) -> dict[str, _VALID_HDU]:
+        """
+        Read the data from the FITS file.
+
+        Args:
+            extensions (str, list[str], optional): List of extensions to read. Defaults to None.
+            do_not_scale_image_data (bool, optional): Whether to not scale data according to BZERO and BSCALE. Defaults to True.
+        """
+        # TODO: Implement validation as optional input keyword, here we apply blind conversion
+        extensions = self._resolve_extensions(extensions)
+        self._data = {}
+        with fits.open(
+            self.filename,
+            memmap=True,
+            do_not_scale_image_data=do_not_scale_image_data
+        ) as hdulist:
+            for extname in extensions:
+                hdu = hdulist[extname]
+                hdu_type = type(hdu)
+                if hdu_type is fits.ImageHDU:
+                    dtype = self.EXTENSIONS[extname]['dtype']
+                    self._data[extname] = hdu.data.astype(dtype)
+                elif hdu_type is fits.BinTableHDU:
+                    self._data[extname] = pd.DataFrame(hdu.data)
+        return self._data
+    
+
+    def save(self, filename : str | None, add_missing_metadata : bool = False):
+        """
+        Save the DataModel to a FITS file.
+
+        Args:
+            filename (str, optional): The filename to save to. Defaults to self.filename.
+            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+        """
+        if filename is not None:
+            self.filename = filename
+        if self.filename is None:
+            raise ValueError("No filename provided")
+        hdulist = fits.HDUList()
+        for extname in self.EXTENSIONS:
+            hdu = self.make_hdu_for_extension(extname, add_missing_metadata=add_missing_metadata)
+            hdulist.append(hdu)
+        hdulist.writeto(self.filename, overwrite=True)
+
+
+    def make_hdu_for_extension(self, extname : str, add_missing_metadata : bool = False) -> _VALID_HDU:
+        """
+        Create an HDU for an extension name.
+        
+        Args:
+            extname (str): The extension name.
+            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+        """
+        hdu_class = self.EXTENSIONS[extname]['hdu_type']
+        header = self._make_header(self.meta, extname=extname, add_missing=add_missing_metadata)
+        if hdu_class is fits.PrimaryHDU:
+            return hdu_class(header=header)
+        if hdu_class is fits.ImageHDU:
+            data = self._data.get(extname, None)
+            hdu = hdu_class(data=data, name=extname, header=header)
+        elif hdu_class is fits.BinTableHDU:
+            data = self._data.get(extname, None)
+            if data is not None:
+                data = astropy.table.Table.from_pandas(data)
+            hdu = hdu_class(data=data, name=extname, header=header)
+        return hdu
+
+
+    def get_calibration_file(self, cal_type : str, **kwargs) -> str:
+        """
+        Get the appropriate calibration file for a DataModel from the local cache or online database.
+        To be implemented later.
+        This method might be moved to the base primitive class.
+        """
+        return NotImplementedError(f"Method get_calibration_file not implemented for class {self.__class__.__name__}")
 
 
     def __repr__(self):
-        return f"{self.__class__.__name__}('{self.filename}')"
+        if self.filename is not None:
+            return f"{self.__class__.__name__}('{os.path.basename(self.filename)}')"
+        else:
+            return f"{self.__class__.__name__}()"
     
 
     def __init_subclass__(cls):
         subclasses = cls.mro()[::-1]
         for _cls in subclasses:
-            if hasattr(_cls, "extensions"):
-                cls.extensions.update(_cls.extensions)
-            if hasattr(_cls, "HDU_TYPE_MAP"):
-                cls.HDU_TYPE_MAP.update(_cls.HDU_TYPE_MAP)
+            if hasattr(_cls, "EXTENSIONS") and cls.INHERIT_EXTENSIONS:
+                for extname in _cls.EXTENSIONS:
+                    if extname not in cls.EXTENSIONS:
+                        cls.EXTENSIONS[extname] = _cls.EXTENSIONS[extname]
+            if 'PRIMARY' in cls.EXTENSIONS:
+                cls.EXTENSIONS = {'PRIMARY': cls.EXTENSIONS['PRIMARY'], **{k: v for k, v in cls.EXTENSIONS.items() if k != 'PRIMARY'}}
+            if 'RECEIPT' in cls.EXTENSIONS:
+                cls.EXTENSIONS = {**{k: v for k, v in cls.EXTENSIONS.items() if k != 'RECEIPT'}, 'RECEIPT': cls.EXTENSIONS['RECEIPT']}
+            if hasattr(_cls, "HEADER_SCHEMAS") and cls.INHERIT_SCHEMAS:
+                for schema_file in _cls.HEADER_SCHEMAS:
+                    if schema_file not in cls.HEADER_SCHEMAS:
+                        cls.HEADER_SCHEMAS.append(schema_file)
+
+
+    def copy(self):
+        """
+        Create a deep copy of the object.
+        """
+        return copy.deepcopy(self)
+    
+
+    def _resolve_extensions(self, extensions : str | list[str] | None = None):
+        if extensions is None:
+            return list(self.EXTENSIONS.keys())
+        if isinstance(extensions, str):
+            return [extensions.upper()]
+        else:
+            return [e.upper() for e in extensions]
+
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        new_instance = self.__class__.__new__(self.__class__)
+        for key, value in self.__dict__.items():
+            setattr(new_instance, key, copy.deepcopy(value, memo))
+
+
+    def __getattr__(self, attr):
+        if attr.startswith('_') or attr in self._ALLOWED_ATTRIBUTES:
+           return super().__getattr__(attr)
+        if attr in self.meta:
+           return self.meta.__getattr__(attr)
+        if attr in self.schema['properties']:
+            return None
+        if attr in self._data:
+            return self._data[attr]
+        if attr.upper() in self._data:
+            return self._data[attr.upper()]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
+
+
+    def validate_metadata(self):
+        """
+        Validate the metadata against the schema.
+        """
+        schema.validate(self.schema, self.meta)
+
+    
+    def load_schemas(self):
+        """
+        Load the schemas from the schema files and merges them into one schema.
+
+        Returns:
+            dict : The merged schema.
+        """
+        self.schemas = {}
+        self.schema = {}
+        for schema_file in self.HEADER_SCHEMAS:
+            self.schemas[schema_file] = schema.load_schema(schema_file)
+            self.schema = schema.merge_schemas(self.schema, self.schemas[schema_file])
+        return self.schema
+    
+
+    def init_data(self, data : dict | None):
+        """
+        Initialize the data.
+
+        Args:
+            data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
+                Keys should match the schema's extension names. Defaults to None.
+        """
+        self._data = {}
+        if data is not None:
+            for key in data:
+                if key.upper() in self.EXTENSIONS:
+                    self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
+                else:
+                    raise ValueError(f"Unknown extension: {key.upper()}")
+    
+
+    def init_meta(self, meta : MetaDict | None = None):
+        """
+        Initialize the metadata and optionally merge in provided metadata.
+
+        Args:
+            meta (dict, optional): Metadata to merge in. Defaults to None.
+        """
+        self.meta = MetaDict(_schema=self.schema)
+        if meta is not None:
+            self.meta.update(meta)
+
+
+    @property
+    def default_level(self):
+        """
+        Get the default data level. NameLX -> X.
+        """
+        s = ''
+        for c in self.__class__.__name__[::-1]:
+            if c == 'L':
+                break
+            else:
+                s += c
+        s = s[::-1]
+        if s == self.__class__.__name__:
+            return ''
+        else:
+            return s
+
+
+    @staticmethod
+    def _make_header(meta : MetaDict, extname : str = 'PRIMARY', add_missing : bool = False) -> fits.Header:
+        """
+        Create a fits header for the given extension.
+        
+        Args:
+            extname (str, optional): The extension name. Defaults to 'PRIMARY'.
+            add_missing (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+        Returns:
+            astropy.io.fits.Header: The header.
+        """
+        return schema.create_header(meta, extname=extname, add_missing=add_missing)

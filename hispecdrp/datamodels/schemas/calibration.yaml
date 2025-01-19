@@ -1,0 +1,8 @@
+%YAML 1.2
+---
+type: object
+properties:
+  cal_type:
+    fits_keyword: CALTYPE
+    comment: "Type of calibration"
+    type: string

@@ -1,0 +1,26 @@
+%YAML 1.2
+---
+type: object
+properties:
+  instrument:
+    type: object
+    comment: "Instrument information"
+    properties:
+      name:
+        comment: "Name of the instrument used to acquire the data"
+        fits_keyword: INSTRUME
+        type: string
+        default: "HISPEC"
+      spectrograph:
+        comment: "Name of the spectrograph (BSPEC or RSPEC)"
+        fits_keyword: SPECTROG
+        type: string
+      era:
+        comment: "Instrument era specified via semver"
+        fits_keyword: ERA
+        type: string
+        default: "0.0.1"
+      mode:
+        comment: "Instrument mode (YJ, HK, YJHK)"
+        fits_keyword: INSTMODE
+        type: string

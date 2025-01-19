@@ -1,0 +1,72 @@
+%YAML 1.2
+---
+type: object
+properties:
+  cal_file:
+    comment: "Calibration files used for processing"
+    type: object
+    properties:
+      data_quality:
+        comment: "Data quality reference file"
+        fits_keyword: C_DQ
+        type: string
+      saturation:
+        comment: "Saturation levels reference file"
+        fits_keyword: C_SAT
+        type: string
+      bias:
+        comment: "Bias reference file"
+        fits_keyword: C_BIAS
+        type: string
+      read_noise:
+        comment: "Read noise reference file"
+        fits_keyword: C_RN
+        type: string
+      nonlin_corr:
+        comment: "Nonlinearity correction reference file"
+        fits_keyword: C_NLC
+        type: string
+      dark:
+        comment: "Dark current reference file"
+        fits_keyword: C_DARK
+        type: string
+      gain:
+        comment: "Gain reference file"
+        fits_keyword: C_GAIN
+        type: string
+      detector_flat:
+        comment: "Detector flat field reference file"
+        fits_keyword: C_DFLAT
+        type: string
+      fiber_flat:
+        comment: "Fiber flat reference file"
+        fits_keyword: C_FFLAT
+        type: string
+      trace_positions:
+        comment: "Trace positions reference file"
+        fits_keyword: C_TRACE
+        type: string
+      spec_extract:
+        comment: "Spectral extraction reference file"
+        fits_keyword: C_SPECX
+        type: string
+      etalon_anchor:
+        comment: "Etalon anchor reference file"
+        fits_keyword: C_ETAN
+        type: string
+      gascell_wavecal:
+        comment: "Gas cell wavelength calibration reference file"
+        fits_keyword: C_GWC
+        type: string
+      hcl_wavecal:
+        comment: "Hollow cathode lamp wavelength calibration reference file"
+        fits_keyword: C_HWC
+        type: string
+      lfc_wavecal:
+        comment: "Laser frequency comb wavelength calibration reference file"
+        fits_keyword: C_LWC
+        type: string
+      lsf:
+        comment: "Line spread function reference file"
+        fits_keyword: C_LSF
+        type: string
