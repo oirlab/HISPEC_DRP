@@ -26,6 +26,7 @@ _VALID_HDU = TypeVar('T', bound=fits.hdu.base._ValidHDU, covariant=True)
 class DataModel:
     """
     Base class for data models.
+
     Class Attributes:
         EXTENSIONS (dict): Extensions and their properties.
         INHERIT_EXTENSIONS (bool): Whether to inherit extensions from parent class. Defaults to True.
@@ -50,13 +51,13 @@ class DataModel:
     _ALLOWED_ATTRIBUTES = []
 
     def __init__(
-            self,
-            filename : str | None = None,
-            data : dict | None = None,
-            meta : MetaDict | None = None,
-            extensions : str | list[str] | None = None,
-            validate_metadata : bool = True
-        ):
+        self,
+        filename : str | None = None,
+        data : dict | None = None,
+        meta : MetaDict | None = None,
+        extensions : str | list[str] | None = None,
+        validate_metadata : bool = True
+    ):
         """
         Initialize a DataModel object.
 
@@ -69,6 +70,7 @@ class DataModel:
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
         """
+
         # TODO: Implement hdu_list input.
 
         # Set the optional filename
@@ -112,10 +114,10 @@ class DataModel:
     
 
     def set_meta_from_headers(
-            self,
-            extensions : str | list[str] | None = None,
-            validate : bool = False,
-        ) -> dict[str, fits.Header]:
+        self,
+        extensions : str | list[str] | None = None,
+        validate : bool = False,
+    ) -> dict[str, fits.Header]:
         """
         Set the metadata from the headers of the FITS file.
         
@@ -137,10 +139,10 @@ class DataModel:
     
 
     def read_data(
-            self,
-            extensions : str | list[str] | None = None,
-            do_not_scale_image_data : bool = True,
-        ) -> dict[str, _VALID_HDU]:
+        self,
+        extensions : str | list[str] | None = None,
+        do_not_scale_image_data : bool = True,
+    ) -> dict[str, _VALID_HDU]:
         """
         Read the data from the FITS file.
 
@@ -167,7 +169,11 @@ class DataModel:
         return self._data
     
 
-    def save(self, filename : str | None = None, add_missing_metadata : bool = False):
+    def save(
+        self,
+        filename : str | None = None,
+        add_missing_metadata : bool = False
+    ):
         """
         Save the DataModel to a FITS file.
 
