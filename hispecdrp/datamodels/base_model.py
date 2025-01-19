@@ -167,7 +167,7 @@ class DataModel:
         return self._data
     
 
-    def save(self, filename : str | None, add_missing_metadata : bool = False):
+    def save(self, filename : str | None = None, add_missing_metadata : bool = False):
         """
         Save the DataModel to a FITS file.
 

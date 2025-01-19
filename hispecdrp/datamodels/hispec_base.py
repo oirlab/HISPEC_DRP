@@ -14,7 +14,8 @@ class HISPECDataModel(DataModel):
     @staticmethod
     def _generate_filename(
         spectrograph : str,
-        date : str, level : str | int,
+        date : str,
+        level : str | int,
         suffix : str | None = None
     ) -> str:
         """

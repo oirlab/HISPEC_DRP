@@ -77,13 +77,17 @@ class MetaDict(dict):
 
         # Make sure value is the correct type
         if schema_type == 'string':
-            assert type_passed is str, f"Property '{prop}' must be a string"
+            if type_passed is not str:
+                raise ValueError(f"Property '{prop}' must be a string")
         elif schema_type == 'number':
-            assert type_passed in [int, float], f"Property '{prop}' must be a number"
+            if type_passed not in [int, float]:
+                raise ValueError(f"Property '{prop}' must be a number")
         elif schema_type == 'integer':
-            assert type_passed is int, f"Property '{prop}' must be an integer"
+            if type_passed is not int:
+                raise ValueError(f"Property '{prop}' must be an integer")
         elif schema_type == 'boolean':
-            assert type_passed is bool, f"Property '{prop}' must be a boolean"
+            if type_passed is not bool:
+                raise ValueError(f"Property '{prop}' must be a boolean")
         
         return True
 
