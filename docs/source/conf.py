@@ -21,6 +21,7 @@ author = 'HISPEC DRP Team'
 
 extensions = [
     'sphinx.ext.doctest',
+    'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
@@ -28,6 +29,7 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
+    'sphinx.ext.autosummary',
     'nbsphinx',
 ]
 
@@ -39,10 +41,8 @@ exclude_patterns = []
 
 html_theme = 'sphinxawesome_theme'
 from sphinxawesome_theme.postprocess import Icons
-
 html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
-
 
 # Version
 version = hispecdrp.__version__

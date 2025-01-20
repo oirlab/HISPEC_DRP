@@ -18,12 +18,14 @@ Examples
 
    examples
 
+
 Primitives
 ==========
 
 .. toctree::
 
    primitives
+
 
 Pipelines
 =========
@@ -39,3 +41,11 @@ Calibrations
 .. toctree::
 
    calibrations
+
+
+Data Models
+===========
+
+.. toctree::
+
+   data_models
