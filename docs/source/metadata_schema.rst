@@ -7,7 +7,7 @@ FITS Header Properties
 ----------------------
 
 .. code-block:: yaml
-
+  
   property_name:
     comment: # Optional FITS comment.
     fits_keyword:  # FITS keyword. Required.
