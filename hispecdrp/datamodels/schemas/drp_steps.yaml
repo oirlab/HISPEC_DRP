@@ -1,0 +1,76 @@
+%YAML 1.2
+---
+type: object
+properties:
+  drp_step:
+    comment: "Modules performed by the DRP"
+    type: object
+    properties:
+      dq_init:
+        comment: Data quality initialization
+        fits_keyword: P_DQINIT
+        type: string
+      bias_sub:
+        comment: Bias subtraction
+        fits_keyword: P_BIASUB
+        type: string
+      refpix_corr:
+        comment: Reference pixel correction
+        fits_keyword: P_REFPIX
+        type: string
+      dark_sub:
+        comment: Dark subtraction
+        fits_keyword: P_DARK
+        type: string
+      nonlincorr:
+        comment: Nonlinear readout correction
+        fits_keyword: P_NLCORR
+        type: string
+      ramp_fit:
+        comment: Ramp fitting
+        fits_keyword: P_RAMPFT
+        type: string
+      flat_field:
+        comment: Flat Field Correction
+        fits_keyword: P_FLAT
+        type: string
+      gain_scale:
+        comment: Gain Scale Correction
+        fits_keyword: P_GANSCL
+        type: string
+      spec_extract:
+        comment: Spectral Extraction
+        fits_keyword: P_SPECEX
+        type: string
+      bary_center_calc:
+        comment: Barycenter Calculation
+        fits_keyword: P_BARYC
+        type: string
+      trans_corr:
+        comment: Instrument transmission correction (e.g., blaze)
+        fits_keyword: P_TRANSC
+        type: string
+      comput_rvs:
+        comment: Compute Radial Velocities
+        fits_keyword: P_COMRV
+        type: string
+      merge_orders:
+        comment: Merge spectral orders
+        fits_keyword: P_MERGEO
+        type: string
+      fluxcal:
+        comment: Flux Calibration
+        fits_keyword: P_FLUXCL
+        type: string
+      drift_calc:
+        comment: Drift Calculation for wavelength calibration
+        fits_keyword: P_DRIFTC
+        type: string
+      sky_sub:
+        comment: Sky subtraction
+        fits_keyword: P_SKYSUB
+        type: string
+      tell_corr:
+        comment: Telluric correction
+        fits_keyword: P_TELCOR
+        type: string

@@ -1,6 +1,8 @@
 
 import traceback
 import logging
+import datetime
+import git
 
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
@@ -8,6 +10,8 @@ from keckdrpframework.models.action import Action
 from keckdrpframework.models.event import Event
 from keckdrpframework.models.processing_context import ProcessingContext
 from keckdrpframework.config.framework_config import ConfigClass
+
+from ..datamodels import DataModel
 
 from ..utils.logging import get_logger
 
@@ -57,7 +61,7 @@ class HISPECPrimitive(BasePrimitive):
         raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
 
 
-    def apply(self, **kwargs):
+    def apply(self, *args, **kwargs):
         try:
             self.set_args(**kwargs)
             self.logger = self.get_logger(self.__class__.__name__, self.args)
@@ -132,13 +136,6 @@ class HISPECPrimitive(BasePrimitive):
 
     def hasarg(self, key: str):
         return hasattr(self.args, key)
-
-
-    def get_calibration_file(self, kind : str, **kwargs):
-        """
-        This will implement the function 
-        """
-        raise NotImplementedError(f"instance method get_calibration_file not implemented for class {self.__class__.__name__}")
     
 
     def __init_subclass__(cls):
@@ -146,3 +143,30 @@ class HISPECPrimitive(BasePrimitive):
         for _cls in subclasses:
             if hasattr(_cls, "default_args"):
                 cls.default_args.update(_cls.default_args)
+
+
+    def add_receipt_entry(self, model : DataModel):
+        """
+        Taken from KPF DRP and modified:
+            https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/kpfpipe/models/base_model.py
+        """
+        time = datetime.datetime.now().isoformat()
+
+        # Get version info
+        repo = git.Repo(search_parent_directories=True)
+        git_commit_hash = repo.head.object.hexsha
+        git_branch = repo.active_branch.name
+        git_tag = str(repo.tags[-1])
+
+        # add the row to the bottom of the table
+        row = {
+            'Time' : time,
+            'Code_Release': git_tag,
+            'Branch_Name': git_branch,
+            'Commit_Hash': git_commit_hash,
+            'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
+            'Filename' : self.filename,
+            'Arguments': repr(self.args),
+            'Status' : self.status
+        }
+        model.receipt.append(row, ignore_index=True)

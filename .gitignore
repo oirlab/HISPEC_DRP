@@ -1,8 +1,6 @@
 # Starting from: https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/.gitignore
 # Universal ignore
 outputs/*
-examples/V1/BiasRecipe/BiasRecipeRes/
-examples/V1/recipe_results/
 *.npy
 *~
 *.DS_Store

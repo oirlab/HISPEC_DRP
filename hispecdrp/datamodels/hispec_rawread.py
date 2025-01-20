@@ -1,9 +1,12 @@
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
+import numpy as np
 
 class HISPECRawRead(HISPECDataModel):
 
-    extensions = {
-        'DATA': fits.ImageHDU,
-        'DQ': fits.ImageHDU,
+    EXTENSIONS = {
+        'DATA': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.int16
+        }
     }

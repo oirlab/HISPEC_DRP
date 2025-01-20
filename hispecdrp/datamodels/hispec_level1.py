@@ -1,19 +1,19 @@
 
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
+import numpy as np
 
 class HISPECL1(HISPECDataModel):
-    extensions = {}
+    EXTENSIONS = {}
     for i in range(1, 4):
-        extensions[f'SPEC_UNCAL_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_UNCAL_ERR_ALL_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_UNCAL_ERR_FLOOR_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_DQ_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'MID_TIME_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'WS_BSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_UNCAL_RSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_UNCAL_ERR_ALL_RSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_UNCAL_ERR_FLOOR_RSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'SPEC_DQ_RSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'MID_TIME_RSPEC_FIB{i}'] = fits.ImageHDU
-        extensions[f'WS_RSPEC_FIB{i}'] = fits.ImageHDU
+        # Uncalibrated spectrum, error, dq
+        EXTENSIONS[f'SPEC_UNCAL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+        EXTENSIONS[f'SPEC_UNCAL_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+        EXTENSIONS[f'SPEC_UNCAL_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+        EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
+
+        # Mid time
+        EXTENSIONS[f'MID_TIME_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+
+        # Wavelength solution
+        EXTENSIONS[f'WS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
