@@ -50,7 +50,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "requests"]
 docs = ["sphinx", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
 
 [project.urls]
