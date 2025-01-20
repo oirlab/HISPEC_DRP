@@ -1,118 +1,163 @@
 
 import traceback
-import logging
+from typing import Self
+from collections.abc import Sequence
 import datetime
 import git
+import os
 
-from keckdrpframework.primitives.base_primitive import BasePrimitive
+from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePrimitive
 from keckdrpframework.models.arguments import Arguments
-from keckdrpframework.models.action import Action
-from keckdrpframework.models.event import Event
-from keckdrpframework.models.processing_context import ProcessingContext
-from keckdrpframework.config.framework_config import ConfigClass
 
+#from keckdrpframework.models.action import Action as _Action
+#from keckdrpframework.models.event import Event as _Event
+#from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
+#from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
+
+from pathlib import Path
 from ..datamodels import DataModel
-
+from ..utils.config import PrimitiveConfig
 from ..utils.logging import get_logger
 
 
-class HISPECPrimitive(BasePrimitive):
+__all__ = ['BasePrimitive']
+
+
+class BasePrimitive(_BasePrimitive):
     
-    default_args = {
-        "skip" : False,
+    ARGUMENTS = {
+        'skip' : False,
+        'save_results' : True,
+        'output_dir' : None,
+        'suffix' : ''
+    }
+
+    LOGGER = {
+        'enable' : True,
+        'level' : 'warning',
+        'log_path' : None,
+        'verbose' : True,
     }
 
     def __init__(
-            self,
-            config_file : str | None = None,
-            **kwargs
-        ):
+        self,
+        config : PrimitiveConfig | str | None = None,
+        **kwargs
+    ):
         """
-        Arguments:
-            config_file (str | None): The configuration file to further specify default parameters.
-            **kwargs: Any additional keyword arguments to set or override in `self.args`.
+        Args:
+            config (str | PrimitiveConfig | None): The configuration file or PrimitiveConfig to further specify parameters.
+            **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
         """
 
-        # Default config
+        # NOTE: TEMPORARY until we choose how to interface best with the Keck framework
+        self.action = None
+        self.context = None
 
-        # Get a default Context and action
-        super().__init__(action=None, context=None)
+        # Load the configuration
+        self.config_file = None
+        if isinstance(config, (str, Path)):
+            self.load_config(config_file=str(config))
+        elif isinstance(config, PrimitiveConfig):
+            self.config_file = config._filename
+            self.config = PrimitiveConfig(config)
+        else:
+            self.config_file = None
+            self.config = PrimitiveConfig()
 
-        # Logger
-        self.logger = get_logger(self)
+        # Init the logger
+        self.init_logger()
 
-        # Set the default args
+        # Set any kwargs passed to init
         self.set_args(**kwargs)
 
-        # Initialize output to None
+        # Init the output and status
         self.output = None
+        self.status = None
 
-    @classmethod
-    def from_action_context(
-            cls,
-            action : Action | None = None,
-            context : ProcessingContext | None = None,
-        ):
-        # This will interface with the Keck framework specific pipeline
-        # context = ProcessingContext(event_queue, event_queue_hi, logger, config)
-        raise NotImplementedError(f"class method from_action_context not implemented for {cls.__name__}")
-    
+
+    def load_config(self, config_file : str) -> PrimitiveConfig:
+        """
+        Load the config_file for this primitive or pipeline and any sub config_files.
+        """
+        self.config_file = config_file
+        self.config = PrimitiveConfig(config_file=config_file)
+        return self.config
+
+
     def _perform(self):
         raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
 
 
     def apply(self, *args, **kwargs):
+        self.output = None
         try:
-            self.set_args(**kwargs)
-            self.logger = self.get_logger(self.__class__.__name__, self.args)
+            self.set_args(*args, **kwargs)
             if not self._pre_condition():
                 self.logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.args}:")
+                self.on_skip()
             else:
                 self.logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.args}:")
-                output = self._perform()
+                _kwargs = {}
+                for key in self.args.iter_kw():
+                    if key not in ('name', '_pos_args') and key not in self.ARGUMENTS:
+                        _kwargs[key] = kwargs[key]
+                output = self._perform(self.args.name, **_kwargs) # TODO: SORT OUT HOW ARGS vs. KWARGS ARE SET AND PASSED
                 if self._post_condition():
                     self.output = output
+                if self.args.save_results:
+                    if isinstance(self.output, Sequence):
+                        for out in self.output:
+                            self.save_model(out)
+                    else:
+                        self.save_model(self.output)
                     return self.output
         except Exception as e:
             self.logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
             raise e
-        return None
+        return self.output
     
-    def default_context(self, logger : logging.Logger | None = None):
-        self.context = ProcessingContext(None, None, logger)
-        return self.context
 
+    def init_logger(self):
+        self.logger = get_logger(self)
+    
 
-    def set_args(self, **kwargs) -> Arguments:
+    def set_args(self, *args, **kwargs) -> Arguments:
         """
         Coalesces the user input into a single `Arguments` object with the following priorities:
-            4. `self.default_args`
-            3. `self.context.config`
-            2. `self.action.args`
+            4. `self.ARGUMENTS`
+            3. `self.config['ARGUMENTS']`
+            2. `self.args`
             1. `kwargs`
         And is stored in `self.args`.
         If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
+        `self.args.name` should be the name of the primary datamodel or filename to be processed.
         """
         if not hasattr(self, "args") or not isinstance(self.args, Arguments):
-            self.reset_args(**kwargs)
-        else:
-            self.args.update(**kwargs)
+            self.init_args()
+        if len(args) > 0:
+            self.args.name = args[0]
+        for key in kwargs: # Only want to pass valid kwargs to self.args, don't call dict update()
+            if key in self.ARGUMENTS:
+                self.args[key] = kwargs[key]
         return self.args
 
-    def reset_args(self, **kwargs) -> Arguments:
+
+    def init_args(self) -> Arguments:
         """
         Coalesces the user input into a single `Arguments` object from scratch with the following priorities:
-            4. `self.default_args`
-            3. `self.context.config`
-            2. `self.action.args`
-            1. `kwargs`
+            3. `self.ARGUMENTS`
+            2. `self.config`
+            1. `self.args`
         And is stored in `self.args`.
+
+        Keyword Args:
+            Any valid arguments for the primitive.
         """
-        self.args = Arguments(name=kwargs.get('name', None))
-        self.args.update(**self.default_args)
-        if self.context.config.has_section("ARGUMENT"):
-            self.args.update(**self.context.config["ARGUMENT"])
-        self.args.update(**kwargs)
+        self.args = Arguments()
+        self.args.update(**self.ARGUMENTS)
+        if 'ARGUMENTS' in self.config:
+            self.args.update(**self.config['ARGUMENTS'])
         return self.args
     
 
@@ -127,9 +172,24 @@ class HISPECPrimitive(BasePrimitive):
         return not super()._pre_condition() or not self.args.skip
     
 
+    def _post_condition(self):
+        if super()._post_condition():
+            self.status = "COMPLETE"
+        return True
+    
+
+    def on_skip(self):
+        self.status = "SKIPPED"
+    
+
     def __repr__(self):
         if hasattr(self, "args"):
-            return f"{self.__class__.__name__} with Arguments: {self.args}"
+            s = self.__class__.__name__
+            # for k, arg in enumerate(self.args):
+            #     s += f"\n  {k}: {arg}"
+            for key in self.args.iter_kw():
+                s += f"\n  {key}: {self.args[key]}"
+            return s
         else:
             return self.__class__.__name__
 
@@ -139,10 +199,11 @@ class HISPECPrimitive(BasePrimitive):
     
 
     def __init_subclass__(cls):
-        subclasses = cls.mro()[::-1]
-        for _cls in subclasses:
-            if hasattr(_cls, "default_args"):
-                cls.default_args.update(_cls.default_args)
+        ARGUMENTS = {}
+        for _cls in cls.mro()[::-1]:
+            if issubclass(_cls, BasePrimitive):
+                ARGUMENTS.update(_cls.ARGUMENTS)
+        cls.ARGUMENTS = ARGUMENTS
 
 
     def add_receipt_entry(self, model : DataModel):
@@ -150,23 +211,110 @@ class HISPECPrimitive(BasePrimitive):
         Taken from KPF DRP and modified:
             https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/kpfpipe/models/base_model.py
         """
-        time = datetime.datetime.now().isoformat()
 
-        # Get version info
-        repo = git.Repo(search_parent_directories=True)
-        git_commit_hash = repo.head.object.hexsha
-        git_branch = repo.active_branch.name
-        git_tag = str(repo.tags[-1])
+        # TODO: Get accurate GitHub info
+        #repo = git.Repo(search_parent_directories=True)
+        #git_commit_hash = repo.head.object.hexsha
+        #git_branch = repo.active_branch.name
+        #git_tag = str(repo.tags[-1])
+        repo = 'None'
+        git_commit_hash = 'None'
+        git_branch = 'None'
+        git_tag = 'None'
 
         # add the row to the bottom of the table
         row = {
-            'Time' : time,
+            'Time' : datetime.datetime.now().isoformat(),
             'Code_Release': git_tag,
             'Branch_Name': git_branch,
             'Commit_Hash': git_commit_hash,
             'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : self.filename,
+            'Filename' : self.args.name.filename,
             'Arguments': repr(self.args),
             'Status' : self.status
         }
-        model.receipt.append(row, ignore_index=True)
+        model.receipt.loc[len(model.receipt)] = row
+
+    
+    def make_output_path(self, model : DataModel, suffix : str = None):
+        """
+        Args:
+            model (DataModel): The model to generate the output path for.
+            suffix (str): The suffix to append to the output file. Defaults to `self.args.suffix`.
+        """
+        if suffix is None:
+            suffix = self.args.suffix
+        return os.path.join(self.args.output_dir, model.generate_filename(suffix=suffix))
+    
+
+    def save_model(
+        self,
+        model: DataModel,
+        filename: str | None = None,
+        output_path: str | None = None,
+        suffix: str = None,
+        output_dir: str | None = None,
+        update_receipt: bool = True
+    ):
+        """
+        Save a model to a file. The output_path is determined as follows:
+        1. If output_path is input to this method, use that.
+        2. If self.output_path is provided, use that.
+        3. If output_dir is provided, use that for the directory.
+        4. If self.output_dir is provided, use that for the directory.
+        5. If filename is provided, use that for the filename.
+        6. Generate filename from model.filename and either self.suffix or suffix passed in.
+
+        Args:
+            model (DataModel): The model to save.
+            filename (str, optional): The filename to save the model to.
+            output_path (str, optional): The full path where the model should be saved.
+            suffix (str, optional): The suffix to append to the output file. Defaults to self.args.suffix.
+            output_dir (str, optional): The directory to save the file in.
+            update_receipt (bool, optional): Whether to update the receipt. Defaults to True.
+        """
+        # Step 1 & 2: Check output_path priority
+        if output_path is not None:
+            final_path = output_path
+        else:
+            # Check instance output_path
+            instance_output_path = getattr(self, 'output_path', None)
+            if instance_output_path is not None:
+                final_path = instance_output_path
+            else:
+                # Step 3 & 4: Determine the directory
+                if output_dir is None:
+                    output_dir = getattr(self, 'output_dir', None)
+                
+                # Step 5 & 6: Determine the filename
+                if filename is not None:
+                    final_filename = filename
+                else:
+                    # Use provided suffix or fall back to self.args.suffix
+                    current_suffix = suffix or getattr(self.args, 'suffix', None)
+                    final_filename = self.make_output_path(model, suffix=current_suffix)
+                
+                # Combine directory and filename if directory exists
+                if output_dir is not None:
+                    final_path = os.path.join(output_dir, os.path.basename(final_filename))
+                else:
+                    final_path = final_filename
+
+        # Update the receipt
+        if update_receipt:
+            self.add_receipt_entry(model)
+        
+        # Save the model
+        model.save(filename=final_path)
+
+
+    # @classmethod
+    # def from_action_context(cls, action, context):
+    #     """
+    #     Create a new instance of this primitive from an action and context.
+    #     """
+    #     name = action.args.name
+    #     self = cls(config=context.config, )
+    #     self._action = action
+    #     self._context = context
+    #     return self

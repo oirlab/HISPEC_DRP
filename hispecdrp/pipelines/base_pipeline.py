@@ -1,5 +1,5 @@
 from keckdrpframework.models.arguments import Arguments
-from keckdrpframework.config.framework_config import ConfigClass
+from ..utils.config import PrimitiveConfig
 
 from ..primitives.base_primitive import HISPECPrimitive
 
@@ -10,12 +10,12 @@ class HISPECPipeline(HISPECPrimitive):
 
     def __init__(
             self,
-            config : ConfigClass | str | None = None,
+            config : PrimitiveConfig | str | None = None,
             **kwargs
         ):
         """
-        Parameters:
-            config_file (str): Filename for pipeline-level configuration file containing configuration for all primitives.
+        Args:
+            config (str): Filename for pipeline-level configuration file containing configuration for all primitives.
         """
         super().__init__(config=config)
         self.init_primitives()
