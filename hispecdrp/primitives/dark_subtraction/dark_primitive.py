@@ -11,6 +11,8 @@ class DarkSubtractionPrimitive(BasePrimitive):
             If None, the dark model will be queried.
     """
 
+    class_alias = 'darksub'
+
     ARGUMENTS = {
         'suffix' : 'darksub',
         'dark' : None
@@ -18,6 +20,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
 
     def _perform(
             self,
-            name : datamodels.DataModel | str,
+            name : datamodels.HISPECL0 | str,
         ):
-        return datamodels.open(name)
+        model_to_process = self.open_model(name)
+        return model_to_process

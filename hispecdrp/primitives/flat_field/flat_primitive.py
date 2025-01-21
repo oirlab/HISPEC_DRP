@@ -11,6 +11,8 @@ class FlatFieldPrimitive(BasePrimitive):
             If None, the flat field model will be queried.
     """
 
+    class_alias = 'flat_field'
+
     ARGUMENTS = {
         'suffix' : 'flatfield',
         'flat' : None
@@ -18,6 +20,7 @@ class FlatFieldPrimitive(BasePrimitive):
 
     def _perform(
             self,
-            name : datamodels.DataModel | str,
+            name : datamodels.HISPECL0 | str,
         ):
-        return datamodels.open(name)
+        model_to_process = self.open_model(name)
+        return model_to_process

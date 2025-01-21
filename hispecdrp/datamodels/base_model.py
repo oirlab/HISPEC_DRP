@@ -264,14 +264,6 @@ class DataModel:
             return [e.upper() for e in extensions]
 
 
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        new_instance = self.__class__.__new__(self.__class__)
-        for key, value in self.__dict__.items():
-            setattr(new_instance, key, copy.deepcopy(value, memo))
-
-
     def __getattr__(self, attr):
         if attr.startswith('_') or attr in self._ALLOWED_ATTRIBUTES:
            return super().__getattr__(attr)

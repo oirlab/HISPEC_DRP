@@ -14,9 +14,11 @@ from keckdrpframework.models.arguments import Arguments
 #from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
 #from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
 
+from .. import datamodels
+
 from pathlib import Path
 from ..datamodels import DataModel
-from ..utils.config import PrimitiveConfig
+from ..utils.config import Config
 from ..utils.logging import get_logger
 
 
@@ -24,6 +26,8 @@ __all__ = ['BasePrimitive']
 
 
 class BasePrimitive(_BasePrimitive):
+
+    class_alias = None
     
     ARGUMENTS = {
         'skip' : False,
@@ -34,36 +38,24 @@ class BasePrimitive(_BasePrimitive):
 
     LOGGER = {
         'enable' : True,
-        'level' : 'warning',
+        'level' : 'info',
         'log_path' : None,
         'verbose' : True,
     }
 
     def __init__(
-        self,
-        config : PrimitiveConfig | str | None = None,
-        **kwargs
-    ):
+            self,
+            config : Config | str | None = None,
+            **kwargs
+        ):
         """
         Args:
-            config (str | PrimitiveConfig | None): The configuration file or PrimitiveConfig to further specify parameters.
+            config (str | Config | None): The configuration file or Config to further specify parameters.
             **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
         """
 
-        # NOTE: TEMPORARY until we choose how to interface best with the Keck framework
-        self.action = None
-        self.context = None
-
-        # Load the configuration
-        self.config_file = None
-        if isinstance(config, (str, Path)):
-            self.load_config(config_file=str(config))
-        elif isinstance(config, PrimitiveConfig):
-            self.config_file = config._filename
-            self.config = PrimitiveConfig(config)
-        else:
-            self.config_file = None
-            self.config = PrimitiveConfig()
+        # Load the configuration file or Config object
+        self.init_config(config=config)
 
         # Init the logger
         self.init_logger()
@@ -76,12 +68,42 @@ class BasePrimitive(_BasePrimitive):
         self.status = None
 
 
-    def load_config(self, config_file : str) -> PrimitiveConfig:
+    @classmethod
+    def _load_config(cls, config_file : str) -> Config:
+        """
+        Load a config file for this primitive or pipeline.
+        """
+        config = Config(config_file=config_file, root_dir=os.path.dirname(config_file))
+        if 'class' not in config:
+            raise ValueError(f"'class' entry not found in config {config_file}")
+        _class = config._resolve_primitive_class(config['class'])
+        if _class is not cls:
+            raise ValueError(f"Config 'class' '{_class}' from {config_file} not consistent with instantiated primitive {cls.__name__}")
+        return config
+
+
+    def load_config(self, config_file : str) -> Config:
+        """
+        Load a config file for this primitive or pipeline and set `self.config` and `self.config_file`.
+        """
+        self.config = self._load_config(config_file)
+        self.config_file = config_file
+        return self.config
+
+
+    def init_config(self, config : str | Config) -> Config:
         """
         Load the config_file for this primitive or pipeline and any sub config_files.
         """
-        self.config_file = config_file
-        self.config = PrimitiveConfig(config_file=config_file)
+        if isinstance(config, str):
+            self.load_config(config_file=config)
+        elif isinstance(config, Config):
+            self.config_file = config._filename
+            self.config = config
+        else:
+            self.config_file = None
+            self.config = Config()
+
         return self.config
 
 
@@ -105,13 +127,12 @@ class BasePrimitive(_BasePrimitive):
                 output = self._perform(self.args.name, **_kwargs) # TODO: SORT OUT HOW ARGS vs. KWARGS ARE SET AND PASSED
                 if self._post_condition():
                     self.output = output
-                if self.args.save_results:
-                    if isinstance(self.output, Sequence):
-                        for out in self.output:
-                            self.save_model(out)
-                    else:
-                        self.save_model(self.output)
-                    return self.output
+                    if self.args.save_results:
+                        if isinstance(self.output, Sequence):
+                            for out in self.output:
+                                self.save_model(out)
+                        else:
+                            self.save_model(self.output)
         except Exception as e:
             self.logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
             raise e
@@ -126,7 +147,7 @@ class BasePrimitive(_BasePrimitive):
         """
         Coalesces the user input into a single `Arguments` object with the following priorities:
             4. `self.ARGUMENTS`
-            3. `self.config['ARGUMENTS']`
+            3. `self.config['arguments']`
             2. `self.args`
             1. `kwargs`
         And is stored in `self.args`.
@@ -157,7 +178,7 @@ class BasePrimitive(_BasePrimitive):
         self.args = Arguments()
         self.args.update(**self.ARGUMENTS)
         if 'ARGUMENTS' in self.config:
-            self.args.update(**self.config['ARGUMENTS'])
+            self.args.update(**self.config['arguments'])
         return self.args
     
 
@@ -229,7 +250,7 @@ class BasePrimitive(_BasePrimitive):
             'Branch_Name': git_branch,
             'Commit_Hash': git_commit_hash,
             'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : self.args.name.filename,
+            'Filename' : model.filename,
             'Arguments': repr(self.args),
             'Status' : self.status
         }
@@ -248,14 +269,14 @@ class BasePrimitive(_BasePrimitive):
     
 
     def save_model(
-        self,
-        model: DataModel,
-        filename: str | None = None,
-        output_path: str | None = None,
-        suffix: str = None,
-        output_dir: str | None = None,
-        update_receipt: bool = True
-    ):
+            self,
+            model: DataModel,
+            filename: str | None = None,
+            output_path: str | None = None,
+            suffix: str = None,
+            output_dir: str | None = None,
+            update_receipt: bool = True
+        ):
         """
         Save a model to a file. The output_path is determined as follows:
         1. If output_path is input to this method, use that.
@@ -278,7 +299,7 @@ class BasePrimitive(_BasePrimitive):
             final_path = output_path
         else:
             # Check instance output_path
-            instance_output_path = getattr(self, 'output_path', None)
+            instance_output_path = getattr(self.args, 'output_path', None)
             if instance_output_path is not None:
                 final_path = instance_output_path
             else:
@@ -307,9 +328,24 @@ class BasePrimitive(_BasePrimitive):
         # Save the model
         model.save(filename=final_path)
 
+    def open_model(self, name : DataModel, _copy=True):
+        """
+        Open a model from a file or copy a datamodel.
+        """
+        #breakpoint()
+        if isinstance(name, DataModel):
+            if _copy:
+                return name.copy()
+            else:
+                return name
+        if isinstance(name, str):
+            return datamodels.open(name)
+        else:
+            raise ValueError(f"Cannot open model from {name}")
+
 
     # @classmethod
-    # def from_action_context(cls, action, context):
+    # def from_keck_pipeline(cls, keck_pipeline):
     #     """
     #     Create a new instance of this primitive from an action and context.
     #     """
