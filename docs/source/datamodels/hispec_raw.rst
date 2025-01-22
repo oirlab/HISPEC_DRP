@@ -20,9 +20,9 @@ Extensions
    * - 1
      - DATA
      - Image
-     - Float32
-     - 4096 x 4096
+     - UInt16
+     - 4096 x 4096 x Nreads x Ngroups
      - ADU
 
 
-1. **DATA**
+1. **DATA**: The raw UTR data.

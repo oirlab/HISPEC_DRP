@@ -49,12 +49,12 @@ Extensions
      - MJD
 
 
-1. **DATA**
+1. **DATA**: Rate map.
 
-2. **ERR_ALL**
+2. **ERR_ALL**: All errors including correlated errors.
 
-3. **ERR_FLOOR**
+3. **ERR_FLOOR**: Error from photon and read noise only.
 
-4. **DQ**
+4. **DQ**: Data quality values (see X).
 
-5. **MID_TIME**
+5. **MID_TIME**: Exposure mid-point time for each pixel.

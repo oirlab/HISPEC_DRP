@@ -54,14 +54,14 @@ Extensions
      - micron
 
 
-**1-3. SPEC_UNCAL_[B/R]SPEC_FIB#**
+**1-3. SPEC_UNCAL_[B/R]SPEC_FIB#**: Extracted 1D spectra.
 
-**4-6. SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#**
+**4-6. SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (all noise sources).
 
-**7-9. SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#**
+**7-9. SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (photon and read noise only).
 
-**10-12. SPEC_DQ_[B/R]SPEC_FIB#**
+**10-12. SPEC_DQ_[B/R]SPEC_FIB#**: Data quality.
 
-**13-15. MID_TIME_[B/R]SPEC_FIB#**
+**13-15. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time for wavelength bin.
 
-**16-18. WS_[B/R]SPEC_FIB#**
+**16-18. WS_[B/R]SPEC_FIB#**: Wavelength solutions likely derived from that night's LFC.
