@@ -10,14 +10,14 @@ A primitive is designed to take as input either a datamodel or ``DataModel`` ins
 
 Primitives should invoke the ``apply`` method when used after construction. This method is fully implemented by ``BasePrimitive`` and does the following:
 
-#. Any additional ``kwargs`` are passed to ``primitive.args`.
+#. Any additional ``kwargs`` are passed to ``primitive.args``.
 #. Calls ``primitive._pre_condition(self) -> bool``
     * If ``_precondition`` returns ``False``, the primitive will be skipped. Default is ``True``.
-#. Calls ``output = primitive._perform(self, name : DataModel | str) -> DataModel`
-    * The primary logic of the primitive should be implemented in `_perform`.
-    * Subtypes of `BasePrimitive` must implement this method.
-#. Calls ``primitive._post_condition(self, output) -> bool`
-    * If ``_post_condition` returns `False`, the output is stashed and nothing is returned. Default is `True`.
+#. Calls ``output = primitive._perform(self, name : DataModel | str) -> DataModel``
+    * The primary logic of the primitive should be implemented in ``_perform``.
+    * Subtypes of ``BasePrimitive``` must implement this method.
+#. Calls ``primitive._post_condition(self, output) -> bool``
+    * If ``_post_condition`` returns ``False``, the output is stashed and nothing is returned. Default is ``True``.
 #. Optionally calls ``primitive.save_model(self, model : DataModel | str)``
     * The model is saved if ``primitive.save_results`` is ``True``. See additional configuration options in ``BasePrimitive`` for output_path construction.
 
