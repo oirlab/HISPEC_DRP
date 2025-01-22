@@ -1,4 +1,4 @@
-hispecdrp.primitives
+﻿hispecdrp.primitives
 ====================
 
 .. automodule:: hispecdrp.primitives

@@ -33,12 +33,12 @@ def create_header(
     Includes section headers as COMMENT cards.
     
     Args:
-        meta : (MetaDict, optional)
-            Dictionary containing data values. Keys should match the schema's property paths.
-            If None, header will be created with default values
+        meta : (MetaDict, optional) Dictionary containing data values.
+            Keys should match the schema's property paths.
+            If None, header will be created with default values.
         extname : (str, optional). Default is 'PRIMARY'
         add_missing : (bool, optional). Default is False. If True, missing entries will be added with None values.
-    
+
     Returns:
         astropy.io.fits.Header : FITS header populated according to the schema
     """
