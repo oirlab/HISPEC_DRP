@@ -34,7 +34,7 @@ For example, the `EXTENSIONS` attribute for the base data model class is specifi
     }
 
 
-**Metadata**: Metadata managed with a dotted dictionary structure stored in the `meta` attribute. Metadata is validated against a list of schema files specified by the class attribute `HEADER_SCHEMAS`, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>` for more information.
+**Metadata**: Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute `HEADER_SCHEMAS`, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>` for more information.
 
 .. toctree::
 
@@ -50,9 +50,10 @@ The `HEADER_SCHEMAS` attribute for the base data model class is specified as fol
         'exposure.yaml',
         'target.yaml',
         'drp_steps.yaml',
-        'calibration_files.yaml',
+        'calibration_files.yaml'
     ]
 
+View all YAML schemas `here. <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/datamodels/schemas/>`_
 
 
 Data Handling

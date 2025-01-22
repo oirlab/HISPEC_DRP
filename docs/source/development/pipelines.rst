@@ -49,4 +49,6 @@ Implementing a Primitive
                 dark = self.get_calibration_file(model_to_process, 'dark')
             else:
                 dark = self.open_model(dark)
+            # Perform the dark subtraction, error propagation, and data quality flagging here
+            ...
             return model_to_process

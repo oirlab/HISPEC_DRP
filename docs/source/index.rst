@@ -11,41 +11,65 @@ Installation
 
    installation
 
+
 Examples
 ========
 
 .. toctree::
+   :maxdepth: 2
 
-   examples
+   examples/examples
 
 
 Primitives
 ==========
 
 .. toctree::
+   :maxdepth: 2
 
-   primitives
+   primitives/primitives
 
 
 Pipelines
 =========
 
 .. toctree::
+   :maxdepth: 2
 
-   pipelines
-
-
-Calibrations
-============
-
-.. toctree::
-
-   calibrations
+   pipelines/pipelines
 
 
 Data Models
 ===========
 
 .. toctree::
+   :maxdepth: 2
 
-   data_models
+   datamodels/datamodels
+
+
+Calibrations
+============
+
+.. toctree::
+   :maxdepth: 2
+
+   calibrations/calibrations
+
+
+Development
+===========
+
+.. toctree::
+   :maxdepth: 2
+
+   development/development
+
+
+API
+===
+
+.. toctree::
+   :maxdepth: 2
+
+   api/api

@@ -1,4 +1,0 @@
-Calibrations
-============
-
-Calibration documentation here.
