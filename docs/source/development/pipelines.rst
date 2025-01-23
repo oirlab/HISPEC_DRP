@@ -27,8 +27,9 @@ For example, the stage 1 pipeline might be implemented as follows and stored in 
             'flat_field': FlatFieldPrimitive,
         }
 
-        def _perform(self, name : datamodels.HISPECL0 | str):
-            result = self.dark_sub.apply(name)
+        def _perform(self):
+            model_to_process = self.open_model(self.args.name, _copy=True) # Open the input model or copy if already open
+            result = self.dark_sub.apply(model_to_process)
             result = self.flat_field.apply(result)
             return result
 

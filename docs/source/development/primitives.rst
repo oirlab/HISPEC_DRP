@@ -13,7 +13,7 @@ Primitives should invoke the ``apply`` method when used after construction. This
 #. Any additional ``kwargs`` are passed to ``primitive.args``.
 #. Calls ``primitive._pre_condition(self) -> bool``
     * If ``_precondition`` returns ``False``, the primitive will be skipped. Default is ``True``.
-#. Calls ``output = primitive._perform(self, name : DataModel | str) -> DataModel``
+#. Calls ``output = primitive._perform(self) -> DataModel``
     * The primary logic of the primitive should be implemented in ``_perform``.
     * Subtypes of ``BasePrimitive``` must implement this method.
 #. Calls ``primitive._post_condition(self, output) -> bool``
@@ -52,11 +52,8 @@ For example, the dark subtraction module might be implemented as follows and sto
             'dark' : None
         }
 
-        def _perform(
-                self,
-                name : datamodels.HISPECL0 | str,
-            ) -> datamodels.HISPECL0:
-            model_to_process = self.open_model(name, _copy=True) # Open the input model or copy if already open
+        def _perform(self):
+            model_to_process = self.open_model(self.args.name, _copy=True) # Open the input model or copy if already open
             if self.args.dark is None:
                 # Get cal from the calibration database
                 dark = self.get_calibration_file(model_to_process, 'dark')
@@ -75,13 +72,13 @@ Primitive Arguments
 
 **Priority Hierarchy**
 
-1. **Keyword Arguments** ``**kwargs``
+1. **Keyword Arguments** ``kwargs``
    - Keyword arguments passed directly to the method or function when it is called have the highest priority.
 
-2. **``primitive.config['arguments']`` (Configuration Arguments)**
+2. **Configuration Arguments** ``primitive.config['arguments']``
    - Arguments loaded from a configuration file or a pre-defined configuration object with key ``arguments``.
 
-3. **``primitive.ARGUMENTS`` (Class-Level Default Arguments)**
+3. **Class-Level Default Arguments** ``primitive.ARGUMENTS``
    - Arguments defined in the class attribute ``ARGUMENTS`` are the starting values.
 
 
