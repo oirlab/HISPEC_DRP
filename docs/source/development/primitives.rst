@@ -24,7 +24,7 @@ Primitives should invoke the ``apply`` method when used after construction. This
 ``apply`` will store the output in ``primitive.output`` and return the output.
 
 
-For example, the dark subtraction module might be implemented like so:
+For example, the dark subtraction module might be implemented as follows and stored in hispecdrp/primitives/dark_subtraction/dark_primitive.py
 
 
 .. code-block:: python
@@ -55,15 +55,60 @@ For example, the dark subtraction module might be implemented like so:
         def _perform(
                 self,
                 name : datamodels.HISPECL0 | str,
-            ):
+            ) -> datamodels.HISPECL0:
             model_to_process = self.open_model(name, _copy=True) # Open the input model or copy if already open
             if self.args.dark is None:
-                # get_calibration_file not implemented yet
+                # Get cal from the calibration database
                 dark = self.get_calibration_file(model_to_process, 'dark')
             else:
-                dark = self.open_model(dark)
+                dark = self.open_model(self.args.dark)
+            self.log.info(f"Using {dark} to process {model_to_process}") # Always use self.log to log messages.
             # Perform the dark subtraction, error propagation, and data quality flagging here
             ...
 
-            # Return a model or list of models
+            # Return a model
             return model_to_process
+
+
+Primitive Arguments
+-------------------
+
+**Priority Hierarchy**
+
+1. **Keyword Arguments** ``**kwargs``
+   - Keyword arguments passed directly to the method or function when it is called have the highest priority.
+
+2. **``primitive.config['arguments']`` (Configuration Arguments)**
+   - Arguments loaded from a configuration file or a pre-defined configuration object with key ``arguments``.
+
+3. **``primitive.ARGUMENTS`` (Class-Level Default Arguments)**
+   - Arguments defined in the class attribute ``ARGUMENTS`` are the starting values.
+
+
+**Note** the final behavior of a primitive, including setting any additional arguments can be done within ``primitive._perform``.
+
+
+Primitive Configuration Files
+-----------------------------
+
+Primitives can also be configured with config files. An example configuration for the dark primitive is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
+
+
+.. code-block:: yaml
+    
+    %YAML 1.2
+    ---
+    class: 'DarkSubtraction'
+
+    logging:
+      enable: True
+      level: info
+      verbose: True
+      log_path: None
+  
+    arguments:
+      skip: False
+      save_results: True
+      output_dir: None
+      suffix: 'examplesuffix'
+

@@ -9,9 +9,9 @@ def create_dark_config():
     ---
     class: 'DarkSubtraction'
 
-    logger:
+    logging:
       enable: True
-      level: info
+      level: warning
       verbose: True
       log_path: None
     
@@ -38,5 +38,5 @@ def test_primitive(tmp_path):
         f.write(textwrap.dedent(dark_config_raw))
 
     # Setup and call the dark primitive
-    dark_prim = DarkSubtractionPrimitive(output_dir=tmp_path, config=dark_config_file)
-    model_result = dark_prim.apply(file_path)
+    dark_prim = DarkSubtractionPrimitive(config_file=dark_config_file)
+    model_result = dark_prim.apply(file_path, output_dir=tmp_path)

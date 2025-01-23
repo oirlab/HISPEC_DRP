@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import datetime
 import git
 import os
+import functools
 
 from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePrimitive
 from keckdrpframework.models.arguments import Arguments
@@ -15,11 +16,11 @@ from keckdrpframework.models.arguments import Arguments
 #from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
 
 from .. import datamodels
-
-from pathlib import Path
 from ..datamodels import DataModel
+from .. import utils as utils
 from ..utils.config import Config
 from ..utils.logging import get_logger
+from ..utils.utils import prepr_args
 
 
 __all__ = ['BasePrimitive']
@@ -36,16 +37,17 @@ class BasePrimitive(_BasePrimitive):
         'suffix' : ''
     }
 
-    LOGGER = {
+    LOGGING = {
         'enable' : True,
         'level' : 'info',
         'log_path' : None,
-        'verbose' : True,
+        'verbose' : True, # NOTE: not used yet, look at logger.py
     }
 
     def __init__(
             self,
-            config : Config | str | None = None,
+            config_file : str | None = None,
+            config : Config | None = None,
             **kwargs
         ):
         """
@@ -55,12 +57,10 @@ class BasePrimitive(_BasePrimitive):
         """
 
         # Load the configuration file or Config object
-        self.init_config(config=config)
-
-        # Init the logger
-        self.init_logger()
+        self.init_config(config=config, config_file=config_file)
 
         # Set any kwargs passed to init
+        # NOTE HERE: Finalize how args are set
         self.set_args(**kwargs)
 
         # Init the output and status
@@ -69,41 +69,37 @@ class BasePrimitive(_BasePrimitive):
 
 
     @classmethod
-    def _load_config(cls, config_file : str) -> Config:
+    def _get_config(cls, config : Config | None = None, config_file : str | None = None) -> Config:
         """
-        Load a config file for this primitive or pipeline.
+        Load a config file for this primitive or pipeline, or construct one from scratch.
         """
-        config = Config(config_file=config_file, root_dir=os.path.dirname(config_file))
-        if 'class' not in config:
-            raise ValueError(f"'class' entry not found in config {config_file}")
-        _class = config._resolve_primitive_class(config['class'])
-        if _class is not cls:
-            raise ValueError(f"Config 'class' '{_class}' from {config_file} not consistent with instantiated primitive {cls.__name__}")
-        return config
+        if config_file is None:
+            _config = Config(data={'class': cls.__module__ + '.' + cls.__name__, 'arguments': Config(), 'logging': cls.LOGGING.copy()})
+        else:
+            _config = Config(config_file=config_file)
+            if 'class' not in _config:
+                raise ValueError(f"'class' entry not found in config {config_file}")
+            _class = utils.resolve_primitive_class(_config['class'])
+            if _class is not cls:
+                raise ValueError(f"Config 'class' '{_class}' from {config_file} not consistent with instantiated primitive {cls.__name__}")
+            if 'logging' not in _config:
+                _config['logging'] = cls.LOGGING.copy()
+            else:
+                _config['logging'] = cls.LOGGING | _config['logging']
+            if 'arguments' not in _config:
+                _config['arguments'] = {}
+        if config is not None:
+            _config.update(**config)
 
+        return _config
+    
 
-    def load_config(self, config_file : str) -> Config:
-        """
-        Load a config file for this primitive or pipeline and set `self.config` and `self.config_file`.
-        """
-        self.config = self._load_config(config_file)
-        self.config_file = config_file
-        return self.config
-
-
-    def init_config(self, config : str | Config) -> Config:
+    def init_config(self, config : Config | None = None, config_file : str | None = None) -> Config:
         """
         Load the config_file for this primitive or pipeline and any sub config_files.
         """
-        if isinstance(config, str):
-            self.load_config(config_file=config)
-        elif isinstance(config, Config):
-            self.config_file = config._filename
-            self.config = config
-        else:
-            self.config_file = None
-            self.config = Config()
-
+        self.config_file = config_file
+        self.config = self._get_config(config=config, config_file=config_file)
         return self.config
 
 
@@ -111,21 +107,19 @@ class BasePrimitive(_BasePrimitive):
         raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
 
 
-    def apply(self, *args, **kwargs):
+    def apply(self, name : DataModel, **kwargs):
+        self.init_logger()
         self.output = None
         try:
-            self.set_args(*args, **kwargs)
+            self.set_args(name, **kwargs)
             if not self._pre_condition():
-                self.logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.args}:")
+                self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{prepr_args(self.args)}")
                 self.on_skip()
             else:
-                self.logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.args}:")
-                _kwargs = {}
-                for key in self.args.iter_kw():
-                    if key not in ('name', '_pos_args') and key not in self.ARGUMENTS:
-                        _kwargs[key] = kwargs[key]
-                output = self._perform(self.args.name, **_kwargs) # TODO: SORT OUT HOW ARGS vs. KWARGS ARE SET AND PASSED
+                self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{prepr_args(self.args)}")
+                output = self._perform()
                 if self._post_condition():
+                    self.finalize_model(output)
                     self.output = output
                     if self.args.save_results:
                         if isinstance(self.output, Sequence):
@@ -134,18 +128,41 @@ class BasePrimitive(_BasePrimitive):
                         else:
                             self.save_model(self.output)
         except Exception as e:
-            self.logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
+            self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
             raise e
         return self.output
     
 
     def init_logger(self):
-        self.logger = get_logger(self)
-    
-
-    def set_args(self, *args, **kwargs) -> Arguments:
         """
-        Coalesces the user input into a single `Arguments` object with the following priorities:
+        Initialize the logger for this primitive. If logging is disabled, `self.logger` will be None.
+        """
+        self.logger = get_logger(self.__class__.__name__, self.config)
+        return self.logger
+
+
+    @property
+    def log(self):
+        if (hasattr(self, 'logger') and self.logger is None) \
+            or not self.config.get('logging', self.LOGGING).get('enable', True):
+            return self._fallback_log
+        return self.logger
+
+    @property
+    def _fallback_log(self):
+        # Use a lambda to dynamically handle log methods
+        return type(
+            "_FallbackLog",  # Anonymous type name
+            (),  # No base class
+            {
+                method: functools.partial(lambda message: print(f"[{method.upper()} LOGGING DISABLED] {message}"))
+                for method in ["warn", "info", "error", "debug"] # Log methods to handle
+            },
+        )()
+        
+    def set_args(self, name : str | DataModel | None = None, **kwargs) -> dict:
+        """
+        Coalesces the user input into a single `Arguments` obejct with the following priorities:
             4. `self.ARGUMENTS`
             3. `self.config['arguments']`
             2. `self.args`
@@ -154,17 +171,18 @@ class BasePrimitive(_BasePrimitive):
         If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
         `self.args.name` should be the name of the primary datamodel or filename to be processed.
         """
-        if not hasattr(self, "args") or not isinstance(self.args, Arguments):
+        if not hasattr(self, "args"):
             self.init_args()
-        if len(args) > 0:
-            self.args.name = args[0]
+        if name is not None:
+            self.args.name = name
+        #self.args.update(**self.config['arguments'])
         for key in kwargs: # Only want to pass valid kwargs to self.args, don't call dict update()
             if key in self.ARGUMENTS:
                 self.args[key] = kwargs[key]
         return self.args
 
 
-    def init_args(self) -> Arguments:
+    def init_args(self) -> dict:
         """
         Coalesces the user input into a single `Arguments` object from scratch with the following priorities:
             3. `self.ARGUMENTS`
@@ -175,18 +193,18 @@ class BasePrimitive(_BasePrimitive):
         Keyword Args:
             Any valid arguments for the primitive.
         """
-        self.args = Arguments()
+        self.args = Arguments(name=None)
         self.args.update(**self.ARGUMENTS)
-        if 'ARGUMENTS' in self.config:
+        if 'arguments' in self.config:
             self.args.update(**self.config['arguments'])
         return self.args
     
 
-    def __call__(self, **kwargs):
+    def __call__(self, name : DataModel, **kwargs):
         """
         Wrapper for `self.apply`. Any valid arguments can be passed through `kwargs`.
         """
-        return self.apply(**kwargs)
+        return self.apply(name, **kwargs)
     
 
     def _pre_condition(self):
@@ -294,7 +312,7 @@ class BasePrimitive(_BasePrimitive):
             output_dir (str, optional): The directory to save the file in.
             update_receipt (bool, optional): Whether to update the receipt. Defaults to True.
         """
-        # Step 1 & 2: Check output_path priority
+        # Check output_path priority
         if output_path is not None:
             final_path = output_path
         else:
@@ -303,11 +321,11 @@ class BasePrimitive(_BasePrimitive):
             if instance_output_path is not None:
                 final_path = instance_output_path
             else:
-                # Step 3 & 4: Determine the directory
+                # Determine the directory
                 if output_dir is None:
                     output_dir = getattr(self, 'output_dir', None)
                 
-                # Step 5 & 6: Determine the filename
+                # Determine the filename
                 if filename is not None:
                     final_filename = filename
                 else:
@@ -332,7 +350,6 @@ class BasePrimitive(_BasePrimitive):
         """
         Open a model from a file or copy a datamodel.
         """
-        #breakpoint()
         if isinstance(name, DataModel):
             if _copy:
                 return name.copy()
@@ -342,6 +359,20 @@ class BasePrimitive(_BasePrimitive):
             return datamodels.open(name)
         else:
             raise ValueError(f"Cannot open model from {name}")
+        
+    
+    def finalize_model(self, model_result : DataModel):
+        """
+        Hook called at the end of `pipeline.apply` to finalize the model.
+
+        Args:
+            model_result (DataModel): The model to finalize.
+        """
+        try:
+            setattr(model_result.meta.drp_step, self.class_alias, str(self.status))
+        except:
+            pass
+        return model_result
 
 
     # @classmethod

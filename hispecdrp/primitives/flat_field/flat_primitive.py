@@ -18,9 +18,6 @@ class FlatFieldPrimitive(BasePrimitive):
         'flat' : None
     }
 
-    def _perform(
-            self,
-            name : datamodels.HISPECL0 | str,
-        ):
-        model_to_process = self.open_model(name)
+    def _perform(self):
+        model_to_process = self.open_model(self.args.name)
         return model_to_process

@@ -1,4 +1,5 @@
 import logging
+from .config import Config
 
 
 def get_level(lvl : str) -> int:
@@ -15,40 +16,37 @@ def get_level(lvl : str) -> int:
     else: return logging.NOTSET
 
 
-def get_logger(primitive : "BasePrimitive") -> logging.Logger:
+def get_logger(name : str, config : Config) -> logging.Logger:
     """
     Args:
-        primitive (BasePrimitive): Name of logger, which will be shown in each log msg.
-        log_path (str): (optional) path to the logfile if different than whats defined in the configuration file
+        name (str): Name of logger, which will be shown in each log msg.
+        config (Config): Config object with logging settings.
     """
-
-    #if not primitive.LOGGER['enable']:
+    if not config.get('logging', {}).get('enabled', True):
+        return None
 
     # Initialize the logger
-    logger_name = primitive.__class__.__name__
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger(name)
     logger.propagate = False
 
     # Get logger config
-    log_cfg = primitive.config.get('LOGGER')
+    log_cfg = config.get('logging')
 
     # Check if writing to a file
-    if log_cfg is not None:
-        log_path = log_cfg.get('log_path')
-        if log_path is None:
-            log_path = primitive.LOGGER.get('log_path')
-    else:
-        log_path = None
+    if not log_cfg:
+        return logger
+    
+    # Log path
+    log_path = log_cfg.get('log_path', None)
 
     # Log level (what gets logged and what doesn't)
-    if log_cfg is not None:
-        log_lvl = log_cfg.get('level', 'warning')
-    else:
-        log_lvl = 'warning'
+    log_lvl = log_cfg.get('level', 'info')
     logger.setLevel(get_level(log_lvl))
 
     # Format
     formatter = logging.Formatter("[%(asctime)s][%(name)s][%(levelname)s]: %(message)s", datefmt='%Y-%m-%d %H:%M:%S')
+
+    # Stream handler (NOTE: use verbose to set this?)
     s_handle = logging.StreamHandler()
     s_handle.setLevel(get_level(log_lvl))
     s_handle.setFormatter(formatter)

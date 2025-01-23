@@ -15,7 +15,8 @@ class Stage1Pipeline(BasePipeline):
     }
 
 
-    def _perform(self, name : datamodels.HISPECL0 | str):
-        result = self.dark_sub.apply(name)
+    def _perform(self):
+        model_to_process = self.open_model(self.args.name)
+        result = self.dark_sub.apply(model_to_process)
         result = self.flat_field.apply(result)
         return result

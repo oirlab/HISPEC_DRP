@@ -9,7 +9,7 @@ def create_dark_config():
     ---
     class: 'DarkSubtraction'
 
-    logger:
+    logging:
       enable: True
       level: info
       verbose: True
@@ -29,7 +29,7 @@ def create_stage1_config():
     ---
     class: 'Stage1'
 
-    logger:
+    logging:
       enable: True
       level: info
       verbose: True
@@ -43,8 +43,12 @@ def create_stage1_config():
 
     primitives:
       dark_sub:
+        config_file: 'dark_config.yaml'
         arguments:
-          config_file: 'dark_config.yaml'    
+          skip: False
+          save_results: True
+          output_dir: None
+          suffix: 'dark-suffix'
     """
     return conf
 
@@ -67,5 +71,5 @@ def test_primitive(tmp_path):
         f.write(textwrap.dedent(stage1_config_raw))
 
     # Pipeline
-    pipeline = Stage1Pipeline(output_dir=tmp_path, config=stage1_config_file)
+    pipeline = Stage1Pipeline(config_file=stage1_config_file)
     result = pipeline.apply(file_path, output_dir=tmp_path)
