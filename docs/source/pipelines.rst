@@ -1,4 +1,0 @@
-Pipelines
-=========
-
-Pipeline documentation here.

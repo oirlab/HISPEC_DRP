@@ -33,7 +33,8 @@ def test_load_hispec_file(tmp_path):
 
     # Set invalid metadata
     try:
-        model.meta.exposure.integration_time = '10.0' # invalid
+        model.meta.exposure.integration_time = '10.0'  # invalid
+        raise RuntimeError("Invalid metadata was set.")
     except ValueError:
         pass
     

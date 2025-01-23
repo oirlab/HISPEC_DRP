@@ -1,4 +1,0 @@
-Primitives
-==========
-
-Primitive documentation here.

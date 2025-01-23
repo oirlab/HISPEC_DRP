@@ -1,4 +1,5 @@
 import logging
+from .config import Config
 
 
 def get_level(lvl : str) -> int:
@@ -15,32 +16,41 @@ def get_level(lvl : str) -> int:
     else: return logging.NOTSET
 
 
-def get_logger(primitive : "HISPECPrimitive") -> logging.Logger:
+def get_logger(name : str, config : Config) -> logging.Logger:
     """
     Args:
-        primitive (Primitive): Name of logger, which will be shown in each log msg.
-        log_path (str): (optional) path to the logfile if different than whats defined in the configuration file
+        name (str): Name of logger, which will be shown in each log msg.
+        config (Config): Config object with logging settings.
     """
-    logger_name = primitive.__class__.__name__
-    logging.getLogger(logger_name)
-
-    # Get logger config
-    log_cfg = primitive.config['LOGGER']
-
-    # Check if writing to a file
-    if log_path is None:
-        log_path = log_cfg.get('log_path')
+    if not config.get('logging', {}).get('enabled', True):
+        return None
 
     # Initialize the logger
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger(name)
     logger.propagate = False
 
+    # Get logger config
+    log_cfg = config.get('logging')
+
+    # Check if writing to a file
+    if not log_cfg:
+        return logger
+    
+    # Log path
+    log_path = log_cfg.get('log_path', None)
+
     # Log level (what gets logged and what doesn't)
+    log_lvl = log_cfg.get('level', 'info')
     logger.setLevel(get_level(log_lvl))
-    log_lvl = log_cfg.get('level', 'warning')
 
     # Format
-    formatter = logging.Formatter("[%(name)s][%(levelname)s]:%(message)s")
+    formatter = logging.Formatter("[%(asctime)s][%(name)s][%(levelname)s]: %(message)s", datefmt='%Y-%m-%d %H:%M:%S')
+
+    # Stream handler (NOTE: use verbose to set this?)
+    s_handle = logging.StreamHandler()
+    s_handle.setLevel(get_level(log_lvl))
+    s_handle.setFormatter(formatter)
+    logger.addHandler(s_handle)
 
     # Log file
     if log_path is not None:
@@ -48,9 +58,5 @@ def get_logger(primitive : "HISPECPrimitive") -> logging.Logger:
         f_handle.setLevel(get_level(log_lvl))
         f_handle.setFormatter(formatter)
         logger.addHandler(f_handle)
-        s_handle = logging.StreamHandler()
-        s_handle.setLevel(get_level(log_lvl))
-        s_handle.setFormatter(formatter)
-        logger.addHandler(s_handle)
 
     return logger

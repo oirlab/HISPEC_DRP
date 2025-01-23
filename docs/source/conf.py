@@ -33,14 +33,29 @@ extensions = [
     'nbsphinx',
 ]
 
+autosummary_generate = True  # Generate autosummary stubs automatically
+autodoc_default_options = {
+    'members': True,          # Include all class members
+    'undoc-members': False,    # Include undocumented members
+    'show-inheritance': True, # Show class inheritance
+}
+
 templates_path = ['_templates']
 exclude_patterns = []
 
+# Add the custom CSS file
+html_css_files = [
+    'custom.css'
+]
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
-
+# https://sphinxawesome.xyz/how-to/configure/
 html_theme = 'sphinxawesome_theme'
 from sphinxawesome_theme.postprocess import Icons
+#from pygments.styles import get_all_styles
+pygments_style = "friendly"
+pygments_style_dark = "friendly"
 html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
 

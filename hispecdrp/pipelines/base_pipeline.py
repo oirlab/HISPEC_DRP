@@ -1,37 +1,82 @@
 from keckdrpframework.models.arguments import Arguments
-from keckdrpframework.config.framework_config import ConfigClass
+from ..utils.config import Config
+from .. import datamodels
+import os
 
-from ..primitives.base_primitive import HISPECPrimitive
+from ..primitives.base_primitive import BasePrimitive
 
 
-class HISPECPipeline(HISPECPrimitive):
+class BasePipeline(BasePrimitive):
 
-    primitive_table : dict[str, type[HISPECPrimitive]]
+    ARGUMENTS = {
+        'save_results': 'final', # Overrides individual primitive save_results. Set to None to manually control each primitive.
+    }
+
+    PRIMITIVES = {}
 
     def __init__(
             self,
-            config : ConfigClass | str | None = None,
+            config : Config | None = None,
+            config_file : Config | str | None = None,
             **kwargs
         ):
         """
-        Parameters:
-            config_file (str): Filename for pipeline-level configuration file containing configuration for all primitives.
+        Args:
+            config (str | Config | None): The configuration file or Config to further specify parameters.
+            **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
         """
-        super().__init__(config=config)
+        super().__init__(config=config, config_file=config_file, **kwargs)
         self.init_primitives()
-        
-        # Get cals?
+
 
     def init_primitives(self):
         """
         Initialize each primitive in the primitive table.
         """
-        # for attr, prim in self.primitive_table.items():
-        pass
+        # TODO: Sort out config dirs
+        if self.config_file is not None:
+            config_dir = os.path.dirname(self.config_file)
+        else:
+            config_dir = ""
+        for prim_alias, prim_class in self.PRIMITIVES.items():
+            if prim_alias in self.config["primitives"]:
+                prim_config_from_pipeline = self.config["primitives"][prim_alias]
+                if "config_file" in prim_config_from_pipeline:
+                    prim_config_file = os.path.join(config_dir, prim_config_from_pipeline["config_file"])
+                else:
+                    prim_config_file = None
+            else:
+                prim_config_from_pipeline = None
+                prim_config_file = None
 
+            # !!! NOTE !!! Keep an eye on how we propogate the pipeline's logger to the primitive.
+            prim_config = prim_class._get_config(config_file=prim_config_file, config=prim_config_from_pipeline)
+            prim_config['logging'].update(**self.config['logging'])
+            primitive = prim_class(
+                config_file=prim_config_file,
+                config=prim_config,
+            )
 
-    def _perform(self):
+            # !!! NOTE !!! Keep an eye on how we propogate the pipeline's logger to the primitive.
+            if primitive.config.get('output_dir') is None and primitive.args.output_dir is None:
+                primitive.args.output_dir = self.args.output_dir
+            if self.args.save_results == 'final':
+                #primitive.config['save_results'] = False
+                primitive.args.save_results = False
+            if self.args.save_results == 'all':
+                #primitive.config['save_results'] = True
+                primitive.args.save_results = True
+
+            # Set the primitive
+            setattr(self, prim_alias, primitive)
+
+    @classmethod
+    def _get_config(cls, config : Config | None = None, config_file : str | None = None) -> Config:
         """
-        Invokes all pipeline steps manually
+        Load a config file for this primitive or pipeline, or construct one from scratch.
         """
-        pass
+        _config = super()._get_config(config_file=config_file, config=config)
+        if 'primitives' not in _config:
+            _config['primitives'] = {key : Config() for key in cls.PRIMITIVES.keys()}
+
+        return _config
