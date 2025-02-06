@@ -1,7 +1,8 @@
 HISPEC Level 2
 ==============
 
-HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements.
+HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements. Data products from BSPEC and RSPEC are still kept separate.
+
 
 Extensions
 ----------
@@ -210,23 +211,23 @@ Extensions
      - See below
 
 
-**1-3. SPEC_UNCAL_[BSPEC/RSPEC]_FIB#**: 1D original flux in e-/s from level 1 which remains unmodified throughout stage 2 processing.
+**1-3. SPEC_UNCAL_[B/R]SPEC_FIB#**: 1D original flux in e-/s from level 1 which remains unmodified throughout stage 2 processing.
 
-**4-6. SPEC_UNCAL_ERR_ALL_[BSPEC/RSPEC]_FIB#**: 1D vectors of original errors from level 1 with all sources of noise, including correlated errors.
+**4-6. SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#**: 1D vectors of original errors from level 1 with all sources of noise, including correlated errors.
 
-**7-9. SPEC_UNCAL_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors (photon noise & read noise), also from level 1.
+**7-9. SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors (photon noise & read noise), also from level 1.
 
-**10-12. SPEC_[BSPEC/RSPEC]_FIB#**: Calibrated 1D spectrum. The nature of this extension depends on the stage 2 reduction steps that have been run. It can, for example, be sky subtracted, blaze corrected, telluric corrected, or a subset of those.
+**10-12. SPEC_[B/R]SPEC_FIB#**: Calibrated 1D spectrum. The nature of this extension depends on the stage 2 reduction steps that have been run. It can, for example, be sky subtracted, blaze corrected, telluric corrected, or a subset of those.
 
-**13-15. SPEC_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the calibrated spectrum.
+**13-15. SPEC_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the calibrated spectrum.
 
-**16-18. SPEC_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the calibrated spectrum.
+**16-18. SPEC_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the calibrated spectrum.
 
-**19-21. SPEC_DQ_[BSPEC/RSPEC]_FIB#**: Data Quality flag (i.e., general “bad pixel map”).
+**19-21. SPEC_DQ_[B/R]SPEC_FIB#**: Data Quality flag (i.e., general “bad pixel map”).
 
-**22-24. MID_TIME_[BSPEC/RSPEC]_FIB#**: Exposure mid-point time (for barycenter correction).
+**22-24. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time (for barycenter correction).
 
-**25-27. BARY_CORR_[BSPEC/RSPEC]_FIB#**: Table of exposure mid-point times (for barycenter correction) for each order (not per wavelength bin). We will compute the Julian dates in the UTC, heliocentric (HJD), and barycentric (BJD) reference frames for all targets for consistency. We also include uniformly weighted and flux weighted variations.
+**25-27. BARY_CORR_[B/R]SPEC_FIB#**: Table of exposure mid-point times (for barycenter correction) for each order (not per wavelength bin). We will compute the Julian dates in the UTC, heliocentric (HJD), and barycentric (BJD) reference frames for all targets for consistency. We also include uniformly weighted and flux weighted variations.
 
 Columns:
 
@@ -241,47 +242,47 @@ Columns:
 - BERV (unweighted)
 - BERVW (weighted)
 
-**28-30. WS_[BSPEC/RSPEC]_FIB#**: Wavelength in microns in rest frame of the instrument.
+**28-30. WS_[B/R]SPEC_FIB#**: Wavelength in microns in rest frame of the instrument.
 
-**31-33. FIBERFLAT_[BSPEC/RSPEC]_FIB#**: Instrumental transmission.
+**31-33. FIBERFLAT_[B/R]SPEC_FIB#**: Instrumental transmission.
 
-**34-36. FIBERFLAT_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the instrumental transmission.
+**34-36. FIBERFLAT_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the instrumental transmission.
 
-**37-39. FIBERFLAT_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the instrumental transmission.
+**37-39. FIBERFLAT_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the instrumental transmission.
 
-**40-42. SKY_[BSPEC/RSPEC]_FIB#**: Thermal background and OH lines from the sky fiber.
+**40-42. SKY_[B/R]SPEC_FIB#**: Thermal background and OH lines from the sky fiber.
 
-**43-45. SKY_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the sky background spectrum.
+**43-45. SKY_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the sky background spectrum.
 
-**46-48. SKY_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the sky background spectrum.
+**46-48. SKY_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the sky background spectrum.
 
-**49-51. STAR_MOD_[BSPEC/RSPEC]_FIB#**: The stellar model sampled on the detector and appropriately Doppler shifted to match the observed wavelengths.
+**49-51. STAR_MOD_[B/R]SPEC_FIB#**: The stellar model sampled on the detector and appropriately Doppler shifted to match the observed wavelengths.
 
-**52-54. E2E_TPUT_[BSPEC/RSPEC]_FIB#**: End-to-end throughput derived from STAR_MOD.
+**52-54. E2E_TPUT_[B/R]SPEC_FIB#**: End-to-end throughput derived from STAR_MOD.
 
-**55-57. TEL_[BSPEC/RSPEC]_FIB#**: Telluric model sampled on the detector in normalized units.
+**55-57. TEL_[B/R]SPEC_FIB#**: Telluric model sampled on the detector in normalized units.
 
-**58-60. TEL_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the telluric model spectrum.
+**58-60. TEL_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the telluric model spectrum.
 
-**61-63. TEL_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the telluric model spectrum.
+**61-63. TEL_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the telluric model spectrum.
 
-**64-66. FLUX_ABS_[BSPEC/RSPEC]_FIB#**: Absolute flux calibration derived from the ATC images which provides the scaling factors to go from blaze corrected e-/s to W/m²/µm.
+**64-66. FLUX_ABS_[B/R]SPEC_FIB#**: Absolute flux calibration derived from the ATC images which provides the scaling factors to go from blaze corrected e-/s to W/m²/µm.
 
-**67-69. FLUX_ABS_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the absolute flux calibration.
+**67-69. FLUX_ABS_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the absolute flux calibration.
 
-**70-72. FLUX_ABS_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the absolute flux calibration.
+**70-72. FLUX_ABS_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the absolute flux calibration.
 
-**73-75. ET_[BSPEC/RSPEC]_FIB#**: Simultaneous etalon spectrum.
+**73-75. ET_[B/R]SPEC_FIB#**: Simultaneous etalon spectrum.
 
-**76-78. ET_ERR_ALL_[BSPEC/RSPEC]_FIB#**: All errors for the etalon spectrum.
+**76-78. ET_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the etalon spectrum.
 
-**79-81. ET_ERR_FLOOR_[BSPEC/RSPEC]_FIB#**: Uncorrelated errors for the etalon spectrum.
+**79-81. ET_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the etalon spectrum.
 
-**82-84. ET_CEN_[BSPEC/RSPEC]_FIB#**: Centroid (in dispersion/horizontal direction) of each etalon peak in pixel coordinates and their uncertainties.
+**82-84. ET_CEN_[B/R]SPEC_FIB#**: Centroid (in dispersion/horizontal direction) of each etalon peak in pixel coordinates and their uncertainties.
 
 Columns: See Section 9.3.12.
 
-**85-87. RVCCF_[BSPEC/RSPEC]_FIB#**: The RVs and other relevant information for the individual chunks. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
+**85-87. RVCCF_[B/R]SPEC_FIB#**: The RVs and other relevant information for the individual chunks. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
 
 Columns:
 
@@ -297,7 +298,7 @@ Columns:
 - RV_ABS (absolute RV; m/s)
 - RV_ABS_ERR
 
-**88-90. RVCCFWAVG_[BSPEC/RSPEC]_FIB#**: The RVs averaged together across chunks and other relevant information.
+**88-90. RVCCFWAVG_[B/R]SPEC_FIB#**: The RVs averaged together across chunks and other relevant information.
 
 Columns – there will likely only be two values per column (BSPEC, RSPEC), so we may consider an alternative approach for this extension:
 
@@ -314,7 +315,7 @@ Columns – there will likely only be two values per column (BSPEC, RSPEC), so w
 - BIS (bisector inverse slope to probe activity; m/s)
 - RV_ABS (absolute RV; m/s)
 
-**91-93. CCF_[BSPEC/RSPEC]_FIB#**: The cross-correlation functions (CCFs) for each chunk.
+**91-93. CCF_[B/R]SPEC_FIB#**: The cross-correlation functions (CCFs) for each chunk.
 
 Columns:
 
