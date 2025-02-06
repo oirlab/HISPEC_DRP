@@ -1,7 +1,7 @@
 Pipelines
 =========
 
-Pipelines are a collection of primitives that are executed in a specific order to process the data. The base class :py:class:`hispecdrp.pipelines.BasePipeline` specifies the interface for all pipelines.
+Pipelines are a collection of primitives that are executed in a specific order to process the data. The base class :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines.
 
 Implementing a Pipeline
 -----------------------
@@ -54,7 +54,7 @@ Like primitives, pipelines can also utilize config files. An example configurati
       log_path: None
 
     arguments:
-      skip: False
+      run: True
       save_results: True
       output_dir: None
       suffix: 'examplesuffix'
@@ -63,9 +63,9 @@ Like primitives, pipelines can also utilize config files. An example configurati
       dark_sub:
         config_file: 'dark_config.yaml' # Optional
         arguments: # Additional arguments will override those in 'dark_primitive.yaml'
-          skip: False
+          run: True
       flat_field:
         arguments:
-          skip: False
+          run: True
           save_results: False
           suffix: 'examplesuffix'

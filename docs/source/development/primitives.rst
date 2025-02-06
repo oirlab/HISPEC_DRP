@@ -1,7 +1,7 @@
 Primitives
 ==========
 
-Primitives are the algorithmic building blocks of the HISPEC_DRP which specify the processesing for a single processing step. The base class :py:class:`hispecdrp.primitives.BasePrimitive` specifies the interface for all primitives.
+Primitives are the algorithmic building blocks of the HISPEC_DRP which specify the processesing for a single processing step. The base class :py:class:`hispecdrp.primitives.base_primitive.BasePrimitive` specifies the interface for all primitives.
 
 Implementing a Primitive
 ------------------------
@@ -104,7 +104,7 @@ Primitives can also be configured with config files. An example configuration fo
       log_path: None
   
     arguments:
-      skip: False
+      run: True
       save_results: True
       output_dir: None
       suffix: 'examplesuffix'

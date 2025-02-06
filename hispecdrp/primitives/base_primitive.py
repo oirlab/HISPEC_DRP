@@ -31,7 +31,7 @@ class BasePrimitive(_BasePrimitive):
     class_alias = None
     
     ARGUMENTS = {
-        'skip' : False,
+        'run' : True,
         'save_results' : True,
         'output_dir' : None,
         'suffix' : ''
@@ -208,7 +208,7 @@ class BasePrimitive(_BasePrimitive):
     
 
     def _pre_condition(self):
-        return not super()._pre_condition() or not self.args.skip
+        return super()._pre_condition() and self.args.run
     
 
     def _post_condition(self):
