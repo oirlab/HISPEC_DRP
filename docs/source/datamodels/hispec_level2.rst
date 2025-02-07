@@ -227,20 +227,20 @@ Extensions
 
 **22-24. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time (for barycenter correction).
 
-**25-27. BARY_CORR_[B/R]SPEC_FIB#**: Table of exposure mid-point times (for barycenter correction) for each order (not per wavelength bin). We will compute the Julian dates in the UTC, heliocentric (HJD), and barycentric (BJD) reference frames for all targets for consistency. We also include uniformly weighted and flux weighted variations.
+**25-27. BARY_CORR_[B/R]SPEC_FIB#**: Table of exposure mid-point times and barycentric corrections. The DRP computes both flux-weighted and non-weighted timing midpoints for an exposure from the UTR ramp fit. The correction is specific to each echelle order. Some of the values in this table are redundant with the table in the extension **RVCCF_[B/R]SPEC_FIB#** (see below). We will consider merging these tables in future updates.
 
-Columns:
+**Columns:**
 
-- Echelle order
-- Wavelength (microns) – middle of order
-- JDUTC midpoint (unweighted)
-- JDUTCW midpoint (weighted)
-- HJD midpoint (unweighted)
-- HJDW midpoint (weighted)
-- BJD midpoint (unweighted)
-- BJDW midpoint (weighted)
-- BERV (unweighted)
-- BERVW (weighted)
+- ``ORDER (int32)``: Echelle order number.
+- ``WAVE (float64)``: Wavelength of the middle of order in microns.
+- ``JDUTC (float64)``: Julian date in universal coordinate time (UTC) of the non-flux-weighted midpoint.
+- ``JDUTCW (float64)``: Julian date in universal coordinate time (UTC) of the flux-weighted midpoint.
+- ``HJD (float64)``: Heliocentric Julian date of the non-flux-weighted midpoint.
+- ``HJDW (float64)``: Heliocentric Julian date of the flux-weighted midpoint.
+- ``BJD (float64)``: Barycentric Julian date of the non-flux-weighted midpoint.
+- ``BJDW (float64)``: Barycentric Julian date of the flux-weighted midpoint.
+- ``BERV (float64)``: Barycentric velicity correction for the non-flux-weighted midpoint in m/s.
+- ``BERVW (float64)``: Barycentric velicity correction for the flux-weighted midpoint in m/s.
 
 **28-30. WS_[B/R]SPEC_FIB#**: Wavelength in microns in rest frame of the instrument.
 
@@ -278,47 +278,52 @@ Columns:
 
 **79-81. ET_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the etalon spectrum.
 
-**82-84. ET_CEN_[B/R]SPEC_FIB#**: Centroid (in dispersion/horizontal direction) of each etalon peak in pixel coordinates and their uncertainties.
+**82-84. ET_CEN_[B/R]SPEC_FIB#**: Fit results for each etalon mode from the simultaneous etalon spectrum.
 
-Columns: See Section 9.3.12.
+**Columns:**
 
-**85-87. RVCCF_[B/R]SPEC_FIB#**: The RVs and other relevant information for the individual chunks. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
+- ``AMPLITUDE, AMPLITUDE_ERR, (float64)``: The amplitude of the etalon mode and its uncertainty in e-.
+- ``MEAN, MEAN_ERR (float64)``: The center of the etalon mode and its uncertainty in pixels.
+- ``SIGMA, SIGMA_ERR (float64)``: The standard deviation of the etalon mode and its uncertainty in pixels.
+- ``B0, B0_ERR (float64)``: The background level and uncertainty in e-.
+- ``MODE_NUM (int32)``: The mode number of this etalon peak. Etalon mode numbers are arbitrary, but are nice to keep track of.
+- ``WAVE, WAVE_ERR (float64)``: The measured wavelength of the etalon peak and its uncertainty as calibrated by the LFC in microns.
+- ``FINESSE, FINESSE_ERR (float64)``: The cavity finesse and its uncertainty.
+- ``CAVLEN, CAVLEN_ERR (float64)``: The effective cavity length at this wavelength.
 
-Columns:
+**85-87. RVCCF_[B/R]SPEC_FIB#**: The RVs and other relevant information for the individual orders. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
 
-- BJDUTCW midpoint (weighted)
-- BERVW
-- RV (m/s)
-- RV_ERR_AGG (m/s)
-- RV_ERR_DIST (m/s)
-- WAVE (RV info. weighted avg. wavelength for this chunk in microns)
-- RES (average spectral resolution in this chunk)
-- TELL_ABS (average telluric absorption in this chunk)
-- BIS (bisector inverse slope to probe activity; m/s)
-- RV_ABS (absolute RV; m/s)
-- RV_ABS_ERR
+**Columns:**
+
+- ``BJDW (float64)``: Barycentric Julian date of the flux-weighted midpoint.
+- ``BERVW (float64)``: Barycentric velicity correction for the flux-weighted midpoint in m/s.
+- ``RV (float64)``: The RV in m/s.
+- ``RV_ERR (float64)``: The RV uncertainty in m/s.
+- ``WAVE (float64)``: Wavelength of the middle of order in microns.
+- ``SPECRES (float64)``: Average spectral resolution in this order.
+- ``TELL_ABS (float64)``: Average telluric absorption in this order.
+- ``BIS (float64)``: Bisector inverse slope (BIS) in m/s.
+- ``RV_ABS (float64)``: Absolute RV measured in m/s.
+- ``RV_ABS_ERR (float64)``: Error in absolute RV in m/s.
 
 **88-90. RVCCFWAVG_[B/R]SPEC_FIB#**: The RVs averaged together across chunks and other relevant information.
 
-Columns – there will likely only be two values per column (BSPEC, RSPEC), so we may consider an alternative approach for this extension:
+**Columns** there will likely only be one value per column, so we may consider an alternative approach for this extension:
 
-- JDUTC midpoint (unweighted)
-- JDUTC midpoint (weighted)
-- HJDUTC midpoint (unweighted)
-- HJDUTC midpoint (weighted)
-- BJDUTC midpoint (unweighted)
-- BJDUTC midpoint (weighted)
-- BERV midpoint (unweighted)
-- BERV midpoint (weighted)
-- RV (m/s)
-- RV_ERR (m/s)
-- BIS (bisector inverse slope to probe activity; m/s)
-- RV_ABS (absolute RV; m/s)
+- ``BJDW (float64)``: Average barycentric Julian date of the flux-weighted midpoint.
+- ``BERVW (float64)``: Barycentric velicity correction for the flux-weighted midpoint in m/s.
+- ``RV (float64)``: RV in m/s.
+- ``RV_ERR_AGG (float64)``: RV uncertainty measured by adding the individual RV errors in quadrature.
+- ``RV_ERR_DIST (float64)``: RV uncertainty measured from the distribution of the individual RVs assuming they are normally distributed.
+- ``AIRMASS (float64)``: Airmass at the midpoint of this observation.
+- ``BIS (float64)``: Bisector inverse slope (BIS) in m/s.
+- ``RV_ABS (float64)``: Absolute RV measured in m/s.
+- ``RV_ABS_ERR (float64)``: Error in absolute RV in m/s.
 
-**91-93. CCF_[B/R]SPEC_FIB#**: The cross-correlation functions (CCFs) for each chunk.
+**91-93. CCF_[B/R]SPEC_FIB#**: The cross-correlation functions (CCFs) for each chunk. **Final format TBD**.
 
-Columns:
+**Columns:**
 
-- The average wavelength in this chunk (microns).
-- WAVE - the relative/effective wavelength grid in microns
-- CCF - the CCF function
+- ``WAVE (float64)``: The average wavelength in this order (microns).
+- ``VEL_GRID (float64)``: The relative wavelength or velocity grid (TBD).
+- ``CCF (float64)``: The CCF function.
