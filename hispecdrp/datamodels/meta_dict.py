@@ -59,8 +59,8 @@ class MetaDict(dict):
         assert prop in self._schema['properties']
 
         # Return if a dict or MetaDict is passed
-        if isinstance(value, dict):
-            return
+        #if isinstance(value, dict):
+        #    return
         if value is not None:
             self.validate_header_entry(prop, value)
 
@@ -88,8 +88,6 @@ class MetaDict(dict):
         elif schema_type == 'boolean':
             if type_passed is not bool:
                 raise ValueError(f"Property '{prop}' must be a boolean")
-        
-        return True
 
 
     def __getattr__(self, name):
