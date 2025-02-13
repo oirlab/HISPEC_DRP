@@ -6,6 +6,7 @@ import copy
 from typing import TypeVar
 from . import schema
 from .meta_dict import MetaDict
+import numpy as np
 
 import warnings
 from astropy.io.fits.verify import VerifyWarning
@@ -95,6 +96,10 @@ class DataModel:
         if 'RECEIPT' not in self._data:
             self._data['RECEIPT'] = pd.DataFrame({name : pd.Series(dtype=dtype) for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()})
 
+        # Defaults
+        if self.meta.data_level is None:
+            self.meta.data_level = self.default_level
+
 
     @property
     def dirname(self):
@@ -140,7 +145,7 @@ class DataModel:
     def read_data(
         self,
         extensions : str | list[str] | None = None,
-        do_not_scale_image_data : bool = True,
+        do_not_scale_image_data : bool | None = None,
     ) -> dict[str, _VALID_HDU]:
         """
         Read the data from the FITS file.
@@ -154,7 +159,7 @@ class DataModel:
         self._data = {}
         with fits.open(
             self.filename,
-            memmap=True,
+            memmap=False,
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
@@ -226,7 +231,11 @@ class DataModel:
             return hdu_class(header=header)
         if hdu_class is fits.ImageHDU:
             data = self._data.get(extname, None)
-            hdu = hdu_class(data=data, name=extname, header=header)
+            if data is not None:
+                dtype = self.EXTENSIONS[extname]['dtype']
+            hdu = hdu_class(data=data.astype(dtype), name=extname, header=header)
+            if np.issubdtype(dtype, np.unsignedinteger):
+                hdu.scale(dtype.__name__)
         elif hdu_class is fits.BinTableHDU:
             data = self._data.get(extname, None)
             if data is not None:
