@@ -1,35 +1,6 @@
-from hispecdrp import datamodels
-from astropy.time import Time
 import requests
 import re
 import os
-
-
-def add_metadata(model : datamodels.HISPECDataModel):
-    """
-    Adds basic metadata to a HISPEC datamodel (in-place). 
-
-    Args:
-        model (HISPECDataModel): The HISPEC datamodel to add metadata to.
-    """
-    # NOTE: Consider moving this method to datamodels.utils
-    model.meta.instrument.name = "HISPEC"
-    model.meta.file_type = 'FITS'
-    model.meta.telescope = 'Keck-II'
-    model.meta.organization = 'WMKO'
-    model.meta.drp_version = '0.0.1'
-    model.meta.instrument.era = '0.0.1'
-    time = Time(model.meta.exposure.jd_start, format='jd')
-    model.meta.date = time.isot
-    model.meta.date_created = time.isot
-
-    model.meta.exposure.date_start = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.date_mid = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.date_end = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.time_start = time.datetime.strftime('%H:%M:%S.%f')[:-3]
-    model.meta.exposure.time_mid = time.datetime.strftime('%H:%M:%S.%f')[:-3]
-    model.meta.exposure.time_end = time.datetime.strftime('%H:%M:%S.%f')[:-3]
-
 
 def download_github_lfs_file(
         git_file_path: str,
@@ -127,24 +98,3 @@ def download_github_lfs_file(
     except Exception as e:
         print(f"Error downloading file at {url}:\n{e}")
         return None
-    
-
-
-
-
-
-# PREDEFINED_DATA_FOLDERS=["data/"]
-
-# for folder in PREDEFINED_DATA_FOLDERS:
-#     full_path = os.path.join(folder, filename)
-#     if os.path.exists(full_path):
-#         warnings.warn(f"Access data from {full_path}")
-#         return full_path
-#     with data.conf.set_temp("dataurl", DATAURL), data.conf.set_temp(
-#         "remote_timeout", 30
-#     ):
-#         warnings.warn(f"Retrieve data for {filename} (if not cached already)")
-#         local_path = data.get_pkg_data_filename(filename, show_progress=True)
-#         local_path_suffix = local_path + ".fits"
-#         if not os.path.exists(local_path_suffix):
-#             os.symlink(local_path, local_path_suffix)

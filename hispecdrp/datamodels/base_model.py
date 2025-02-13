@@ -181,8 +181,7 @@ class DataModel:
             filename (str, optional): The filename to save to. Defaults to self.filename.
             add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
         """
-        if filename is not None:
-            self.filename = filename
+        self.on_save(filename)
         if self.filename is None:
             raise ValueError("No filename provided")
         hdulist = fits.HDUList()
@@ -190,6 +189,20 @@ class DataModel:
             hdu = self.make_hdu_for_extension(extname, add_missing_metadata=add_missing_metadata)
             hdulist.append(hdu)
         hdulist.writeto(self.filename, overwrite=True)
+
+    def on_save(
+        self,
+        filename : str | None = None,
+    ):
+        """
+        Hook called when a datamodel is saved. The default implementation updates the `filename` attribute.
+
+        Args:
+            filename (str, optional): The filename to save to.
+        """
+        if filename is not None:
+            self.filename = filename
+            self.meta.filename = os.path.basename(filename)
 
 
     def make_hdu_for_extension(self, extname : str, add_missing_metadata : bool = False) -> _VALID_HDU:
