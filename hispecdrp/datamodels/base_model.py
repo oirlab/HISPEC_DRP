@@ -7,6 +7,9 @@ from typing import TypeVar
 from . import schema
 from .meta_dict import MetaDict
 
+import warnings
+from astropy.io.fits.verify import VerifyWarning
+
 # Receipt columns
 _RECEIPT_COLS = {
     'Time' : str,
@@ -91,10 +94,6 @@ class DataModel:
         # Add Receipt HDU if one not provided
         if 'RECEIPT' not in self._data:
             self._data['RECEIPT'] = pd.DataFrame({name : pd.Series(dtype=dtype) for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()})
-            
-        # Defaults
-        if self.meta.data_level is None:
-            self.meta.data_level = self.default_level
 
 
     @property
@@ -188,14 +187,19 @@ class DataModel:
         for extname in self.EXTENSIONS:
             hdu = self.make_hdu_for_extension(extname, add_missing_metadata=add_missing_metadata)
             hdulist.append(hdu)
-        hdulist.writeto(self.filename, overwrite=True)
+        with warnings.catch_warnings(): # NOTE: This (at minimum) suppresses the 80 char limit warning
+            warnings.simplefilter('ignore', VerifyWarning)
+            hdulist.writeto(self.filename, overwrite=True)
 
     def on_save(
         self,
         filename : str | None = None,
     ):
         """
-        Hook called when a datamodel is saved. The default implementation updates the `filename` attribute.
+        Hook called when a datamodel is saved. The default implementation:
+            1. Updates `self.filename` with full path.
+            2. Updates `self.meta.filename` with base filename.
+            3. Updates `self.meta.model_type` with class name.
 
         Args:
             filename (str, optional): The filename to save to.
@@ -203,6 +207,9 @@ class DataModel:
         if filename is not None:
             self.filename = filename
             self.meta.filename = os.path.basename(filename)
+
+        if self.meta.model_type is None:
+            self.meta.model_type = self.__class__.__name__
 
 
     def make_hdu_for_extension(self, extname : str, add_missing_metadata : bool = False) -> _VALID_HDU:
