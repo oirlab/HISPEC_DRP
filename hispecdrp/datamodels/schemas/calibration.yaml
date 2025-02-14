@@ -3,6 +3,6 @@
 type: object
 properties:
   cal_type:
-    fits_keyword: CALTYPE
     comment: "Type of calibration"
+    fits_keyword: CALTYPE
     type: string
