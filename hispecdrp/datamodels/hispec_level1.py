@@ -1,7 +1,8 @@
-
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
 import numpy as np
+
+__all__ = ['HISPECL1Model']
 
 _L1_EXTENSIONS = {}
 for i in range(1, 4):
@@ -18,10 +19,10 @@ for i in range(1, 4):
     _L1_EXTENSIONS[f'WS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
 
-class HISPECL1(HISPECDataModel):
+class HISPECL1Model(HISPECDataModel):
     
     EXTENSIONS = _L1_EXTENSIONS
 
     @property
     def level(self):
-        return 1
+        return '1'

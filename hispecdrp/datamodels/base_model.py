@@ -96,8 +96,8 @@ class DataModel:
         self.init_receipt()
 
         # Defaults
-        if self.meta.data_level is None:
-            self.meta.data_level = self.default_level
+        if self.meta.data_level is None and self.level is not None:
+            self.meta.data_level = self.level
 
 
     @property
@@ -131,7 +131,7 @@ class DataModel:
         extensions = self._resolve_extensions(extensions)
         self.meta = MetaDict(_schema=self.schema, _validate=validate)
         with fits.open(self.filename, memmap=True) as hdulist:
-            for path, entry in schema.walk_schema(self.schema):
+            for path, entry in schema.walk_schema(self.schema, objects=False):
                 fits_hdu = entry.get('fits_hdu', 'PRIMARY')
                 fits_keyword = entry.get('fits_keyword')
                 header = hdulist[fits_hdu].header
@@ -151,7 +151,7 @@ class DataModel:
 
         Args:
             extensions (str, list[str], optional): List of extensions to read. Defaults to None.
-            do_not_scale_image_data (bool, optional): Whether to not scale data according to BZERO and BSCALE. Defaults to True.
+            do_not_scale_image_data (bool, optional): Whether to not scale data according to BZERO and BSCALE. See astropy behavior.
         """
         # TODO: Implement validation as optional input keyword, here we apply blind conversion
         extensions = self._resolve_extensions(extensions)

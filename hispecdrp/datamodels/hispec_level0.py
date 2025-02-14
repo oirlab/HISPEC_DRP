@@ -1,9 +1,10 @@
-
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
 import numpy as np
 
-class HISPECL0(HISPECDataModel):
+__all__ = ['HISPECL0Model']
+
+class HISPECL0Model(HISPECDataModel):
 
     EXTENSIONS = {
         'DATA': {
@@ -30,4 +31,4 @@ class HISPECL0(HISPECDataModel):
 
     @property
     def level(self):
-        return 0
+        return '0'

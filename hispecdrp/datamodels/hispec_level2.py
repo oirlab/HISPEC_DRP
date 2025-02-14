@@ -2,7 +2,8 @@
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
 import numpy as np
-import pandas as pd
+
+__all__ = ['HISPECL2Model']
 
 _BARYCORR_HDU = {
     'hdu_type' : fits.BinTableHDU,
@@ -112,10 +113,10 @@ for i in range(1, 4):
     _L2_EXTENSIONS[f'RVCCFAVG_FIB{i}'] = _RVCCFAVG_HDU
     _L2_EXTENSIONS[f'CCF_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
-class HISPECL2(HISPECDataModel):
+class HISPECL2Model(HISPECDataModel):
 
     EXTENSIONS = _L2_EXTENSIONS
 
     @property
     def level(self):
-        return 2
+        return '2'

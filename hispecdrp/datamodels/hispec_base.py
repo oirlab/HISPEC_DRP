@@ -53,7 +53,7 @@ class HISPECDataModel(DataModel):
         """
         spectrograph = spectrograph or self.instrument.spectrograph
         date = date or self.date.replace(':', '').replace('-', '')[0:15]
-        level = level or self.data_level
+        level = level or self.data_level or self.level
         return self._generate_filename(
             spectrograph=spectrograph,
             date=date,
