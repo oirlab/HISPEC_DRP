@@ -92,9 +92,8 @@ class DataModel:
             self.init_meta(meta)
             self.init_data(data)
 
-        # Add Receipt HDU if one not provided
-        if 'RECEIPT' not in self._data:
-            self._data['RECEIPT'] = pd.DataFrame({name : pd.Series(dtype=dtype) for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()})
+        # Initialize the receipt
+        self.init_receipt()
 
         # Defaults
         if self.meta.data_level is None:
@@ -358,22 +357,23 @@ class DataModel:
             self.meta.update(meta)
 
 
+    def init_receipt(self):
+        """
+        Initialize the receipt.
+        """
+        if 'RECEIPT' not in self._data:
+            self._data['RECEIPT'] = pd.DataFrame({
+                name : pd.Series(dtype=dtype)
+                for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()
+            })
+
     @property
-    def default_level(self):
+    def level(self):
         """
-        Get the default data level. NameLX -> X.
+        Datamodel level to override for each datamodel.
+        If level is None, it is not included when creating filenames unless specified.
         """
-        s = ''
-        for c in self.__class__.__name__[::-1]:
-            if c == 'L':
-                break
-            else:
-                s += c
-        s = s[::-1]
-        if s == self.__class__.__name__:
-            return ''
-        else:
-            return s
+        return None
 
 
     @staticmethod

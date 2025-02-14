@@ -27,3 +27,7 @@ class HISPECL0(HISPECDataModel):
             'dtype' : np.float64
         },
     }
+
+    @property
+    def level(self):
+        return 0

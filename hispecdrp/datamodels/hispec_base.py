@@ -35,7 +35,8 @@ class HISPECDataModel(DataModel):
         Returns:
             str : The filename
         """
-        filename = f"HS_{spectrograph.upper()}_{date}_LVL{level}.fits"
+        level = '' if level is None else f"_LVL{level}"
+        filename = f"HS_{spectrograph.upper()}_{date}{level}.fits"
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
@@ -59,3 +60,4 @@ class HISPECDataModel(DataModel):
             level=level,
             suffix=suffix
         )
+    

@@ -7,6 +7,6 @@ class HISPECRawRead(HISPECDataModel):
     EXTENSIONS = {
         'DATA': {
             'hdu_type' : fits.ImageHDU,
-            'dtype' : np.int16
+            'dtype' : np.uint16
         }
     }
