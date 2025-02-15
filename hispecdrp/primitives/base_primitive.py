@@ -15,6 +15,7 @@ from keckdrpframework.models.arguments import Arguments
 #from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
 #from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
 
+import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
 from .. import utils as utils
@@ -77,11 +78,6 @@ class BasePrimitive(_BasePrimitive):
             _config = Config(data={'class': cls.__module__ + '.' + cls.__name__, 'arguments': Config(), 'logging': cls.LOGGING.copy()})
         else:
             _config = Config(config_file=config_file)
-            if 'class' not in _config:
-                raise ValueError(f"'class' entry not found in config {config_file}")
-            _class = utils.resolve_primitive_class(_config['class'])
-            if _class is not cls:
-                raise ValueError(f"Config 'class' '{_class}' from {config_file} not consistent with instantiated primitive {cls.__name__}")
             if 'logging' not in _config:
                 _config['logging'] = cls.LOGGING.copy()
             else:
@@ -346,12 +342,13 @@ class BasePrimitive(_BasePrimitive):
         # Save the model
         model.save(filename=final_path)
 
-    def open_model(self, name : DataModel, _copy=True):
+    def open_model(self, name : DataModel, copy=True):
         """
         Open a model from a file or copy a datamodel.
         """
+        # NOTE: May remove this layer between process and datamodels.open() if we don't find it helpful
         if isinstance(name, DataModel):
-            if _copy:
+            if copy:
                 return name.copy()
             else:
                 return name
@@ -369,10 +366,19 @@ class BasePrimitive(_BasePrimitive):
             model_result (DataModel): The model to finalize.
         """
         try:
-            setattr(model_result.meta.drp_step, self.class_alias, str(self.status))
+            setattr(model_result.meta.drp_step, self.class_alias, str(self.status)) # NOTE: May drop this in favor of receipt
         except:
             pass
+        model_result.meta.drp_version = hispecdrp.__version__
         return model_result
+    
+
+    def get_calibration_file(self, name : str | DataModel, cal_type : str, **kwargs) -> str:
+        """
+        Forward function for model.get_calibration_file.
+        """
+        input_model = datamodels.open(name) if isinstance(name, str) else name
+        return input_model.get_calibration_file(cal_type, **kwargs)
 
 
     # @classmethod
