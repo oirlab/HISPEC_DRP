@@ -10,6 +10,11 @@ properties:
         fits_keyword: IMTYPE
         comment: "Type of exposure"
         type: string
+      data_quality:
+        fits_keyword: DATAQUAL
+        comment: "Data quality flag at the exposure level"
+        type: string
+        default: "GOOD"
       jd_start:
         fits_keyword: EXPJDST
         comment: "Exposure start time"
@@ -53,23 +58,10 @@ properties:
         fits_keyword: READMODE
         comment: "Readout mode"
         type: string
-      num_groups:
-        fits_keyword: NGROUPS
-        comment: "Number of groups in integration"
-        type: integer
       num_reads:
         fits_keyword: NREADS
-        comment: "Number of reads per group"
+        comment: "Total number of reads"
         type: integer
-      num_frames:
-        fits_keyword: NFRAMES
-        comment: "Total number of integrations"
-        type: integer
-      group_gap_time:
-        fits_keyword: TGROUPGP
-        comment: "Time between groups [s]"
-        unit: sec
-        type: number
       integration_time:
         fits_keyword: ITIME
         comment: "Effective light integration time [s]"
@@ -84,10 +76,6 @@ properties:
         fits_keyword: NRSTSTRT
         comment: "Number of resets at start of exposure"
         type: integer
-      data_problem:
-        fits_keyword: DATAPROB
-        comment: "Science telemetry indicated a problem"
-        type: string
       exposure_num:
         fits_keyword: EXPNUM
         comment: "Exposure number in the sequence"
