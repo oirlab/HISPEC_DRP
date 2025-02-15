@@ -2,17 +2,9 @@
 ---
 type: object
 properties:
-  date:
-    comment: "ISO 8601 datetime YYYYMMDDTHHMMSS" # NOTE: TBD what this represents
-    fits_keyword: DATE
-    type: string
   date_created:
-    comment: "ISO 8601 datetime file creation"
+    comment: "ISO 8601 datetime last file save YYYYMMDDTHHMMSS"
     fits_keyword: DATECRT
-    type: string
-  organization:
-    comment: "Organization responsible for creating file"
-    fits_keyword: ORG
     type: string
   filename:
     comment: "Name of the file"
