@@ -61,7 +61,8 @@ class DataModel:
         data : dict | None = None,
         meta : MetaDict | None = None,
         extensions : str | list[str] | None = None,
-        validate_metadata : bool = True
+        validate_metadata : bool = True,
+        correct_dtypes : bool = False,
     ):
         """
         Initialize a DataModel object.
@@ -74,6 +75,7 @@ class DataModel:
             filename (str, optional): Path to a FITS file to load. Defaults to None.
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
         """
 
         # TODO: Implement hdu_list input.
@@ -91,7 +93,7 @@ class DataModel:
         else:
             # If given starting (meta)data, set that.
             self.init_meta(meta)
-            self.init_data(data)
+            self.init_data(data, correct_dtypes=correct_dtypes)
 
         # Initialize the receipt
         self.init_receipt()
@@ -345,7 +347,7 @@ class DataModel:
         return self.schema
     
 
-    def init_data(self, data : dict | None):
+    def init_data(self, data : dict | None, correct_dtypes : bool = False):
         """
         Initialize the data.
 
@@ -357,7 +359,13 @@ class DataModel:
         if data is not None:
             for key in data:
                 if key.upper() in self.EXTENSIONS:
-                    self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
+                    if isinstance(data[key], pd.DataFrame):
+                        self._data[key.upper()] = data[key]
+                    elif isinstance(data[key], np.ndarray):
+                        if correct_dtypes:
+                            self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
+                        else:
+                            self._data[key.upper()] = data[key]
                 else:
                     raise ValueError(f"Unknown extension: {key.upper()}")
     

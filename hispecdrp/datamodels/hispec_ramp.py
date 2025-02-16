@@ -10,5 +10,9 @@ class HISPECRampModel(HISPECDataModel):
         'DATA': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.uint16
+        },
+        'TIMES': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
         }
     }

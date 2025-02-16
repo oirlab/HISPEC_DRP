@@ -46,6 +46,7 @@ dependencies = [
   "astropy",
   "pandas",
   "gitpython",
+  "numba",
   "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#dev"
 ]
 

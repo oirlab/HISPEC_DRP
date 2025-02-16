@@ -1,6 +1,9 @@
 import requests
 import re
 import os
+from astropy.time import Time
+
+from hispecdrp import datamodels
 
 def download_github_lfs_file(
         git_file_path: str,
@@ -98,3 +101,20 @@ def download_github_lfs_file(
     except Exception as e:
         print(f"Error downloading file at {url}:\n{e}")
         return None
+    
+
+
+def add_metadata(model : datamodels.HISPECDataModel):
+    model.meta.instrument.name = "HISPEC"
+    model.meta.file_type = 'FITS'
+    model.meta.telescope = 'Keck-II'
+    model.meta.drp_version = '0.0.1'
+    model.meta.instrument.era = '0.0.1'
+    time = Time(model.meta.exposure.jd_start, format='jd')
+    model.meta.date_created = time.isot
+    model.meta.exposure.date_start = time.datetime.strftime('%Y%m%d')
+    model.meta.exposure.date_mid = time.datetime.strftime('%Y%m%d')
+    model.meta.exposure.date_end = time.datetime.strftime('%Y%m%d')
+    model.meta.exposure.time_start = time.datetime.strftime('%H:%M:%S.%f')[:-3]
+    model.meta.exposure.time_mid = time.datetime.strftime('%H:%M:%S.%f')[:-3]
+    model.meta.exposure.time_end = time.datetime.strftime('%H:%M:%S.%f')[:-3]
