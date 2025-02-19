@@ -61,7 +61,7 @@ class HISPECDataModel(DataModel):
         if datetime is None:
             datetime = self.meta.date_obs \
                        + 'T' \
-                       + self.meta.utc[0:6] # HHMMSS, remove colons and decimal seconds
+                       + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
         level = level or self.meta.data_level or self.level
         return self._generate_filename(
             spectrograph=spectrograph,
