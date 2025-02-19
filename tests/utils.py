@@ -2,6 +2,7 @@ import requests
 import re
 import os
 from astropy.time import Time
+from tqdm import tqdm
 
 from hispecdrp import datamodels
 
@@ -62,7 +63,7 @@ def download_github_lfs_file(
                 raise ValueError(f"Unable to find 'oid' or 'size' in the LFS pointer file: {response.text}")
 
             lfs_oid = match.group(1)
-            lfs_size = size_match.group(1)
+            lfs_size = float(size_match.group(1))
 
             # Build the JSON payload for LFS batch API
             payload = {
@@ -86,14 +87,20 @@ def download_github_lfs_file(
             download_url = lfs_data['objects'][0]['actions']['download']['href']
 
             # Download the file from the href URL
-            file_data = requests.get(download_url).content
+            #file_data = requests.get(download_url).content
+            # Stream the file and use tqdm for progress
+            with requests.get(download_url, stream=True) as r, \
+                 open(output_path, "wb") as f, \
+                 tqdm(total=lfs_size, unit="B", unit_scale=True, desc=f"Downloading {git_file_path}") as pbar:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    pbar.update(len(chunk))
 
         else:
-            file_data = response.content
 
-        # Write the file content to the output path
-        with open(output_path, 'wb') as f:
-            f.write(file_data)
+            file_data = response.content
+            with open(output_path, 'wb') as f:
+               f.write(file_data)
         
         print(f"Successfully downloaded {url} to {output_path}")
         return output_path
@@ -111,10 +118,5 @@ def add_metadata(model : datamodels.HISPECDataModel):
     model.meta.drp_version = '0.0.1'
     model.meta.instrument.era = '0.0.1'
     time = Time(model.meta.exposure.jd_start, format='jd')
-    model.meta.date_created = time.isot
-    model.meta.exposure.date_start = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.date_mid = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.date_end = time.datetime.strftime('%Y%m%d')
-    model.meta.exposure.time_start = time.datetime.strftime('%H:%M:%S.%f')[:-3]
-    model.meta.exposure.time_mid = time.datetime.strftime('%H:%M:%S.%f')[:-3]
-    model.meta.exposure.time_end = time.datetime.strftime('%H:%M:%S.%f')[:-3]
+    model.meta.utc = time.datetime.strftime('%H:%M:%S.%f')[0:11]
+    model.meta.date_obs = time.datetime.strftime('%Y%m%d')
