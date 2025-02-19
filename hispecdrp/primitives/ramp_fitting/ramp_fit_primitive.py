@@ -27,9 +27,11 @@ class FitRampPrimitive(BasePrimitive):
         input_model = self.open_model(self.args.name, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.args.method.lower()}")
         if self.args.method.lower() == 'utr':
-            slopes, slopes_err = fit_ramps_utr(input_model.times.astype(np.float32), input_model.data.astype(np.float32))
+            result = fit_ramps_utr(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)
+            slopes, slopes_err = result['slope'], result['slope_err']
         elif self.args.method.lower() == 'mcds':
-            slopes, slopes_err = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.num_coadd)
+            result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.num_coadd)
+            slopes, slopes_err = result['slope'], result['slope_err']
 
         # For now, create a simple DQ model for the L0 model
         dq_out = np.zeros(slopes.shape, dtype=np.uint16)
