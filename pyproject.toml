@@ -17,7 +17,7 @@ name = "hispecdrp"
 version = "0.0.1"
 description = "Data Reduction Pipeline for the HISPEC instrument at the W. M. Keck Observatory."
 readme = "README.md"
-requires-python = ">=3.11.0,<=3.11.9"
+requires-python = ">=3.11.0"
 
 # license = {file = "LICENSE.txt"}
 
@@ -35,6 +35,7 @@ classifiers = [
   "Development Status :: 1 - Planning",
   "Topic :: Scientific/Engineering :: Astronomy",
   # "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3 :: Only",
 ]
@@ -47,7 +48,7 @@ dependencies = [
   "pandas",
   "gitpython",
   "numba",
-  "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#dev"
+  "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
 ]
 
 [project.optional-dependencies]
