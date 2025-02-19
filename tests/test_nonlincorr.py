@@ -65,16 +65,10 @@ def create_ramp_model(slope, nonlin_coeffs_inv):
 
 
 def test_ramp_fit(tmp_path):
-    
-    # Science file (just tellurics)
-    #git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    #cache_dir = astropy.utils.data._get_download_cache_loc()
-    #file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    #file_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
 
+    # Create ramp model
     slope = 10
     nonlin_coeffs_inv = np.array([0.0, 1.0, 1E-8, -1E-10], dtype=np.float64) # NOTE: zeroth order coeff always zero, but we should keep for consistency
-    #nonlin_coeffs_inv = np.array([0.0, 1.0, -1E-10], dtype=np.float64) # NOTE: zeroth order coeff always zero, but we should keep for consistency
     ramp_model, nonlin_coeffs = create_ramp_model(slope, nonlin_coeffs_inv)
 
     # Nonlin config file

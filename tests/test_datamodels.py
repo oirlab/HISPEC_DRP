@@ -4,15 +4,11 @@ from tests.utils import download_github_lfs_file
 import astropy.utils.data
 
 def test_hispec_level0(tmp_path):
-
-    
     
     # Science file (just tellurics)
-    #git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    #cache_dir = astropy.utils.data._get_download_cache_loc()
-    #file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    file_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    dark_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_master-dark.fits'
+    cache_dir = astropy.utils.data._get_download_cache_loc()
+    git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
+    file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
 
     def _test_model_attrs(model):
         assert model.meta.exposure.exposure_type == "SCI"
@@ -33,11 +29,11 @@ def test_hispec_level0(tmp_path):
     model = datamodels.HISPECL0Model(file_path)
 
     # Set arbitrary metadata
-    model.meta.exposure.integration_time = 10.0 # valid
+    model.meta.exposure.exposure_time = 10.0 # valid
 
     # Set invalid metadata
     try:
-        model.meta.exposure.integration_time = '10.0'  # invalid
+        model.meta.exposure.exposure_time = '10.0'  # invalid
         raise RuntimeError("Invalid metadata was set.")
     except ValueError:
         pass

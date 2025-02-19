@@ -42,12 +42,6 @@ def create_ramp_model(slope):
 
 def test_ramp_fit(tmp_path):
     
-    # Science file (just tellurics)
-    #git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    #cache_dir = astropy.utils.data._get_download_cache_loc()
-    #file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    #file_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
-
     slope = 10
     ramp_model = create_ramp_model(slope=slope)
 

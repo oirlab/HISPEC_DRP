@@ -26,11 +26,11 @@ def create_dark_config():
 def test_dark_level0(tmp_path):
     
     # Science file (just tellurics)
-    #git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    #cache_dir = astropy.utils.data._get_download_cache_loc()
-    #file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    file_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    dark_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_master-dark.fits'
+    cache_dir = astropy.utils.data._get_download_cache_loc()
+    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
+    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
+    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
+    dark_path = download_github_lfs_file(git_file_path_dark, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
 
     # Config file
     dark_config_file = str(tmp_path / 'dark_config.yaml')
@@ -40,10 +40,10 @@ def test_dark_level0(tmp_path):
 
     # Setup and call the dark primitive
     dark_prim = DarkSubtractionPrimitive(config_file=dark_config_file, dark=dark_path)
-    model_result = dark_prim.apply(file_path, output_dir=tmp_path)
+    model_result = dark_prim.apply(sci_path, output_dir=tmp_path)
 
     # Open models
-    input_model = datamodels.open(file_path)
+    input_model = datamodels.open(sci_path)
     dark_model = datamodels.HISPECDarkModel(dark_path)
     
     # Test against manual correction
@@ -55,12 +55,12 @@ def test_dark_level0(tmp_path):
 
 def test_dark_ramp(tmp_path):
     
-    # Science file (just tellurics)
-    #git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    #cache_dir = astropy.utils.data._get_download_cache_loc()
-    #file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    file_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
-    dark_path = '/Users/cale/Desktop/HS_BSPEC_20240924T000000_master-dark.fits'
+    # Grab files
+    cache_dir = astropy.utils.data._get_download_cache_loc()
+    git_file_path_sci = 'HISPEC/Raw/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
+    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
+    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
+    dark_path = download_github_lfs_file(git_file_path_dark, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
 
     # Config file
     dark_config_file = str(tmp_path / 'dark_config.yaml')
@@ -70,10 +70,10 @@ def test_dark_ramp(tmp_path):
 
     # Setup and call the dark primitive
     dark_prim = DarkSubtractionPrimitive(config_file=dark_config_file, dark=dark_path)
-    model_result = dark_prim.apply(file_path, output_dir=tmp_path)
+    model_result = dark_prim.apply(sci_path, output_dir=tmp_path)
 
     # Manual subtraction
-    input_model = datamodels.open(file_path)
+    input_model = datamodels.open(sci_path)
     dark_model = datamodels.HISPECDarkModel(dark_path)
     
     # Test
