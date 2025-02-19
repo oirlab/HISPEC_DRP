@@ -17,7 +17,7 @@ name = "hispecdrp"
 version = "0.0.1"
 description = "Data Reduction Pipeline for the HISPEC instrument at the W. M. Keck Observatory."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11.0,<=3.11.9"
 
 # license = {file = "LICENSE.txt"}
 
