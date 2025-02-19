@@ -19,8 +19,6 @@ Like primitives, pipelines can also utilize config files. An example configurati
     %YAML 1.2
     ---
 
-    class: 'Stage1Pipeline'
-
     logging:
       enable: True
       level: info
