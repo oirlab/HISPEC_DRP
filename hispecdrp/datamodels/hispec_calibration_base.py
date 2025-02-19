@@ -63,9 +63,9 @@ class HISPECCalibrationModel(HISPECDataModel):
         """
         spectrograph = spectrograph or self.meta.instrument.spectrograph
         if datetime is None:
-            datetime = self.meta.exposure.date_start \
+            datetime = self.meta.date_obs \
                        + 'T' \
-                       + self.meta.exposure.time_start.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
+                       + self.meta.utc[0:6] # HHMMSS, remove colons and decimal seconds
         cal_type = cal_type or self.CAL_TYPE
         return self._generate_filename(
             spectrograph=spectrograph,

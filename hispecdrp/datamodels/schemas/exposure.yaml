@@ -30,30 +30,6 @@ properties:
         comment: "Exposure end time"
         unit: JD
         type: number
-      date_start:
-        fits_keyword: EXPDTST
-        comment: "Exposure start date in YYYYMMDD"
-        type: string
-      date_mid:
-        fits_keyword: EXPDTMID
-        comment: "Exposure mid date in YYYYMMDD"
-        type: string
-      date_end:
-        fits_keyword: EXPDTEND
-        comment: "Exposure end date in YYYYMMDD"
-        type: string
-      time_start:
-        fits_keyword: EXPTMST
-        comment: "Exposure start time in hh:mm:ss.ss"
-        type: string
-      time_mid:
-        fits_keyword: EXPTMMID
-        comment: "Exposure mid time in hh:mm:ss.ss"
-        type: string
-      time_end:
-        fits_keyword: EXPTMEND
-        comment: "Exposure end time in hh:mm:ss.ss"
-        type: string
       read_mode:
         fits_keyword: READMODE
         comment: "Readout mode"
@@ -62,11 +38,6 @@ properties:
         fits_keyword: NREADS
         comment: "Total number of reads"
         type: integer
-      integration_time:
-        fits_keyword: ITIME
-        comment: "Effective light integration time [s]"
-        unit: sec
-        type: number
       exposure_time:
         fits_keyword: EXPTIME
         comment: "Effective exposure time [s]"
@@ -75,6 +46,10 @@ properties:
       num_resets_start:
         fits_keyword: NRSTSTRT
         comment: "Number of resets at start of exposure"
+        type: integer
+      exposure_id:
+        fits_keyword: EXPID
+        comment: "Exposure ID"
         type: integer
       exposure_num:
         fits_keyword: EXPNUM

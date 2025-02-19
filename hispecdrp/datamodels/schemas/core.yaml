@@ -3,8 +3,16 @@
 type: object
 properties:
   date_created:
-    comment: "ISO 8601 datetime last file save YYYYMMDDTHHMMSS"
+    comment: "ISO 8601 datetime file was created YYYYMMDDTHHMMSS"
     fits_keyword: DATECRT
+    type: string
+  date_obs:
+    comment: "ISO 8601 datetime of the observation YYYYMMDD for KOA"
+    fits_keyword: DATE-OBS
+    type: string
+  utc:
+    comment: "UTC time of the observation HHMMSS.SS for KOA"
+    fits_keyword: UTC
     type: string
   filename:
     comment: "Name of the file"
