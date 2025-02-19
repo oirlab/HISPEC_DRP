@@ -48,8 +48,10 @@ dependencies = [
   "pandas",
   "gitpython",
   "numba",
-  "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
+  #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
+  "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
+
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov", "requests", "tqdm"]
