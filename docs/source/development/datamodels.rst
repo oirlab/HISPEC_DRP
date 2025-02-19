@@ -50,7 +50,8 @@ The `HEADER_SCHEMAS` attribute for the base data model class is specified as fol
         'exposure.yaml',
         'target.yaml',
         'drp_steps.yaml',
-        'calibration_files.yaml'
+        'calibration_files.yaml',
+        'keck_program.yaml',
     ]
 
 View all YAML schemas `here. <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/datamodels/schemas/>`_
@@ -64,7 +65,7 @@ The `datamodels.open` method reads in a file and constructs the appropriate data
 .. autofunction:: hispecdrp.datamodels.open
 
 
-Alternatively, a file can be passed to the correct datamodel class:
+Alternatively, a file can be passed to the constructor for the appropriate datamodel class:
 
 .. autofunction:: hispecdrp.datamodels.DataModel.__init__
 
@@ -83,9 +84,10 @@ Metadata example:
 
     from hispecdrp import datamodels
     file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    model = datamodels.HISPECL0(file_path)
-    print(model.meta.date) # -> '2024-09-24T00:00:00.000'
-    print(model.meta.model_type) # -> 'HISPECL0'
+    model = datamodels.open(file_path)
+    print(model.meta.date_obs) # -> '20240924'
+    print(model.meta.utc) # -> '000000' (HHMMSS)
+    print(model.meta.model_type) # -> 'HISPECL0Model'
     print(model.meta.exposure.exposure_type) # -> 'SCI'
     print(model.meta.instrument.spectrograph )# -> 'BSPEC'
     print(model.meta.instrument.mode) # -> 'YJHK'
@@ -94,5 +96,5 @@ Metadata example:
     # Valid
     model.meta.exposure.integration_time = 10.0
 
-    # Invalid
+    # Invalid, raises an error!
     model.meta.exposure.integration_time = '10.0'

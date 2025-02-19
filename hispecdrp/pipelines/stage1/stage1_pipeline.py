@@ -1,6 +1,5 @@
 
 from ..base_pipeline import BasePipeline
-from ... import datamodels
 from ...primitives import DarkSubtractionPrimitive, FlatFieldPrimitive
 
 __all__ = ['Stage1Pipeline']

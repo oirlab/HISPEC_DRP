@@ -9,8 +9,12 @@ Data Models
    hispec_level1
    hispec_level2
 
+
+Calibration Models
+------------------
+
 .. toctree::
    :maxdepth: 2
-   
+
    hispec_dark
    hispec_flat

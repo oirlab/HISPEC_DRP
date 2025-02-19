@@ -17,12 +17,6 @@ Extensions
      - Data Type
      - Dimensions
      - Units
-   * - 0
-     - N/A
-     - Primary
-     - N/A
-     - N/A
-     - 
    * - 1-3
      - SPEC_UNCAL_[B/R]SPEC_FIB#
      - Image
@@ -64,7 +58,7 @@ Extensions
      - Image
      - Uint32
      - Nord x 4096
-     - N/A
+     - None
    * - 22-24
      - MID_TIME_[B/R]SPEC_FIB#
      - Image
@@ -88,37 +82,37 @@ Extensions
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 34-36
      - FIBERFLAT_ERR_ALL_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 37-39
      - FIBERFLAT_ERR_FLOOR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 40-42
      - SKY_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 43-45
      - SKY_ERR_ALL_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 46-48
      - SKY_ERR_FLOOR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 49-51
      - STAR_MOD_[B/R]SPEC_FIB#
      - Image
@@ -130,25 +124,25 @@ Extensions
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 55-57
      - TEL_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 58-60
      - TEL_ERR_ALL_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 61-63
      - TEL_ERR_FLOOR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - N/A
+     - None
    * - 64-66
      - FLUX_ABS_[B/R]SPEC_FIB#
      - Image

@@ -40,7 +40,7 @@ Extensions
      - Image
      - Uint32
      - 4096 x 4096
-     - N/A
+     - None
    * - 5
      - MID_TIME
      - Image

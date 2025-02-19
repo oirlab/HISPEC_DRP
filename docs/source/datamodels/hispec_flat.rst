@@ -23,19 +23,19 @@ Extensions
      - Float32
      - 4096 x 4096
      - e-
-  * - 2
+   * - 2
      - ERR_ALL
      - Image
      - Float32
      - 4096 x 4096
      - e-
-  * - 3
+   * - 3
      - ERR_FLOOR
      - Image
      - Float32
      - 4096 x 4096
      - e-
-  * - 4
+   * - 4
      - DQ
      - Image
      - UInt32
@@ -43,7 +43,11 @@ Extensions
      - None
 
 
+
 **1. DATA**: The raw UTR data.
+
 **2. ERR_ALL**: The dark current error (all noise sources).
+
 **3. ERR_FLOOR**: The dark current error (photon and read noise only).
+
 **4. DQ**: Data quality.

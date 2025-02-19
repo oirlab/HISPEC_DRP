@@ -39,7 +39,7 @@ Extensions
      - Image
      - Uint32
      - Nord x 4096
-     - N/A
+     - None
    * - 13-15
      - MID_TIME_[B/R]SPEC_FIB#
      - Image
