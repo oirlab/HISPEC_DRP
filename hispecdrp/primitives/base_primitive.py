@@ -33,7 +33,7 @@ class BasePrimitive(_BasePrimitive):
     
     ARGUMENTS = {
         'run' : True,
-        'save_results' : True,
+        'save_results' : False,
         'output_dir' : None,
         'suffix' : ''
     }
