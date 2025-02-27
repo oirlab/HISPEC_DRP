@@ -1,3 +1,4 @@
+=========
 Pipelines
 =========
 
@@ -9,7 +10,7 @@ Pipelines are a collection of primitives that are executed in a specific order t
 The Pipeline interface is built on top of the primitive interface and is used in nearly an identicaly manner. Pipeline-specific configuration is stored in ``pipeline.args``, and the primary filename or datamodel to process can be accessed with ``pipeline.args.name``. A class attribute called ``PRIMITIVES`` specifies which primitives are instantiated and available for the pipeline to execute.
 
 
-Pipeline Configuraiton Files
+Pipeline Configuration Files
 ----------------------------
 
 Like primitives, pipelines can also utilize config files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.

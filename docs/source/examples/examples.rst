@@ -8,4 +8,5 @@ Examples
    :maxdepth: 1
    :glob:
     
-   ./*
+   run_primitive
+   run_pipeline
