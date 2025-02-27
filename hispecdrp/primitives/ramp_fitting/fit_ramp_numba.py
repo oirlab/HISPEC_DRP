@@ -16,6 +16,7 @@ import numpy as np
 
 __all__ = ['fit_ramp_slope_intercept', 'fit_ramp_slope_fixed_intercept', 'fit_ramps_slope_intercept', 'fit_ramps_slope_fixed_intercept_array', 'fit_ramps_slope_fixed_intercept_float', 'fit_ramps_utr', 'fit_ramp_mcds', 'fit_ramps_mcds']
 
+
 @njit
 def fit_ramp_slope_intercept(times, ramp):
     """

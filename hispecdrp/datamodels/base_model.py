@@ -19,7 +19,7 @@ _RECEIPT_COLS = {
     'Branch_Name' : str,
     'Commit_Hash' : str,
     'Class' : str,
-    'Datamodel' : str,
+    'Filename' : str,
     'Arguments' : str,
     'Status' : str,
 }
@@ -70,8 +70,10 @@ class DataModel:
         Args:
             data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
                 Keys should match the schema's extension names. Defaults to None.
+
             meta (dict, optional): Dictionary containing metadata.
                 Keys should match the schema's property paths. Defaults to None.
+                
             filename (str, optional): Path to a FITS file to load. Defaults to None.
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.

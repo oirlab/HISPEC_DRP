@@ -21,12 +21,12 @@ class DarkSubtractionPrimitive(BasePrimitive):
 
 
     def _perform(self):
-        input_model = self.open_model(self.args.name, copy=False)
+        input_model = datamodels.open(self.args.name, copy=False)
         if self.args.dark is None:
             dark_path = self.get_calibration_file(input_model, cal_type='dark')
         else:
             dark_path = self.args.dark
-        dark_model = self.open_model(dark_path, copy=False)
+        dark_model = datamodels.open(dark_path, copy=False)
         result = input_model.copy()
         self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
         if isinstance(result, datamodels.HISPECRampModel):

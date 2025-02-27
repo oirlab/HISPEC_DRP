@@ -1,6 +1,6 @@
 from astropy.io import fits
 
-def open(init):
+def open(init, copy=False):
     """
     Creates a DataModel from a FITS file. More types might be added later.
 
@@ -16,7 +16,10 @@ def open(init):
     # If init is already a datamodel, copy and return
     from .base_model import DataModel
     if isinstance(init, DataModel):
-        return init
+        if copy:
+            return init.copy()
+        else:
+            return init
     
     # Convert path to string
     if isinstance(init, str):

@@ -16,7 +16,7 @@ def get_level(lvl : str) -> int:
     else: return logging.NOTSET
 
 
-def get_logger(name: str, config: Config) -> logging.Logger:
+def get_logger(name: str, config: Config) -> logging.Logger | None:
     """
     Args:
         name (str): Name of logger, which will be shown in each log msg.

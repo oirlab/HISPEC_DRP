@@ -144,6 +144,7 @@ class BasePrimitive(_BasePrimitive):
             return self._fallback_log
         return self.logger
 
+
     @property
     def _fallback_log(self):
         # Use a lambda to dynamically handle log methods
@@ -156,6 +157,7 @@ class BasePrimitive(_BasePrimitive):
             },
         )()
         
+        
     def set_args(self, name : str | DataModel | None = None, **kwargs) -> dict:
         """
         Coalesces the user input into a single `Arguments` obejct with the following priorities:
@@ -163,7 +165,9 @@ class BasePrimitive(_BasePrimitive):
             3. `self.config['arguments']`
             2. `self.args`
             1. `kwargs`
+        
         And is stored in `self.args`.
+
         If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
         `self.args.name` should be the name of the primary datamodel or filename to be processed.
         """
@@ -184,6 +188,7 @@ class BasePrimitive(_BasePrimitive):
             3. `self.ARGUMENTS`
             2. `self.config`
             1. `self.args`
+
         And is stored in `self.args`.
 
         Keyword Args:
@@ -220,8 +225,6 @@ class BasePrimitive(_BasePrimitive):
     def __repr__(self):
         if hasattr(self, "args"):
             s = self.__class__.__name__
-            # for k, arg in enumerate(self.args):
-            #     s += f"\n  {k}: {arg}"
             for key in self.args.iter_kw():
                 s += f"\n  {key}: {self.args[key]}"
             return s
@@ -252,7 +255,6 @@ class BasePrimitive(_BasePrimitive):
         #git_commit_hash = repo.head.object.hexsha
         #git_branch = repo.active_branch.name
         #git_tag = str(repo.tags[-1])
-        repo = 'None'
         git_commit_hash = 'None'
         git_branch = 'None'
         git_tag = 'None'
@@ -264,7 +266,7 @@ class BasePrimitive(_BasePrimitive):
             'Branch_Name': git_branch,
             'Commit_Hash': git_commit_hash,
             'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : model.filename,
+            'Filename' : model.filename or 'None',
             'Arguments': repr(self.args),
             'Status' : self.status
         }
@@ -342,21 +344,6 @@ class BasePrimitive(_BasePrimitive):
         # Save the model
         model.save(filename=final_path)
 
-    def open_model(self, name : DataModel, copy=True):
-        """
-        Open a model from a file or copy a datamodel.
-        """
-        # NOTE: May remove this layer between process and datamodels.open() if we don't find it helpful
-        if isinstance(name, DataModel):
-            if copy:
-                return name.copy()
-            else:
-                return name
-        if isinstance(name, str):
-            return datamodels.open(name)
-        else:
-            raise ValueError(f"Cannot open model from {name}")
-        
     
     def finalize_model(self, model_result : DataModel):
         """

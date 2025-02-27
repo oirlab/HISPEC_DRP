@@ -12,7 +12,7 @@ class FlatFieldPrimitive(BasePrimitive):
             If None, the flat model will be queried.
     """
 
-    class_alias = 'flatfield'
+    class_alias = 'flat_field'
 
     ARGUMENTS = {
         'suffix' : 'flatfield',
@@ -21,12 +21,12 @@ class FlatFieldPrimitive(BasePrimitive):
 
 
     def _perform(self):
-        input_model = self.open_model(self.args.name, copy=False)
+        input_model = datamodels.open(self.args.name, copy=False)
         if self.args.flat is None:
             flat_path = self.get_calibration_file(input_model, cal_type='flat')
         else:
             flat_path = self.args.flat
-        flat_model = self.open_model(flat_path, copy=False)
+        flat_model = datamodels.open(flat_path, copy=False)
         result = input_model.copy()
         self.log.info(f"Applying flat field correction with {flat_model} to {input_model}")
         result = flatfield_correction(result, flat_model)

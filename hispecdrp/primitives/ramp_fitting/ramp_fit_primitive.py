@@ -24,7 +24,7 @@ class FitRampPrimitive(BasePrimitive):
 
 
     def _perform(self):
-        input_model = self.open_model(self.args.name, copy=False)
+        input_model = datamodels.open(self.args.name, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.args.method.lower()}")
         if self.args.method.lower() == 'utr':
             result = fit_ramps_utr(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)

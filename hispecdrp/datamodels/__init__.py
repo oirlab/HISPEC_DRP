@@ -13,12 +13,5 @@ from .hispec_nonlin import HISPECNonlinearCoeffModel
 
 from .utils import open
 
-__all__ = [
-    "open",
-    "MetaDict",
-]
-
 _local_dict = locals()
 MODEL_REGISTER = {name : _local_dict[name] for name in _local_dict if name.endswith('Model')}
-
-__all__ += list(MODEL_REGISTER.keys())
