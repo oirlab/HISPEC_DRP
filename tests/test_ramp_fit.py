@@ -57,3 +57,11 @@ def test_ramp_fit(tmp_path):
 
     # Test manual results
     np.testing.assert_array_equal(model_result.data, slope)
+
+    # Test CDS
+    model_result = rampfit_prim.apply(ramp_model, output_dir=tmp_path, method='cds')
+    np.testing.assert_array_equal(model_result.data, slope)
+
+    # Test MCDS
+    model_result = rampfit_prim.apply(ramp_model, output_dir=tmp_path, method='mcds', num_coadd=3)
+    np.testing.assert_array_equal(model_result.data, slope)
