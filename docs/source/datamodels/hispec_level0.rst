@@ -8,7 +8,7 @@ Extensions
 ----------
 
 .. list-table::
-   :widths: 10 10 10 10 10 10
+   :widths: 5 10 10 10 10 10
    :header-rows: 1
 
    * - HDU
@@ -24,37 +24,45 @@ Extensions
      - 4096 x 4096
      - e-/s
    * - 2
-     - ERR_ALL
+     - ERR
      - Image
      - Float32
      - 4096 x 4096
      - e-/s
    * - 3
-     - ERR_FLOOR
+     - VAR_POISSON
      - Image
      - Float32
      - 4096 x 4096
      - e-/s
    * - 4
+     - VAR_RNOISE
+     - Image
+     - Float32
+     - 4096 x 4096
+     - e-/s
+   * - 5
      - DQ
      - Image
      - Uint32
      - 4096 x 4096
      - None
-   * - 5
+   * - 6
      - MID_TIME
      - Image
-     - Float64
+     - Float32
      - 4096 x 4096
      - MJD
 
 
 1. **DATA**: Rate map.
 
-2. **ERR_ALL**: All errors including correlated errors.
+2. **ERR**: All errors including correlated errors.
 
-3. **ERR_FLOOR**: Error from photon and read noise only.
+3. **VAR_POISSON**: Estimated variance from Poisson errors.
 
-4. **DQ**: Data quality values (see X).
+4. **VAR_RNOISE**: Estimated variance from read noise errors.
 
-5. **MID_TIME**: Exposure mid-point time for each pixel.
+5. **DQ**: Data quality values.
+
+6. **MID_TIME**: Exposure mid-point time for each pixel.

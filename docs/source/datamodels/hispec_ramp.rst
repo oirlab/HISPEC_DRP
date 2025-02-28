@@ -32,3 +32,5 @@ Extensions
 
 
 1. **DATA**: The raw UTR data.
+
+2. **TIMES**: The exposure times for each read. *NOTE: This is a temporary solution until we choose how to store the minimum information rerequired to generate the exposure times dynamically.*

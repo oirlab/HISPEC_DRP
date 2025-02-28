@@ -24,180 +24,222 @@ Extensions
      - Nord x 4096
      - e-/s
    * - 4-6
-     - SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#
+     - SPEC_UNCAL_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
    * - 7-9
-     - SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#
+     - SPEC_UNCAL_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
    * - 10-12
+     - SPEC_UNCAL_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - e-/s
+   * - 13-15
      - SPEC_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s (or W/m²/µm)
-   * - 13-15
-     - SPEC_ERR_ALL_[B/R]SPEC_FIB#
-     - Image
-     - Float32
-     - Nord x 4096
-     - e-/s (or W/m²/µm)
    * - 16-18
-     - SPEC_ERR_FLOOR_[B/R]SPEC_FIB#
+     - SPEC_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s (or W/m²/µm)
    * - 19-21
+     - SPEC_VAR_POISSON_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - (e-/s)² (or (W/m²/µm)²)
+   * - 22-24
+     - SPEC_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - (e-/s)² (or (W/m²/µm)²)
+   * - 25-27
      - SPEC_DQ_[B/R]SPEC_FIB#
      - Image
      - Uint32
      - Nord x 4096
      - None
-   * - 22-24
+   * - 28-30
      - MID_TIME_[B/R]SPEC_FIB#
      - Image
-     - Float64
+     - Float32
      - Nord x 4096
      - MJD
-   * - 25-27
+   * - 31-33
      - BARY_CORR_[B/R]SPEC_FIB#
      - Table
      - See below
      - See below
      - See below
-   * - 28-30
+   * - 34-36
      - WS_[B/R]SPEC_FIB#
      - Image
      - Float64
      - Nord x 4096
      - micron
-   * - 31-33
+   * - 37-39
      - FIBERFLAT_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
-   * - 34-36
-     - FIBERFLAT_ERR_ALL_[B/R]SPEC_FIB#
-     - Image
-     - Float32
-     - Nord x 4096
-     - None
-   * - 37-39
-     - FIBERFLAT_ERR_FLOOR_[B/R]SPEC_FIB#
-     - Image
-     - Float32
-     - Nord x 4096
-     - None
    * - 40-42
-     - SKY_[B/R]SPEC_FIB#
+     - FIBERFLAT_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 43-45
-     - SKY_ERR_ALL_[B/R]SPEC_FIB#
+     - FIBERFLAT_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 46-48
-     - SKY_ERR_FLOOR_[B/R]SPEC_FIB#
+     - FIBERFLAT_VAR_RNOISE_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 49-51
-     - STAR_MOD_[B/R]SPEC_FIB#
+     - SKY_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - W/m²/µm
+     - None
    * - 52-54
-     - E2E_TPUT_[B/R]SPEC_FIB#
+     - SKY_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 55-57
-     - TEL_[B/R]SPEC_FIB#
+     - SKY_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 58-60
-     - TEL_ERR_ALL_[B/R]SPEC_FIB#
+     - SKY_VAR_RNOISE_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
    * - 61-63
-     - TEL_ERR_FLOOR_[B/R]SPEC_FIB#
+     - STAR_MOD_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - W/m²/µm
+   * - 64-66
+     - E2E_TPUT_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - None
-   * - 64-66
+   * - 67-69
+     - TEL_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - None
+   * - 70-72
+     - TEL_ERR_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - None
+   * - 73-75
+     - TEL_VAR_POISSON_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - None
+   * - 76-78
+     - TEL_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - None
+   * - 79-81
      - FLUX_ABS_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - W/m²/µm/(e-/s)
-   * - 67-69
-     - FLUX_ABS_ERR_ALL_[B/R]SPEC_FIB#
+   * - 82-84
+     - FLUX_ABS_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - W/m²/µm/(e-/s)
-   * - 70-72
-     - FLUX_ABS_ERR_FLOOR_[B/R]SPEC_FIB#
+   * - 85-87
+     - FLUX_ABS_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - W/m²/µm/(e-/s)
-   * - 73-75
+   * - 88-90
+     - FLUX_ABS_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - W/m²/µm/(e-/s)
+   * - 91-93
      - ET_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
-   * - 76-78
-     - ET_ERR_FLOOR_[B/R]SPEC_FIB#
+   * - 94-96
+     - ET_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
-   * - 79-81
-     - ET_ERR_ALL_[B/R]SPEC_FIB#
+   * - 97-99
+     - ET_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
-   * - 82-84
+   * - 100-102
+     - ET_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - e-/s
+   * - 103-105
      - ET_CEN_[B/R]SPEC_FIB#
      - Table
      - See below
      - See below
      - See below
-   * - 85-87
+   * - 106-108
      - RVCCF_[B/R]SPEC_FIB#
      - Table
      - See below
      - See below
      - See below
-   * - 88-90
+   * - 109-111
      - RVCCFWAVG_[B/R]SPEC_FIB#
      - Table
      - See below
      - See below
      - See below
-   * - 91-93
+   * - 112-114
      - CCF_[B/R]SPEC_FIB#
      - Table
      - See below
@@ -207,21 +249,25 @@ Extensions
 
 **1-3. SPEC_UNCAL_[B/R]SPEC_FIB#**: 1D original flux in e-/s from level 1 which remains unmodified throughout stage 2 processing.
 
-**4-6. SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#**: 1D vectors of original errors from level 1 with all sources of noise, including correlated errors.
+**4-6. SPEC_UNCAL_ERR_[B/R]SPEC_FIB#**: 1D vectors of original errors from level 1 with all sources of noise, including correlated errors.
 
-**7-9. SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors (photon noise & read noise), also from level 1.
+**7-9. SPEC_UNCAL_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component of uncorrelated errors from level 1.
 
-**10-12. SPEC_[B/R]SPEC_FIB#**: Calibrated 1D spectrum. The nature of this extension depends on the stage 2 reduction steps that have been run. It can, for example, be sky subtracted, blaze corrected, telluric corrected, or a subset of those.
+**10-12. SPEC_UNCAL_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component of uncorrelated errors from level 1.
 
-**13-15. SPEC_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the calibrated spectrum.
+**13-15. SPEC_[B/R]SPEC_FIB#**: Calibrated 1D spectrum. The nature of this extension depends on the stage 2 reduction steps that have been run. It can, for example, be sky subtracted, blaze corrected, telluric corrected, or a subset of those.
 
-**16-18. SPEC_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the calibrated spectrum.
+**16-18. SPEC_ERR_[B/R]SPEC_FIB#**: All errors for the calibrated spectrum.
 
-**19-21. SPEC_DQ_[B/R]SPEC_FIB#**: Data Quality flag (i.e., general “bad pixel map”).
+**19-21. SPEC_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the calibrated spectrum.
 
-**22-24. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time (for barycenter correction).
+**22-24. SPEC_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the calibrated spectrum.
 
-**25-27. BARY_CORR_[B/R]SPEC_FIB#**: Table of exposure mid-point times and barycentric corrections. The DRP computes both flux-weighted and non-weighted timing midpoints for an exposure from the UTR ramp fit. The correction is specific to each echelle order. Some of the values in this table are redundant with the table in the extension **RVCCF_[B/R]SPEC_FIB#** (see below). We will consider merging these tables in future updates.
+**25-27. SPEC_DQ_[B/R]SPEC_FIB#**: Data Quality flag (i.e., general "bad pixel map").
+
+**28-30. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time (for barycenter correction).
+
+**31-33. BARY_CORR_[B/R]SPEC_FIB#**: Table of exposure mid-point times and barycentric corrections. The DRP computes both flux-weighted and non-weighted timing midpoints for an exposure from the UTR ramp fit. The correction is specific to each echelle order. Some of the values in this table are redundant with the table in the extension **RVCCF_[B/R]SPEC_FIB#** (see below). We will consider merging these tables in future updates.
 
 **Columns:**
 
@@ -236,43 +282,53 @@ Extensions
 - ``BERV (float64)``: Barycentric velicity correction for the non-flux-weighted midpoint in m/s.
 - ``BERVW (float64)``: Barycentric velicity correction for the flux-weighted midpoint in m/s.
 
-**28-30. WS_[B/R]SPEC_FIB#**: Wavelength in microns in rest frame of the instrument.
+**34-36. WS_[B/R]SPEC_FIB#**: Wavelength in microns in rest frame of the instrument.
 
-**31-33. FIBERFLAT_[B/R]SPEC_FIB#**: Instrumental transmission.
+**37-39. FIBERFLAT_[B/R]SPEC_FIB#**: Instrumental transmission.
 
-**34-36. FIBERFLAT_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the instrumental transmission.
+**40-42. FIBERFLAT_ERR_[B/R]SPEC_FIB#**: All errors for the instrumental transmission.
 
-**37-39. FIBERFLAT_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the instrumental transmission.
+**43-45. FIBERFLAT_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the instrumental transmission.
 
-**40-42. SKY_[B/R]SPEC_FIB#**: Thermal background and OH lines from the sky fiber.
+**46-48. FIBERFLAT_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the instrumental transmission.
 
-**43-45. SKY_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the sky background spectrum.
+**49-51. SKY_[B/R]SPEC_FIB#**: Thermal background and OH lines from the sky fiber.
 
-**46-48. SKY_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the sky background spectrum.
+**52-54. SKY_ERR_[B/R]SPEC_FIB#**: All errors for the sky background spectrum.
 
-**49-51. STAR_MOD_[B/R]SPEC_FIB#**: The stellar model sampled on the detector and appropriately Doppler shifted to match the observed wavelengths.
+**55-57. SKY_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the sky background spectrum.
 
-**52-54. E2E_TPUT_[B/R]SPEC_FIB#**: End-to-end throughput derived from STAR_MOD.
+**58-60. SKY_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the sky background spectrum.
 
-**55-57. TEL_[B/R]SPEC_FIB#**: Telluric model sampled on the detector in normalized units.
+**61-63. STAR_MOD_[B/R]SPEC_FIB#**: The stellar model sampled on the detector and appropriately Doppler shifted to match the observed wavelengths.
 
-**58-60. TEL_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the telluric model spectrum.
+**64-66. E2E_TPUT_[B/R]SPEC_FIB#**: End-to-end throughput derived from STAR_MOD.
 
-**61-63. TEL_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the telluric model spectrum.
+**67-69. TEL_[B/R]SPEC_FIB#**: Telluric model sampled on the detector in normalized units.
 
-**64-66. FLUX_ABS_[B/R]SPEC_FIB#**: Absolute flux calibration derived from the ATC images which provides the scaling factors to go from blaze corrected e-/s to W/m²/µm.
+**70-72. TEL_ERR_[B/R]SPEC_FIB#**: All errors for the telluric model spectrum.
 
-**67-69. FLUX_ABS_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the absolute flux calibration.
+**73-75. TEL_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the telluric model spectrum.
 
-**70-72. FLUX_ABS_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the absolute flux calibration.
+**76-78. TEL_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the telluric model spectrum.
 
-**73-75. ET_[B/R]SPEC_FIB#**: Simultaneous etalon spectrum.
+**79-81. FLUX_ABS_[B/R]SPEC_FIB#**: Absolute flux calibration derived from the ATC images which provides the scaling factors to go from blaze corrected e-/s to W/m²/µm.
 
-**76-78. ET_ERR_ALL_[B/R]SPEC_FIB#**: All errors for the etalon spectrum.
+**82-84. FLUX_ABS_ERR_[B/R]SPEC_FIB#**: All errors for the absolute flux calibration.
 
-**79-81. ET_ERR_FLOOR_[B/R]SPEC_FIB#**: Uncorrelated errors for the etalon spectrum.
+**85-87. FLUX_ABS_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the absolute flux calibration.
 
-**82-84. ET_CEN_[B/R]SPEC_FIB#**: Fit results for each etalon mode from the simultaneous etalon spectrum.
+**88-90. FLUX_ABS_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the absolute flux calibration.
+
+**91-93. ET_[B/R]SPEC_FIB#**: Simultaneous etalon spectrum.
+
+**94-96. ET_ERR_[B/R]SPEC_FIB#**: All errors for the etalon spectrum.
+
+**97-99. ET_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the etalon spectrum.
+
+**100-102. ET_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the etalon spectrum.
+
+**103-105. ET_CEN_[B/R]SPEC_FIB#**: Fit results for each etalon mode from the simultaneous etalon spectrum.
 
 **Columns:**
 
@@ -285,7 +341,7 @@ Extensions
 - ``FINESSE, FINESSE_ERR (float64)``: The cavity finesse and its uncertainty.
 - ``CAVLEN, CAVLEN_ERR (float64)``: The effective cavity length at this wavelength.
 
-**85-87. RVCCF_[B/R]SPEC_FIB#**: The RVs and other relevant information for the individual orders. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
+**106-108. RVCCF_[B/R]SPEC_FIB#**: The RVs and other relevant information for the individual orders. By default, all RVs are corrected by the weighted barycentric velocity BERVW.
 
 **Columns:**
 
@@ -300,7 +356,7 @@ Extensions
 - ``RV_ABS (float64)``: Absolute RV measured in m/s.
 - ``RV_ABS_ERR (float64)``: Error in absolute RV in m/s.
 
-**88-90. RVCCFWAVG_[B/R]SPEC_FIB#**: The RVs averaged together across chunks and other relevant information.
+**109-111. RVCCFWAVG_[B/R]SPEC_FIB#**: The RVs averaged together across chunks and other relevant information.
 
 **Columns** there will likely only be one value per column, so we may consider an alternative approach for this extension:
 
@@ -314,7 +370,7 @@ Extensions
 - ``RV_ABS (float64)``: Absolute RV measured in m/s.
 - ``RV_ABS_ERR (float64)``: Error in absolute RV in m/s.
 
-**91-93. CCF_[B/R]SPEC_FIB#**: The cross-correlation functions (CCFs) for each chunk. **Final format TBD**.
+**112-114. CCF_[B/R]SPEC_FIB#**: The cross-correlation functions (CCFs) for each chunk. **Final format TBD**.
 
 **Columns:**
 
