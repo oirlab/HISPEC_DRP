@@ -1,20 +1,25 @@
-
 from astropy.io import fits
 from .hispec_base import HISPECDataModel
 import numpy as np
 
-class HISPECL0(HISPECDataModel):
+__all__ = ['HISPECL0Model']
+
+class HISPECL0Model(HISPECDataModel):
 
     EXTENSIONS = {
         'DATA': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'ERR_ALL': {
+        'ERR': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'ERR_FLOOR': {
+        'VAR_RNOISE': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float32
+        },
+        'VAR_POISSON': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
@@ -27,3 +32,7 @@ class HISPECL0(HISPECDataModel):
             'dtype' : np.float64
         },
     }
+
+    @property
+    def level(self):
+        return '0'

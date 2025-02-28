@@ -1,12 +1,12 @@
 Primitives
 ==========
 
-Primitives are the algorithmic building blocks of the HISPEC_DRP which specify the processesing for a single processing step. The base class :py:class:`hispecdrp.primitives.BasePrimitive` specifies the interface for all primitives.
+Overview
+--------
 
-Implementing a Primitive
-------------------------
+Primitives are the algorithmic building blocks of the HISPEC_DRP which specify the processesing for a single processing step. The base class :py:class:`hispecdrp.primitives.base_primitive.BasePrimitive` specifies the interface for all primitives.
 
-A primitive is designed to take as input either a datamodel or ``DataModel`` instance. A primitive is also specified by additional keyword-arguments which may be passed to the primitive upon construction or processing. All primitive-specific configuration is stored in ``primitive.args``. This is a dictionary-like object with attribute-style access. The primary filename or datamodel to process can be accessed with ``primitive.args.name``.
+A primitive takes as input either a filename or ``DataModel`` instance. A primitive is also specified by additional keyword-arguments which may be passed to the primitive upon construction or processing. Additional parameters can be numbers, strings, or any valid Python object. The final primitive-specific configuration is stored in ``primitive.args``, which is a dictionary-like object with attribute-style access. The primary filename or datamodel to process can be accessed with ``primitive.args.name``.
 
 Primitives should invoke the ``apply`` method when used after construction. This method is fully implemented by ``BasePrimitive`` and does the following:
 
@@ -22,49 +22,6 @@ Primitives should invoke the ``apply`` method when used after construction. This
     * The model is saved if ``primitive.save_results`` is ``True``. See additional configuration options in ``BasePrimitive`` for output_path construction.
 
 ``apply`` will store the output in ``primitive.output`` and return the output.
-
-
-For example, the dark subtraction module might be implemented as follows and stored in hispecdrp/primitives/dark_subtraction/dark_primitive.py
-
-
-.. code-block:: python
-
-    from ..base_primitive import BasePrimitive
-    from ... import datamodels
-
-    __all__ = ['DarkSubtractionPrimitive']
-
-    # Name of class should end with 'Primitive'
-    # and inherit from BasePrimitive (or a subclass of BasePrimitive)
-    class DarkSubtractionPrimitive(BasePrimitive):
-        """
-        # Log any new arguments that the primitive takes.
-        ARGUMENTS:
-            dark (datamodels.DataModel | str | None): Dark model to apply to the input data.
-                If None, the dark model will be queried.
-        """
-
-        class_alias = 'dark_sub' # Class alias for pipeline context
-
-        # Specify and new arguments that the primitive takes or override any values from the parent class.
-        ARGUMENTS = {
-            'suffix' : 'darksub',
-            'dark' : None
-        }
-
-        def _perform(self):
-            model_to_process = self.open_model(self.args.name, _copy=True) # Open the input model or copy if already open
-            if self.args.dark is None:
-                # Get cal from the calibration database
-                dark = self.get_calibration_file(model_to_process, 'dark')
-            else:
-                dark = self.open_model(self.args.dark)
-            self.log.info(f"Using {dark} to process {model_to_process}") # Always use self.log to log messages.
-            # Perform the dark subtraction, error propagation, and data quality flagging here
-            ...
-
-            # Return a model
-            return model_to_process
 
 
 Primitive Arguments
@@ -88,14 +45,13 @@ Primitive Arguments
 Primitive Configuration Files
 -----------------------------
 
-Primitives can also be configured with config files. An example configuration for the dark primitive is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
+Primitives can also be configured with config files, but only simple arguments can be specified here. An example configuration for the dark primitive is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
 
 
 .. code-block:: yaml
     
     %YAML 1.2
     ---
-    class: 'DarkSubtraction'
 
     logging:
       enable: True
@@ -104,8 +60,47 @@ Primitives can also be configured with config files. An example configuration fo
       log_path: None
   
     arguments:
-      skip: False
+      run: True
       save_results: True
       output_dir: None
       suffix: 'examplesuffix'
 
+
+
+Implementing a Primitive
+------------------------
+
+The dark subtraction primitive is implemented as follows and stored in ``hispecdrp/primitives/dark_subtraction/dark_primitive.py``. See `dark_primitive.py <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/primitives/dark_subtraction/dark_primitive.py>`_ for the rest of the implementation.
+
+
+.. code-block:: python
+
+    class DarkSubtractionPrimitive(BasePrimitive):
+        """
+        ARGUMENTS:
+            dark (DataModel | str | None): Dark model to apply to the input data.
+                If None, the dark model will be queried.
+        """
+
+        class_alias = 'dark_sub'
+
+        ARGUMENTS = {
+            'suffix' : 'darksub',
+            'dark' : None
+        }
+
+
+        def _perform(self):
+            input_model = self.open_model(self.args.name, copy=False)
+            if self.args.dark is None:
+                dark_path = self.get_calibration_file(input_model, cal_type='dark')
+            else:
+                dark_path = self.args.dark
+            dark_model = self.open_model(dark_path, copy=False)
+            result = input_model.copy()
+            self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
+            if isinstance(result, datamodels.HISPECRampModel):
+                result = dark_subtraction_ramp(result, dark_model)
+            elif isinstance(result, datamodels.HISPECL0Model):
+                result = dark_subtraction_rate(result, dark_model)
+            return result

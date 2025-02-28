@@ -4,8 +4,13 @@ from astropy.io import fits
 import pandas as pd
 import copy
 from typing import TypeVar
+import datetime
 from . import schema
 from .meta_dict import MetaDict
+
+import numpy as np
+import warnings
+from astropy.io.fits.verify import VerifyWarning
 
 # Receipt columns
 _RECEIPT_COLS = {
@@ -14,7 +19,7 @@ _RECEIPT_COLS = {
     'Branch_Name' : str,
     'Commit_Hash' : str,
     'Class' : str,
-    'Datamodel' : str,
+    'Filename' : str,
     'Arguments' : str,
     'Status' : str,
 }
@@ -56,7 +61,8 @@ class DataModel:
         data : dict | None = None,
         meta : MetaDict | None = None,
         extensions : str | list[str] | None = None,
-        validate_metadata : bool = True
+        validate_metadata : bool = True,
+        correct_dtypes : bool = False,
     ):
         """
         Initialize a DataModel object.
@@ -64,11 +70,14 @@ class DataModel:
         Args:
             data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
                 Keys should match the schema's extension names. Defaults to None.
+
             meta (dict, optional): Dictionary containing metadata.
                 Keys should match the schema's property paths. Defaults to None.
+                
             filename (str, optional): Path to a FITS file to load. Defaults to None.
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
         """
 
         # TODO: Implement hdu_list input.
@@ -86,15 +95,13 @@ class DataModel:
         else:
             # If given starting (meta)data, set that.
             self.init_meta(meta)
-            self.init_data(data)
+            self.init_data(data, correct_dtypes=correct_dtypes)
 
-        # Add Receipt HDU if one not provided
-        if 'RECEIPT' not in self._data:
-            self._data['RECEIPT'] = pd.DataFrame({name : pd.Series(dtype=dtype) for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()})
-            
-        # Defaults
-        if self.meta.data_level is None:
-            self.meta.data_level = self.default_level
+        # Initialize the receipt
+        self.init_receipt()
+
+        # Hook
+        self.on_init()
 
 
     @property
@@ -128,7 +135,7 @@ class DataModel:
         extensions = self._resolve_extensions(extensions)
         self.meta = MetaDict(_schema=self.schema, _validate=validate)
         with fits.open(self.filename, memmap=True) as hdulist:
-            for path, entry in schema.walk_schema(self.schema):
+            for path, entry in schema.walk_schema(self.schema, objects=False):
                 fits_hdu = entry.get('fits_hdu', 'PRIMARY')
                 fits_keyword = entry.get('fits_keyword')
                 header = hdulist[fits_hdu].header
@@ -141,38 +148,49 @@ class DataModel:
     def read_data(
         self,
         extensions : str | list[str] | None = None,
-        do_not_scale_image_data : bool = True,
+        do_not_scale_image_data : bool | None = None,
+        correct_dtype : bool = False,
     ) -> dict[str, _VALID_HDU]:
         """
         Read the data from the FITS file.
 
         Args:
             extensions (str, list[str], optional): List of extensions to read. Defaults to None.
-            do_not_scale_image_data (bool, optional): Whether to not scale data according to BZERO and BSCALE. Defaults to True.
+            do_not_scale_image_data (bool | None, optional): Whether to not scale data according to BZERO and BSCALE. See astropy behavior.
         """
         # TODO: Implement validation as optional input keyword, here we apply blind conversion
         extensions = self._resolve_extensions(extensions)
         self._data = {}
         with fits.open(
             self.filename,
-            memmap=True,
+            memmap=False,
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
-                hdu = hdulist[extname]
-                hdu_type = type(hdu)
-                if hdu_type is fits.ImageHDU:
-                    dtype = self.EXTENSIONS[extname]['dtype']
-                    self._data[extname] = hdu.data.astype(dtype)
-                elif hdu_type is fits.BinTableHDU:
-                    self._data[extname] = pd.DataFrame(hdu.data)
+                self._data[extname] = self.read_extension_data(hdulist[extname], correct_dtype=correct_dtype)
         return self._data
+    
+    def read_extension_data(self, hdu : _VALID_HDU, correct_dtype : bool = False) -> np.ndarray | pd.DataFrame:
+        hdu_type = type(hdu)
+        data = hdu.data
+        if hdu_type is fits.ImageHDU:
+            dtype = self.EXTENSIONS[hdu.name]['dtype']
+            if data is not None:
+                if not np.issubdtype(data.dtype, dtype):
+                    if correct_dtype:
+                        warnings.warn(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
+                        data = data.astype(dtype)
+        elif hdu_type is fits.BinTableHDU:
+            data = pd.DataFrame(data)
+        return data
+
     
 
     def save(
         self,
         filename : str | None = None,
-        add_missing_metadata : bool = False
+        add_missing_metadata : bool = False,
+        correct_dtypes : bool = False,
     ):
         """
         Save the DataModel to a FITS file.
@@ -181,24 +199,55 @@ class DataModel:
             filename (str, optional): The filename to save to. Defaults to self.filename.
             add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
         """
-        if filename is not None:
-            self.filename = filename
+        self.on_save(filename)
         if self.filename is None:
             raise ValueError("No filename provided")
         hdulist = fits.HDUList()
         for extname in self.EXTENSIONS:
-            hdu = self.make_hdu_for_extension(extname, add_missing_metadata=add_missing_metadata)
+            hdu = self.make_hdu_for_extension(extname, add_missing_metadata=add_missing_metadata, correct_dtypes=correct_dtypes)
             hdulist.append(hdu)
-        hdulist.writeto(self.filename, overwrite=True)
+        with warnings.catch_warnings(): # NOTE: This (at minimum) suppresses the 80 char limit warning
+            warnings.simplefilter('ignore', VerifyWarning)
+            hdulist.writeto(self.filename, overwrite=True)
 
 
-    def make_hdu_for_extension(self, extname : str, add_missing_metadata : bool = False) -> _VALID_HDU:
+    def on_init(self):
+        """
+        Hook called after the DataModel is initialized.
+        """
+        if self.meta.model_type is None:
+            self.meta.model_type = self.__class__.__name__
+        if self.meta.model_type != self.__class__.__name__:
+            warnings.warn(f'Model type does not match class name: {self.basename}')
+
+
+    def on_save(
+        self,
+        filename : str | None = None,
+    ):
+        """
+        Hook called before a datamodel is saved. The default implementation:
+            1. Updates `self.filename` with full path.
+            2. Updates `self.meta.filename` with base filename.
+
+        Args:
+            filename (str, optional): The filename to save to.
+        """
+        if filename is not None:
+            self.filename = filename
+            self.meta.filename = os.path.basename(filename)
+
+        self.meta.date_created = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')
+
+
+    def make_hdu_for_extension(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = False) -> _VALID_HDU:
         """
         Create an HDU for an extension name.
         
         Args:
             extname (str): The extension name.
             add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
         """
         hdu_class = self.EXTENSIONS[extname]['hdu_type']
         header = self._make_header(self.meta, extname=extname, add_missing=add_missing_metadata)
@@ -206,7 +255,12 @@ class DataModel:
             return hdu_class(header=header)
         if hdu_class is fits.ImageHDU:
             data = self._data.get(extname, None)
-            hdu = hdu_class(data=data, name=extname, header=header)
+            if data is not None and correct_dtypes:
+                dtype = self.EXTENSIONS[extname]['dtype']
+                _data = data.astype(dtype)
+            else:
+                _data = data
+            hdu = hdu_class(data=_data, name=extname, header=header)
         elif hdu_class is fits.BinTableHDU:
             data = self._data.get(extname, None)
             if data is not None:
@@ -219,7 +273,6 @@ class DataModel:
         """
         Get the appropriate calibration file for a DataModel from the local cache or online database.
         To be implemented later.
-        This method might be moved to the base primitive class.
         """
         return NotImplementedError(f"Method get_calibration_file not implemented for class {self.__class__.__name__}")
 
@@ -267,10 +320,6 @@ class DataModel:
     def __getattr__(self, attr):
         if attr.startswith('_') or attr in self._ALLOWED_ATTRIBUTES:
            return super().__getattr__(attr)
-        if attr in self.meta:
-           return self.meta.__getattr__(attr)
-        if attr in self.schema['properties']:
-            return None
         if attr in self._data:
             return self._data[attr]
         if attr.upper() in self._data:
@@ -300,7 +349,7 @@ class DataModel:
         return self.schema
     
 
-    def init_data(self, data : dict | None):
+    def init_data(self, data : dict | None, correct_dtypes : bool = False):
         """
         Initialize the data.
 
@@ -312,7 +361,13 @@ class DataModel:
         if data is not None:
             for key in data:
                 if key.upper() in self.EXTENSIONS:
-                    self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
+                    if isinstance(data[key], pd.DataFrame):
+                        self._data[key.upper()] = data[key]
+                    elif isinstance(data[key], np.ndarray):
+                        if correct_dtypes:
+                            self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
+                        else:
+                            self._data[key.upper()] = data[key]
                 else:
                     raise ValueError(f"Unknown extension: {key.upper()}")
     
@@ -329,22 +384,23 @@ class DataModel:
             self.meta.update(meta)
 
 
+    def init_receipt(self):
+        """
+        Initialize the receipt.
+        """
+        if 'RECEIPT' not in self._data:
+            self._data['RECEIPT'] = pd.DataFrame({
+                name : pd.Series(dtype=dtype)
+                for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()
+            })
+
     @property
-    def default_level(self):
+    def level(self):
         """
-        Get the default data level. NameLX -> X.
+        Datamodel level to override for each datamodel.
+        If level is None, it is not included when creating filenames unless specified.
         """
-        s = ''
-        for c in self.__class__.__name__[::-1]:
-            if c == 'L':
-                break
-            else:
-                s += c
-        s = s[::-1]
-        if s == self.__class__.__name__:
-            return ''
-        else:
-            return s
+        return None
 
 
     @staticmethod

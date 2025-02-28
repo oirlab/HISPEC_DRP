@@ -17,7 +17,7 @@ properties:
         type: string
       era:
         comment: "Instrument era specified via semver"
-        fits_keyword: ERA
+        fits_keyword: INSTERA
         type: string
         default: "0.0.1"
       mode:

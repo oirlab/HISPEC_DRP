@@ -23,30 +23,36 @@ Extensions
      - Nord x 4096
      - e-/s
    * - 4-6
-     - SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#
+     - SPEC_UNCAL_ERR_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
      - e-/s
    * - 7-9
-     - SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#
+     - SPEC_UNCAL_VAR_POISSON_[B/R]SPEC_FIB#
      - Image
      - Float32
      - Nord x 4096
-     - e-/s
+     - (e-/s)²
    * - 10-12
+     - SPEC_UNCAL_VAR_RNOISE_[B/R]SPEC_FIB#
+     - Image
+     - Float32
+     - Nord x 4096
+     - (e-/s)²
+   * - 13-15
      - SPEC_DQ_[B/R]SPEC_FIB#
      - Image
      - Uint32
      - Nord x 4096
-     - N/A
-   * - 13-15
+     - None
+   * - 16-18
      - MID_TIME_[B/R]SPEC_FIB#
      - Image
      - Float64
      - Nord x 4096
      - MJD
-   * - 16-18
+   * - 19-21
      - WS_[B/R]SPEC_FIB#
      - Image
      - Float64
@@ -56,12 +62,14 @@ Extensions
 
 **1-3. SPEC_UNCAL_[B/R]SPEC_FIB#**: Extracted 1D spectra.
 
-**4-6. SPEC_UNCAL_ERR_ALL_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (all noise sources).
+**4-6. SPEC_UNCAL_ERR_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (all noise sources).
 
-**7-9. SPEC_UNCAL_ERR_FLOOR_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (photon and read noise only).
+**7-9. SPEC_UNCAL_VAR_POISSON_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (Poisson noise only).
 
-**10-12. SPEC_DQ_[B/R]SPEC_FIB#**: Data quality.
+**10-12. SPEC_UNCAL_VAR_RNOISE_[B/R]SPEC_FIB#**: Extracted 1D spectra errors (read noise only).
 
-**13-15. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time for wavelength bin.
+**13-15. SPEC_DQ_[B/R]SPEC_FIB#**: Data quality.
 
-**16-18. WS_[B/R]SPEC_FIB#**: Wavelength solutions likely derived from that night's LFC.
+**16-18. MID_TIME_[B/R]SPEC_FIB#**: Exposure mid-point time for wavelength bin.
+
+**19-21. WS_[B/R]SPEC_FIB#**: Wavelength solutions likely derived from that night's LFC.

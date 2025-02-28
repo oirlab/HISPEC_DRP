@@ -17,7 +17,7 @@ name = "hispecdrp"
 version = "0.0.1"
 description = "Data Reduction Pipeline for the HISPEC instrument at the W. M. Keck Observatory."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11.0"
 
 # license = {file = "LICENSE.txt"}
 
@@ -35,6 +35,7 @@ classifiers = [
   "Development Status :: 1 - Planning",
   "Topic :: Scientific/Engineering :: Astronomy",
   # "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3 :: Only",
 ]
@@ -46,12 +47,15 @@ dependencies = [
   "astropy",
   "pandas",
   "gitpython",
-  "keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#dev"
+  "numba",
+  #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
+  "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
 
+
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov", "requests"]
-docs = ["sphinx", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
+test = ["pytest", "pytest-cov", "requests", "tqdm"]
+docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
 
 [project.urls]
 "Documentation" = "https://oirlab.github.io/HISPEC_DRP/"
@@ -68,5 +72,8 @@ namespaces = false
 [tool.setuptools.package-data]
 hispecdrp = ["datamodels/schemas/*.yaml", "configs/*.yaml"]
 
+# [tool.pytest.ini_options]
+# pythonpath = ["."]
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+testpaths = ["tests"]

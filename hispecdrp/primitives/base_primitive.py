@@ -15,6 +15,7 @@ from keckdrpframework.models.arguments import Arguments
 #from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
 #from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
 
+import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
 from .. import utils as utils
@@ -31,8 +32,8 @@ class BasePrimitive(_BasePrimitive):
     class_alias = None
     
     ARGUMENTS = {
-        'skip' : False,
-        'save_results' : True,
+        'run' : True,
+        'save_results' : False,
         'output_dir' : None,
         'suffix' : ''
     }
@@ -77,11 +78,6 @@ class BasePrimitive(_BasePrimitive):
             _config = Config(data={'class': cls.__module__ + '.' + cls.__name__, 'arguments': Config(), 'logging': cls.LOGGING.copy()})
         else:
             _config = Config(config_file=config_file)
-            if 'class' not in _config:
-                raise ValueError(f"'class' entry not found in config {config_file}")
-            _class = utils.resolve_primitive_class(_config['class'])
-            if _class is not cls:
-                raise ValueError(f"Config 'class' '{_class}' from {config_file} not consistent with instantiated primitive {cls.__name__}")
             if 'logging' not in _config:
                 _config['logging'] = cls.LOGGING.copy()
             else:
@@ -148,6 +144,7 @@ class BasePrimitive(_BasePrimitive):
             return self._fallback_log
         return self.logger
 
+
     @property
     def _fallback_log(self):
         # Use a lambda to dynamically handle log methods
@@ -160,6 +157,7 @@ class BasePrimitive(_BasePrimitive):
             },
         )()
         
+        
     def set_args(self, name : str | DataModel | None = None, **kwargs) -> dict:
         """
         Coalesces the user input into a single `Arguments` obejct with the following priorities:
@@ -167,7 +165,9 @@ class BasePrimitive(_BasePrimitive):
             3. `self.config['arguments']`
             2. `self.args`
             1. `kwargs`
+        
         And is stored in `self.args`.
+
         If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
         `self.args.name` should be the name of the primary datamodel or filename to be processed.
         """
@@ -188,6 +188,7 @@ class BasePrimitive(_BasePrimitive):
             3. `self.ARGUMENTS`
             2. `self.config`
             1. `self.args`
+
         And is stored in `self.args`.
 
         Keyword Args:
@@ -208,7 +209,7 @@ class BasePrimitive(_BasePrimitive):
     
 
     def _pre_condition(self):
-        return not super()._pre_condition() or not self.args.skip
+        return super()._pre_condition() and self.args.run
     
 
     def _post_condition(self):
@@ -224,8 +225,6 @@ class BasePrimitive(_BasePrimitive):
     def __repr__(self):
         if hasattr(self, "args"):
             s = self.__class__.__name__
-            # for k, arg in enumerate(self.args):
-            #     s += f"\n  {k}: {arg}"
             for key in self.args.iter_kw():
                 s += f"\n  {key}: {self.args[key]}"
             return s
@@ -256,7 +255,6 @@ class BasePrimitive(_BasePrimitive):
         #git_commit_hash = repo.head.object.hexsha
         #git_branch = repo.active_branch.name
         #git_tag = str(repo.tags[-1])
-        repo = 'None'
         git_commit_hash = 'None'
         git_branch = 'None'
         git_tag = 'None'
@@ -268,7 +266,7 @@ class BasePrimitive(_BasePrimitive):
             'Branch_Name': git_branch,
             'Commit_Hash': git_commit_hash,
             'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : model.filename,
+            'Filename' : model.filename or 'None',
             'Arguments': repr(self.args),
             'Status' : self.status
         }
@@ -346,20 +344,6 @@ class BasePrimitive(_BasePrimitive):
         # Save the model
         model.save(filename=final_path)
 
-    def open_model(self, name : DataModel, _copy=True):
-        """
-        Open a model from a file or copy a datamodel.
-        """
-        if isinstance(name, DataModel):
-            if _copy:
-                return name.copy()
-            else:
-                return name
-        if isinstance(name, str):
-            return datamodels.open(name)
-        else:
-            raise ValueError(f"Cannot open model from {name}")
-        
     
     def finalize_model(self, model_result : DataModel):
         """
@@ -369,10 +353,19 @@ class BasePrimitive(_BasePrimitive):
             model_result (DataModel): The model to finalize.
         """
         try:
-            setattr(model_result.meta.drp_step, self.class_alias, str(self.status))
+            setattr(model_result.meta.drp_step, self.class_alias, str(self.status)) # NOTE: May drop this in favor of receipt
         except:
             pass
+        model_result.meta.drp_version = hispecdrp.__version__
         return model_result
+    
+
+    def get_calibration_file(self, name : str | DataModel, cal_type : str, **kwargs) -> str:
+        """
+        Forward function for model.get_calibration_file.
+        """
+        input_model = datamodels.open(name) if isinstance(name, str) else name
+        return input_model.get_calibration_file(cal_type, **kwargs)
 
 
     # @classmethod

@@ -1,5 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
+import numpy as np
 
 __all__ = ['DarkSubtractionPrimitive']
 
@@ -7,7 +8,7 @@ __all__ = ['DarkSubtractionPrimitive']
 class DarkSubtractionPrimitive(BasePrimitive):
     """
     ARGUMENTS:
-        dark (datamodels.DataModel | str | None): Dark model to apply to the input data.
+        dark (DataModel | str | None): Dark model to apply to the input data.
             If None, the dark model will be queried.
     """
 
@@ -18,6 +19,59 @@ class DarkSubtractionPrimitive(BasePrimitive):
         'dark' : None
     }
 
+
     def _perform(self):
-        model_to_process = self.open_model(self.args.name)
-        return model_to_process
+        input_model = datamodels.open(self.args.name, copy=False)
+        if self.args.dark is None:
+            dark_path = self.get_calibration_file(input_model, cal_type='dark')
+        else:
+            dark_path = self.args.dark
+        dark_model = datamodels.open(dark_path, copy=False)
+        result = input_model.copy()
+        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
+        if isinstance(result, datamodels.HISPECRampModel):
+            result = dark_subtraction_ramp(result, dark_model)
+        elif isinstance(result, datamodels.HISPECL0Model):
+            result = dark_subtraction_rate(result, dark_model)
+        return result
+    
+
+def dark_subtraction_ramp(
+        input_model : datamodels.HISPECRampModel,
+        dark_model : datamodels.HISPECDarkModel,
+    ) -> datamodels.HISPECRampModel:
+    """
+    Subtract the dark model from an input ramp model.
+    
+    Args:
+        input_model (RampModel): Input ramp model.
+        dark_model (DarkModel): Dark model.
+    
+    Returns:
+        RampModel: The dark-subtracted data.
+    """
+    input_model.data = input_model.data - dark_model.data[:, :, None]
+    # TODO: Sort out error handling for ramps.
+    return input_model
+
+
+def dark_subtraction_rate(
+        input_model : datamodels.HISPECL0Model,
+        dark_model : datamodels.HISPECDarkModel,
+    ) -> datamodels.HISPECL0Model:
+    """
+    Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
+
+    Args:
+        input_model (HISPECL0Model): Input level 0 model.
+        dark_model (HISPECDarkModel): Dark model.
+    
+    Returns:
+        HISPECL0Model: The dark-subtracted data.
+    """
+    input_model.data = input_model.data - dark_model.data
+    if hasattr(input_model, 'err'):
+        input_model.err = np.sqrt(input_model.err**2 + dark_model.err**2)
+    if hasattr(input_model, 'dq'):
+        input_model.dq |= dark_model.dq
+    return input_model

@@ -11,4 +11,5 @@
    :recursive:
 
    base_pipeline
+   stage0
    stage1

@@ -8,5 +8,5 @@ hispecdrp.datamodels.hispec\_level2
 
    .. autosummary::
    
-      HISPECL2
+      HISPECL2Model
    
