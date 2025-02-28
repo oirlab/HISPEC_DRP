@@ -21,4 +21,4 @@ Installation
    cd HISPEC_DRP
    pip install -e .
 
-Specifically, the ``-e`` (editable) uses the specified directory as the "live" source code, and does not copy it to the usual site-packages directory.
+Specifically, the ``-e`` (editable) flag uses the specified directory as the "live" source code, and does not copy it to the usual site-packages directory.
