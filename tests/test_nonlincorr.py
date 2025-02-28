@@ -97,5 +97,3 @@ def test_ramp_fit(tmp_path):
 
     # Test manual results
     np.testing.assert_array_equal(model_result.data, slope)
-    np.testing.assert_array_equal(model_result.err_all, 0)
-    np.testing.assert_array_equal(model_result.err_floor, 0)

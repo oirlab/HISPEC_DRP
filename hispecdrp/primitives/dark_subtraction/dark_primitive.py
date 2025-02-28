@@ -51,22 +51,16 @@ def dark_subtraction_ramp(
         RampModel: The dark-subtracted data.
     """
     input_model.data = input_model.data - dark_model.data[:, :, None]
-    # TODO: Sort this out. Currently ramp data has no error or DQ arrays.
-    # if hasattr(result, 'err_all'):
-    #     result.err_all = np.sqrt(result.err_all**2 + dark_model.err_all**2)
-    # if hasattr(result, 'err_floor'):
-    #     result.err_floor = np.sqrt(result.err_floor**2 + dark_model.err_floor**2)
-    # if hasattr(result, 'dq'):
-    #     result.dq |= dark_model.dq
+    # TODO: Sort out error handling for ramps.
     return input_model
 
 
 def dark_subtraction_rate(
         input_model : datamodels.HISPECL0Model,
         dark_model : datamodels.HISPECDarkModel,
-    ) -> datamodels.HISPECRampModel:
+    ) -> datamodels.HISPECL0Model:
     """
-    Subtract the dark model from an input rate (level 0) model.
+    Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
 
     Args:
         input_model (HISPECL0Model): Input level 0 model.
@@ -76,10 +70,8 @@ def dark_subtraction_rate(
         HISPECL0Model: The dark-subtracted data.
     """
     input_model.data = input_model.data - dark_model.data
-    if hasattr(input_model, 'err_all'):
-        input_model.err_all = np.sqrt(input_model.err_all**2 + dark_model.err_all**2)
-    if hasattr(input_model, 'err_floor'):
-        input_model.err_floor = np.sqrt(input_model.err_floor**2 + dark_model.err_floor**2)
+    if hasattr(input_model, 'err'):
+        input_model.err = np.sqrt(input_model.err**2 + dark_model.err**2)
     if hasattr(input_model, 'dq'):
         input_model.dq |= dark_model.dq
     return input_model

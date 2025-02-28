@@ -1,5 +1,6 @@
 from astropy.io import fits
 
+
 def open(init, copy=False):
     """
     Creates a DataModel from a FITS file. More types might be added later.

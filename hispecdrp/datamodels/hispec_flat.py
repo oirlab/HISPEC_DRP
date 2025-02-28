@@ -12,11 +12,15 @@ class HISPECFlatModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'ERR_ALL': {
+        'ERR': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'ERR_FLOOR': {
+        'VAR_RNOISE': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float32
+        },
+        'VAR_POISSON': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },

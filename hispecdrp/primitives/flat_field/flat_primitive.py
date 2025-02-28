@@ -36,7 +36,7 @@ class FlatFieldPrimitive(BasePrimitive):
 def flatfield_correction(
         input_model : datamodels.HISPECL0Model,
         flat_model : datamodels.HISPECFlatModel,
-    ) -> datamodels.HISPECRampModel:
+    ) -> datamodels.HISPECL0Model:
     """
     Flat field correction.
 
@@ -48,10 +48,8 @@ def flatfield_correction(
         HISPECL0Model: The flatfield corrected data.
     """
     z = input_model.data / flat_model.data
-    if hasattr(input_model, 'err_all'):
-        input_model.err_all = z * np.sqrt((input_model.err_all / input_model.data)**2 + (flat_model.err_all / flat_model.data)**2)
-    if hasattr(input_model, 'err_floor'):
-        input_model.err_floor = z * np.sqrt((input_model.err_floor / input_model.data)**2 + (flat_model.err_floor / flat_model.data)**2)
+    if hasattr(input_model, 'err'):
+        input_model.err = z * np.sqrt((input_model.err / input_model.data)**2 + (flat_model.err / flat_model.data)**2)
     if hasattr(input_model, 'dq'):
         input_model.dq |= flat_model.dq
     input_model.data = z

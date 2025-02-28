@@ -17,12 +17,14 @@ def test_hispec_level0(tmp_path):
         assert model.meta.instrument.mode == 'YJHK'
         shape = (4096, 4096)
         assert model.data.shape == shape
-        assert model.err_all.shape == shape
-        assert model.err_floor.shape == shape
+        assert model.err.shape == shape
+        assert model.var_poisson.shape == shape
+        assert model.var_rnoise.shape == shape
         assert model.dq.shape == shape
         assert np.issubdtype(model.data.dtype, np.float32)
-        assert np.issubdtype(model.err_all.dtype, np.float32)
-        assert np.issubdtype(model.err_floor.dtype, np.float32)
+        assert np.issubdtype(model.err.dtype, np.float32)
+        assert np.issubdtype(model.var_poisson.dtype, np.float32)
+        assert np.issubdtype(model.var_rnoise.dtype, np.float32)
         assert np.issubdtype(model.dq.dtype, np.uint32)
 
     # Open directly as HISPECL0

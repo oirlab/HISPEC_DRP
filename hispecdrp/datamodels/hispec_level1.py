@@ -8,8 +8,9 @@ _L1_EXTENSIONS = {}
 for i in range(1, 4):
     # Uncalibrated spectrum, error, dq
     _L1_EXTENSIONS[f'SPEC_UNCAL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L1_EXTENSIONS[f'SPEC_UNCAL_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L1_EXTENSIONS[f'SPEC_UNCAL_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L1_EXTENSIONS[f'SPEC_UNCAL_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L1_EXTENSIONS[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L1_EXTENSIONS[f'SPEC_UNCAL_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L1_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
 
     # Mid time

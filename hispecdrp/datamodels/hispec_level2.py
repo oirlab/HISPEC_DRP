@@ -57,13 +57,15 @@ _L2_EXTENSIONS = {}
 for i in range(1, 4):
     # Uncalibrated spectrum, error
     _L2_EXTENSIONS[f'SPEC_UNCAL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SPEC_UNCAL_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SPEC_UNCAL_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_UNCAL_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_UNCAL_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Calibrated spectrum, error, dq
     _L2_EXTENSIONS[f'SPEC_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SPEC_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SPEC_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SPEC_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L2_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
 
     # Mid time
@@ -77,13 +79,15 @@ for i in range(1, 4):
 
     # Fiber flat
     _L2_EXTENSIONS[f'FIBERFLAT_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'FIBERFLAT_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'FIBERFLAT_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FIBERFLAT_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FIBERFLAT_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FIBERFLAT_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Sky fiber
     _L2_EXTENSIONS[f'SKY_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SKY_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'SKY_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SKY_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SKY_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'SKY_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Star model
     _L2_EXTENSIONS[f'STAR_MOD_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
@@ -93,18 +97,21 @@ for i in range(1, 4):
 
     # Telluric correction
     _L2_EXTENSIONS[f'TEL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'TEL_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'TEL_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'TEL_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'TEL_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'TEL_VAR_RNOISe_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Flux calibration
     _L2_EXTENSIONS[f'FLUX_ABS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'FLUX_ABS_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'FLUX_ABS_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FLUX_ABS_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FLUX_ABS_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'FLUX_ABS_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Simult etalon
     _L2_EXTENSIONS[f'ET_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'ET_ERR_ALL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _L2_EXTENSIONS[f'ET_ERR_FLOOR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'ET_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'ET_ERR_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'ET_ERR_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L2_EXTENSIONS[f'ET_CEN_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
     _L2_EXTENSIONS[f'ET_CEN_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
@@ -112,6 +119,7 @@ for i in range(1, 4):
     _L2_EXTENSIONS[f'RVCCF_FIB{i}'] = _RVCCF_HDU
     _L2_EXTENSIONS[f'RVCCFAVG_FIB{i}'] = _RVCCFAVG_HDU
     _L2_EXTENSIONS[f'CCF_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+
 
 class HISPECL2Model(HISPECDataModel):
 

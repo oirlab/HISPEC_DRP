@@ -53,12 +53,8 @@ def test_flatfield(tmp_path):
         z
     )
     np.testing.assert_array_equal(
-        model_result.err_all,
-        z * np.sqrt((input_model.err_all / input_model.data)**2 + (flat_model.err_all / flat_model.data)**2)
-    )
-    np.testing.assert_array_equal(
-        model_result.err_floor,
-        z * np.sqrt((input_model.err_floor / input_model.data)**2 + (flat_model.err_floor / flat_model.data)**2)
+        model_result.err,
+        z * np.sqrt((input_model.err / input_model.data)**2 + (flat_model.err / flat_model.data)**2)
     )
     np.testing.assert_array_equal(
         model_result.dq,

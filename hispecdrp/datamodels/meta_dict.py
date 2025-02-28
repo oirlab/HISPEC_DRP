@@ -1,5 +1,9 @@
 from typing import Self
 
+
+__all__ = ['MetaDict']
+
+
 class MetaDict:
     """
     A dictionary that allows attribute-style access and creates nested MetaDicts
