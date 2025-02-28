@@ -288,9 +288,9 @@ Extensions
 
 **40-42. FIBERFLAT_ERR_[B/R]SPEC_FIB#**: All errors for the instrumental transmission.
 
-**43-45. FIBERFLAT_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the instrumental transmission.
+**43-45. FIBERFLAT_VAR_POISSON_[B/R]SPEC_FIB#**: Poisson variance component for the fiber flat.
 
-**46-48. FIBERFLAT_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the instrumental transmission.
+**46-48. FIBERFLAT_VAR_RNOISE_[B/R]SPEC_FIB#**: Read noise variance component for the fiber flat.
 
 **49-51. SKY_[B/R]SPEC_FIB#**: Thermal background and OH lines from the sky fiber.
 
