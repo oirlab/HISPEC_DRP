@@ -2,7 +2,7 @@ Data Models
 ===========
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    
    hispec_ramp
    hispec_level0
@@ -14,7 +14,7 @@ Calibration Models
 ------------------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    hispec_dark
    hispec_flat
