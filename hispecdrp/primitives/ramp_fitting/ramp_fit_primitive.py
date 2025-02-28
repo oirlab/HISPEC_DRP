@@ -2,7 +2,7 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
 
-from .fit_ramp_numba import fit_ramps_utr, fit_ramps_mcds
+from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 
 __all__ = ['FitRampPrimitive']
 
@@ -10,15 +10,15 @@ __all__ = ['FitRampPrimitive']
 class FitRampPrimitive(BasePrimitive):
     """
     ARGUMENTS:
-        method (str): Ramp fitting method. Options are 'cds', 'mcds', 'utr'. Default is UTR.
-        num_coadd (int): Number of coadds for MCDS method. Default is 1, equivalent to method=CDS.
+        method (str): Ramp fitting method. Options are 'cds', 'mcds', 'ols'. Default is ols.
+        num_coadd (int): Number of coadds for MCDS method. Default is 1, equivalent to method='cds'.
     """
 
     class_alias = 'ramp_fit'
 
     ARGUMENTS = {
         'suffix' : 'rampfit',
-        'method' : 'utr',
+        'method' : 'ols',
         'num_coadd' : 1
     }
 
@@ -26,16 +26,19 @@ class FitRampPrimitive(BasePrimitive):
     def _perform(self):
         input_model = datamodels.open(self.args.name, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.args.method.lower()}")
-        if self.args.method.lower() == 'utr':
-            result = fit_ramps_utr(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)
+        if self.args.method.lower() == 'ols':
+            result = fit_ramps_ols(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)
             slopes, slopes_err = result['slope'], result['slope_err']
-        elif self.args.method.lower() == 'mcds':
-            result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.num_coadd)
+        elif self.args.method.lower() in ('mcds', 'cds'):
+            result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.args.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
+        else:
+            self.log.error(f"Invalid ramp fit method {self.args.method.lower()}")
+            raise ValueError(f"Invalid ramp fit method {self.args.method.lower()}")
 
         # Calculate variances
         var_poisson = np.sqrt(np.abs(slopes))
-        var_rnoise = np.zeros(slopes.shape, dtype=np.float32)
+        var_rnoise = np.zeros(slopes.shape, dtype=np.float32) # TODO: Calculate effective read noise from fit (?)
 
         # For now, create a simple DQ model for the L0 model
         dq_out = np.zeros(slopes.shape, dtype=np.uint16)

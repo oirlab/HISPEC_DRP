@@ -14,11 +14,11 @@ import numpy as np
 from numba import njit
 import numpy as np
 
-__all__ = ['fit_ramp_slope_intercept', 'fit_ramp_slope_fixed_intercept', 'fit_ramps_slope_intercept', 'fit_ramps_slope_fixed_intercept_array', 'fit_ramps_slope_fixed_intercept_float', 'fit_ramps_utr', 'fit_ramp_mcds', 'fit_ramps_mcds']
+__all__ = ['fit_ramps_ols', 'fit_ramps_mcds']
 
 
 @njit
-def fit_ramp_slope_intercept(times, ramp):
+def _fit_ramp_slope_intercept(times, ramp):
     """
     Fits a line to the given data (times, ramp) with a free y-intercept.
 
@@ -51,7 +51,7 @@ def fit_ramp_slope_intercept(times, ramp):
 
 
 @njit
-def fit_ramp_slope_fixed_intercept(times, ramp, b):
+def _fit_ramp_slope_fixed_intercept(times, ramp, b):
     """
     Fits a line to the given data (times, ramp) with a fixed y-intercept.
 
@@ -73,39 +73,39 @@ def fit_ramp_slope_fixed_intercept(times, ramp, b):
 
 
 @njit
-def fit_ramps_slope_intercept(times, ramps):
+def _fit_ramps_slope_intercept(times, ramps):
     ny, nx, _ = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = fit_ramp_slope_intercept(times, ramps[i, j, :])
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_intercept(times, ramps[i, j, :])
     return slope_image, slope_errors
 
 
 @njit
-def fit_ramps_slope_fixed_intercept_array(times, ramps, b):
+def _fit_ramps_slope_fixed_intercept_array(times, ramps, b):
     ny, nx, _ = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = fit_ramp_slope_fixed_intercept(times, ramps[i, j, :], b[i, j])
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_intercept(times, ramps[i, j, :], b[i, j])
     return slope_image, slope_errors
 
 
 @njit
-def fit_ramps_slope_fixed_intercept_float(times, ramps, b):
+def _fit_ramps_slope_fixed_intercept_float(times, ramps, b):
     ny, nx, _ = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = fit_ramp_slope_fixed_intercept(times, ramps[i, j, :], b)
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_intercept(times, ramps[i, j, :], b)
     return slope_image, slope_errors
 
 
-def fit_ramps_utr(times, ramps, b=None):
+def fit_ramps_ols(times, ramps, b=None):
     """
     Top-level function for fitting ramps with or without a fixed y-intercept with no correlated noise.
     Dispatches to the appropriate specialized function based on whether b is provided.
@@ -119,13 +119,13 @@ def fit_ramps_utr(times, ramps, b=None):
         dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors. If b is not provided, the result also contains 'b' and 'b_err'.
     """
     if b is None:
-        result = fit_ramps_slope_intercept(times, ramps)
+        result = _fit_ramps_slope_intercept(times, ramps)
         return dict(slope=result[0], slope_err=result[1], b=result[2], b_err=result[3])
     elif isinstance(b, np.ndarray):
-        result = fit_ramps_slope_fixed_intercept_array(times, ramps, b)
+        result = _fit_ramps_slope_fixed_intercept_array(times, ramps, b)
         return dict(slope=result[0], slope_err=result[1])
     else:
-        result = fit_ramps_slope_fixed_intercept_float(times, ramps, b)
+        result = _fit_ramps_slope_fixed_intercept_float(times, ramps, b)
         return dict(slope=result[0], slope_err=result[1])
 
 
@@ -136,7 +136,7 @@ def fit_ramps_utr(times, ramps, b=None):
 
 
 @njit
-def fit_ramp_mcds(times, ramp, num_coadd=1):
+def _fit_ramp_mcds(times, ramp, num_coadd=1):
     n = len(times)
     n1 = np.sum(ramp[:num_coadd])
     n2 = np.sum(ramp[-num_coadd:])
@@ -154,11 +154,27 @@ def fit_ramp_mcds(times, ramp, num_coadd=1):
 
 
 @njit
-def fit_ramps_mcds(times, ramps):
+def _fit_ramps_mcds(times, ramps, num_coadd=1):
     ny, nx, _ = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = fit_ramp_mcds(times, ramps[i, j, :])
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_mcds(times, ramps[i, j, :], num_coadd=num_coadd)
     return slope_image, slope_errors
+
+
+def fit_ramps_mcds(times, ramps, num_coadd=1):
+    """
+    Fits ramps using the MCDS method.
+
+    Args:
+        times (np.ndarray): Read times.
+        ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
+        num_coadd (int): Number of coadds.
+
+    Returns:
+        dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.
+    """
+    result = _fit_ramps_mcds(times, ramps, num_coadd=num_coadd)
+    return dict(slope=result[0], slope_err=result[1])
