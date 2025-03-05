@@ -29,11 +29,10 @@ class FluxExtractionPrimitive(BasePrimitive):
 
     def _perform(self):
         input_model = datamodels.open(self.args.name, copy=False)
-        ### FIXME if we're going to process a large number of files we don't want to 
-        ### load the calibrations from disk every time, it's much more efficient to 
-        ### keep them in memory and loop over the science frames
+
+        ### Load the trace positions if not passed
         if self.args.tracepos is None:
-            tracepos_path = self.get_calibration_file(input_model, cal_type=)
+            tracepos_path = self.get_calibration_file(input_model, cal_type='tracepos')
         else:
             tracepos_path = self.args.tracepos
         tracepos_model = datamodels.open(tracepos_path, copy=False)
@@ -41,7 +40,7 @@ class FluxExtractionPrimitive(BasePrimitive):
         ### If using box extraction, the traceprof should be empty
         if self.args.method.lower() == 'optimal':
             if self.args.traceprof is None:
-                traceprof_path = self.get_calibration_file(input_model, cal_type=)
+                traceprof_path = self.get_calibration_file(input_model, cal_type='traceprof')
             else:
                 traceprof_path = self.args.traceprof
             traceprof_model = datamodels.open(tracepos_path, copy=False)
