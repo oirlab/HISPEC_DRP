@@ -1,6 +1,6 @@
 from hispecdrp import datamodels
 from ..base_pipeline import BasePipeline
-from ...primitives import DarkSubtractionPrimitive, FlatFieldPrimitive
+from ...primitives import DarkSubtractionPrimitive, FlatFieldPrimitive, FluxExtractionPrimitive
 
 __all__ = ['Stage1Pipeline']
 
