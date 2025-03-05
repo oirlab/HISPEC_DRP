@@ -1,5 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
+import numpy as np
 
 __all__ = ['FluxExtractionPrimitive']
 
@@ -74,8 +75,8 @@ def flux_extraction(
 
     Args:
         input_model (HISPECL0Model): Input level 0 model.
-        tracepos_model (): Trace center traceposs
-        traceprof_model (): traceprof for optimal extraction
+        tracepos_model (HISPECTracePosModel): Trace center traceposs
+        traceprof_model (HISPECTraceProfModel): traceprof for optimal extraction
         method (str): Type of extraction to perform.
         boxwidth (int): size of box to use for box extraction
     
@@ -83,10 +84,48 @@ def flux_extraction(
         HISPECL1Model: The extracted 1D sepectra.
     """
 
-    ### How do we compute average referebce time for each wavelength
+    ### How do we compute average reference time for each wavelength
 
     ### Set up the L1 model we write at the end
+    output = HISPECL1Model()
 
     ### Basic box extraction for now
     if method == 'box':
-        for i in range(1,len)
+        dy = (boxwidth - 1) // 2
+        ### Loop over fibers
+        for i in range(1,4):
+            ### Get the trace positions for the fiber
+            pos = tracepos_model[f'POS_FIB{i}']
+            ### Set up the output arrays
+            flux = np.empty(pos.shape)
+            err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
+            dq = np.empty(pos.shape)
+            ### Loop over orders and wavlength channels for the specified fiber
+            for order in range(pos.shape[1]):
+                for channel in range(pos.shape[0]):
+                    ### FIXME do we need to check the DQ and return NAN if anything in the slice is bad?
+                    y = pos[channel,order]
+                    ### Check axes with some simulated 
+                    ### Simple sum of the flux
+                    flux[channel,order] = np.sum(input_model.data[y-dy:y+dy+1,channel])
+                    ### Assuming the errors add in quadrature but can revisit
+                    err[channel,order] = np.sqrt(np.sum(input_model.err[y-dy:y+dy+1,channel]**2))
+                    ### Assuming there are no covariances so that this is a straight sum
+                    rnoise[channel,order] = np.sum(input_model.var_rnoise[y-dy:y+dy+1,channel])
+                    poisson[channel,order] = np.sum(input_model.var_poisson[y-dy:y+dy+1,channel])
+                    ### Just check if any pixels in the slice were bad or do something more complicated?
+                    dq = np.any(input_model.dq[y-dy:y+dy+1,channel] != 0)
+            output[f'SPEC_UNCAL_FIB{i}'] = flux
+            output[f'SPEC_UNCAL_ERR_FIB{i}'] = err
+            output[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
+            output[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
+            output[f'SPEC_DQ_FIB{i}'] = dq
+            ### How do we calculate mid time
+            # output[f'MID_TIME_FIB{i}']
+            ### Are we attaching wavelength solution now?
+        return output
+
+    elif method == 'optimal':
+        pass
+
+
