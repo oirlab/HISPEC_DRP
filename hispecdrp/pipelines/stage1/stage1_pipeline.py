@@ -11,6 +11,7 @@ class Stage1Pipeline(BasePipeline):
     PRIMITIVES = {
         'dark_sub': DarkSubtractionPrimitive,
         'flat_field': FlatFieldPrimitive,
+        'flux_extract':FluxExtractionPrimitive
     }
 
 
@@ -18,4 +19,5 @@ class Stage1Pipeline(BasePipeline):
         model_to_process = datamodels.open(self.args.name)
         result = self.dark_sub.apply(model_to_process)
         result = self.flat_field.apply(result)
+        result = self.flux_extract.apply(result)
         return result
