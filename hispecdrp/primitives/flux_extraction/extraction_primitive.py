@@ -7,21 +7,21 @@ __all__ = ['FluxExtractionPrimitive']
 class FluxExtractionPrimitive(BasePrimitive):
     """
     ARGUMENTS:
-        locations (datamodels.DataModel | str | None): Trace locations for flux extraction
-            if None, the trace locations will be queried
-        weights (datamodels.DataModel | str | None): Profile weights to use for flux extraction
+        tracepos (datamodels.HISPECTracePosModel | str | None): Trace traceposs for flux extraction
+            if None, the trace traceposs will be queried
+        traceprof (datamodels.HISPECTraceProfModel | str | None): Profile traceprof to use for flux extraction
             If None, the fiber flat will be queried.
         method (str | 'box'): method to use for flux extraction.
             At present, only box is implemented
         boxwidth (int | 5): width to use for box extraction
     """
 
-    class_alias = 'flat_field'
+    class_alias = 'flux_extract'
 
     ARGUMENTS = {
         'suffix' : 'fluxextracted',
-        'locations' : None
-        'weights' : None
+        'tracepos' : None
+        'traceprof' : None
         method : 'box' 
         boxwidth : 5
     }
@@ -31,32 +31,32 @@ class FluxExtractionPrimitive(BasePrimitive):
         ### FIXME if we're going to process a large number of files we don't want to 
         ### load the calibrations from disk every time, it's much more efficient to 
         ### keep them in memory and loop over the science frames
-        if self.args.locations is None:
-            location_path = self.get_calibration_file(input_model, cal_type=)
+        if self.args.tracepos is None:
+            tracepos_path = self.get_calibration_file(input_model, cal_type=)
         else:
-            location_path = self.args.flat
-        location_model = datamodels.open(location_path, copy=False)
+            tracepos_path = self.args.flat
+        tracepos_model = datamodels.open(tracepos_path, copy=False)
 
-        ### If using box extraction, the weights should be empty
+        ### If using box extraction, the traceprof should be empty
         ### FIXME how much error checking are we doing on inputs
         if self.args.method != 'box':
-            if self.args.weights is None:
-                weights_path = self.get_calibration_file(input_model, cal_type=)
+            if self.args.traceprof is None:
+                traceprof_path = self.get_calibration_file(input_model, cal_type=)
             else:
-                weights_path = self.args.weights
-            weights_model = datamodels.open(location_path, copy=False)
+                traceprof_path = self.args.traceprof
+            traceprof_model = datamodels.open(tracepos_path, copy=False)
         else:
-            weights_model = None
+            traceprof_model = None
 
 
 
         result = input_model.copy()
         if method == 'box'
-            self.log.info(f"Performing {method} extraction on {input_model} with locations {location_model} and width {boxwidth}")
+            self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and width {boxwidth}")
         else:
-            self.log.info(f"Performing {method} extraction on {input_model} with locations {location_model} and weights {weights_mdoel}")
+            self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and traceprof {traceprof_mdoel}")
         
-        result = flux_extraction(result, location_model, weights_model, method, boxwidth)
+        result = flux_extraction(result, tracepos_model, traceprof_model, method, boxwidth)
         return result
     
 
@@ -64,8 +64,8 @@ class FluxExtractionPrimitive(BasePrimitive):
 
 def flux_extraction(
         input_model : datamodels.HISPECL0Model,
-        location_model : datamodels.HISPEC,
-        weights_model : ,
+        tracepos_model : datamodels.HISPECTracePosModel,
+        traceprof_model : datamodels.HISPECTraceProfModel ,
         method : str,
         boxwidth : int
     ) -> datamodels.HISPECL1Model:
@@ -74,11 +74,19 @@ def flux_extraction(
 
     Args:
         input_model (HISPECL0Model): Input level 0 model.
-        location_model (): Trace center locations
-        weights_model (): Weights for optimal extraction
+        tracepos_model (): Trace center traceposs
+        traceprof_model (): traceprof for optimal extraction
         method (str): Type of extraction to perform.
         boxwidth (int): size of box to use for box extraction
     
     Returns:
         HISPECL1Model: The extracted 1D sepectra.
     """
+
+    ### How do we compute average referebce time for each wavelength
+
+    ### Set up the L1 model we write at the end
+
+    ### Basic box extraction for now
+    if method == 'box':
+        for i in range(1,len)
