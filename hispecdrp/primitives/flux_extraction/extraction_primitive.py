@@ -35,24 +35,25 @@ class FluxExtractionPrimitive(BasePrimitive):
         if self.args.tracepos is None:
             tracepos_path = self.get_calibration_file(input_model, cal_type=)
         else:
-            tracepos_path = self.args.flat
+            tracepos_path = self.args.tracepos
         tracepos_model = datamodels.open(tracepos_path, copy=False)
 
         ### If using box extraction, the traceprof should be empty
-        ### FIXME how much error checking are we doing on inputs
-        if self.args.method != 'box':
+        if self.args.method.lower() == 'optimal':
             if self.args.traceprof is None:
                 traceprof_path = self.get_calibration_file(input_model, cal_type=)
             else:
                 traceprof_path = self.args.traceprof
             traceprof_model = datamodels.open(tracepos_path, copy=False)
-        else:
+        elif self.args.metho.lower() == 'box':
             traceprof_model = None
-
+        else:
+            self.log.error(f"Invalid flux extraction method {self.args.method.lower()}")
+            raise ValueError(f"Invalid flux extraction method {self.args.method.lower()}")
 
 
         result = input_model.copy()
-        if method == 'box'
+        if self.args.method.lower() == 'box'
             self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and width {boxwidth}")
         else:
             self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and traceprof {traceprof_mdoel}")
@@ -86,8 +87,8 @@ def flux_extraction(
 
     ### How do we compute average reference time for each wavelength
 
-    ### Set up the L1 model we write at the end
-    output = HISPECL1Model()
+    ### Dictionary that will be filled with output data
+    out_dict = {}
 
     ### Basic box extraction for now
     if method == 'box':
@@ -101,11 +102,11 @@ def flux_extraction(
             err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
             dq = np.empty(pos.shape)
             ### Loop over orders and wavlength channels for the specified fiber
+            ### We can definitely find ways to speed up the nested loop
             for order in range(pos.shape[1]):
                 for channel in range(pos.shape[0]):
-                    ### FIXME do we need to check the DQ and return NAN if anything in the slice is bad?
                     y = pos[channel,order]
-                    ### Check axes with some simulated 
+                    ### Check axes with some simulated data
                     ### Simple sum of the flux
                     flux[channel,order] = np.sum(input_model.data[y-dy:y+dy+1,channel])
                     ### Assuming the errors add in quadrature but can revisit
@@ -115,17 +116,45 @@ def flux_extraction(
                     poisson[channel,order] = np.sum(input_model.var_poisson[y-dy:y+dy+1,channel])
                     ### Just check if any pixels in the slice were bad or do something more complicated?
                     dq = np.any(input_model.dq[y-dy:y+dy+1,channel] != 0)
-            output[f'SPEC_UNCAL_FIB{i}'] = flux
-            output[f'SPEC_UNCAL_ERR_FIB{i}'] = err
-            output[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
-            output[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
-            output[f'SPEC_DQ_FIB{i}'] = dq
+            ### Save the results for each fiber to a separate extension
+            out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
+            out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
+            out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
+            out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
+            out_dict[f'SPEC_DQ_FIB{i}'] = dq
             ### How do we calculate mid time
             # output[f'MID_TIME_FIB{i}']
             ### Are we attaching wavelength solution now?
         return output
 
     elif method == 'optimal':
-        pass
+        for i in range(1,4):
+            ### Get the trace positions for the fiber
+            pos = tracepos_model[f'POS_FIB{i}']
+            profiles = traceprof_model[f'POF_FIB{i}']
+            ### Set up the output arrays
+            flux = np.empty(pos.shape)
+            err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
+            dq = np.empty(pos.shape)
+            ### Loop over orders and wavlength channels for the specified fiber
+            ### We can definitely find ways to speed up the nested loop
+            for channel in range(pos.shape[0]):
+                ys = pos[channel,:]
+                profs = profiles[channel,:]
+                ### Horne 86 steps go in here
+
+                ### FIXME how are we going to break things out by order?
 
 
+            ### Save the results for each fiber to a separate extension
+            out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
+            out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
+            out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
+            out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
+            out_dict[f'SPEC_DQ_FIB{i}'] = dq
+
+
+    ### Write the output model
+    model_result = HISPECL1Model(data=out_dict,meta=input_model.meta)
+
+    return model_result
