@@ -4,7 +4,7 @@ from ...primitives import DarkSubtractionPrimitive, FlatFieldPrimitive, TracePos
 
 __all__ = ['TraceFittingPipeline']
 
-class Stage1Pipeline(BasePipeline):
+class TraceFittingPipeline(BasePipeline):
 
     class_alias = 'tracefitting'
 
