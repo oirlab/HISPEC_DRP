@@ -17,9 +17,15 @@ class TraceFittingPipeline(BasePipeline):
 
 
     def _perform(self):
+        ### FIXME if we're doing this on a stack that stack needs
+        ### to be processed and coadded before we hit the trace
+        ### finding primitives
         model_to_process = datamodels.open(self.args.name)
         result = self.dark_sub.apply(model_to_process)
         result = self.flat_field.apply(result)
+        ### Coadd for each fiber
+
+        ### Feed in images for each fiber
         result = self.trace_pos.apply(result)
         result = self.trace_prof.appy(result)
         return result

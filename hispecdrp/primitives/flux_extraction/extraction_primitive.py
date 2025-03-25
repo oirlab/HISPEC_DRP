@@ -102,19 +102,19 @@ def flux_extraction(
             dq = np.empty(pos.shape)
             ### Loop over orders and wavlength channels for the specified fiber
             ### We can definitely find ways to speed up the nested loop
-            for order in range(pos.shape[1]):
-                for channel in range(pos.shape[0]):
-                    y = pos[channel,order]
+            for order in range(pos.shape[0]):
+                for channel in range(pos.shape[1]):
+                    y = int(np.round(pos[order, channel]),0)
                     ### Check axes with some simulated data
                     ### Simple sum of the flux
-                    flux[channel,order] = np.sum(input_model.data[y-dy:y+dy+1,channel])
+                    flux[order, channel] = np.sum(input_model.data[y-dy:y+dy+1,channel])
                     ### Assuming the errors add in quadrature but can revisit
-                    err[channel,order] = np.sqrt(np.sum(input_model.err[y-dy:y+dy+1,channel]**2))
+                    err[order, channel] = np.sqrt(np.sum(input_model.err[y-dy:y+dy+1,channel]**2))
                     ### Assuming there are no covariances so that this is a straight sum
-                    rnoise[channel,order] = np.sum(input_model.var_rnoise[y-dy:y+dy+1,channel])
-                    poisson[channel,order] = np.sum(input_model.var_poisson[y-dy:y+dy+1,channel])
+                    rnoise[order, channel] = np.sum(input_model.var_rnoise[y-dy:y+dy+1,channel])
+                    poisson[order, channel] = np.sum(input_model.var_poisson[y-dy:y+dy+1,channel])
                     ### Just check if any pixels in the slice were bad or do something more complicated?
-                    dq = np.any(input_model.dq[y-dy:y+dy+1,channel] != 0)
+                    dq = int(~np.any(input_model.dq[y-dy:y+dy+1,channel] != 0))
             ### Save the results for each fiber to a separate extension
             out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
             out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
@@ -140,9 +140,10 @@ def flux_extraction(
             for channel in range(pos.shape[0]):
                 ys = pos[channel,:]
                 profs = profiles[channel,:]
-                ### Horne 86 steps go in here
+                
+                ### Now we have a 3x norders free parameter fit
 
-                ### FIXME how are we going to break things out by order?
+                ### Sort that out into the right orders/fibers
 
 
             ### Save the results for each fiber to a separate extension

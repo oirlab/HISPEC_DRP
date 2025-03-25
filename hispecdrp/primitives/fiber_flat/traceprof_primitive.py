@@ -48,3 +48,9 @@ def fit_trace_prof(
         trace_pos : datamodels.HISPECTracePosModel
         deg : int
     ) -> datamodels.HISPECTracePosModel:
+
+    ### Full frame weights for cross talk 
+
+    ### Normalize each column and use that as empirical weights
+
+    
