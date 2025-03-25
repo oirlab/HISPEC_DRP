@@ -26,6 +26,8 @@ class TraceFittingPipeline(BasePipeline):
         ### Coadd for each fiber
 
         ### Feed in images for each fiber
+        ### trace_pos is supposed to takea  list of 3 images,
+        ### 1 per fiber - how do we do this?
         result = self.trace_pos.apply(result)
         result = self.trace_prof.appy(result)
         return result

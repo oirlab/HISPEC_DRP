@@ -24,6 +24,7 @@ class TracePositionPrimitive(BasePrimitive):
 
     def _perform(self):
         ### FIXME Input model should be a flat/dark corrected rate map, how do we enforce that?
+        ### FIXME2 what do we do about needing 1 file/fiber?
         input_model_f1 = datamodels.open(self.args.names[0], copy=False)
         input_model_f2 = datamodels.open(self.args.names[1], copy=False)
         input_model_f3 = datamodels.open(self.args.names[2], copy=False)
