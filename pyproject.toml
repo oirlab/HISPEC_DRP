@@ -8,13 +8,13 @@
 # Choosing a build backend:
 # https://packaging.python.org/en/latest/tutorials/packaging-projects/#choosing-a-build-backend
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=38.3.0", "wheel", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 
 [project]
 name = "hispecdrp"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Data Reduction Pipeline for the HISPEC instrument at the W. M. Keck Observatory."
 readme = "README.md"
 requires-python = ">=3.11.0"
