@@ -100,6 +100,7 @@ class DarkSelector(CalibrationSelector):
         - Calibration type == 'dark'
         - Matching instrument era
         - Matching spectrograph
+        - Master calibration
         - Closest in time to the input data
     """
 
@@ -109,6 +110,7 @@ class DarkSelector(CalibrationSelector):
                 Calibration.cal_type == 'dark',
                 Calibration.instera == input.meta.instrument.era,
                 Calibration.spectrograph == input.meta.instrument.spectrograph,
+                Calibration.master == True
             ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
 
 
@@ -118,6 +120,7 @@ class FlatFieldSelector(CalibrationSelector):
         - Calibration type == 'flat'
         - Matching instrument era
         - Matching spectrograph
+        - Master calibration
         - Closest in time to the input data
     """
 
@@ -127,4 +130,5 @@ class FlatFieldSelector(CalibrationSelector):
                 Calibration.cal_type == 'flat',
                 Calibration.instera == input.meta.instrument.era,
                 Calibration.spectrograph == input.meta.instrument.spectrograph,
+                Calibration.master == True
             ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
