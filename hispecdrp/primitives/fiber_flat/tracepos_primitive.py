@@ -81,6 +81,8 @@ def find_trace_pos(
             coeffs[i] = np.polyfit(xpts, ypts, deg)
             fit = np.poly1d(coeffs[i])
             smooth_trace_locs[i,:] = fit(xpts)
+
+        return smooth_trace_locs, coeffs
         ### Put into output data model
         out_dict[f'POS_FIB{k}'] = smooth_trace_locs
         out_dict[f'COEFF_FIB{k}'] = coeffs

@@ -20,4 +20,5 @@ class Stage1Pipeline(BasePipeline):
         result = self.dark_sub.apply(model_to_process)
         result = self.flat_field.apply(result)
         result = self.flux_extract.apply(result)
+        ### Link to a wavelength solution
         return result
