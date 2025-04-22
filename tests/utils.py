@@ -5,6 +5,7 @@ from astropy.time import Time
 from tqdm import tqdm
 
 from hispecdrp import datamodels
+from hispecdrp import __version__
 
 def download_github_lfs_file(
         git_file_path: str,
@@ -115,8 +116,13 @@ def add_metadata(model : datamodels.HISPECDataModel):
     model.meta.instrument.name = "HISPEC"
     model.meta.file_type = 'FITS'
     model.meta.telescope = 'Keck-II'
-    model.meta.drp_version = '0.0.1'
+    model.meta.drp_version = __version__
     model.meta.instrument.era = '0.0.1'
+    model.meta.exposure.read_mode = 'DEFAULT'
+    model.meta.target.target_name = 'DARK'
+    model.meta.target.object_fiber1 = None
+    model.meta.target.object_fiber2 = None
+    model.meta.target.object_fiber3 = None
     time = Time(model.meta.exposure.jd_start, format='jd')
     model.meta.utc = time.datetime.strftime('%H:%M:%S.%f')[0:11]
     model.meta.date_obs = time.datetime.strftime('%Y%m%d')

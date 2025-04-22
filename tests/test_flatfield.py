@@ -5,23 +5,6 @@ import textwrap
 from hispecdrp import datamodels
 import numpy as np
 
-def create_flatfield_config():
-    conf = """
-    %YAML 1.2
-    ---
-
-    logging:
-      enable: True
-      level: info
-      verbose: True
-      log_path: None
-    
-    arguments:
-      save_results: True
-      suffix: 'flat-sub'
-    """
-    return conf
-
 
 def test_flatfield(tmp_path):
     
@@ -34,7 +17,20 @@ def test_flatfield(tmp_path):
 
     # Config file
     flat_config_file = str(tmp_path / 'flat_config.yaml')
-    flat_config_raw = create_flatfield_config()
+    flat_config_raw = """
+    %YAML 1.2
+    ---
+
+    logging:
+      enable: True
+      level: info
+      verbose: True
+      log_path: None
+    
+    arguments:
+      save_results: False
+      suffix: 'flat-sub'
+    """
     with open(flat_config_file, 'w') as f:
         f.write(textwrap.dedent(flat_config_raw))
 

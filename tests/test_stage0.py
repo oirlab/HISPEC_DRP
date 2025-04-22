@@ -17,7 +17,7 @@ def create_config():
       log_path: None
     
     arguments:
-      save_results: True
+      save_results: False
       suffix: 'dark-sub'
     """
     return conf
