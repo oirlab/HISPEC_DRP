@@ -11,6 +11,11 @@
 requires = ["setuptools>=38.3.0", "wheel", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools_scm]
+version_file = "hispecdrp/_version.py"
+version_scheme = "guess-next-dev"
+local_scheme = "no-local"
+
 
 [project]
 name = "hispecdrp"
