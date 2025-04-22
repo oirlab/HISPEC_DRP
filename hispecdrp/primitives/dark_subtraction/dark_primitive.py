@@ -1,4 +1,5 @@
 from ..base_primitive import BasePrimitive
+from ...calibrations import get_calibration_store, CalibrationSelector, DarkSelector
 from ... import datamodels
 import numpy as np
 
@@ -23,7 +24,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     def _perform(self):
         input_model = datamodels.open(self.args.name, copy=False)
         if self.args.dark is None:
-            dark_path = self.get_calibration_file(input_model, cal_type='dark')
+            dark_path = self.get_calibration(input_model, selector=DarkSelector(), use_cached=True)
         else:
             dark_path = self.args.dark
         dark_model = datamodels.open(dark_path, copy=False)
@@ -35,6 +36,11 @@ class DarkSubtractionPrimitive(BasePrimitive):
             result = dark_subtraction_rate(result, dark_model)
         return result
     
+    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
+        if selector is None:
+            selector = DarkSelector()
+        return super().get_calibration(name, selector, use_cached=use_cached, **kwargs)
+        
 
 def dark_subtraction_ramp(
         input_model : datamodels.HISPECRampModel,
@@ -50,7 +56,7 @@ def dark_subtraction_ramp(
     Returns:
         RampModel: The dark-subtracted data.
     """
-    input_model.data = input_model.data - dark_model.data[:, :, None]
+    input_model.data = input_model.data - dark_model.data[:, :, None] # NOTE: THIS WILL NEED TO BE UPDATED TO INCLUDE ITIME
     # TODO: Sort out error handling for ramps.
     return input_model
 
