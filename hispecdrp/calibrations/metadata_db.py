@@ -14,7 +14,8 @@ import warnings
 
 __all__ = ['CalibrationDB', 'Calibration', 'RemoteCalibrationDB', 'LocalCalibrationDB']
 
-from hispecdrp import datamodels, __version__
+from hispecdrp import __version__
+from .. import datamodels
 
 
 # Use the environment variable for database connection
@@ -135,7 +136,7 @@ class Calibration(_Base):
         input : str | datamodels.HISPECCalibrationModel,
         note : str | None = None,
     ) -> 'Calibration':
-        cal_model = datamodels.open(input)
+        cal_model = datamodels.open(input, copy=False, meta_only=True)
         filename = cal_model.meta.filename
         datetime_obs = cal_model.meta.date_obs + 'T' + cal_model.meta.utc
         datetime_obs = datetime.datetime.strptime(datetime_obs, "%Y%m%dT%H:%M:%S.%f")
@@ -274,7 +275,7 @@ class CalibrationDB:
         with self.session_manager(session) as session:
             for item in calibration:
                 if isinstance(item, (str, datamodels.HISPECCalibrationModel)):
-                    cal_model = datamodels.open(item)
+                    cal_model = datamodels.open(item, copy=False, meta_only=True)
                     obj = Calibration.from_datamodel(cal_model, note=note)
                 else:
                     obj = item

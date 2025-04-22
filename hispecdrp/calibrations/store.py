@@ -106,8 +106,7 @@ class CalibrationStore:
             Selected calibration file(s).
         """
         # NOTE: Change how this works if result is not a string, or implement in _get_calibration
-        if isinstance(input, str):
-            input = datamodels.open(input, copy=False, meta_only=True)
+        input = datamodels.open(input, copy=False, meta_only=True)
         result = selector.select(input, self.local_db, **kwargs)
         return self._get_calibration(result, use_cached=use_cached)
 

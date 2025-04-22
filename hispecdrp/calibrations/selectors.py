@@ -22,6 +22,7 @@ class CalibrationSelector:
         Returns:
             Any: Selected calibration file or model.
         """
+        input = datamodels.open(input, copy=False, meta_only=True)
         result = self._select(input, db, **kwargs)
         if result is None:
             result = self.select_fallback(input, db, **kwargs) # TODO: Implement fallback selection
