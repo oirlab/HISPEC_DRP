@@ -1,14 +1,16 @@
 from astropy.io import fits
 
 
-def open(init, copy=False):
+def open(init, copy : bool = False, **kwargs):
     """
     Creates a DataModel from a FITS file. More types might be added later.
 
     Parameters:
         init:
-            - file path: Initialize from the given FITS file.
-            - DataModel: Return the given DataModel instance.
+            - filepath: Full path to FITS file.
+            - DataModel: Return the given DataModel instance or make a copy if `copy=True`.
+        copy (bool): If True, return a copy of the DataModel instance. If `init` is a `str`, this is ignored.
+        **kwargs: Additional keyword arguments for the DataModel constructor.
     
     Returns:
         DataModel : The specific DataModel instance.
@@ -26,10 +28,10 @@ def open(init, copy=False):
     if isinstance(init, str):
         with fits.open(init, memmap=True) as hdulist:
             model_class = class_from_model_type(hdulist)
-        model = model_class(filename=init)
+        model = model_class(filepath=init, **kwargs)
     elif isinstance(init, fits.HDUList):
         model_class = class_from_model_type(init)
-        model = model_class(hdulist=init)
+        model = model_class(hdulist=init, **kwargs)
 
     # Return the model
     return model
