@@ -1,5 +1,7 @@
 from .base_model import DataModel
 
+#### HERE: NOTE: Look through remaining level properties to use for generating koa filename
+
 class HISPECDataModel(DataModel):
 
     HEADER_SCHEMAS = [
@@ -20,7 +22,7 @@ class HISPECDataModel(DataModel):
     @staticmethod
     def _generate_filename(
         spectrograph : str,
-        datetime : str,
+        date_time : str,
         level : str | int,
         suffix : str | None = None
     ) -> str:
@@ -34,7 +36,7 @@ class HISPECDataModel(DataModel):
 
         Args:
             spectrograph (str): The spectrograph name.
-            datetime (str): The date and time of the observation.
+            date_time (str): The date and time of the observation.
             level (str | int): The data level.
             suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
 
@@ -42,30 +44,23 @@ class HISPECDataModel(DataModel):
             str : The filename
         """
         level = '' if level is None else f"_LVL{level}"
-        filename = f"HS_{spectrograph.upper()}_{datetime}{level}.fits"
+        filename = f"HS_{spectrograph.upper()}_{date_time}{level}.fits"
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
     
-    def generate_filename(
-            self,
-            spectrograph : str | None = None,
-            datetime : str | None = None,
-            level : str | int | None = None,
-            suffix : str | None = None,
-        ):
+    def generate_filename(self, suffix : str | None = None) -> str:
         """
         See _generate_filename for details.
         """
-        spectrograph = spectrograph or self.meta.instrument.spectrograph
-        if datetime is None:
-            datetime = self.meta.date_obs \
-                       + 'T' \
-                       + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
-        level = level or self.meta.data_level or self.level
+        spectrograph = self.meta.instrument.spectrograph
+        date_time = self.meta.date_obs \
+                    + 'T' \
+                    + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
+        level = self.meta.data_level or self.level
         return self._generate_filename(
             spectrograph=spectrograph,
-            datetime=datetime,
+            date_time=date_time,
             level=level,
             suffix=suffix
         )
