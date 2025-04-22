@@ -103,14 +103,12 @@ class DarkSelector(CalibrationSelector):
     """
 
     def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
-        session = db.Session()
-        result = session.query(Calibration).filter(
-            Calibration.cal_type == 'dark',
-            Calibration.instera == input.meta.instrument.era,
-            Calibration.spectrograph == input.meta.instrument.spectrograph,
-        ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
-        return result
-
+        with db.session_manager() as session:
+            return session.query(Calibration).filter(
+                Calibration.cal_type == 'dark',
+                Calibration.instera == input.meta.instrument.era,
+                Calibration.spectrograph == input.meta.instrument.spectrograph,
+            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
 
 
 class FlatFieldSelector(CalibrationSelector):
@@ -123,10 +121,9 @@ class FlatFieldSelector(CalibrationSelector):
     """
 
     def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
-        session = db.Session()
-        result = session.query(Calibration).filter(
-            Calibration.cal_type == 'flat',
-            Calibration.instera == input.meta.instrument.era,
-            Calibration.spectrograph == input.meta.instrument.spectrograph,
-        ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
-        return result
+        with db.session_manager() as session:
+            return session.query(Calibration).filter(
+                Calibration.cal_type == 'flat',
+                Calibration.instera == input.meta.instrument.era,
+                Calibration.spectrograph == input.meta.instrument.spectrograph,
+            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
