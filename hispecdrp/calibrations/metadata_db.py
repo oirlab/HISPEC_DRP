@@ -222,7 +222,8 @@ class CalibrationDB:
     ) -> Calibration | None:
         with self.session_manager(session) as session:
             return session.query(Calibration).filter(
-                Calibration.id == calibration.id,
+                #Calibration.id == calibration.id,
+                Calibration.filename == calibration.filename,
             ).first()
     
     def get_deltas(

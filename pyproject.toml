@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 version_file = "hispecdrp/_version.py"
-version_scheme = "guess-next-dev"
+version_scheme = "post-release"
 local_scheme = "no-local"
 
 
@@ -53,6 +53,7 @@ dependencies = [
   "pandas",
   "gitpython",
   "numba",
+  "sqlalchemy>2.0",
   #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
