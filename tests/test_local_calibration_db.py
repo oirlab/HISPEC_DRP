@@ -4,7 +4,7 @@ from hispecdrp import get_calibration_store
 from hispecdrp import datamodels
 import numpy as np
 import os
-from tests.utils import add_metadata
+from tests.utils import add_default_metadata
 
 
 def test_local_db(tmp_path):
@@ -25,7 +25,7 @@ def test_local_db(tmp_path):
     for i in range(N):
         dark_model = datamodels.open(dark_path, meta_only=False)
         dark_model.meta.exposure.jd_start += 365 * i
-        add_metadata(dark_model)
+        add_default_metadata(dark_model)
         filename = dark_model.generate_filename()
         filepath = cal_cache_dir + 'calibrations/' + filename
         dark_model.meta.filename = filename

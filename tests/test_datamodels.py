@@ -11,6 +11,7 @@ def test_hispec_level0(tmp_path):
     file_path = download_github_lfs_file(git_file_path, use_cached=True)
 
     def _test_model_attrs(model):
+        assert model.meta.instrument.name == 'HISPEC'
         assert model.meta.exposure.exposure_type == "SCI"
         assert model.meta.instrument.spectrograph == 'BSPEC'
         assert model.meta.model_type == 'HISPECL0Model'

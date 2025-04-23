@@ -3,26 +3,18 @@ import textwrap
 from hispecdrp import datamodels
 import numpy as np
 
-from .utils import add_metadata
+from .utils import add_default_metadata
 
 
 def create_ramp_model(slope):
     # Create ramp
-    times = np.arange(10).astype(np.float64)
-    ramps = np.zeros(shape=(100, 100, 10), dtype=np.float32)
-    for i in range(10):
+    n_reads = 10
+    times = np.arange(n_reads).astype(np.float64)
+    ramps = np.zeros(shape=(100, 100, n_reads), dtype=np.float32)
+    for i in range(n_reads):
         ramps[:, :, i] = slope * times[i]
     ramp_model = datamodels.HISPECRampModel(data=dict(data=ramps, times=times))
-    ramp_model.meta.target.target_name = 'My-Target'
-    ramp_model.meta.target.object_fiber1 = 'Sci'
-    ramp_model.meta.target.object_fiber1 = 'Sky'
-    ramp_model.meta.target.object_fiber1 = 'LFC'
-    ramp_model.meta.exposure.exposure_type = "SCI"
-    ramp_model.meta.exposure.jd_start = 2460577.5
-    ramp_model.meta.instrument.spectrograph = 'BSPEC'
-    ramp_model.meta.instrument.mode = 'YJHK'
-    ramp_model.meta.model_type = 'HISPECRampModel'
-    add_metadata(ramp_model)
+    add_default_metadata(ramp_model)
     return ramp_model
 
 

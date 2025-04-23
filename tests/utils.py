@@ -118,18 +118,33 @@ def download_github_lfs_file(
 
 
 def add_default_metadata(model : datamodels.HISPECDataModel):
-    model.meta.instrument.name = "HISPEC" if model.meta.instrument.name is None else model.meta.instrument.name
-    model.meta.file_type = 'FITS' if model.meta.file_type is None else model.meta.file_type
-    model.meta.telescope = 'Keck-II' if model.meta.telescope is None else model.meta.telescope
-    model.meta.drp_version = __version__ if model.meta.drp_version is None else model.meta.drp_version
-    model.meta.instrument.era = '0.0.1' if model.meta.instrument.era is None else model.meta.instrument.era
-    model.meta.exposure.read_mode = 'DEFAULT' if model.meta.exposure.read_mode is None else model.meta.exposure.read_mode
-    model.meta.exposure.exposure_type = "SCI" if model.meta.exposure.exposure_type is None else model.meta.exposure.exposure_type
-    model.meta.exposure.jd_start = 2460577.5 if model.meta.exposure.jd_start is None else model.meta.exposure.jd_start
-    model.meta.instrument.spectrograph = 'BSPEC' if model.meta.instrument.spectrograph is None else model.meta.instrument.spectrograph
-    model.meta.instrument.mode = 'YJHK' if model.meta.instrument.mode is None else model.meta.instrument.mode
-    model.meta.target.ra = 90.0 if model.meta.target.ra is None else model.meta.target.ra
-    model.meta.target.dec = 10.0 if model.meta.target.dec is None else model.meta.target.dec
+    def _set(attr, value):
+        if getattr(model.meta, attr) is None:
+            setattr(model.meta, attr, value)
+    _set('instrument.name', 'HISPEC')
+    _set('file_type', 'FITS')
+    _set('telescope', 'Keck-II')
+    _set('drp_version', __version__)
+    _set('instrument.era', '0.0.1')
+    _set('exposure.read_mode', 'DEFAULT')
+    _set('exposure.exposure_type', 'SCI')
+    _set('exposure.jd_start', 2460577.5)
+    _set('instrument.spectrograph', 'BSPEC')
+    _set('instrument.mode', 'YJHK')
+    _set('target.ra', 90.0)
+    _set('target.dec', 10.0)
+    _set('exposure.jd_start', 2460577.5)
+    _set('exposure.exposure_type', 'SCI')
     time = Time(model.meta.exposure.jd_start, format='jd')
     model.meta.utc = time.datetime.strftime('%H:%M:%S.%f')[0:11]
     model.meta.date_obs = time.datetime.strftime('%Y%m%d')
+    if model.meta.exposure.exposure_type is not None and model.meta.exposure.exposure_type not in ('DARK', 'DETFLAT'):
+        _set('target.object_fiber1', 'SCI')
+        _set('target.object_fiber2', 'SKY')
+        _set('target.object_fiber3', 'ETALON')
+        _set('target.target_name', 'MyTarget')
+    elif model.meta.exposure.exposure_type == 'DARK':
+        _set('target.object_fiber1', 'NONE')
+        _set('target.object_fiber2', 'NONE')
+        _set('target.object_fiber3', 'NONE')
+        _set('target.target_name', 'DARK')
