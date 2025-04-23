@@ -6,3 +6,8 @@ properties:
     comment: "Type of calibration"
     fits_keyword: CALTYPE
     type: string
+  master_cal:
+    comment: "Is this a master calibration file (e.g. valid to use for standard processing)?"
+    fits_keyword: CALMAST
+    type: bool
+    default: false

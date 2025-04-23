@@ -2,6 +2,7 @@ import yaml
 import os
 from astropy.io import fits
 from .meta_dict import MetaDict
+import pandas as pd
 
 
 __all__ = ['load_schema', 'create_header', 'merge_schemas', 'walk_schema']
@@ -168,6 +169,26 @@ def merge_schemas(schema1 : dict, schema2 : dict):
         else:
             merged[key] = value
     return merged
+
+def schema_to_table(schema : dict):
+    df = pd.DataFrame(columns=[
+        'Keyword', 'HDU', 'Comment', 'Units', 'Datatype',
+        'Default', 'Datamodel Property', 'KTL Keyword'
+    ])
+    for current_path, value in walk_schema(schema, objects=False):
+        df.loc[len(df)] = {
+            'Keyword' : value['fits_keyword'],
+            'HDU' : value.get('fits_hdu', 'PRIMARY'),
+            'Comment' : value.get('comment', ''),
+            'Units' : value.get('unit', 'None'),
+            'Datatype' : value.get('type', 'string'),
+            'Default' : value.get('default', 'None'),
+            'Datamodel Property' : '.'.join(current_path),
+            'KTL' : value.get('ktl_keyword', 'None'),
+        }
+    return df
+        
+
 
 
 # def walk_schema(_schema : dict, path : list[str] | None = None, objects : bool = False):

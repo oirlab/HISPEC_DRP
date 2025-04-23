@@ -57,10 +57,11 @@ class DataModel:
 
     def __init__(
         self,
-        filename : str | None = None,
+        filepath : str | None = None,
         data : dict | None = None,
         meta : MetaDict | None = None,
         extensions : str | list[str] | None = None,
+        meta_only : bool = False,
         validate_metadata : bool = True,
         correct_dtypes : bool = False,
     ):
@@ -74,7 +75,7 @@ class DataModel:
             meta (dict, optional): Dictionary containing metadata.
                 Keys should match the schema's property paths. Defaults to None.
                 
-            filename (str, optional): Path to a FITS file to load. Defaults to None.
+            filepath (str, optional): Path to a FITS file to load. Defaults to None.
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
             correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
@@ -82,20 +83,26 @@ class DataModel:
 
         # TODO: Implement hdu_list input.
 
-        # Set the optional filename
-        self.filename = filename
+        # Set the optional filepath
+        self.filepath = filepath
 
         # Load and merge the schemas
         self.load_schemas()
 
         # If given a file, load the header and data from that
-        if self.filename is not None and os.path.isfile(self.filename):
+        if self.filepath is not None and os.path.isfile(self.filepath):
             self.set_meta_from_headers(extensions=extensions, validate=validate_metadata)
-            self.read_data(extensions=extensions)
+            if not meta_only:
+                self.read_data(extensions=extensions)
+            else:
+                self._data = {}
         else:
             # If given starting (meta)data, set that.
             self.init_meta(meta)
-            self.init_data(data, correct_dtypes=correct_dtypes)
+            if not meta_only:
+                self.init_data(data, correct_dtypes=correct_dtypes)
+            else:
+                self._data = {}
 
         # Initialize the receipt
         self.init_receipt()
@@ -109,7 +116,7 @@ class DataModel:
         """
         Returns the directory of the DataModel if present.
         """
-        return os.path.dirname(self.filename) if self.filename else None
+        return os.path.dirname(self.filepath) if self.filepath else None
 
 
     @property
@@ -117,7 +124,7 @@ class DataModel:
         """
         Returns the base filename of the DataModel if present.
         """
-        return os.path.basename(self.filename) if self.filename else None
+        return os.path.basename(self.filepath) if self.filepath else None
     
 
     def set_meta_from_headers(
@@ -134,7 +141,7 @@ class DataModel:
         """
         extensions = self._resolve_extensions(extensions)
         self.meta = MetaDict(_schema=self.schema, _validate=validate)
-        with fits.open(self.filename, memmap=True) as hdulist:
+        with fits.open(self.filepath, memmap=True) as hdulist:
             for path, entry in schema.walk_schema(self.schema, objects=False):
                 fits_hdu = entry.get('fits_hdu', 'PRIMARY')
                 fits_keyword = entry.get('fits_keyword')
@@ -162,7 +169,7 @@ class DataModel:
         extensions = self._resolve_extensions(extensions)
         self._data = {}
         with fits.open(
-            self.filename,
+            self.filepath,
             memmap=False,
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
@@ -185,22 +192,26 @@ class DataModel:
         return data
 
     
-
     def save(
         self,
+        filepath : str | None = None,
         filename : str | None = None,
+        output_dir : str | None = None,
         add_missing_metadata : bool = False,
         correct_dtypes : bool = False,
-    ):
+    ) -> str:
         """
         Save the DataModel to a FITS file.
 
         Args:
-            filename (str, optional): The filename to save to. Defaults to self.filename.
+            filepath (str, optional): The filepath to save to. Defaults to self.filepath.
+            filename (str, optional): The filename to save to. Defaults to None.
+            output_dir (str, optional): The directory to save to. Defaults to None.
             add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
         """
-        self.on_save(filename)
-        if self.filename is None:
+        self.on_save(filepath=filepath, filename=filename, output_dir=output_dir)
+        if self.filepath is None:
             raise ValueError("No filename provided")
         hdulist = fits.HDUList()
         for extname in self.EXTENSIONS:
@@ -208,34 +219,49 @@ class DataModel:
             hdulist.append(hdu)
         with warnings.catch_warnings(): # NOTE: This (at minimum) suppresses the 80 char limit warning
             warnings.simplefilter('ignore', VerifyWarning)
-            hdulist.writeto(self.filename, overwrite=True)
+            hdulist.writeto(self.filepath, overwrite=True)
+        return self.filepath
 
 
     def on_init(self):
         """
         Hook called after the DataModel is initialized.
         """
-        if self.meta.model_type is None:
-            self.meta.model_type = self.__class__.__name__
-        if self.meta.model_type != self.__class__.__name__:
-            warnings.warn(f'Model type does not match class name: {self.basename}')
+        self.meta.model_type = self.__class__.__name__
+        if self.filepath is not None:
+            self.meta.filename = os.path.basename(self.filepath)
 
 
     def on_save(
         self,
+        filepath : str | None = None,
         filename : str | None = None,
+        output_dir : str | None = None,
     ):
         """
         Hook called before a datamodel is saved. The default implementation:
-            1. Updates `self.filename` with full path.
+            1. Updates `self.filepath` with full path.
             2. Updates `self.meta.filename` with base filename.
 
         Args:
             filename (str, optional): The filename to save to.
+            output_dir (str, optional): The directory to save to. Defaults to None.
         """
-        if filename is not None:
-            self.filename = filename
-            self.meta.filename = os.path.basename(filename)
+        if filepath is not None:
+            self.filepath = filepath
+            self.meta.filename = os.path.basename(filepath)
+        elif output_dir is not None and filename is not None:
+            self.filepath = os.path.join(output_dir, self.basename)
+            self.meta.filename = os.path.basename(self.filepath)
+        elif output_dir is not None:
+            self.filepath = os.path.join(output_dir, self.meta.filename)
+        elif filename is not None:
+            if self.filepath is not None:
+                output_dir = os.path.dirname(self.filepath)
+                self.filepath = os.path.join(output_dir, filename)
+                self.meta.filename = os.path.basename(self.filepath)
+            else:
+                raise ValueError("No output directory specified")
 
         self.meta.date_created = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')
 
@@ -269,17 +295,9 @@ class DataModel:
         return hdu
 
 
-    def get_calibration_file(self, cal_type : str, **kwargs) -> str:
-        """
-        Get the appropriate calibration file for a DataModel from the local cache or online database.
-        To be implemented later.
-        """
-        return NotImplementedError(f"Method get_calibration_file not implemented for class {self.__class__.__name__}")
-
-
     def __repr__(self):
-        if self.filename is not None:
-            return f"{self.__class__.__name__}('{os.path.basename(self.filename)}')"
+        if self.filepath is not None:
+            return f"{self.__class__.__name__}('{os.path.basename(self.filepath)}')"
         else:
             return f"{self.__class__.__name__}()"
     
@@ -415,3 +433,8 @@ class DataModel:
             astropy.io.fits.Header: The header.
         """
         return schema.create_header(meta, extname=extname, add_missing=add_missing)
+    
+    def make_datetime_str(self):
+        return self.meta.date_obs \
+            + 'T' \
+            + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds

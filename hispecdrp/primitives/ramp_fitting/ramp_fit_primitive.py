@@ -44,7 +44,16 @@ class FitRampPrimitive(BasePrimitive):
         dq_out = np.zeros(slopes.shape, dtype=np.uint16)
 
         # Create output model
-        model_result = datamodels.HISPECL0Model(data=dict(data=slopes, err=slopes_err, var_poisson=var_poisson, var_rnoise=var_rnoise, dq=dq_out), meta=input_model.meta)
+        model_result = datamodels.HISPECL0Model(
+            data=dict(
+                data=slopes,
+                err=slopes_err,
+                var_poisson=var_poisson,
+                var_rnoise=var_rnoise,
+                dq=dq_out
+            ),
+            meta=input_model.meta
+        )
 
         return model_result
     

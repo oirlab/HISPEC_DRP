@@ -18,7 +18,7 @@ class HISPECCalibrationModel(HISPECDataModel):
     @staticmethod
     def _generate_filename(
         spectrograph : str,
-        datetime : str,
+        date_time : str,
         cal_type : str,
         master : bool = False,
         suffix : str | None = None
@@ -44,32 +44,25 @@ class HISPECCalibrationModel(HISPECDataModel):
         """
         if master:
             cal_type = f"master-{cal_type}"
-        filename = f"HS_{spectrograph.upper()}_{datetime}_{cal_type}.fits"
+        filename = f"HS_{spectrograph.upper()}_{date_time}_{cal_type}.fits"
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
     
 
-    def generate_filename(
-            self,
-            spectrograph : str | None = None,
-            datetime : str | None = None,
-            cal_type : str | None = None,
-            master : bool = False,
-            suffix : str | None = None,
-        ):
+    def generate_filename(self, suffix : str | None = None) -> str:
         """
-        See _generate_filename for details.
+        See _generate_filename for additional arguments.
         """
-        spectrograph = spectrograph or self.meta.instrument.spectrograph
-        if datetime is None:
-            datetime = self.meta.date_obs \
-                       + 'T' \
-                       + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
-        cal_type = cal_type or self.CAL_TYPE
+        spectrograph = self.meta.instrument.spectrograph
+        date_time = self.meta.date_obs \
+                    + 'T' \
+                    + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
+        cal_type = self.CAL_TYPE
+        master = self.meta.master_cal
         return self._generate_filename(
             spectrograph=spectrograph,
-            datetime=datetime,
+            date_time=date_time,
             cal_type=cal_type,
             master=master,
             suffix=suffix

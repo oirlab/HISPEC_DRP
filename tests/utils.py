@@ -3,8 +3,10 @@ import re
 import os
 from astropy.time import Time
 from tqdm import tqdm
+import astropy.utils.data
 
 from hispecdrp import datamodels
+from hispecdrp import __version__
 
 def download_github_lfs_file(
         git_file_path: str,
@@ -34,6 +36,10 @@ def download_github_lfs_file(
     
     # LFS URL
     lfs_batch_url = "https://github.com/oirlab/HISPEC_Test_Data.git/info/lfs/objects/batch"
+
+    # Output dir
+    if output_dir is None:
+        output_dir = astropy.utils.data._get_download_cache_loc()
     
     # Set the output path
     if preserve_github_path:
@@ -111,12 +117,34 @@ def download_github_lfs_file(
     
 
 
-def add_metadata(model : datamodels.HISPECDataModel):
-    model.meta.instrument.name = "HISPEC"
-    model.meta.file_type = 'FITS'
-    model.meta.telescope = 'Keck-II'
-    model.meta.drp_version = '0.0.1'
-    model.meta.instrument.era = '0.0.1'
+def add_default_metadata(model : datamodels.HISPECDataModel):
+    def _set(attr, value):
+        if getattr(model.meta, attr) is None:
+            setattr(model.meta, attr, value)
+    _set('instrument.name', 'HISPEC')
+    _set('file_type', 'FITS')
+    _set('telescope', 'Keck-II')
+    _set('drp_version', __version__)
+    _set('instrument.era', '0.0.1')
+    _set('exposure.read_mode', 'DEFAULT')
+    _set('exposure.exposure_type', 'SCI')
+    _set('exposure.jd_start', 2460577.5)
+    _set('instrument.spectrograph', 'BSPEC')
+    _set('instrument.mode', 'YJHK')
+    _set('target.ra', 90.0)
+    _set('target.dec', 10.0)
+    _set('exposure.jd_start', 2460577.5)
+    _set('exposure.exposure_type', 'SCI')
     time = Time(model.meta.exposure.jd_start, format='jd')
     model.meta.utc = time.datetime.strftime('%H:%M:%S.%f')[0:11]
     model.meta.date_obs = time.datetime.strftime('%Y%m%d')
+    if model.meta.exposure.exposure_type is not None and model.meta.exposure.exposure_type not in ('DARK', 'DETFLAT'):
+        _set('target.object_fiber1', 'SCI')
+        _set('target.object_fiber2', 'SKY')
+        _set('target.object_fiber3', 'ETALON')
+        _set('target.target_name', 'MyTarget')
+    elif model.meta.exposure.exposure_type == 'DARK':
+        _set('target.object_fiber1', 'NONE')
+        _set('target.object_fiber2', 'NONE')
+        _set('target.object_fiber3', 'NONE')
+        _set('target.target_name', 'DARK')
