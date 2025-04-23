@@ -97,6 +97,10 @@ class MetaDict:
         if name.startswith('_'):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         
+        # Handle dot notation string
+        if isinstance(name, str) and '.' in name:
+            return self[name.split('.')]
+        
         # Assert name in properties
         if self._schema is not None:
             assert name in self._schema['properties'], f"Property '{name}' not found in schema"
