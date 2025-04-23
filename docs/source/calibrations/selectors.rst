@@ -13,7 +13,7 @@ Selectors are Python classes that specify the logic to select a calibration file
         This method is mandatory for any Selector.
         """
 
-    def select_best(self, input, candidates : List[Calibration], input : datamodels.HISPECDataModel) -> Calibration:
+    def select_best(self, input, candidates : list[Calibration], input : datamodels.HISPECDataModel) -> Calibration:
         """
         Select the best calibration from a list of candidates.
         By default, the first candidate is returned.
