@@ -1,7 +1,5 @@
 from hispecdrp import DarkSubtractionPrimitive
 from tests.utils import download_github_lfs_file
-import astropy.utils.data
-import textwrap
 from hispecdrp import get_calibration_store
 from hispecdrp import datamodels
 import numpy as np
@@ -12,11 +10,10 @@ from tests.utils import add_metadata
 def test_local_db(tmp_path):
     
     # Science file (just tellurics)
-    astropy_cache_dir = astropy.utils.data._get_download_cache_loc()
     git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
     git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=astropy_cache_dir, preserve_github_path=True, use_cached=True)
-    dark_path = download_github_lfs_file(git_file_path_dark, output_dir=astropy_cache_dir, preserve_github_path=True, use_cached=True)
+    sci_path = download_github_lfs_file(git_file_path_sci, use_cached=True)
+    dark_path = download_github_lfs_file(git_file_path_dark, use_cached=True)
 
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True) # For speed

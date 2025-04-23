@@ -8,7 +8,7 @@ def test_hispec_level0(tmp_path):
     # Science file (just tellurics)
     cache_dir = astropy.utils.data._get_download_cache_loc()
     git_file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    file_path = download_github_lfs_file(git_file_path, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
+    file_path = download_github_lfs_file(git_file_path, use_cached=True)
 
     def _test_model_attrs(model):
         assert model.meta.exposure.exposure_type == "SCI"
@@ -44,7 +44,7 @@ def test_hispec_level0(tmp_path):
     model.meta.pprint()
 
     # Save model
-    model.save()
+    model.save(output_dir=tmp_path)
 
     # Test model
     _test_model_attrs(model)

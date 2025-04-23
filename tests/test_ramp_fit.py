@@ -1,6 +1,4 @@
 from hispecdrp import FitRampPrimitive
-from tests.utils import download_github_lfs_file
-import astropy.utils.data
 import textwrap
 from hispecdrp import datamodels
 import numpy as np

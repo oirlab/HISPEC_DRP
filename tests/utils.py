@@ -3,6 +3,7 @@ import re
 import os
 from astropy.time import Time
 from tqdm import tqdm
+import astropy.utils.data
 
 from hispecdrp import datamodels
 from hispecdrp import __version__
@@ -35,6 +36,10 @@ def download_github_lfs_file(
     
     # LFS URL
     lfs_batch_url = "https://github.com/oirlab/HISPEC_Test_Data.git/info/lfs/objects/batch"
+
+    # Output dir
+    if output_dir is None:
+        output_dir = astropy.utils.data._get_download_cache_loc()
     
     # Set the output path
     if preserve_github_path:
@@ -112,17 +117,19 @@ def download_github_lfs_file(
     
 
 
-def add_metadata(model : datamodels.HISPECDataModel):
-    model.meta.instrument.name = "HISPEC"
-    model.meta.file_type = 'FITS'
-    model.meta.telescope = 'Keck-II'
-    model.meta.drp_version = __version__
-    model.meta.instrument.era = '0.0.1'
-    model.meta.exposure.read_mode = 'DEFAULT'
-    model.meta.target.target_name = 'DARK'
-    model.meta.target.object_fiber1 = None
-    model.meta.target.object_fiber2 = None
-    model.meta.target.object_fiber3 = None
+def add_default_metadata(model : datamodels.HISPECDataModel):
+    model.meta.instrument.name = "HISPEC" if model.meta.instrument.name is None else model.meta.instrument.name
+    model.meta.file_type = 'FITS' if model.meta.file_type is None else model.meta.file_type
+    model.meta.telescope = 'Keck-II' if model.meta.telescope is None else model.meta.telescope
+    model.meta.drp_version = __version__ if model.meta.drp_version is None else model.meta.drp_version
+    model.meta.instrument.era = '0.0.1' if model.meta.instrument.era is None else model.meta.instrument.era
+    model.meta.exposure.read_mode = 'DEFAULT' if model.meta.exposure.read_mode is None else model.meta.exposure.read_mode
+    model.meta.exposure.exposure_type = "SCI" if model.meta.exposure.exposure_type is None else model.meta.exposure.exposure_type
+    model.meta.exposure.jd_start = 2460577.5 if model.meta.exposure.jd_start is None else model.meta.exposure.jd_start
+    model.meta.instrument.spectrograph = 'BSPEC' if model.meta.instrument.spectrograph is None else model.meta.instrument.spectrograph
+    model.meta.instrument.mode = 'YJHK' if model.meta.instrument.mode is None else model.meta.instrument.mode
+    model.meta.target.ra = 90.0 if model.meta.target.ra is None else model.meta.target.ra
+    model.meta.target.dec = 10.0 if model.meta.target.dec is None else model.meta.target.dec
     time = Time(model.meta.exposure.jd_start, format='jd')
     model.meta.utc = time.datetime.strftime('%H:%M:%S.%f')[0:11]
     model.meta.date_obs = time.datetime.strftime('%Y%m%d')
