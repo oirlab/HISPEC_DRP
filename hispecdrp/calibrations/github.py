@@ -75,8 +75,8 @@ def download_github_lfs(
         git_file_path (str): Path to the file in the HISPEC_Test_Data repository.
         output_dir (str, optional): Local directory to save the file (default: current directory).
         preserve_github_path (bool, optional): Preserve the GitHub path in the output directory (default: True)
-        base_url (str, optional): Base URL of the HISPEC_Test_Data repository
-            Defaults to: "https://raw.githubusercontent.com/oirlab/HISPEC_Test_Data/main/"
+        base_url (str, optional): Base URL of the HISPEC_Test_Data repository. Defaults to: "https://raw.githubusercontent.com/oirlab/HISPEC_Test_Data/main/"
+
         use_cached (bool, optional): Use cached file if it exists (default: True).
     
     Returns:

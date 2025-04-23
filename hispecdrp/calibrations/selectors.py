@@ -17,7 +17,7 @@ class CalibrationSelector:
         Args:
             input (str | datamodels.HISPECDataModel): Input data file or model.
             db (CalibrationDB): Database session for querying.
-            **kwargs: Additional filtering parameters specific for the selector.
+            kwargs: Additional filtering parameters specific for the selector.
 
         Returns:
             Any: Selected calibration file or model.
@@ -36,7 +36,7 @@ class CalibrationSelector:
         Args:
             input: Input science frame or its metadata.
             db: Database session for querying.
-            **kwargs: Additional filtering parameters
+            kwargs: Additional filtering parameters
         
         Returns:
             Selected calibration file(s).
@@ -53,7 +53,7 @@ class CalibrationSelector:
         Args:
             input: Input data product.
             candidates: Initial query of candidates.
-            **kwargs: Additional filtering parameters.
+            kwargs: Additional filtering parameters.
         
         Returns:
             Candidate calibrations.
@@ -68,7 +68,7 @@ class CalibrationSelector:
         Args:
             input: Input data product.
             candidates: Candidate calibrations returned from self.get_candidates().
-            **kwargs: Additional filtering parameters.
+            kwargs: Additional filtering parameters.
         
         Returns:
             Selected calibration file(s).
@@ -83,7 +83,7 @@ class CalibrationSelector:
         Args:
             input: Input data product.
             db: Database session for querying.
-            **kwargs: Additional filtering parameters.
+            kwargs: Additional filtering parameters.
         
         Returns:
             Fallback calibration file(s).

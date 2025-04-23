@@ -100,7 +100,7 @@ class CalibrationStore:
         
         Args:
             input: Input data product.
-            **kwargs: Additional filtering parameters.
+            kwargs: Additional filtering parameters.
         
         Returns:
             Selected calibration file(s).
@@ -182,3 +182,7 @@ class CalibrationStore:
         else:
             raise ValueError(f"Unknown sync direction: {direction}")
         return calibrations
+    
+    
+    def update_from_cache(self):
+        return self.local_db.update_from_cache(self.cache_dir)

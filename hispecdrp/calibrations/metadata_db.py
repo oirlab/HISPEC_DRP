@@ -318,4 +318,3 @@ class LocalCalibrationDB(CalibrationDB):
 
         if calibrations:
             self.add(calibrations)
-    

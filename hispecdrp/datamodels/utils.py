@@ -9,8 +9,10 @@ def open(init, copy : bool = False, **kwargs):
         init:
             - filepath: Full path to FITS file.
             - DataModel: Return the given DataModel instance or make a copy if `copy=True`.
+
         copy (bool): If True, return a copy of the DataModel instance. If `init` is a `str`, this is ignored.
-        **kwargs: Additional keyword arguments for the DataModel constructor.
+        
+        kwargs: Additional keyword arguments for the DataModel constructor.
     
     Returns:
         DataModel : The specific DataModel instance.

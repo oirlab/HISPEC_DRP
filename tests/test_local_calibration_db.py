@@ -39,7 +39,7 @@ def test_local_db(tmp_path):
     store = get_calibration_store(cache_dir=cal_cache_dir)
 
     # Register the local files
-    store.local_db.update_from_cache(cache_dir=cal_cache_dir)
+    store.update_from_cache()
 
     # Test if the local files are registered
     results = store.local_db.query()
