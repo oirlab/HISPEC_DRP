@@ -1,4 +1,5 @@
 from ..base_primitive import BasePrimitive
+from ...calibrations import get_calibration_store, CalibrationSelector, FlatFieldSelector
 from ... import datamodels
 import numpy as np
 
@@ -23,7 +24,7 @@ class FlatFieldPrimitive(BasePrimitive):
     def _perform(self):
         input_model = datamodels.open(self.args.name, copy=False)
         if self.args.flat is None:
-            flat_path = self.get_calibration_file(input_model, cal_type='flat')
+            flat_path = self.get_calibration_file(input_model, selector=FlatFieldSelector(), use_cached=True)
         else:
             flat_path = self.args.flat
         flat_model = datamodels.open(flat_path, copy=False)
@@ -31,6 +32,14 @@ class FlatFieldPrimitive(BasePrimitive):
         self.log.info(f"Applying flat field correction with {flat_model} to {input_model}")
         result = flatfield_correction(result, flat_model)
         return result
+    
+
+    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
+        cal_store = get_calibration_store()
+        if selector is None:
+            selector = FlatFieldSelector()
+        dark_file = cal_store.get_calibration(name, selector, use_cached=use_cached, **kwargs)
+        return dark_file
     
 
 def flatfield_correction(

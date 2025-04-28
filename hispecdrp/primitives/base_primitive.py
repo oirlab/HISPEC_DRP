@@ -16,6 +16,7 @@ from keckdrpframework.models.arguments import Arguments
 #from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
 
 import hispecdrp
+from ..calibrations import get_calibration_store, CalibrationSelector
 from .. import datamodels
 from ..datamodels import DataModel
 from .. import utils as utils
@@ -266,7 +267,7 @@ class BasePrimitive(_BasePrimitive):
             'Branch_Name': git_branch,
             'Commit_Hash': git_commit_hash,
             'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : model.filename or 'None',
+            'Filename' : model.meta.filename or 'None',
             'Arguments': repr(self.args),
             'Status' : self.status
         }
@@ -360,12 +361,9 @@ class BasePrimitive(_BasePrimitive):
         return model_result
     
 
-    def get_calibration_file(self, name : str | DataModel, cal_type : str, **kwargs) -> str:
-        """
-        Forward function for model.get_calibration_file.
-        """
-        input_model = datamodels.open(name) if isinstance(name, str) else name
-        return input_model.get_calibration_file(cal_type, **kwargs)
+    def get_calibration(self, name, selector : CalibrationSelector, use_cached : bool = True, **kwargs):
+        cal_store = get_calibration_store()
+        return cal_store.get_calibration(name, selector, use_cached=use_cached, **kwargs)
 
 
     # @classmethod

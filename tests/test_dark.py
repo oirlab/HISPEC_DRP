@@ -5,8 +5,18 @@ import textwrap
 from hispecdrp import datamodels
 import numpy as np
 
-def create_dark_config():
-    conf = """
+
+def test_dark_level0(tmp_path):
+    
+    # Science file (just tellurics)
+    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
+    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
+    sci_path = download_github_lfs_file(git_file_path_sci, use_cached=True)
+    dark_path = download_github_lfs_file(git_file_path_dark, use_cached=True)
+
+    # Config file
+    dark_config_file = str(tmp_path / 'dark_config.yaml')
+    dark_config_raw = """
     %YAML 1.2
     ---
 
@@ -17,24 +27,9 @@ def create_dark_config():
       log_path: None
     
     arguments:
-      save_results: True
+      save_results: False
       suffix: 'dark-sub'
     """
-    return conf
-
-
-def test_dark_level0(tmp_path):
-    
-    # Science file (just tellurics)
-    cache_dir = astropy.utils.data._get_download_cache_loc()
-    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    dark_path = download_github_lfs_file(git_file_path_dark, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-
-    # Config file
-    dark_config_file = str(tmp_path / 'dark_config.yaml')
-    dark_config_raw = create_dark_config()
     with open(dark_config_file, 'w') as f:
         f.write(textwrap.dedent(dark_config_raw))
 
@@ -65,7 +60,20 @@ def test_dark_ramp(tmp_path):
 
     # Config file
     dark_config_file = str(tmp_path / 'dark_config.yaml')
-    dark_config_raw = create_dark_config()
+    dark_config_raw = """
+    %YAML 1.2
+    ---
+
+    logging:
+      enable: True
+      level: info
+      verbose: True
+      log_path: None
+    
+    arguments:
+      save_results: False
+      suffix: 'dark-sub'
+    """
     with open(dark_config_file, 'w') as f:
         f.write(textwrap.dedent(dark_config_raw))
 
