@@ -220,6 +220,9 @@ class CalibrationDB:
         calibration : Calibration,
         session : Session | None = None,
     ) -> Calibration | None:
+        """
+        Check if a calibration is in the database.
+        """
         with self.session_manager(session) as session:
             return session.query(Calibration).filter(
                 #Calibration.id == calibration.id,
@@ -231,6 +234,9 @@ class CalibrationDB:
         calibrations : list[Calibration],
         session : Session | None = None,
     ) -> Calibration | list[Calibration] | None:
+        """
+        Based on a provided list of calibrations, returns entries which are not present in this DB.
+        """
         missing = []
         with self.session_manager(session) as session:
             for calibration in calibrations:
@@ -248,6 +254,10 @@ class CalibrationDB:
         date_time_end : datetime.datetime = datetime.datetime.max,
         fetch : str = 'all',
     ) -> list[Calibration]:
+        """
+        Higher level query method to retrieve calibrations based on a specified calibration type and datetime start/end.
+        The utility of this method will be revisited as the DRP is developed.
+        """
         with self.session_manager(session) as session:
             _query = session.query(Calibration).filter(
                 Calibration.datetime_obs >= date_time_start,
