@@ -41,6 +41,10 @@ def _fit_ramps_likely_row(indata):
     # Need to designate one of the flags to be NO_GAIN_VALUE
     flags['NO_GAIN_VALUE'] = flags['UNRELIABLE_FLAT']
 
+    # For OLS algorithm we need to set CHARGELOSS flag
+    if algorithm == 'OLS_C':
+        flags['CHARGELOSS'] = flags['OUTLIER']
+
     # Initialize ramp data model
     ramp_data = RampData()
 
