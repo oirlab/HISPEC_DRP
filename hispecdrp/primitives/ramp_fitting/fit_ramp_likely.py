@@ -1,104 +1,165 @@
-from stcal.ramp_fitting import likely_fit, likely_algo_classes
-
-import multiprocessing as mp
 import numpy as np
 
-# TODO: benchmark likely fit method using jump detection for run time
-# add memory sharing in parallelization
-# pass back var_rdnoise and var_poisson calculated directly by this method
+from stcal.ramp_fitting import ramp_fit
+from stcal.ramp_fitting.ramp_fit_class import RampData
+
+import multiprocessing as mp
+
+# Need datamodel for hispec_dqflags
+from ... import datamodels
 
 __all__ = ['fit_ramps_likely']
 
-def _likely_ramp_fit_row(data):
+def _fit_ramps_likely_row(indata):
     """
     Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit methods.
 
     Args:
-        data Tuple[int, stcal.ramp_fitting.likely_algo_classes.Covar, np.ndarray, np.ndarray, np.ndarray]: 
-            Tuple containing the row index, covariance object of read times, 
-            difference of input image array, read noise array, and gain array.
+        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
+            Tuple containing the row index, and the following data arrays for a single row:
+                ramps, read times, data, error, readnoise, gain, data quality, dark current, bias
     Returns:
-        Tuple[int, stcal.ramp_fitting.likely_algo_classes.RampResult]: 
-            Row index integer and RampResult output class containing slope and slope error.
+        Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
+            Row index integer and arrays containing the following output data arrays for a single row:
+                slope, data quality, variance of Poisson noise, variance of read noise, and error in slope
     """
 
-    row, covar_times, diff, rdnoise, gain = data
+    i, times, data_3d, error_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d, bias_2d = indata
 
-    if jump_detect:
-        d2use, countrates = likely_fit.mask_jumps(diff, covar_times, rdnoise, gain)
-        rateguess = countrates * (countrates > 0)
-    else:
-        rateguess = np.median(diff, axis=0)[np.newaxis, :]
-        rateguess *= rateguess > 0
-        d2use = None
-    
-    result = likely_fit.fit_ramps(
-        diff,
-        covar_times,
-        gain,
-        rdnoise,
-        diffs2use=d2use,
-        count_rate_guess=rateguess,
+    # We are implicitly fitting by row, so columns is only other axis and nrows=1
+    nints, nframes, ny, nx = data_3d.shape
+
+    # Set static parameters for stcal.ramp_fitting methods
+    max_cores="1" # Run with 1 core since we are parallelizing outside this method
+    save_opt=False # Save optional output
+    algorithm="LIKELY" # Use LIKELY algorithm
+    weighting="optimal"
+    suppress_one_group=False # Suppress saturated ramps with good 0th group
+    BUFSIZE=1024*300000
+
+    # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
+    groupdq = np.zeros(data_3d.shape).astype(np.uint32)
+
+    flags = datamodels.hispec_dqflags.DQ_FLAGS
+    # Need to designate one of the flags to be NO_GAIN_VALUE
+    flags['NO_GAIN_VALUE'] = hispec_dqflags.DQ_FLAGS['UNRELIABLE_FLAT']
+
+    # Initialize ramp data model
+    ramp_data = RampData()
+
+    ramp_data.set_arrays(data_3d,
+        error_3d,
+        groupdq, 
+        pixeldq_2d, 
+        dark_current_2d,
+        None
     )
 
-    return(row, result)
+    # Set other required parameters
+    ramp_data.algorithm=algorithm
+    ramp_data.set_dqflags(flags)
+    ramp_data.zeroframe=bias_2d
+    ramp_data.start_row=0
+    ramp_data.num_rows=ny
+    ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
+    ramp_data.suppress_one_group_ramps=suppress_one_group
 
-def fit_ramps_likely(times, ramps, max_cores=1, dq=None, rdnoise=None, gain=None):
+    # Times information is set as read_pattern parameter of RampData
+    ramp_data.read_pattern = list(times)
+
+    # Run ramp fitting
+    image_info, _, _, _ = ramp_fit.ramp_fit_data(
+        ramp_data, BUFSIZE, save_opt, readnoise_2d, gain_2d, algorithm, 
+        weighting, max_cores, flags)
+
+    return(i, *image_info)
+
+def fit_ramps_likely(times, ramps, max_cores=1, error=None, dq=None, rdnoise=None, gain=None, dark_current=None, bias=None):
     """
-    Fits ramps using the likely method.
-
-    See references from Brandt (2024) - 
-    https://iopscience.iop.org/article/10.1088/1538-3873/ad38da
+    Top-level function for fitting ramps with stcal.ramp_fitting.likely_fit.
 
     Args:
         times (np.ndarray): Read times.
         ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
         max_cores (int): Number of cores for parallelization.
+        error (np.ndarray): 2D array of error in the ramp data (ny, nx, n_reads)
         dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
         rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
+        dark_current (np.ndarray): 2D array of dark current across detector (ny, nx)
+        bias (np.ndarray): 2D array of bias across detector (ny, nx)
     Returns:
-        dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.
+        dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.  The output also contains 'dq' for output data quality, 'var_poisson' for variance in Poisson noise, and 'var_rnoise' for variance in read noise.
     """
 
-    covar_times = likely_algo_classes.Covar(times)
+    ny, nx, n_reads = ramps.shape
 
-    ny, nx, nreads = ramps.shape
-
-    # likely_fit methods assume reads are on first axis
+    # JWST assumes that ramps are in first index, so transpose to n_reads x ny x nx
     ramps = ramps.transpose(2, 0, 1)
 
-    if nreads < 4:
-        raise Exception('Likelihood fit should be performed with nreads >= 4')
+    # Create an error array if not provided or else transpose to correct ordering
+    if error is None:
+        error = np.zeros((n_reads, ny, nx)).astype(np.float32)
+    else:
+        error = error.transpose(2, 0, 1)
 
-    # Create dummy variables if input arrays are not provided
+    # Create remaining dummy variables if input arrays are not provided
     if dq is None:
-        dq = np.zeros((ny, nx)).astype(np.uint8)
+        dq = np.zeros((ny, nx)).astype(np.uint32)
     if rdnoise is None:
-        rdnoise = np.zeros((ny, nx)) + np.std(ramps[0])
+        # TODO - optimize read noise when array is not passed
+        rdnoise = np.zeros((ny, nx)) + np.std(ramps[0, :, :])
     if gain is None:
-        gain = np.zeros((ny, nx))+1.0
-
-    # See references from Brandt (2024) - 
-    # https://iopscience.iop.org/article/10.1088/1538-3873/ad38da
-    # Eqn (5)
-    diff = (ramps[1:] - ramps[:-1]) / covar_times.delta_t[:,np.newaxis, np.newaxis]
+        # TODO - optimize gain when array is not passed
+        gain = np.zeros((ny, nx)) + 2.28
+    if dark_current is None:
+        dark_current = np.zeros((ny, nx))
+    if bias is None:
+        bias = np.zeros((ny, nx))
 
     with mp.Pool(max_cores) as pool:
-        # TODO - pass arrays via memory sharing instead of splitting this way
-        data = [(row, covar_times, diff[:, row], rdnoise[row], gain[row]) 
-            for row in np.arange(nrows)]
+        # TODO - parallelize with memory sharing instead of this way
+        data = []
+        for row in np.arange(ny):
+            ramps_3d = ramps[:,[row],:]
+            # Reshape to add the nints axis that JWST pipeline requires
+            ramps_3d = ramps_3d[np.newaxis,:]
 
-        results = pool.map(likely_ramp_fit_row, data)
+            # Same with error array
+            error_3d = error[:,[row],:]
+            error_3d = error_3d[np.newaxis,:]
+
+            data.append((row,
+                         times,
+                         ramps_3d,
+                         error_3d,
+                         # Make sure to add a new axis to each array to maintain number of dimensions
+                         rdnoise[[row], :],
+                         gain[[row], :],
+                         dq[[row], :],
+                         dark_current[[row], :],
+                         # JWST bias/zero frame has shape nints x ny x nx
+                         bias[[row], :][np.newaxis, :]))
+
+        results = pool.map(_fit_ramps_likely_row, data)
 
     # Parse process results into output images
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_poisson_image = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_rnoise_image = np.zeros(shape=(ny, nx), dtype=np.float32)
+    dq_image = np.zeros(shape=(ny, nx), dtype=np.uint32)
     for row_element in results:
-        row_idx = row_element[0]
-        result = row_element[1]
+        row, outdata, dq, var_poisson, var_rnoise, err = row_element
 
-        slope_image[row_idx,:] = result.countrate
-        slope_errors[row_idx,:] = result.uncert
+        slope_image[row,:] = outdata
+        slope_errors[row,:] = err
+        dq_image[row, :] = dq
+        var_poisson_image[row, :] = var_poisson 
+        var_rnoise_image[row, :] = var_rnoise
 
-    return dict(slope=slope_image, slope_err=slope_errors)
+    return(dict(slope=slope_image, 
+                slope_err=slope_errors, 
+                dq=dq_image, 
+                var_poisson=var_poisson_image, 
+                var_rnoise=var_rnoise_image))
