@@ -3,7 +3,7 @@ from ... import datamodels
 import numpy as np
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
-from .fit_ramp_likely import fit_ramps_likely
+from .fit_ramp_jwst import fit_ramps_jwst
 
 __all__ = ['FitRampPrimitive']
 
@@ -40,8 +40,8 @@ class FitRampPrimitive(BasePrimitive):
         elif self.args.method.lower() in ('mcds', 'cds'):
             result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.args.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
-        elif self.args.method.lower() == 'likely':
-            result = fit_ramps_likely(input_model.times.astype(np.float32), input_model.data.astype(np.float32), max_cores=self.args.max_cores)
+        elif self.args.method.lower() in ('jwst_likely', 'jwst_ols'):
+            result = fit_ramps_jwst(input_model.times.astype(np.float32), input_model.data.astype(np.float32), max_cores=self.args.max_cores, algorithm=self.args.method.lower())
             slopes, slopes_err = result['slope'], result['slope_err']
             # Pass Poisson, read noise, dq arrays out
             var_poisson = result['var_poisson']
