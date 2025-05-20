@@ -1,12 +1,11 @@
+from ... import datamodels
+
 import numpy as np
 
 from stcal.ramp_fitting import ramp_fit
 from stcal.ramp_fitting.ramp_fit_class import RampData
 
 import multiprocessing as mp
-
-# Replace with path to dqflags in HISPEC pipeline
-import hispec_dqflags
 
 __all__ = ['fit_ramps_likely']
 
@@ -39,9 +38,9 @@ def _fit_ramps_likely_row(indata):
     # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
     groupdq = np.zeros(data_3d.shape).astype(np.uint32)
 
-    flags = hispec_dqflags.DQ_FLAGS
+    flags = datamodels.hispec_dqflags.DQ_FLAGS
     # Need to designate one of the flags to be NO_GAIN_VALUE
-    flags['NO_GAIN_VALUE'] = hispec_dqflags.DQ_FLAGS['UNRELIABLE_FLAT']
+    flags['NO_GAIN_VALUE'] = flags['UNRELIABLE_FLAT']
 
     # Initialize ramp data model
     ramp_data = RampData()
