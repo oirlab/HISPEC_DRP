@@ -42,7 +42,7 @@ def _fit_ramps_likely_row(indata):
 
     flags = datamodels.hispec_dqflags.DQ_FLAGS
     # Need to designate one of the flags to be NO_GAIN_VALUE
-    flags['NO_GAIN_VALUE'] = hispec_dqflags.DQ_FLAGS['UNRELIABLE_FLAT']
+    flags['NO_GAIN_VALUE'] = flags['UNRELIABLE_FLAT']
 
     # Initialize ramp data model
     ramp_data = RampData()
