@@ -40,7 +40,7 @@ class FitRampPrimitive(BasePrimitive):
         elif self.args.method.lower() in ('mcds', 'cds'):
             result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.args.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
-        elif self.args.methods.lower() == 'likely':
+        elif self.args.method.lower() == 'likely':
             result = fit_ramps_likely(input_model.times.astype(np.float32), input_model.data.astype(np.float32), max_cores=self.args.max_cores)
             slopes, slopes_err = result['slope'], result['slope_err']
             # Pass Poisson, read noise, dq arrays out
