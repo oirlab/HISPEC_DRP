@@ -5,8 +5,8 @@ from stcal.ramp_fitting.ramp_fit_class import RampData
 
 import multiprocessing as mp
 
-# Need datamodel for hispec_dqflags
-from ... import datamodels
+# Replace with path to dqflags in HISPEC pipeline
+import hispec_dqflags
 
 __all__ = ['fit_ramps_likely']
 
@@ -17,14 +17,14 @@ def _fit_ramps_likely_row(indata):
     Args:
         data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
             Tuple containing the row index, and the following data arrays for a single row:
-                ramps, read times, data, error, readnoise, gain, data quality, dark current, bias
+                ramps, read times, ramp data, readnoise, gain, data quality, dark current, bias
     Returns:
         Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
             Row index integer and arrays containing the following output data arrays for a single row:
                 slope, data quality, variance of Poisson noise, variance of read noise, and error in slope
     """
 
-    i, times, data_3d, error_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d, bias_2d = indata
+    i, times, data_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d, bias_2d = indata
 
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
@@ -35,20 +35,18 @@ def _fit_ramps_likely_row(indata):
     algorithm="LIKELY" # Use LIKELY algorithm
     weighting="optimal"
     suppress_one_group=False # Suppress saturated ramps with good 0th group
-    BUFSIZE=1024*300000
 
     # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
     groupdq = np.zeros(data_3d.shape).astype(np.uint32)
 
-    flags = datamodels.hispec_dqflags.DQ_FLAGS
+    flags = hispec_dqflags.DQ_FLAGS
     # Need to designate one of the flags to be NO_GAIN_VALUE
-    flags['NO_GAIN_VALUE'] = flags['UNRELIABLE_FLAT']
+    flags['NO_GAIN_VALUE'] = hispec_dqflags.DQ_FLAGS['UNRELIABLE_FLAT']
 
     # Initialize ramp data model
     ramp_data = RampData()
 
     ramp_data.set_arrays(data_3d,
-        error_3d,
         groupdq, 
         pixeldq_2d, 
         dark_current_2d,
@@ -68,13 +66,13 @@ def _fit_ramps_likely_row(indata):
     ramp_data.read_pattern = list(times)
 
     # Run ramp fitting
-    image_info, _, _, _ = ramp_fit.ramp_fit_data(
-        ramp_data, BUFSIZE, save_opt, readnoise_2d, gain_2d, algorithm, 
+    image_info, _, _ = ramp_fit.ramp_fit_data(
+        ramp_data, save_opt, readnoise_2d, gain_2d, algorithm, 
         weighting, max_cores, flags)
 
     return(i, *image_info)
 
-def fit_ramps_likely(times, ramps, max_cores=1, error=None, dq=None, rdnoise=None, gain=None, dark_current=None, bias=None):
+def fit_ramps_likely(times, ramps, max_cores=1, dq=None, rdnoise=None, gain=None, dark_current=None, bias=None):
     """
     Top-level function for fitting ramps with stcal.ramp_fitting.likely_fit.
 
@@ -82,7 +80,6 @@ def fit_ramps_likely(times, ramps, max_cores=1, error=None, dq=None, rdnoise=Non
         times (np.ndarray): Read times.
         ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
         max_cores (int): Number of cores for parallelization.
-        error (np.ndarray): 2D array of error in the ramp data (ny, nx, n_reads)
         dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
         rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
@@ -96,12 +93,6 @@ def fit_ramps_likely(times, ramps, max_cores=1, error=None, dq=None, rdnoise=Non
 
     # JWST assumes that ramps are in first index, so transpose to n_reads x ny x nx
     ramps = ramps.transpose(2, 0, 1)
-
-    # Create an error array if not provided or else transpose to correct ordering
-    if error is None:
-        error = np.zeros((n_reads, ny, nx)).astype(np.float32)
-    else:
-        error = error.transpose(2, 0, 1)
 
     # Create remaining dummy variables if input arrays are not provided
     if dq is None:
@@ -125,14 +116,9 @@ def fit_ramps_likely(times, ramps, max_cores=1, error=None, dq=None, rdnoise=Non
             # Reshape to add the nints axis that JWST pipeline requires
             ramps_3d = ramps_3d[np.newaxis,:]
 
-            # Same with error array
-            error_3d = error[:,[row],:]
-            error_3d = error_3d[np.newaxis,:]
-
             data.append((row,
                          times,
                          ramps_3d,
-                         error_3d,
                          # Make sure to add a new axis to each array to maintain number of dimensions
                          rdnoise[[row], :],
                          gain[[row], :],
