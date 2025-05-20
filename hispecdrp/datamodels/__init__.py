@@ -11,6 +11,7 @@ from .hispec_calibration_base import HISPECCalibrationModel
 from .hispec_dark import HISPECDarkModel
 from .hispec_flat import HISPECFlatModel
 from .hispec_nonlin import HISPECNonlinearCoeffModel
+from .hispec_dqflags import DQ_FLAGS
 
 from .utils import open
 
