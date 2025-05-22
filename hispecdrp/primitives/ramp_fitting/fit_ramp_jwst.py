@@ -35,7 +35,6 @@ def _fit_ramps_jwst_row(indata):
     max_cores="1" # Run with 1 core since we are parallelizing outside this method
     save_opt=False # Save optional output
     weighting="optimal"
-    algorithm="LIKELY"
     suppress_one_group=False # Suppress saturated ramps with good 0th group
 
     # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
