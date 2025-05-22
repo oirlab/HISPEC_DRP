@@ -26,7 +26,7 @@ def _fit_ramps_jwst_row(indata):
         err (np.ndarray): output error in slope image (1, nx).
     """
 
-    i, times, data_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d = indata
+    i, times, data_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d, algorithm = indata
 
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
