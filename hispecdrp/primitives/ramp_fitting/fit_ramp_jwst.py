@@ -58,12 +58,18 @@ def _fit_ramps_jwst_row(indata):
         None
     )
 
+    # Get average exposure time
+    diffs = [times[i+1] - times[i] for i in range(len(times)-1)]
+    group_time = np.average(diffs)
+
     # Set other required parameters
     ramp_data.algorithm=algorithm
     ramp_data.set_dqflags(flags)
     ramp_data.start_row=0
     ramp_data.num_rows=ny
     ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
+    ramp_data.frame_time=group_time
+    ramp_data.group_time=group_time
     ramp_data.suppress_one_group_ramps=suppress_one_group
 
     # Times information is set as read_pattern parameter of RampData
