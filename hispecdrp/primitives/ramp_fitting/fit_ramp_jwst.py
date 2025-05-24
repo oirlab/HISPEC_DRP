@@ -32,7 +32,6 @@ def _fit_ramps_jwst_row(indata):
     nints, nframes, ny, nx = data_3d.shape
 
     # Set static parameters for stcal.ramp_fitting methods
-    max_cores="1" # Run with 1 core since we are parallelizing outside this method
     save_opt=False # Save optional output
     weighting="optimal"
     suppress_one_group=False # Suppress saturated ramps with good 0th group
@@ -70,7 +69,7 @@ def _fit_ramps_jwst_row(indata):
     ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
 
     # Required by OLS_C for frame time
-    ramp_data.frame_time=group_time
+    ramp_data.frame_time=0.0
     ramp_data.group_time=group_time
     ramp_data.groupgap=0
     ramp_data.drop_frames1=0
@@ -131,10 +130,10 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         dq = np.zeros((ny, nx)).astype(np.uint32)
     if rdnoise is None:
         # TODO - optimize read noise when array is not passed
-        rdnoise = np.zeros((ny, nx)).astype(np.float32) + np.std(ramps[0, :, :])
+        rdnoise = np.ones((ny, nx)).astype(np.float32)
     if gain is None:
         # TODO - optimize gain when array is not passed
-        gain = np.zeros((ny, nx)).astype(np.float32) + 2.28
+        gain = np.ones((ny, nx)).astype(np.float32)
     if dark_current is None:
         dark_current = np.zeros((ny, nx)).astype(np.float32)
 
