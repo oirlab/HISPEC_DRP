@@ -53,8 +53,8 @@ def _fit_ramps_jwst_row(indata):
 
     # Explicitly set data arrays
     ramp_data.data = data_3d
-    ramp_data.groupdq = groupdq_2d
-    ramp_data.pixeldq = pixeldq
+    ramp_data.groupdq = groupdq
+    ramp_data.pixeldq = pixeldq_2d
     ramp_data.average_dark_current = dark_current_2d
 
     # Get average exposure time
