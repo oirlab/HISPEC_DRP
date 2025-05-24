@@ -77,13 +77,18 @@ def _fit_ramps_jwst_row(indata):
 
     # Run ramp fitting
     if algorithm=='LIKELY':
-        image_info, _, _ = ramp_fit.ramp_fit_data(
-            ramp_data, save_opt, readnoise_2d, gain_2d, algorithm, 
-            weighting, max_cores, flags)
+        if nframes < ramp_fit.likely_fit.LIKELY_MIN_NGROUPS:
+            raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY method requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
+        # Call directly to likely ramp fit code
+        image_info, _, _ = ramp_fit.likely_fit.likely_ramp_fit(
+            ramp_data, readnoise_2d, gain_2d
+        )
     elif algorithm=='OLS_C':
-        image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(ramp_data, gain, 
-            rdnoise, weighting, save_opt)
+        # Call to C extension for OLS slope fitting
+        image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(
+            ramp_data, gain_2d, readnoise_2d, weighting, save_opt)
 
+    # Parse output image info that we need to pass to output data model
     outdata, dq, var_poisson, var_rnoise, err = image_info
 
     return(i, outdata, dq, var_poisson, var_rnoise, err)
