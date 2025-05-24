@@ -68,8 +68,13 @@ def _fit_ramps_jwst_row(indata):
     ramp_data.start_row=0
     ramp_data.num_rows=ny
     ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
+
+    # Required by OLS_C for frame time
     ramp_data.frame_time=group_time
     ramp_data.group_time=group_time
+    ramp_data.groupgap=0
+    ramp_data.drop_frames1=0
+
     ramp_data.suppress_one_group_ramps=suppress_one_group
 
     # Times information is set as read_pattern parameter of RampData
