@@ -39,23 +39,23 @@ def _fit_ramps_jwst_row(indata):
     # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
     groupdq = np.zeros(data_3d.shape).astype(np.uint8)
 
-    flags = datamodels.hispec_dqflags.DQ_FLAGS
-    # Need to designate one of the flags to be NO_GAIN_VALUE
-    flags['NO_GAIN_VALUE'] = flags['UNRELIABLE_FLAT']
-
-    # For OLS algorithm we need to set CHARGELOSS flag
-    if algorithm == 'OLS_C':
-        flags['CHARGELOSS'] = flags['OUTLIER']
-
     # Initialize ramp data model
     ramp_data = RampData()
 
-    ramp_data.set_arrays(data_3d,
-        groupdq, 
-        pixeldq_2d, 
-        dark_current_2d,
-        None
-    )
+    flags = datamodels.hispec_dqflags.DQ_FLAGS
+    # Explicitly set flags required by JWST pipeline
+    ramp_data.flags_do_not_use = flags['DO_NOT_USE']
+    ramp_data.flags_jump_det = flags['JUMP_DET']
+    ramp_data.flags_saturated = flags['SATURATED']
+    ramp_data.flags_no_gain_val = flags['UNRELIABLE_FLAT'] # Check if this is best/optimal flag
+    ramp_data.flags_unreliable_slope = flags['UNRELIABLE_SLOPE']
+    ramp_data.flags_chargeloss = flags['OUTLIER'] # Check if this is best/optimal flag - only required by OLS_C
+
+    # Explicitly set data arrays
+    ramp_data.data = data_3d
+    ramp_data.groupdq = groupdq_2d
+    ramp_data.pixeldq = pixeldq
+    ramp_data.average_dark_current = dark_current_2d
 
     # Get average exposure time
     diffs = [times[i+1] - times[i] for i in range(len(times)-1)]
@@ -63,7 +63,6 @@ def _fit_ramps_jwst_row(indata):
 
     # Set other required parameters
     ramp_data.algorithm=algorithm
-    ramp_data.set_dqflags(flags)
     ramp_data.start_row=0
     ramp_data.num_rows=ny
     ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
