@@ -1,11 +1,9 @@
 import os
 import astropy.table
 from astropy.io import fits
-import pandas as pd
 import copy
 from typing import TypeVar
 import datetime
-from . import schema
 from .meta_dict import MetaDict
 from hispecdrp import __version__
 import numpy as np
@@ -338,11 +336,6 @@ class DataModel:
         else:
             super().__setattr__(attr, value)
 
-    def validate_metadata(self):
-        """
-        Validate the metadata against the schema.
-        """
-        schema.validate(self.schema, self.meta)
 
     def init_data(self, data : dict | None = None, correct_dtypes : bool = False):
         """
