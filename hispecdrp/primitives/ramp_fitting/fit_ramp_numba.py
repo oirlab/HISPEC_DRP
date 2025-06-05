@@ -14,7 +14,7 @@ import numpy as np
 from numba import njit
 import numpy as np
 
-__all__ = ['fit_ramps_ols', 'fit_ramps_mcds']
+__all__ = ['fit_ramps_ols', 'fit_ramps_mcds','fit_ramps_likely']
 
 
 @njit
