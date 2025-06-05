@@ -3,7 +3,7 @@ import requests
 import tqdm
 import datetime
 
-from ..datamodels import datamodels
+from .. import datamodels
 
 __all__ = ['generate_koa_filepath', 'generate_koa_id', 'download_from_koa']
 
