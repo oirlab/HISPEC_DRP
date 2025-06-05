@@ -23,3 +23,11 @@ def test_ramp_fit(tmp_path):
     # Test MCDS
     model_result = rampfit_prim.apply(ramp_model, output_dir=tmp_path, method='mcds', num_coadd=3)
     np.testing.assert_array_equal(model_result.data, slope)
+
+    # Test JWST Likely
+    model_result = rampfit_prim.apply(ramp_model, output_dir=tmp_path, method='jwst_likely', max_cores=1)
+    np.testing.assert_array_equal(model_result.data, slope)
+
+    # Test JWST OLS
+    model_result = rampfit_prim.apply(ramp_model, output_dir=tmp_path, method='jwst_ols', max_cores=1)
+    np.testing.assert_array_equal(model_result.data, slope)

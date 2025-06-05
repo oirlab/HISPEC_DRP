@@ -55,6 +55,7 @@ dependencies = [
   "numba",
   "sqlalchemy>2.0",
   "tqdm",
+  "stcal",
   "gdown",
   "beautifulsoup4",
   #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"

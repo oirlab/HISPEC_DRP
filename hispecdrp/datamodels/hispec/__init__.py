@@ -8,3 +8,4 @@ from .hispec_calibration_base import *
 from .hispec_dark import *
 from .hispec_flat import *
 from .hispec_nonlin import *
+from .hispec_dqflags import *
