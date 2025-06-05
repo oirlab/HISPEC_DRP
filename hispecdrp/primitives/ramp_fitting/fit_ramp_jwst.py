@@ -42,7 +42,7 @@ def _fit_ramps_jwst_row(indata):
     # Initialize ramp data model
     ramp_data = RampData()
 
-    flags = datamodels.hispec_dqflags.DQ_FLAGS
+    flags = datamodels.hispec.hispec_dqflags.DQ_FLAGS
     # Explicitly set flags required by JWST pipeline
     ramp_data.flags_do_not_use = flags['DO_NOT_USE']
     ramp_data.flags_jump_det = flags['JUMP_DET']

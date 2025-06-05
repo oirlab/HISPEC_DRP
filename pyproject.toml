@@ -56,6 +56,8 @@ dependencies = [
   "sqlalchemy>2.0",
   "tqdm",
   "stcal",
+  "gdown",
+  "beautifulsoup4",
   #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
@@ -78,7 +80,7 @@ include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-hispecdrp = ["datamodels/schemas/*.yaml", "configs/*.yaml"]
+hispecdrp = ["datamodels/hispec/schemas/*.yaml", "datamodels/parvi/schemas/*.yaml", "configs/*.yaml"]
 
 # [tool.pytest.ini_options]
 # pythonpath = ["."]

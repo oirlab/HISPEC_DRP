@@ -4,7 +4,7 @@ import numpy as np
 __all__ = ['correct_nonlinearity']
 
 
-@njit
+@njit(nogil=True)
 def correct_nonlinearity(ramps, coeffs):
     ny, nx, _ = ramps.shape
     for i in range(ny):
@@ -13,7 +13,7 @@ def correct_nonlinearity(ramps, coeffs):
     return ramps
 
 
-@njit
+@njit(nogil=True)
 def polyval(coeffs, x):
     v = np.zeros_like(x)
     for coeff in coeffs[::-1]:

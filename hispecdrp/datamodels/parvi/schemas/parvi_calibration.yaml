@@ -1,0 +1,11 @@
+%YAML 1.2
+---
+cal_type:
+  comment: "Type of calibration"
+  keyword: CALTYPE
+  datatype: string
+master_cal:
+  comment: "Appropriate for calibrating data?"
+  keyword: CALMAST
+  datatype: bool
+  default: false

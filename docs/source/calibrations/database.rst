@@ -38,24 +38,36 @@ The `Calibration` table includes the following fields:
 CalibrationDB
 -------------
 
-The class :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` wraps the SQLAlchemy interface to the database.
+The class :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` wraps the SQLAlchemy interface to the database and defines nearly all of the core logic for interfacing with a local (SQLite) or remote (POSTGRESQL) DB.
 
 Key methods:
 
 - :py:meth:`~hispecdrp.calibrations.metadata_db.CalibrationDB.add`
+
+   Add one or many calibrations to the database.
+
 - :py:meth:`~hispecdrp.calibrations.metadata_db.CalibrationDB.query`
+
+   Higher level query method to retrieve calibrations based on a specified calibration type and datetime start/end. The utility of this method will be revisited as the DRP is developed.
+
 - :py:meth:`~hispecdrp.calibrations.metadata_db.CalibrationDB.get_deltas`
+
+   Based on a provided list of calibrations, returns entries which are not present in the DB.
+
 - :py:meth:`~hispecdrp.calibrations.metadata_db.CalibrationDB.calibration_in_db`
+
+   Check if a calibration is in the database.
+
 
 Remote Database
 ---------------
 
-Subclass of `CalibrationDB` for remote databases (e.g., PostgreSQL).
+Subclass of :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` for remote databases (e.g., PostgreSQL).
 No custom logic yet beyond initialization.
 
 
 Local Database
 --------------
 
-Subclass of `CalibrationDB` for local SQLite databases.
-No custom logic yet beyond initialization.
+Subclass of :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` for local SQLite databases.
+The local DB can also be instantiated from a local cache of calibration files without needing to be connected to a remote DB.

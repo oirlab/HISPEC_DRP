@@ -14,7 +14,6 @@ import warnings
 
 __all__ = ['CalibrationDB', 'Calibration', 'RemoteCalibrationDB', 'LocalCalibrationDB']
 
-from hispecdrp import __version__
 from .. import datamodels
 
 
@@ -53,8 +52,8 @@ class Calibration(_Base):
     # Spectrograph (BSPEC/RSPEC)
     spectrograph : Mapped[str] = mapped_column(String, nullable=False)
 
-    # JD Start of observation (or first observation if coadd)
-    jd_start : Mapped[float] = mapped_column(Float, nullable=False)
+    # MJD Start of observation (or first observation if coadd)
+    mjd_start : Mapped[float] = mapped_column(Float, nullable=False)
 
     # Datetime of observation start, should match jd_start (ISO 8601 format)
     datetime_obs : Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -91,7 +90,7 @@ class Calibration(_Base):
             cal_type=self.cal_type,
             instera=self.instera,
             spectrograph=self.spectrograph,
-            jd_start=self.jd_start,
+            mjd_start=self.mjd_start,
             datetime_obs=self.datetime_obs,
             read_mode=self.read_mode,
             target_name=self.target_name,
@@ -113,7 +112,7 @@ class Calibration(_Base):
             cal_type=data['cal_type'],
             instera=data['instera'],
             spectrograph=data['spectrograph'],
-            jd_start=data['jd_start'],
+            mjd_start=data['mjd_start'],
             datetime_obs=data['datetime_obs'],
             read_mode=data['read_mode'],
             target_name=data['target_name'],
@@ -126,9 +125,8 @@ class Calibration(_Base):
         )
 
     @staticmethod
-    def generate_uuid(filename : str) -> str:
-        # NOTE: Revisit this with Max+KOA
-        return str(uuid.uuid5(UUID_NAMESPACE, filename + __version__))
+    def generate_uuid(filename : str, drp_version : str) -> str:
+        return str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version))
 
     @classmethod
     def from_datamodel(
@@ -138,11 +136,10 @@ class Calibration(_Base):
     ) -> 'Calibration':
         cal_model = datamodels.open(input, copy=False, meta_only=True)
         filename = cal_model.meta.filename
-        datetime_obs = cal_model.meta.date_obs + 'T' + cal_model.meta.utc
-        datetime_obs = datetime.datetime.strptime(datetime_obs, "%Y%m%dT%H:%M:%S.%f")
-        _id = cls.generate_uuid(filename)
+        _id = cls.generate_uuid(filename, cal_model.meta.drp_version)
         koa_filepath = koa.generate_koa_filepath(cal_model)
         koa_id = koa_filepath.split('/')[-1]
+        datetime_obs = datetime.datetime.fromisoformat(cal_model.meta.exposure.datetime_start)
         return cls(
             id=_id,
             filename=filename,
@@ -151,14 +148,14 @@ class Calibration(_Base):
             cal_type=cal_model.meta.cal_type.lower(),
             instera=cal_model.meta.instrument.era,
             read_mode=cal_model.meta.exposure.read_mode,
-            target_name=cal_model.meta.target.target_name,
+            target_name=cal_model.meta.target.name,
             object_fiber1=cal_model.meta.target.object_fiber1,
             object_fiber2=cal_model.meta.target.object_fiber2,
             object_fiber3=cal_model.meta.target.object_fiber3,
             spectrograph=cal_model.meta.instrument.spectrograph,
-            jd_start=cal_model.meta.exposure.jd_start,
+            mjd_start=cal_model.meta.exposure.mjd_start,
             datetime_obs=datetime_obs,
-            drp_version=__version__, # NOTE: Or cal_model.meta.drp_version??
+            drp_version=cal_model.meta.drp_version,
             note=note,
             last_updated=datetime.datetime.now(),
         )
@@ -172,7 +169,7 @@ class Calibration(_Base):
         s += f"  cal_type: {self.cal_type}\n"
         s += f"  instera: {self.instera}\n"
         s += f"  spectrograph: {self.spectrograph}\n"
-        s += f"  jd_start: {self.jd_start}\n"
+        s += f"  mjd_start: {self.mjd_start}\n"
         s += f"  datetime_obs: {self.datetime_obs}\n"
         s += f"  read_mode: {self.read_mode}\n"
         s += f"  target_name: {self.target_name}\n"
@@ -220,6 +217,9 @@ class CalibrationDB:
         calibration : Calibration,
         session : Session | None = None,
     ) -> Calibration | None:
+        """
+        Check if a calibration is in the database.
+        """
         with self.session_manager(session) as session:
             return session.query(Calibration).filter(
                 #Calibration.id == calibration.id,
@@ -231,6 +231,9 @@ class CalibrationDB:
         calibrations : list[Calibration],
         session : Session | None = None,
     ) -> Calibration | list[Calibration] | None:
+        """
+        Based on a provided list of calibrations, returns entries which are not present in this DB.
+        """
         missing = []
         with self.session_manager(session) as session:
             for calibration in calibrations:
@@ -248,10 +251,14 @@ class CalibrationDB:
         date_time_end : datetime.datetime = datetime.datetime.max,
         fetch : str = 'all',
     ) -> list[Calibration]:
+        """
+        Higher level query method to retrieve calibrations based on a specified calibration type and datetime start/end.
+        The utility of this method will be revisited as the DRP is developed.
+        """
         with self.session_manager(session) as session:
             _query = session.query(Calibration).filter(
-                Calibration.datetime_obs >= date_time_start,
-                Calibration.datetime_obs <= date_time_end
+                #Calibration.datetime_obs >= date_time_start,
+                #Calibration.datetime_obs <= date_time_end
             )
             if cal_type is not None:
                 _query = _query.filter(Calibration.cal_type == cal_type)
@@ -311,11 +318,7 @@ class LocalCalibrationDB(CalibrationDB):
         cal_dir = f'{cache_dir}calibrations{os.sep}'
         cal_files = [os.path.abspath(f) for f in glob.glob(cal_dir + '*.fits')]
         for filepath in cal_files:
-            try:
-                calibration = Calibration.from_datamodel(filepath)
-                calibrations.append(calibration)
-            except Exception as e:
-                warnings.warn(f"Failed to parse {filepath}: {e}")
-
+            calibration = Calibration.from_datamodel(filepath)
+            calibrations.append(calibration)
         if calibrations:
             self.add(calibrations)

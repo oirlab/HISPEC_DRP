@@ -1,0 +1,255 @@
+%YAML 1.2
+---
+date_created:
+  keyword: DATECRT
+  comment: ISO 8601 datetime file was created YYYYMMDDTHHMMSS
+date_obs:
+  keyword: DATE-OBS
+  comment: ISO 8601 datetime of the observation YYYYMMDD for KOA
+utc:
+  keyword: UTC
+  comment: UTC time of the observation HHMMSS.SS for KOA
+filename:
+  keyword: FILENAME
+  comment: Name of the file
+file_type:
+  keyword: FILETYPE
+  comment: Type of file
+  default: FITS
+telescope:
+  keyword: TELESCOP
+  comment: Telescope used to acquire the data
+  default: Keck-II
+data_level:
+  keyword: DATALVL
+  comment: Data level
+model_type:
+  keyword: DATAMODL
+  comment: Type of data model
+drp_version:
+  keyword: DRPVER
+  comment: DRP version used to create this file
+instrument:
+  name:
+    keyword: INSTRUME
+    comment: Name of the instrument used to acquire the data
+    default: HISPEC
+  spectrograph:
+    keyword: SPECTROG
+    comment: Name of the spectrograph (BSPEC or RSPEC)
+  era:
+    keyword: INSTERA
+    comment: Instrument era specified via semver
+    default: 0.0.1
+  mode:
+    keyword: INSTMODE
+    comment: Instrument mode (YJ, HK, YJHK)
+    default: YJHK
+exposure:
+  exposure_type:
+    keyword: IMTYPE
+    comment: Type of exposure
+  data_quality:
+    keyword: DATAQUAL
+    comment: Data quality flag at the exposure level
+    default: GOOD
+  datetime_start:
+    keyword: EXPDTST
+    comment: Exposure start datetime in format YYYY-MM-DDTHH:MM:SS.SSS
+  mjd_start:
+    keyword: EXPMJDST
+    comment: Exposure start Modified Julian Date
+    datatype: number
+    unit: MJD
+  read_mode:
+    keyword: READMODE
+    comment: Readout mode
+  exposure_time:
+    keyword: EXPTIME
+    comment: Effective exposure time
+    unit: sec
+    datatype: number
+target:
+  name:
+    keyword: OBJECT
+    comment: Target or object name, internal or on-sky
+  ra:
+    keyword: RA
+    comment: Target Right Ascension
+    unit: degrees
+    datatype: number
+  dec:
+    keyword: DEC
+    comment: Target Declination
+    unit: degrees
+    datatype: number
+  ra_uncertainty:
+    keyword: URA
+    comment: Target RA uncertainty
+    unit: degrees
+    datatype: number
+  dec_uncertainty:
+    keyword: UDEC
+    comment: Target Dec uncertainty
+    unit: degrees
+    datatype: number
+  mu_ra:
+    keyword: MURA
+    comment: Target proper motion in RA
+    unit: degrees
+    datatype: number
+  mu_dec:
+    keyword: MUDEC
+    comment: Target proper motion in Dec
+    unit: degrees
+    datatype: number
+  mu_epoch:
+    keyword: MUEPOCH
+    comment: Target proper motion epoch
+    unit: degrees
+    datatype: number
+  airmass_start:
+    keyword: AIRMAST
+    comment: Airmass at start of exposure
+  airmass_mid:
+    keyword: AIRMAST
+    comment: Airmass at exposure midpoint
+  airmass_end:
+    keyword: AIRMAST
+    comment: Airmass at end of exposure
+  azimuth_start:
+    keyword: AZST
+    comment: Azimuth at start of exposure in degrees
+  azimuth_mid:
+    keyword: AZMID
+    comment: Azimuth of target at exposure midpoint
+  azimuth_end:
+    keyword: AZEND
+    comment: Azimuth at end of exposure
+  elevation_start:
+    keyword: ELSTART
+    comment: Elevation at start of exposure
+  elevation_mid:
+    keyword: ELMID
+    comment: Elevation of target at exposure midpoint
+  elevaiton_end:
+    keyword: ELEND
+    comment: Elevation at end of exposure
+  equinox:
+    keyword: EQUINOX
+    comment: Equinox of coordinates
+    default: '2000'
+  object_fiber1:
+    keyword: OBJFIB1
+    comment: Object name in fiber 1. Utility TBD.
+  object_fiber2:
+    keyword: OBJFIB2
+    comment: Object name in fiber 2. Utility TBD.
+  object_fiber3:
+    keyword: OBJFIB3
+    comment: Object name in fiber 3. Utility TBD.
+drp_step:
+  dq_init:
+    keyword: P_DQINIT
+    comment: Data quality initialization
+  bias_sub:
+    keyword: P_BIASUB
+    comment: Bias subtraction
+  refpix_corr:
+    keyword: P_REFPIX
+    comment: Reference pixel correction
+  dark_sub:
+    keyword: P_DARK
+    comment: Dark subtraction
+  nonlin_corr:
+    keyword: P_NLCORR
+    comment: Nonlinear readout correction
+  ramp_fit:
+    keyword: P_RAMPFT
+    comment: Ramp fitting
+  flat_field:
+    keyword: P_FLAT
+    comment: Flat Field Correction
+  gain_scale:
+    keyword: P_GANSCL
+    comment: Gain Scale Correction
+  spec_extract:
+    keyword: P_SPECEX
+    comment: Spectral Extraction
+  bary_center_calc:
+    keyword: P_BARYC
+    comment: Barycenter Calculation
+  trans_corr:
+    keyword: P_TRANSC
+    comment: Instrument transmission correction
+  comput_rvs:
+    keyword: P_COMRV
+    comment: Compute Radial Velocities
+  merge_orders:
+    keyword: P_MERGEO
+    comment: Merge spectral orders
+  fluxcal:
+    keyword: P_FLUXCL
+    comment: Flux Calibration
+  drift_calc:
+    keyword: P_DRIFTC
+    comment: Drift Calculation for wavelength calibration
+  sky_sub:
+    keyword: P_SKYSUB
+    comment: Sky subtraction
+  tell_corr:
+    keyword: P_TELCOR
+    comment: Telluric correction
+cal_file:
+  data_quality:
+    keyword: C_DQ
+    comment: Data quality reference file
+  saturation:
+    keyword: C_SAT
+    comment: Saturation levels reference file
+  bias:
+    keyword: C_BIAS
+    comment: Bias reference file
+  read_noise:
+    keyword: C_RN
+    comment: Read noise reference file
+  nonlin_corr:
+    keyword: C_NLC
+    comment: Nonlinearity correction reference file
+  dark:
+    keyword: C_DARK
+    comment: Dark current reference file
+  gain:
+    keyword: C_GAIN
+    comment: Gain reference file
+  detector_flat:
+    keyword: C_DFLAT
+    comment: Detector flat field reference file
+  fiber_flat:
+    keyword: C_FFLAT
+    comment: Fiber flat reference file
+  trace_positions:
+    keyword: C_TRACE
+    comment: Trace positions reference file
+  spec_extract:
+    keyword: C_SPECX
+    comment: Spectral extraction reference file
+  etalon_anchor:
+    keyword: C_ETAN
+    comment: Etalon anchor reference file
+  gascell_wavecal:
+    keyword: C_GWC
+    comment: Gas cell wavelength calibration reference file
+  hcl_wavecal:
+    keyword: C_HWC
+    comment: Hollow cathode lamp wavelength calibration reference file
+  lfc_wavecal:
+    keyword: C_LWC
+    comment: Laser frequency comb wavelength calibration reference file
+  lsf:
+    keyword: C_LSF
+    comment: Line spread function reference file
+program:
+  name:
+    keyword: PROGNAME
+    comment: Program name

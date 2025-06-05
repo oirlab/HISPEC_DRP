@@ -25,7 +25,6 @@ class FitRampPrimitive(BasePrimitive):
         'max_cores' : 1,
     }
 
-
     def _perform(self):
         input_model = datamodels.open(self.args.name, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.args.method.lower()}")

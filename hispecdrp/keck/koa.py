@@ -1,13 +1,11 @@
 import os
-import subprocess
-from pathlib import Path
 import requests
 import tqdm
 import datetime
 
 from .. import datamodels
 
-__all__ = ['generate_koa_filepath', 'generate_koa_id', 'stage_for_koa_rti', 'download_from_koa']
+__all__ = ['generate_koa_filepath', 'generate_koa_id', 'download_from_koa']
 
 login_url = "https://koa.ipac.caltech.edu/cgi-bin/KoaAPI/nph-koaLogin?"
 getkoa_url = "https://koa.ipac.caltech.edu/cgi-bin/getKOA/nph-getKOA?return_mode=json&"
@@ -24,7 +22,7 @@ def generate_koa_filepath(input : datamodels.HISPECDataModel | str) -> str:
         level = "cal"
     else:
         level = f"lev{model.meta.data_level}"
-    date = input.meta.date_obs
+    date = model.meta.date_obs
     year = date[0:4]
     koa_id = generate_koa_id(model)
     return f"/HISPEC/{year}/{date}/{level}/{koa_id}"
@@ -38,18 +36,6 @@ def generate_koa_id(input : datamodels.HISPECDataModel | str) -> str:
     time = f"{total_seconds:08.2f}"
     ext = os.path.splitext(model.meta.filename)[1]
     return f"HS.{date}.{time}{ext}"
-
-
-def stage_for_koa_rti(input : datamodels.HISPECDataModel | str) -> str:
-    """
-    Stages a file for KOA RTI.
-    For now, this just saves the file to the local RTI directory which is a git lfs repo, and pushes it to github.
-    Eventually works at Keck to stage files fot RTI.
-    """
-    if isinstance(input, datamodels.HISPECDataModel):
-        return upload_github_lfs(input.filepath)
-    else:
-        return upload_github_lfs(input)
 
 
 def download_from_koa(
