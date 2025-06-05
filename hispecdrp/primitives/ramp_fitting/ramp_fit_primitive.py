@@ -33,6 +33,8 @@ class FitRampPrimitive(BasePrimitive):
         var_rnoise = None
         dq_out = None
 
+        breakpoint()
+
         if self.args.method.lower() == 'ols':
             result = fit_ramps_ols(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)
             slopes, slopes_err = result['slope'], result['slope_err']
