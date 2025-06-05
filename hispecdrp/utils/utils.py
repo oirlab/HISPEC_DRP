@@ -1,16 +1,6 @@
 import importlib
-from keckdrpframework.models.arguments import Arguments
-
 
 __all__ = ['resolve_primitive_class']
-
-def prepr_args(args : Arguments) -> str:
-    s = f'name = {args.name}\n'
-    for k in args.iter_kw():
-        if k != 'name':
-            s += f'{k} = {args[k]}\n'
-    s = s[:-1]
-    return s
 
 
 def resolve_primitive_class(name: str):
