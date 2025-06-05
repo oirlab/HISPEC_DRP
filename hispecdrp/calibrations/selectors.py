@@ -111,7 +111,7 @@ class DarkSelector(CalibrationSelector):
                 Calibration.instera == input.meta.instrument.era,
                 Calibration.spectrograph == input.meta.instrument.spectrograph,
                 Calibration.master == True
-            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
+            ).order_by(func.abs(Calibration.mjd_start - input.meta.exposure.mjd_start)).all()
 
 
 class FlatFieldSelector(CalibrationSelector):
@@ -131,4 +131,4 @@ class FlatFieldSelector(CalibrationSelector):
                 Calibration.instera == input.meta.instrument.era,
                 Calibration.spectrograph == input.meta.instrument.spectrograph,
                 Calibration.master == True
-            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
+            ).order_by(func.abs(Calibration.mjd_start - input.meta.exposure.mjd_start)).all()
