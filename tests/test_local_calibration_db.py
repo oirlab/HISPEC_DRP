@@ -1,19 +1,15 @@
 from hispecdrp import DarkSubtractionPrimitive
-from tests.utils import download_github_lfs_file
+from hispecdrp.utils import download_gdrive_file
 from hispecdrp import get_calibration_store
 from hispecdrp import datamodels
-import numpy as np
 import os
-from tests.utils import add_default_metadata
 
 
 def test_local_db(tmp_path):
     
-    # Science file (just tellurics)
-    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, use_cached=True)
-    dark_path = download_github_lfs_file(git_file_path_dark, use_cached=True)
+    # Files
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
+    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
 
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True) # For speed
@@ -24,13 +20,11 @@ def test_local_db(tmp_path):
     os.makedirs(cal_cache_dir + 'calibrations/', exist_ok=True)
     for i in range(N):
         dark_model = datamodels.open(dark_path, meta_only=False)
-        dark_model.meta.exposure.jd_start += 365 * i
-        add_default_metadata(dark_model)
-        filename = dark_model.generate_filename()
-        filepath = cal_cache_dir + 'calibrations/' + filename
-        dark_model.meta.filename = filename
-        dark_model.filepath = filepath
-        dark_model.save()
+        dark_model.meta.exposure.datetime_start = None
+        dark_model.meta.exposure.mjd_start += 365 * i
+        datamodels.get_hispec_meta(dark_model)
+        filepath = cal_cache_dir + 'calibrations/' + dark_model.generate_filename()
+        dark_model.save(filepath=filepath)
 
     # Connect to DB
     store = get_calibration_store(cache_dir=cal_cache_dir)
@@ -48,7 +42,7 @@ def test_local_db(tmp_path):
     assert dark1 is not None, "No dark model not found in local DB"
 
     # Test retrieval of second dark
-    sci_model.meta.exposure.jd_start += 365
+    sci_model.meta.exposure.mjd_start += 365
     dark_prim = DarkSubtractionPrimitive()
     dark2 = dark_prim.get_calibration(sci_model, use_cached=True)
     store.close()
