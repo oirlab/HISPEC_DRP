@@ -1,11 +1,10 @@
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
+from .hispec_base import HISPECDataModel
 import numpy as np
 
-__all__ = ['HISPECFlatModel']
+__all__ = ['HISPECL0Model']
 
-class HISPECFlatModel(HISPECCalibrationModel):
-
+class HISPECL0Model(HISPECDataModel):
 
     EXTENSIONS = {
         'DATA': {
@@ -27,11 +26,13 @@ class HISPECFlatModel(HISPECCalibrationModel):
         'DQ': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.uint32
-        }
+        },
+        'MID_TIME': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
     }
-
-    CAL_TYPE = 'flat'
 
     @property
     def level(self):
-        return '0'
+        return 'rate'

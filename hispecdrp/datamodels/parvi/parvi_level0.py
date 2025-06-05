@@ -1,11 +1,10 @@
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
+from .parvi_base import PARVIDataModel
 import numpy as np
 
-__all__ = ['HISPECDarkModel']
+__all__ = ['PARVIL0Model']
 
-class HISPECDarkModel(HISPECCalibrationModel):
-
+class PARVIL0Model(PARVIDataModel):
 
     EXTENSIONS = {
         'DATA': {
@@ -16,22 +15,24 @@ class HISPECDarkModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_POISSON': {
+        'VAR_RNOISE': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_RNOISE': {
+        'VAR_POISSON': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
         'DQ': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.uint32
-        }
+        },
+        'MID_TIME': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
     }
 
-    CAL_TYPE = 'dark'
-
     @property
-    def level(self):
-        return '0'
+    def data_level_suffix(self):
+        return 'rate'

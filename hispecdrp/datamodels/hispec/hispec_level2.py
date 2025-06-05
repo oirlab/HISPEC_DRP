@@ -126,5 +126,5 @@ class HISPECL2Model(HISPECDataModel):
     EXTENSIONS = _L2_EXTENSIONS
 
     @property
-    def level(self):
-        return '2'
+    def data_level_suffix(self):
+        return 'spec'

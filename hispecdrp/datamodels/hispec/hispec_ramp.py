@@ -2,18 +2,26 @@ from astropy.io import fits
 from .hispec_base import HISPECDataModel
 import numpy as np
 
-__all__ = ['HISPECL0Model']
+__all__ = ['HISPECRampModel']
 
-class HISPECL0Model(HISPECDataModel):
+class HISPECRampModel(HISPECDataModel):
 
     EXTENSIONS = {
         'DATA': {
             'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float32
+            'dtype' : np.uint16,
+        },
+        'TIMES': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'DQ': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
         },
         'ERR': {
             'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float32
+            'dtype' : np.float64
         },
         'VAR_RNOISE': {
             'hdu_type' : fits.ImageHDU,
@@ -23,16 +31,8 @@ class HISPECL0Model(HISPECDataModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'DQ': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.uint32
-        },
         'MID_TIME': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
         },
     }
-
-    @property
-    def level(self):
-        return '0'

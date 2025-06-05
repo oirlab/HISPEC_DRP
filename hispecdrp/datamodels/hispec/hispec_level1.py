@@ -25,5 +25,5 @@ class HISPECL1Model(HISPECDataModel):
     EXTENSIONS = _L1_EXTENSIONS
 
     @property
-    def level(self):
-        return '1'
+    def data_level_suffix(self):
+        return 'specuncal'
