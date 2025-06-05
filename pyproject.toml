@@ -50,7 +50,6 @@ dependencies = [
   "scipy",
   "matplotlib",
   "astropy",
-  "pandas",
   "gitpython",
   "numba",
   "sqlalchemy>2.0",

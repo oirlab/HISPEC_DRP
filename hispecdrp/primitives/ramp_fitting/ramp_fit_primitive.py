@@ -34,13 +34,13 @@ class FitRampPrimitive(BasePrimitive):
         dq_out = None
 
         if self.args.method.lower() == 'ols':
-            result = fit_ramps_ols(input_model.times.astype(np.float32), input_model.data.astype(np.float32), b=0)
+            result = fit_ramps_ols(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), b=0)
             slopes, slopes_err = result['slope'], result['slope_err']
         elif self.args.method.lower() in ('mcds', 'cds'):
-            result = fit_ramps_mcds(input_model.times.astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.args.num_coadd)
+            result = fit_ramps_mcds(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.args.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
         elif self.args.method.lower() in ('jwst_likely', 'jwst_ols'):
-            result = fit_ramps_jwst(input_model.times.astype(np.float32), input_model.data.astype(np.float32), max_cores=self.args.max_cores, algorithm=self.args.method.lower())
+            result = fit_ramps_jwst(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), max_cores=self.args.max_cores, algorithm=self.args.method.lower())
             slopes, slopes_err = result['slope'], result['slope_err']
             # Pass Poisson, read noise, dq arrays out
             var_poisson = result['var_poisson']
