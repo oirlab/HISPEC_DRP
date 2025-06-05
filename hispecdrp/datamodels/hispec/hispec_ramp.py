@@ -4,6 +4,15 @@ import numpy as np
 
 __all__ = ['HISPECRampModel']
 
+_READTIMES_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'READNUM' : np.uint16,
+        'TIMES' : np.float64,
+        'FRAMETIME' : np.float64,
+    }
+}
+
 class HISPECRampModel(HISPECDataModel):
 
     EXTENSIONS = {
@@ -11,10 +20,7 @@ class HISPECRampModel(HISPECDataModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.uint16,
         },
-        'TIMES': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
+        'TIMES': _READTIMES_HDU,
         'DQ': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
@@ -36,3 +42,7 @@ class HISPECRampModel(HISPECDataModel):
             'dtype' : np.float64
         },
     }
+
+    @property
+    def data_level_suffix(self) -> str:
+        return "raw"
