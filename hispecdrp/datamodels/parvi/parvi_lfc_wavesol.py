@@ -25,7 +25,7 @@ for i in range(1, 5):
             'SIGMA_ERR': np.float64,
             'B': np.float64,
             'B_ERR': np.float64,
-            'MODE_NUM': np.uint16,
+            'MODE_NUM': np.int16,
             'WAVE': np.float64,
             'ORDER': np.uint16,
         }
