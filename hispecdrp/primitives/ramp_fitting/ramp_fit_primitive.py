@@ -5,6 +5,8 @@ import numpy as np
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
 
+from keckdrpframework.models.arguments import Arguments
+
 __all__ = ['FitRampPrimitive']
 
 
@@ -73,5 +75,5 @@ class FitRampPrimitive(BasePrimitive):
             meta=input_model.meta
         )
 
-        return model_result
+        return Arguments(name=model_result)
     

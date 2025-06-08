@@ -1,24 +1,15 @@
 
 import traceback
-from typing import Self
-from collections.abc import Sequence
 import datetime
-import git
 import os
 import functools
 
 from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-#from keckdrpframework.models.action import Action as _Action
-#from keckdrpframework.models.event import Event as _Event
-#from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
-#from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
-
 import hispecdrp
 from ..calibrations import get_calibration_store, CalibrationSelector
 from .. import datamodels
-from ..datamodels import DataModel
 from .. import utils as utils
 from ..utils.config import Config
 from ..utils.logging import get_logger
@@ -33,9 +24,10 @@ class BasePrimitive(_BasePrimitive):
     
     ARGUMENTS = {
         'run' : True,
-        'save_results' : False,
+        'save_result' : False,
         'output_dir' : None,
-        'suffix' : ''
+        'suffix' : '',
+        'full_output' : False,
     }
 
     LOGGING = {
@@ -61,7 +53,6 @@ class BasePrimitive(_BasePrimitive):
         self.init_config(config=config, config_file=config_file)
 
         # Set any kwargs passed to init
-        # NOTE HERE: Finalize how args are set
         self.set_args(**kwargs)
 
         # Init the output and status
@@ -100,11 +91,16 @@ class BasePrimitive(_BasePrimitive):
     def _perform(self):
         raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
 
-    def apply(self, name : DataModel, **kwargs):
+    def apply(self, name, **kwargs):
         self.init_logger()
         self.output = None
         try:
-            self.set_args(name, **kwargs)
+            # This allows pipelines to work whether full_output is True or False.
+            # Pipelines can pass in a datamodel or an Arguments object, in which case the first arg is fetched.
+            # NOTE: Consider alternative approach. A primitive should not have full_output=True when invoked by a pipeline.
+            if isinstance(name, Arguments):
+                name = name.name
+            self.set_args(name=name, **kwargs)
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
                 self.on_skip()
@@ -112,18 +108,32 @@ class BasePrimitive(_BasePrimitive):
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
                 output = self._perform()
                 if self._post_condition():
-                    self.finalize_model(output)
                     self.output = output
-                    if self.args.save_results:
-                        if isinstance(self.output, Sequence):
-                            for out in self.output:
-                                self.save_model(out)
-                        else:
-                            self.save_model(self.output)
+                    if isinstance(self.output.name, datamodels.DataModel):
+                        self.finalize_model(self.output.name)
+                        if self.args.save_result:
+                            self.save_model(self.output.name)
+                    elif isinstance(self.output.name, list):
+                        for result in self.output.name:
+                            if isinstance(result, datamodels.DataModel):
+                                self.finalize_model(result)
+                                if self.args.save_result:
+                                    self.save_model(result)
+                    elif isinstance(self.output, dict):
+                        for key in self.output:
+                            if isinstance(self.output[key], datamodels.DataModel):
+                                self.finalize_model(self.output[key])
+                                if self.args.save_result:
+                                    self.save_model(self.output[key])
         except Exception as e:
             self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
-            raise e
-        return self.output
+            if os.environ.get('HISPECDRP_DEBUG', '0') == '0':
+                raise e
+            return name
+        if self.args.full_output:
+            return self.output
+        else:
+            return self.output.name
     
     def init_logger(self):
         """
@@ -151,7 +161,7 @@ class BasePrimitive(_BasePrimitive):
             },
         )()
                 
-    def set_args(self, name : str | DataModel | None = None, **kwargs) -> dict:
+    def set_args(self, **kwargs) -> dict:
         """
         Coalesces the user input into a single `Arguments` obejct with the following priorities:
             4. `self.ARGUMENTS`
@@ -166,10 +176,10 @@ class BasePrimitive(_BasePrimitive):
         """
         if not hasattr(self, "args"):
             self.init_args()
-        if name is not None:
-            self.args.name = name
-        for key in kwargs: # Only want to pass valid kwargs to self.args, don't call dict update()
-            if key in self.ARGUMENTS:
+        if 'name' in 'kwargs':
+            self.args.name = kwargs.pop('name')
+        for key in kwargs:
+            if key in self.ARGUMENTS or key == 'name':
                 self.args[key] = kwargs[key]
             else:
                 raise ValueError(f"Invalid argument '{key}' for primitive {self.__class__.__name__}. Valid arguments are: {list(self.ARGUMENTS.keys())}")
@@ -192,20 +202,17 @@ class BasePrimitive(_BasePrimitive):
         if 'arguments' in self.config:
             self.args.update(**self.config['arguments'])
         return self.args
-    
-    def __call__(self, name : DataModel, **kwargs):
-        """
-        Wrapper for `self.apply`. Any valid arguments can be passed through `kwargs`.
-        """
-        return self.apply(name, **kwargs)
-    
+        
     def _pre_condition(self):
         return super()._pre_condition() and self.args.run
     
     def _post_condition(self):
         if super()._post_condition():
             self.status = "COMPLETE"
-        return True
+            return True
+        else:
+            self.status = "FAILED"
+            return False
     
     def on_skip(self):
         self.status = "SKIPPED"
@@ -218,9 +225,6 @@ class BasePrimitive(_BasePrimitive):
             return s
         else:
             return self.__class__.__name__
-
-    def hasarg(self, key: str):
-        return hasattr(self.args, key)
     
     def __init_subclass__(cls):
         ARGUMENTS = {}
@@ -229,32 +233,24 @@ class BasePrimitive(_BasePrimitive):
                 ARGUMENTS.update(_cls.ARGUMENTS)
         cls.ARGUMENTS = ARGUMENTS
 
-    def add_receipt_entry(self, model : DataModel):
+    def add_receipt_entry(self, model : datamodels.DataModel):
         """
         Add an entry to the receipt table of the model.
         """
         # add the row to the bottom of the table
-        row = {
-            'Time' : datetime.datetime.now().isoformat(),
-            'HISPECDRP_Version': hispecdrp.__version__,
-            'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : model.meta.filename or 'None',
-            'Arguments': repr(self.args),
-            'Status' : self.status
-        }
-        model.receipt.add_row(row)
-
-    # def make_output_path(self, model : DataModel, suffix : str = None):
-    #     """
-    #     Args:
-    #         model (DataModel): The model to generate the output path for.
-    #         suffix (str): The suffix to append to the output file. Defaults to `self.args.suffix`.
-    #     """
-    #     if suffix is None:
-    #         suffix = self.args.suffix
-    #     return os.path.join(self.args.output_dir, model.generate_filename(suffix=suffix))
+        from ..pipelines import BasePipeline
+        if not isinstance(self, BasePipeline):
+            row = {
+                'Time' : datetime.datetime.now().isoformat(),
+                'HISPECDRP_Version': hispecdrp.__version__,
+                'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
+                'Filename' : model.meta.filename or 'None',
+                'Arguments': repr(self.args),
+                'Status' : self.status
+            }
+            model.receipt.add_row(row)
     
-    def save_model(self, model: DataModel) -> str:
+    def save_model(self, model: datamodels.DataModel) -> str:
         """
         Save a datamodel to a file.
 
@@ -270,40 +266,29 @@ class BasePrimitive(_BasePrimitive):
             suffix=instance_suffix   
         )
 
-    def finalize_model(self, model_result : DataModel):
+    def finalize_model(self, model_result : datamodels.DataModel):
         """
-        Hook called at the end of `pipeline.apply` to finalize the model.
+        Hook called at the end of `primitive.apply` to finalize the model.
 
         Args:
             model_result (DataModel): The model to finalize.
         """
-        from ..pipelines import BasePipeline
-        if not isinstance(self, BasePipeline):
-            setattr(model_result.meta.drp_step, self.class_alias, str(self.status)) # NOTE: May drop this in favor of just receipt
+        # NOTE: Dropping model.meta.drp_step.prim_alias = STATUS
+        #   for now in favor of receipt until we decide the utility of tracking processing.
         self.add_receipt_entry(model_result)
-        model_result.meta.drp_version = hispecdrp.__version__
+        model_result.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
         return model_result
     
     def get_calibration(self, name, selector : CalibrationSelector, use_cached : bool = True, **kwargs):
         cal_store = get_calibration_store()
         return cal_store.get_calibration(name, selector, use_cached=use_cached, **kwargs)
     
-    @staticmethod
-    def prepr_args(args : Arguments) -> str:
+    def prepr_args(self, args : Arguments | None = None) -> str:
+        if args is None:
+            args = self.args
         s = f'name = {args.name}\n'
         for k in args.iter_kw():
             if k != 'name':
                 s += f'{k} = {args[k]}\n'
         s = s[:-1]
         return s
-
-    # @classmethod
-    # def from_keck_pipeline(cls, keck_pipeline):
-    #     """
-    #     Create a new instance of this primitive from an action and context.
-    #     """
-    #     name = action.args.name
-    #     self = cls(config=context.config, )
-    #     self._action = action
-    #     self._context = context
-    #     return self

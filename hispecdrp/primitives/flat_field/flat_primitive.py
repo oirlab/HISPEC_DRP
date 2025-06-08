@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ...calibrations import get_calibration_store, CalibrationSelector, FlatFieldSelector
 from ... import datamodels
+from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
 __all__ = ['FlatFieldPrimitive']
@@ -31,7 +32,7 @@ class FlatFieldPrimitive(BasePrimitive):
         result = input_model.copy()
         self.log.info(f"Applying flat field correction with {flat_model} to {input_model}")
         result = flatfield_correction(result, flat_model)
-        return result
+        return Arguments(name=result)
     
 
     def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
