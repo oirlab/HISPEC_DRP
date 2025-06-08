@@ -148,58 +148,6 @@ target:
   object_fiber3:
     keyword: OBJFIB3
     comment: Object name in fiber 3. Utility TBD.
-drp_step:
-  dq_init:
-    keyword: P_DQINIT
-    comment: Data quality initialization
-  bias_sub:
-    keyword: P_BIASUB
-    comment: Bias subtraction
-  refpix_corr:
-    keyword: P_REFPIX
-    comment: Reference pixel correction
-  dark_sub:
-    keyword: P_DARK
-    comment: Dark subtraction
-  nonlin_corr:
-    keyword: P_NLCORR
-    comment: Nonlinear readout correction
-  ramp_fit:
-    keyword: P_RAMPFT
-    comment: Ramp fitting
-  flat_field:
-    keyword: P_FLAT
-    comment: Flat Field Correction
-  gain_scale:
-    keyword: P_GANSCL
-    comment: Gain Scale Correction
-  spec_extract:
-    keyword: P_SPECEX
-    comment: Spectral Extraction
-  bary_center_calc:
-    keyword: P_BARYC
-    comment: Barycenter Calculation
-  trans_corr:
-    keyword: P_TRANSC
-    comment: Instrument transmission correction
-  comput_rvs:
-    keyword: P_COMRV
-    comment: Compute Radial Velocities
-  merge_orders:
-    keyword: P_MERGEO
-    comment: Merge spectral orders
-  fluxcal:
-    keyword: P_FLUXCL
-    comment: Flux Calibration
-  drift_calc:
-    keyword: P_DRIFTC
-    comment: Drift Calculation for wavelength calibration
-  sky_sub:
-    keyword: P_SKYSUB
-    comment: Sky subtraction
-  tell_corr:
-    keyword: P_TELCOR
-    comment: Telluric correction
 cal_file:
   data_quality:
     keyword: C_DQ

@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ...calibrations import get_calibration_store, CalibrationSelector, DarkSelector
 from ... import datamodels
+from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
 __all__ = ['DarkSubtractionPrimitive']
@@ -34,7 +35,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
             result = dark_subtraction_ramp(result, dark_model)
         elif isinstance(result, datamodels.HISPECL0Model):
             result = dark_subtraction_rate(result, dark_model)
-        return result
+        return Arguments(name=result)
     
     def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
         if selector is None:

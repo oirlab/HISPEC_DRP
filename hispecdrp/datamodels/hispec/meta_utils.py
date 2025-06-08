@@ -28,9 +28,10 @@ def get_hispec_meta(model : HISPECDataModel, meta : dict | None = None):
 
     # Date time for KOA
     if model.meta.date_obs is None:
-        dt = astropy.time.Time(model.meta.exposure.datetime_start, format='isot')
-        model.meta.date_obs = dt.strftime('%Y%m%d')
-        model.meta.utc = dt.strftime('%H:%M:%S.%f')
+        if model.meta.exposure.datetime_start is not None:
+            dt = astropy.time.Time(model.meta.exposure.datetime_start, format='isot')
+            model.meta.date_obs = dt.strftime('%Y%m%d')
+            model.meta.utc = dt.strftime('%H:%M:%S.%f')
     
     # Reference models
     if hasattr(model, 'CAL_TYPE'):

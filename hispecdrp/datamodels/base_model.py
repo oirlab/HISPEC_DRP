@@ -49,6 +49,8 @@ class DataModel:
     HEADER_SCHEMAS = []
     INHERIT_SCHEMAS = True
 
+    ALLOWED_ATTRIBUTES = ['EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'meta', '_data', '_filepath']
+
     def __init__(
         self,
         filepath : str | None = None,
@@ -83,7 +85,7 @@ class DataModel:
                 raise FileNotFoundError(f"File not found: {filepath}")
             self._filepath = os.path.abspath(filepath)
             self.init_meta(validate_metadata=validate_metadata)
-            self.set_meta_from_headers(extensions=extensions, validate=validate_metadata)
+            self.set_meta_from_headers(extensions=extensions)
             if not meta_only:
                 self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
             else:
@@ -102,14 +104,12 @@ class DataModel:
     def set_meta_from_headers(
         self,
         extensions : str | list[str] | None = None,
-        validate : bool = False,
     ) -> dict[str, fits.Header]:
         """
         Set the metadata from the headers of the FITS file.
         
         Args:
             extensions (str, list[str], optional): List of extensions to read. Defaults to None.
-            validate (bool, optional): Whether to validate the metadata against the schema. Defaults to False.
         """
         extensions = self._resolve_extensions(extensions)
         with fits.open(self._filepath, memmap=True) as hdulist:
@@ -136,7 +136,6 @@ class DataModel:
             do_not_scale_image_data (bool | None, optional): Whether to not scale data according to BZERO and BSCALE. See astropy behavior.
             correct_dtypes (bool, optional): Whether to correct the data types of each data format to the specified data format.
         """
-        # TODO: Implement validation as optional input keyword, here we apply blind conversion
         extensions = self._resolve_extensions(extensions)
         self._data = {}
         with fits.open(
@@ -145,7 +144,8 @@ class DataModel:
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
-                self._data[extname] = self.read_extension_data(hdulist[extname], correct_dtype=correct_dtypes)
+                if extname in hdulist:
+                    self._data[extname] = self.read_extension_data(hdulist[extname], correct_dtype=correct_dtypes)
         return self._data
     
     def read_extension_data(self, hdu : _VALID_HDU, correct_dtype : bool = False) -> np.ndarray | astropy.table.Table:
@@ -169,6 +169,7 @@ class DataModel:
         output_dir : str | None = None,
         suffix : str | None = None,
         add_missing_metadata : bool = False,
+        include_empty_extensions : bool = False,
         correct_dtypes : bool = False,
         **kwargs
     ) -> str:
@@ -192,7 +193,12 @@ class DataModel:
                 suffix=suffix
             )
         self.on_save()
-        return self.to_fits(add_missing_metadata=add_missing_metadata, correct_dtypes=correct_dtypes, **kwargs)
+        return self.to_fits(
+            include_empty_extensions=include_empty_extensions,
+            add_missing_metadata=add_missing_metadata,
+            correct_dtypes=correct_dtypes,
+            **kwargs
+        )
     
     def get_output_path(
         self,
@@ -212,7 +218,7 @@ class DataModel:
             filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
         return filepath
 
-    def to_fits(self, add_missing_metadata : bool = False, correct_dtypes : bool = True, **kwargs):
+    def to_fits(self, include_empty_extensions : bool = False, add_missing_metadata : bool = False, correct_dtypes : bool = True, **kwargs):
         """
         Write the DataModel to a FITS file.
         
@@ -225,6 +231,10 @@ class DataModel:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         hdulist = fits.HDUList()
         for extname in self.EXTENSIONS:
+            if not include_empty_extensions \
+                and (extname not in self._data or self._data[extname] is None) \
+                and extname not in ('RECEIPT', 'PRIMARY'):
+                continue
             hdu = self.make_hdu(extname, add_missing_metadata=add_missing_metadata, correct_dtypes=correct_dtypes)
             hdulist.append(hdu)
         with warnings.catch_warnings():
@@ -320,12 +330,12 @@ class DataModel:
         else:
             return [e.upper() for e in extensions]
 
-    def __getattr__(self, attr):
-        attr = attr.upper()
-        if attr not in self.EXTENSIONS:
+    def __getattr__(self, attr): # This is only called if the attribute is not found in the instance's __dict__
+        attru = attr.upper()
+        if attru not in self.EXTENSIONS:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
-        if attr in self._data:
-            return self._data[attr]
+        if attru in self._data:
+            return self._data[attru]
         else:
             return None
         
@@ -333,8 +343,10 @@ class DataModel:
         attru = attr.upper()
         if attru in self.EXTENSIONS:
             self._data[attru] = value
-        else:
+        elif attr in self.ALLOWED_ATTRIBUTES:
             super().__setattr__(attr, value)
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}' or is not allowed to be set directly")
 
 
     def init_data(self, data : dict | None = None, correct_dtypes : bool = False):
@@ -360,6 +372,17 @@ class DataModel:
                     raise ValueError(f"Unknown extension: {key.upper()}")
         if 'RECEIPT' not in self._data:
             self.init_receipt()
+
+        # Initialize remaining extensions
+        for extname in self.EXTENSIONS:
+            if extname not in self._data:
+                if 'columns' in self.EXTENSIONS[extname]:
+                    self._data[extname] = astropy.table.Table({
+                        name: np.array([], dtype=dtype)
+                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
+                    })
+                else:
+                    self._data[extname] = None # Keep Image HDUs as None
 
     def init_meta(self, meta : MetaDict | None = None, validate_metadata : bool = True) -> MetaDict:
         """
@@ -442,6 +465,23 @@ class DataModel:
                 header.append((keyword, value, comment), end=True)
 
         return header
+    
+    @property
+    def extinfo(self):
+        """
+        Prints current extension information.
+        """
+        for extname, info in self.EXTENSIONS.items():
+            hdu_type = info['hdu_type']
+            if hdu_type is fits.PrimaryHDU:
+                continue
+            if hdu_type is fits.ImageHDU:
+                if extname in self._data and self._data[extname] is not None:
+                    dtype = self._data[extname].dtype
+                    print(f"Extension: {extname}\n  dtype: {dtype}\n  shape: {self._data[extname].shape}")
+            elif hdu_type is fits.BinTableHDU:
+                if len(self._data[extname]) > 0:
+                    print(f"Extension: {extname}\n  columns: {list(self._data[extname].columns)}\n  nrows: {len(self._data[extname])})")
 
     @property
     def data_level_suffix(self):

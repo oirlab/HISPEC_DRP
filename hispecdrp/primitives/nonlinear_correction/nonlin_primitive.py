@@ -2,6 +2,8 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
 
+from keckdrpframework.models.arguments import Arguments
+
 from .nonlincorr_numba import correct_nonlinearity
 
 __all__ = ['NonlinearCorrectionPrimitive']
@@ -32,4 +34,4 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         data = result.data.astype(np.float64)
         correct_nonlinearity(data, nonlin_model.coeffs)
         result.data = data.astype(np.float32)
-        return result
+        return Arguments(name=result)

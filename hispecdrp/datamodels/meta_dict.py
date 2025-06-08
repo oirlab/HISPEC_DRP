@@ -12,7 +12,7 @@ class MetaDict:
     A dictionary that allows attribute-style access and creates nested MetaDicts
     during assignment or access and validates against a schema.
     
-    CSV Columns:
+    YAML:
         - fits_keyword: The FITS keyword to be used in the header.
         - comment: The comment to be added to the FITS header. Defaults to None.
         - unit: The unit of the value, not used for validation. Defaults to None.
@@ -136,9 +136,15 @@ class MetaDict:
         return list(set(super().__dir__() + list(self._data.keys())))
     
     def __contains__(self, item):
-        if isinstance(item, (list, tuple)):
-            item = '.'.join(item)
-        return item in self._data
+        if isinstance(item, str):
+            keys = item.split(".")
+        d = self
+        for key in keys:
+            if isinstance(d, (dict, MetaDict)) and key in d._data:
+                d = d[key]
+            else:
+                return False
+        return True
         
     def validate(self, prop, value):
         """
@@ -266,6 +272,19 @@ class MetaDict:
                 items.append((new_key, value))
         
         return dict(items)
+    
+    def update(self, other):
+        """
+        Update the MetaDict with another dictionary or MetaDict.
+        
+        Args:
+            other (dict | MetaDict): The dictionary or MetaDict to merge into this one.
+        """
+        for prop, _ in self.walk_schema(sections=False):
+            prop = '.'.join(prop) if isinstance(prop, (list, tuple)) else prop
+            if prop not in other:
+                continue
+            self[prop] = other[prop]
 
     @staticmethod
     def unflatten_dict(flat_dict, sep='.'):

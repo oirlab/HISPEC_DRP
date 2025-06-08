@@ -3,3 +3,5 @@ from .dark_subtraction import *
 from .flat_field import *
 from .ramp_fitting import *
 from .nonlinear_correction import *
+from .mode_fitting import *
+from .wavesol import *
