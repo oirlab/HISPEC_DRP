@@ -5,7 +5,7 @@ import numpy as np
 __all__ = ['PARVIL1Model']
 
 _L1_EXTENSIONS = {}
-for i in range(1, 3):
+for i in range(1, 5):
     # Uncalibrated spectrum, error, dq
     _L1_EXTENSIONS[f'SPEC_UNCAL_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L1_EXTENSIONS[f'SPEC_UNCAL_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
@@ -17,7 +17,7 @@ for i in range(1, 3):
     _L1_EXTENSIONS[f'MID_TIME_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
     # Wavelength solution
-    _L1_EXTENSIONS[f'WS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L1_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
 
 class PARVIL1Model(PARVIDataModel):

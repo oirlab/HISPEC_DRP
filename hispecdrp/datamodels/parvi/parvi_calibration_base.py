@@ -1,4 +1,6 @@
 from .parvi_base import PARVIDataModel
+import astropy.time
+from datetime import datetime
 
 __all__ = ['PARVICalibrationModel']
 
@@ -40,6 +42,11 @@ class PARVICalibrationModel(PARVIDataModel):
         Returns:
             str : The filename
         """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
         if master:
             cal_type = f"master-{cal_type}"
         filename = f"PR.{date_time}.{cal_type}.fits"

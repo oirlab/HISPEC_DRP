@@ -1,0 +1,37 @@
+
+from astropy.io import fits
+from .parvi_calibration_base import PARVICalibrationModel
+import numpy as np
+
+__all__ = ['PARVILFCWavesolModel']
+
+_LFCWAVESOL_EXTENSIONS = {}
+for i in range(1, 5):
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _LFCWAVESOL_EXTENSIONS[f'CC_COEFF_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _LFCWAVESOL_EXTENSIONS[f'LFC_PARAMS_FIB{i}'] = {
+        'hdu_type': fits.BinTableHDU,
+        'columns': {
+            'AMPLITUDE': np.float64,
+            'AMPLITUDE_ERR': np.float64,
+            'PIXEL': np.float64,
+            'PIXEL_ERR': np.float64,
+            'SIGMA': np.float64,
+            'SIGMA_ERR': np.float64,
+            'B': np.float64,
+            'B_ERR': np.float64,
+            'MODE_NUM': np.uint16,
+            'WAVE': np.float64,
+            'ORDER': np.uint16,
+        }
+    }
+
+
+class PARVILFCWavesolModel(PARVICalibrationModel):
+    CAL_TYPE = 'lfc_wavesol'
+    EXTENSIONS = _LFCWAVESOL_EXTENSIONS
