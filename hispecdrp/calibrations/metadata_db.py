@@ -125,8 +125,8 @@ class Calibration(_Base):
         )
 
     @staticmethod
-    def generate_uuid(filename : str, drp_version : str) -> str:
-        return str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version))
+    def generate_uuid(filename : str) -> str:
+        return str(uuid.uuid5(UUID_NAMESPACE, filename))
 
     @classmethod
     def from_datamodel(
@@ -136,7 +136,7 @@ class Calibration(_Base):
     ) -> 'Calibration':
         cal_model = datamodels.open(input, copy=False, meta_only=True)
         filename = cal_model.meta.filename
-        _id = cls.generate_uuid(filename, cal_model.meta.drp_version)
+        _id = cls.generate_uuid(filename)
         koa_filepath = koa.generate_koa_filepath(cal_model)
         koa_id = koa_filepath.split('/')[-1]
         datetime_obs = datetime.datetime.fromisoformat(cal_model.meta.exposure.datetime_start)
