@@ -13,6 +13,6 @@ def delta_v_to_delta_wave(dv, w):
 def delta_pix_to_delta_wave(dx, x, wavesol=None, dispersion=None):
     if dispersion is None:
         dispersion = np.gradient(wavesol)
-    disp = np.interp(x, dispersion, disp)
+    disp = np.interp(x, np.arange(len(dispersion)), dispersion)
     dw = disp * dx
     return dw
