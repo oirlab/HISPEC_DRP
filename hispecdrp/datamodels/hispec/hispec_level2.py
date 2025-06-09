@@ -76,7 +76,7 @@ for i in range(1, 4):
     _L2_EXTENSIONS[f'BARYCORR_FIB{i}'] = _BARYCORR_HDU
 
     # Wavelength solution
-    _L2_EXTENSIONS[f'WS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L2_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
     # Transmission correction
     _L2_EXTENSIONS[f'TRANS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
@@ -101,10 +101,6 @@ for i in range(1, 4):
     _L2_EXTENSIONS[f'FLUX_ABS_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L2_EXTENSIONS[f'FLUX_ABS_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _L2_EXTENSIONS[f'FLUX_ABS_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-
-    # Simult etalon
-    _L2_EXTENSIONS[f'ET_CEN_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
-    _L2_EXTENSIONS[f'ET_CEN_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
     # Drift correction NOTE: FORMAT TBD, depends how drifts are calculated (per order, detector, pixel, etc.)
     _L2_EXTENSIONS[f'DRIFT_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}

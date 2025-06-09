@@ -9,7 +9,7 @@ _READTIMES_HDU = {
     'columns' : {
         'READNUM' : np.uint16,
         'TIMES' : np.float64,
-        'FRAMETIME' : np.float64,
+        'EXPTIME' : np.float64,
     }
 }
 

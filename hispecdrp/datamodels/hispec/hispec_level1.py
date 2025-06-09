@@ -17,7 +17,7 @@ for i in range(1, 4):
     _L1_EXTENSIONS[f'MID_TIME_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
     # Wavelength solution
-    _L1_EXTENSIONS[f'WS_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L1_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
 
 class HISPECL1Model(HISPECDataModel):
