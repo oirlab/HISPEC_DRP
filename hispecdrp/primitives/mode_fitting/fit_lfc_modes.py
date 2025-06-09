@@ -45,18 +45,22 @@ def fit_modes(
         x_fit = xarr[ki:kf+1].copy()
         y_fit = spec[ki:kf+1].copy()
         yerr_fit = specerr[ki:kf+1].copy()
-        fit_result = gauss_background_fit(x_fit, y_fit, yerr_fit, mu_bounds=mu_bounds, mu_guess=modes[i], sigma_bounds=sigma_bounds, max_fit_window=max_fit_window)
+        fit_result = gauss_background_fit(x_fit, y_fit, yerr_fit, mu_bounds=mu_bounds, mu_guess=modes[i], sigma_bounds=sigma_bounds)
         fit_results.append(fit_result)
 
     return dict(
-        pixel=np.array([fit['mu'] for fit in fit_results]),
         amplitude=np.array([fit['amplitude'] for fit in fit_results]),
+        amplitude_err=np.array([fit['amplitude_err'] for fit in fit_results]),
+        pixel=np.array([fit['mu'] for fit in fit_results]),
+        pixel_err=np.array([fit['mu_err'] for fit in fit_results]),
         sigma=np.array([fit['sigma'] for fit in fit_results]),
-        b=np.array([fit['b'] for fit in fit_results])
+        sigma_err=np.array([fit['sigma_err'] for fit in fit_results]),
+        b=np.array([fit['b'] for fit in fit_results]),
+        b_err=np.array([fit['b_err'] for fit in fit_results]),
     )
 
-def estimate_lfc_background(spec : np.ndarray, mode_density : int = 4, n_modes : int = 10) -> np.ndarray:
-    filter_width = int(mode_density * n_modes)
+def estimate_lfc_background(spec : np.ndarray, min_mode_spacing : int = 12, n_modes : int = 10) -> np.ndarray:
+    filter_width = int(min_mode_spacing / 3 * n_modes)
     if filter_width % 2 == 0:
         filter_width += 1  # Ensure filter width is odd
     background = _nanmin_filter1d(spec, filter_width)
@@ -71,15 +75,16 @@ def _nanmin_filter1d(data: np.ndarray, width: int) -> np.ndarray:
     windows = sliding_window_view(padded, width)
     return np.nanmin(windows, axis=1)
 
-def find_initial_modes(spec, dq, mode_density : float = 12) -> dict:
+def find_initial_modes(spec, dq, min_mode_spacing : float = 10) -> dict:
     
     # Estimate and remove background
-    background = estimate_lfc_background(spec, mode_density=12, n_modes=2)
+    background = estimate_lfc_background(spec, min_mode_spacing=min_mode_spacing, n_modes=2)
     spec_nobkg = spec - background
 
     # Find peaks
-    modes, _ = scipy.signal.find_peaks(spec_nobkg, width=(2, mode_density * 1.25))
+    modes, _ = scipy.signal.find_peaks(spec_nobkg, distance=min_mode_spacing - 2)
     # NOTE: Keep plots here for debugging.
+    # import matplotlib.pyplot as plt
     #plt.plot(spec); [plt.axvline(m, color='r', linestyle='--') for m in modes]
     #plt.plot(spec); plt.plot(background, color='orange', label='Background'); plt.show()
 

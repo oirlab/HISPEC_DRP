@@ -6,7 +6,6 @@ __all__ = ['HISPECFlatModel']
 
 class HISPECFlatModel(HISPECCalibrationModel):
 
-
     EXTENSIONS = {
         'DATA': {
             'hdu_type' : fits.ImageHDU,

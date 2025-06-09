@@ -6,7 +6,6 @@ __all__ = ['HISPECDarkModel']
 
 class HISPECDarkModel(HISPECCalibrationModel):
 
-
     EXTENSIONS = {
         'DATA': {
             'hdu_type' : fits.ImageHDU,

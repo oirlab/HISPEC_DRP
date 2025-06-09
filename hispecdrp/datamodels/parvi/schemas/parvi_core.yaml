@@ -146,12 +146,21 @@ target:
   airmass_start:
     keyword: AIRMAST
     comment: Airmass at start of exposure
+  airmass_end:
+    keyword: AIRMAEND
+    comment: Airmass at end of exposure
   azimuth_start:
     keyword: AZST
     comment: Azimuth at start of exposure in degrees
+  azimuth_end:
+    keyword: AZEND
+    comment: Azimuth at end of exposure
   elevation_start:
     keyword: ELSTART
     comment: Elevation at start of exposure
+  elevation_end:
+    keyword: ELEND
+    comment: Elevation at end of exposure
   equinox:
     keyword: EQUINOX
     comment: Equinox of coordinates

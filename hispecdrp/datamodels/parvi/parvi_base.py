@@ -18,8 +18,8 @@ class PARVIDataModel(DataModel):
         """
         Create a filename for a PARVI data product.
 
-        Format: PR_{date}_{suffix}.fits
-            - datetime : YYYYMMDDTHHMMSS
+        Format: PR.{datetime}_{suffix}.fits
+            - datetime : YYYYMMDDSSSSS.SS
             - suffix : optional suffix
 
         Args:
