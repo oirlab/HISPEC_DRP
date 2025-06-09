@@ -4,6 +4,7 @@ from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 
 from .fit_lfc_modes import fit_modes, find_initial_modes
+from ...utils.doppler import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants
@@ -69,12 +70,22 @@ class FitLFCModesPrimitive(BasePrimitive):
                 if order in params_table['ORDER']:
                     setattr(input_model, f'lfc_params_fib{fiber}', params_table[params_table['ORDER'] != order])
                 for i in range(len(_fit_results['pixel'])):
-                    r = {k.upper() : v[i] for k, v in _fit_results.items()}
-                    r['ORDER'] = order
+                    r = {
+                        'ORDER' : order,
+                        'AMPLITUDE' : _fit_results['amplitude'][i],
+                        'AMPLITUDE_ERR' : _fit_results['amplitude_err'][i],
+                        'PIXEL' : _fit_results['pixel'][i],
+                        'PIXEL_ERR' : _fit_results['pixel_err'][i],
+                        'SIGMA_PIX' : _fit_results['sigma'][i],
+                        'SIGMA_PIX_ERR' : _fit_results['sigma_err'][i],
+                    }
                     wave_closest = wave[oi, int(r['PIXEL'])]
                     mode_wave, _, mode_num = get_closest_lfc_mode(self.args.lfc_nu0, self.args.lfc_delta_nu, wave_closest)
                     r['WAVE'] = mode_wave
                     r['MODE_NUM'] = mode_num
+                    r['SIGMA_WAVE'] = delta_pix_to_delta_wave(r['SIGMA_PIX'], r['PIXEL'], wave[oi, :])
+                    r['SIGMA_WAVE_ERR'] = delta_pix_to_delta_wave(r['SIGMA_PIX_ERR'], r['PIXEL'], wave[oi, :])
+                    r['PIXEL_ERR_WAVE'] = delta_pix_to_delta_wave(_fit_results['pixel_err'][i], r['PIXEL'], wave[oi, :])
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'PIXEL'])
 
@@ -82,8 +93,8 @@ class FitLFCModesPrimitive(BasePrimitive):
 
 
 def gen_lfc_modes(nu0 : float, delta_nu : float, wave_start : float, wave_end : float):
-    nu_end = (scipy.constants.c / wave_start) * 1E9
-    nu_start = (scipy.constants.c / wave_end) * 1E9
+    nu_end = (scipy.constants.c / wave_start) * 1E6
+    nu_start = (scipy.constants.c / wave_end) * 1E6
     n1 = int(np.ceil((nu_start - nu0) / delta_nu))
     n2 = int(np.ceil((nu_end - nu0) / delta_nu))
     integers = np.arange(min(n1, n2), max(n1, n2) + 1).astype(int)
@@ -95,11 +106,11 @@ def gen_lfc_modes(nu0 : float, delta_nu : float, wave_start : float, wave_end : 
 
 def _gen_lfc_modes(nu0 : float, delta_nu : float, integers : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     nus = integers * delta_nu + nu0
-    waves = scipy.constants.c / nus * 1E9
+    waves = scipy.constants.c / nus * 1E6
     return waves, nus
 
 def get_closest_lfc_mode(nu0 : float, delta_nu : float, wave : float):
-    nu = (scipy.constants.c / wave) * 1E9
+    nu = (scipy.constants.c / wave) * 1E6
     n = int(np.round((nu - nu0) / delta_nu))
     _wave, nu = _gen_lfc_modes(nu0, delta_nu, n)
     return _wave, nu, n
