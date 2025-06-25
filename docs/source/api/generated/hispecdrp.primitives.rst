@@ -12,6 +12,10 @@
 
    base_primitive
    dark_subtraction
-   flat_field
+   detector_flat
+   line_fitting
+   lsf
    nonlinear_correction
    ramp_fitting
+   register_calibration
+   wavesol

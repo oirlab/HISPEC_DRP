@@ -11,5 +11,7 @@
    :recursive:
 
    base_pipeline
+   calibration
+   calibration_pipeline_base
    stage0
    stage1

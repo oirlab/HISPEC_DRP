@@ -10,5 +10,7 @@ hispecdrp.primitives.ramp\_fitting
    :toctree:
    :recursive:
 
+   fit_ramp_jwst
+   fit_ramp_likely
    fit_ramp_numba
    ramp_fit_primitive

@@ -8,6 +8,7 @@ hispecdrp.datamodels.utils
 
    .. autosummary::
    
-      class_from_model_type
+      model_type_from_hdu
+      model_type_from_name
       open
    

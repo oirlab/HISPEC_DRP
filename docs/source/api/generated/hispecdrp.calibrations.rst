@@ -10,8 +10,14 @@
    :toctree:
    :recursive:
 
-   github
+   hispec_calibration_orm
+   hispec_selectors
    koa
-   metadata_db
-   selectors
+   local_database
+   metadata_database
+   orm_base
+   parvi_calibration_orm
+   parvi_selectors
+   remote_database
+   selector_base
    store

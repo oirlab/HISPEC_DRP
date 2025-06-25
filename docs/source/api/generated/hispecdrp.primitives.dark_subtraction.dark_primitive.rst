@@ -8,7 +8,6 @@ hispecdrp.primitives.dark\_subtraction.dark\_primitive
 
    .. autosummary::
    
-      dark_subtraction_ramp
       dark_subtraction_rate
    
    .. rubric:: Classes

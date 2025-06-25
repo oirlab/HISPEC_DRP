@@ -1,0 +1,42 @@
+Fit Ramp
+========
+
+
+Overview
+--------
+
+Fit the UTR slopes to produce a rate map.
+
+
+**Class**: :py:class:`~hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive`
+
+
+Algorithm
+---------
+
+Several methods are supported, see below.
+
+Arguments
+---------
+
+- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
+    The raw (UTR) model to fit slopes to.
+- **method** : ``str``
+    The method to use to fit the ramps. Defaults to ``'jwst_ols'``.
+    
+    - **ols**: Ordinary Least Squares with numba. No weights.
+    - **cds**: Correlated double sampling.
+    - **mcds**: Multiple correlated double sampling (see argument num_coadd).
+    - **jwst_ols**: Ordinary least squares method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
+    - **jwst_likely**: Likelihood-based method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
+
+- **num_coadd** : ``int``
+    Number of coadds for ``method='mcds'``.
+- **max_cores** : ``int``
+    Maximum number of cores to use for parallel processing for method. Defaults to 1 (no parallel processing). Only supported by jwst methods for now.
+
+
+Calibration Files
+-----------------
+
+None.
