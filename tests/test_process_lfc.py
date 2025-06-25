@@ -106,8 +106,3 @@ def test_process_lfc_parvi(tmp_path):
     assert len(results) == 2 # lfc_wavesol and lsf
     assert results[0].cal_type == 'lfc_wavesol'
     assert results[1].cal_type == 'lsf'
-
-#from pathlib import Path
-#os.system('rm -r /Users/cale/Desktop/HISPEC_TEMP/HISPECDRP_CALIBRATION_CACHE/')  # Clear cache before running test
-#test_process_lfc_parvi(Path('/Users/cale/Desktop/HISPECDRP_CALIBRATION_CACHE/'))  # Adjust the path as needed
-
