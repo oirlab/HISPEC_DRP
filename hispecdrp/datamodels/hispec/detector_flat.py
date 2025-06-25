@@ -1,10 +1,10 @@
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
+from .hispec_base import HISPECCalibrationModel
 import numpy as np
 
-__all__ = ['HISPECDarkModel']
+__all__ = ['HISPECDetectorFlatModel']
 
-class HISPECDarkModel(HISPECCalibrationModel):
+class HISPECDetectorFlatModel(HISPECCalibrationModel):
 
     EXTENSIONS = {
         'DATA': {
@@ -15,11 +15,11 @@ class HISPECDarkModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_POISSON': {
+        'VAR_RNOISE': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_RNOISE': {
+        'VAR_POISSON': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
@@ -29,4 +29,4 @@ class HISPECDarkModel(HISPECCalibrationModel):
         }
     }
 
-    CAL_TYPE = 'dark'
+    CAL_TYPE = 'detflat'

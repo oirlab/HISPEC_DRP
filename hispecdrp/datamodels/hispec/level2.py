@@ -103,11 +103,14 @@ for i in range(1, 4):
     _L2_EXTENSIONS[f'FLUX_ABS_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
 
     # Drift correction NOTE: FORMAT TBD, depends how drifts are calculated (per order, detector, pixel, etc.)
-    _L2_EXTENSIONS[f'DRIFT_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _L2_EXTENSIONS[f'DRIFT_PIX_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L2_EXTENSIONS[f'DRIFT_PIX_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L2_EXTENSIONS[f'DRIFT_WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _L2_EXTENSIONS[f'DRIFT_WAVE_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
 
     # RVs
     _L2_EXTENSIONS[f'RVCCF_FIB{i}'] = _RVCCF_HDU
-    _L2_EXTENSIONS[f'RVCCFAVG_FIB{i}'] = _RVCCFAVG_HDU
+    _L2_EXTENSIONS[f'RVCCFAGG_FIB{i}'] = _RVCCFAVG_HDU
 
 
 class HISPECL2Model(HISPECDataModel):

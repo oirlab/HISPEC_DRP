@@ -1,10 +1,10 @@
 from astropy.io import fits
-from .parvi_calibration_base import PARVICalibrationModel
+from .parvi_base import PARVICalibrationModel
 import numpy as np
 
-__all__ = ['PARVINonlinearCoeffModel']
+__all__ = ['PARVINonlinearCorrectionModel']
 
-class PARVINonlinearCoeffModel(PARVICalibrationModel):
+class PARVINonlinearCorrectionModel(PARVICalibrationModel):
 
     EXTENSIONS = {
         'COEFFS': {

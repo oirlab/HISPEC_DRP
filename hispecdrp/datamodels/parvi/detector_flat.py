@@ -1,10 +1,10 @@
 from astropy.io import fits
-from .parvi_calibration_base import PARVICalibrationModel
+from .parvi_base import PARVICalibrationModel
 import numpy as np
 
-__all__ = ['PARVIDarkModel']
+__all__ = ['PARVIDetectorFlatModel']
 
-class PARVIDarkModel(PARVICalibrationModel):
+class PARVIDetectorFlatModel(PARVICalibrationModel):
 
     EXTENSIONS = {
         'DATA': {
@@ -15,11 +15,11 @@ class PARVIDarkModel(PARVICalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_POISSON': {
+        'VAR_RNOISE': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
-        'VAR_RNOISE': {
+        'VAR_POISSON': {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float32
         },
@@ -29,4 +29,4 @@ class PARVIDarkModel(PARVICalibrationModel):
         }
     }
 
-    CAL_TYPE = 'dark'
+    CAL_TYPE = 'detflat'

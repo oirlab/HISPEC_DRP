@@ -1,6 +1,6 @@
 
 from astropy.io import fits
-from .parvi_calibration_base import PARVICalibrationModel
+from .parvi_base import PARVICalibrationModel
 import numpy as np
 
 __all__ = ['PARVILFCWavesolModel']
@@ -14,18 +14,18 @@ for i in range(1, 5):
     _LFCWAVESOL_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCWAVESOL_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
     _LFCWAVESOL_EXTENSIONS[f'CC_COEFF_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
-    _LFCWAVESOL_EXTENSIONS[f'LFC_PARAMS_FIB{i}'] = {
+    _LFCWAVESOL_EXTENSIONS[f'LFC_FITPARAMS_FIB{i}'] = {
         'hdu_type': fits.BinTableHDU,
         'columns': {
             'AMPLITUDE': np.float64,
             'AMPLITUDE_ERR': np.float64,
-            'PIXEL': np.float64,
-            'PIXEL_ERR': np.float64,
-            'PIXEL_ERR_WAVE': np.float64,
+            'MU_PIX': np.float64,
+            'MU_ERR_PIX': np.float64,
+            'MU_ERR_WAVE': np.float64,
             'SIGMA_PIX': np.float64,
-            'SIGMA_PIX_ERR': np.float64,
+            'SIGMA_ERR_PIX': np.float64,
             'SIGMA_WAVE': np.float64,
-            'SIGMA_WAVE_ERR': np.float64,
+            'SIGMA_ERR_WAVE': np.float64,
             'B': np.float64,
             'B_ERR': np.float64,
             'MODE_NUM': np.int16,
@@ -38,3 +38,6 @@ for i in range(1, 5):
 class PARVILFCWavesolModel(PARVICalibrationModel):
     CAL_TYPE = 'lfc_wavesol'
     EXTENSIONS = _LFCWAVESOL_EXTENSIONS
+    HEADER_SCHEMAS = [
+        'parvi_lfcwavesol.yaml',
+    ]

@@ -1,7 +1,7 @@
 import os
 import astropy.table
 from astropy.io import fits
-import copy
+from copy import deepcopy
 from typing import TypeVar
 import datetime
 from .meta_dict import MetaDict
@@ -33,6 +33,7 @@ class DataModel:
         INHERIT_EXTENSIONS (bool): Whether to inherit extensions from parent class. Defaults to True.
         HEADER_SCHEMAS (list): List of schema files to load for the header.
         INHERIT_SCHEMAS (bool): Whether to inherit schemas from parent class. Defaults to True.
+        ALLOWED_ATTRIBUTES (list): List of attributes that can be set directly on the DataModel.
     """
 
     EXTENSIONS = {
@@ -55,9 +56,9 @@ class DataModel:
         self,
         filepath : str | None = None,
         data : dict | None = None,
-        extensions : str | list[str] | None = None,
         meta : MetaDict | None = None,
         meta_only : bool = False,
+        extensions : str | list[str] | None = None,
         validate_metadata : bool = True,
         correct_dtypes : bool = False,
     ):
@@ -65,19 +66,14 @@ class DataModel:
         Initialize a DataModel object.
 
         Args:
-            data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
-                Keys should match the schema's extension names. Defaults to None.
-
-            meta (dict, optional): Dictionary containing metadata.
-                Keys should match the schema's property paths. Defaults to None.
-                
-            filepath (str, optional): Path to a FITS file to load. Defaults to None.
-            extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to None.
+            filepath (str, optional): Path to a FITS file to load.
+            data (dict, optional): Dictionary containing the data (numpy arrays or astropy tables). Keys should match the schema's extension names.
+            meta (dict, optional): Dictionary containing metadata. Keys should match the schema's property paths.
+            meta_only (bool, optional): If True, only metadata is loaded and no data is read from the FITS file. Defaults to False.
+            extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to all extensions.
             validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
-            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays upon reading them in. Defaults to False.
         """
-
-        # TODO: Implement hdu_list input.
 
         # Set the optional filepath
         if filepath is not None:
@@ -177,12 +173,14 @@ class DataModel:
         Save the DataModel to a FITS file.
 
         Args:
-            filepath (str, optional): The filepath to save to. Defaults to self._filepath.
-            filename (str, optional): The filename to save to. Defaults to None.
-            output_dir (str, optional): The directory to save to. Defaults to None.
-            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
-            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
-            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
+            - filepath (str, optional): The filepath to save to. Defaults to self._filepath.
+            - filename (str, optional): The filename to save to. Defaults to None.
+            - output_dir (str, optional): The directory to save to. Defaults to None.
+            - suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+            - add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+            - include_empty_extensions (bool, optional): Whether to include empty extensions in the output. Defaults to False.
+            - correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
+            - kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
         """
         if filepath is not None:
             self._filepath = filepath
@@ -223,7 +221,7 @@ class DataModel:
         Write the DataModel to a FITS file.
         
         Args:
-            **kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
+            kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
         """
         if 'overwrite' not in kwargs:
             kwargs['overwrite'] = True
@@ -313,13 +311,13 @@ class DataModel:
         """
         Create a deep copy of the object.
         """
-        return copy.deepcopy(self)
+        return deepcopy(self)
     
     def __deepcopy__(self, memo):
         result = self.__class__.__new__(self.__class__)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            setattr(result, k, copy.deepcopy(v, memo))
+            setattr(result, k, deepcopy(v, memo))
         return result
 
     def _resolve_extensions(self, extensions : str | list[str] | None = None):
@@ -347,7 +345,6 @@ class DataModel:
             super().__setattr__(attr, value)
         else:
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}' or is not allowed to be set directly")
-
 
     def init_data(self, data : dict | None = None, correct_dtypes : bool = False):
         """
@@ -503,3 +500,18 @@ class DataModel:
         Returns the base filename of the DataModel if present.
         """
         return os.path.basename(self._filepath) if self._filepath else None
+    
+    @classmethod
+    def from_datamodel(cls, model : 'DataModel', copy : bool = True):
+        """
+        Create a new DataModel from another DataModel by copying over any valid data and metadata entries. The _filepath is not copied.
+        
+        Args:
+            other (DataModel): The DataModel to copy from.
+        """
+        _data = {k : v for k, v in model._data.items() if k in cls.EXTENSIONS}
+        if copy:
+            _data = deepcopy(_data)
+        model_out = cls(data=_data)
+        model_out.meta.update(model.meta, override=False)
+        return model_out

@@ -48,6 +48,10 @@ instrument:
     keyword: INSTERA
     comment: Instrument era specified via semver
     default: 0.0.1
+  spectrograph:
+    keyword: SPECTROG
+    comment: Name of the spectrograph (JH)
+    default: JH
 exposure:
   exposure_type:
     keyword: IMTYPE

@@ -1,10 +1,10 @@
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
+from .hispec_base import HISPECCalibrationModel
 import numpy as np
 
-__all__ = ['HISPECNonlinearCoeffModel']
+__all__ = ['HISPECNonlinearCorrectionModel']
 
-class HISPECNonlinearCoeffModel(HISPECCalibrationModel):
+class HISPECNonlinearCorrectionModel(HISPECCalibrationModel):
 
     EXTENSIONS = {
         'COEFFS': {
