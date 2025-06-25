@@ -1,7 +1,7 @@
 from ... import datamodels
 from ..base_primitive import BasePrimitive
 
-from ...utils.doppler import delta_wave_to_delta_v
+from ...utils import delta_wave_to_delta_v
 from .cheb2d import solve_chebyshev2d
 from keckdrpframework.models.arguments import Arguments
 import numpy as np
@@ -48,13 +48,18 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
         else:
             deg_inter_order = self.args.deg_inter_order
 
+        fit_results = []
+
+        # Get the output model type
+        output_model = self.get_output_model(input_model, model_suffix='LFCWavesolModel')
+
         for fiber in self.args.do_fibers:
 
             # Get the table for the fiber
-            params_table = getattr(input_model, f'lfc_params_fib{fiber}')
+            params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
 
             # Setup input vectors
-            pixels = params_table['PIXEL']
+            pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
             waves = params_table['WAVE']
             mask = np.nonzero(np.isin(orders, self.args.fit_orders))[0]
@@ -62,7 +67,7 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
             orders = orders[mask]
             waves = waves[mask]
             if self.args.opt_weights:
-                weights = params_table['AMPLITUDE'][mask]
+                weights = 1 / params_table['MU_ERR_WAVE'][mask]**2
             else:
                 weights = None
 
@@ -73,20 +78,26 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
                 max_iters=self.args.max_iters, sigma_cut=self.args.sigma_cut, max_vel_cut=self.args.max_vel_cut,
                 weights=weights,
             )
+            fit_results.append(fit_result)
 
             # Set results in model
-            setattr(input_model, f'cc_coeff_fib{fiber}', fit_result['coeffs'])
-            pixel_vec = np.arange(input_model.spec_fib3.shape[1])
-            order_vec = self.make_order_vec(input_model)
+            setattr(output_model, f'cc_coeff_fib{fiber}', fit_result['coeffs'])
+            nx = getattr(output_model, f'spec_fib{fiber}').shape[1]
+            pixel_vec = np.arange(nx)
+            order_vec = self.make_order_vec(output_model)
+            output_model.meta.wavesol.pixel_min_norm = fit_result['pixel_bounds'][0]
+            output_model.meta.wavesol.pixel_max_norm = fit_result['pixel_bounds'][1]
+            output_model.meta.wavesol.order_min_norm = fit_result['order_bounds'][0]
+            output_model.meta.wavesol.order_max_norm = fit_result['order_bounds'][1]
             wavesol_full = _build_wavesol_poly2d_structured(
                 fit_result['coeffs'],
                 pixel_vec,
                 order_vec,
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
-            setattr(input_model, f'wave_fib{fiber}', wavesol_full)
+            setattr(output_model, f'wave_fib{fiber}', wavesol_full)
         
-        return Arguments(name=input_model, fit_result=fit_result)
+        return Arguments(name=output_model, fit_results=fit_results)
 
     @staticmethod
     def make_order_vec(model : datamodels.DataModel) -> np.ndarray:

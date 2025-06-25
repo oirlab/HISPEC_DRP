@@ -1,1 +1,1 @@
-from .wavesol_cheb2d_prim import *
+from .wavesol_cheb2d_primitive import *

@@ -1,5 +1,5 @@
 from ..base_primitive import BasePrimitive
-from ...calibrations import get_calibration_store, CalibrationSelector, DarkSelector
+from ...calibrations import HISPECDarkSelector, PARVIDarkSelector
 from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 import numpy as np
@@ -14,58 +14,37 @@ class DarkSubtractionPrimitive(BasePrimitive):
             If None, the dark model will be queried.
     """
 
-    class_alias = 'dark_sub'
-
     ARGUMENTS = {
         'suffix' : 'darksub',
-        'dark' : None
+        'dark' : None,
     }
 
-
     def _perform(self):
-        input_model = datamodels.open(self.args.name, copy=False)
+        input_model = datamodels.open(self.args.name)
         if self.args.dark is None:
-            dark_path = self.get_calibration(input_model, selector=DarkSelector(), use_cached=True)
+            dark_path = self.get_calibration(input_model, use_cached=True)
         else:
             dark_path = self.args.dark
-        dark_model = datamodels.open(dark_path, copy=False)
+        dark_model = datamodels.open(dark_path)
         result = input_model.copy()
         self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
-        if isinstance(result, datamodels.HISPECRampModel):
-            result = dark_subtraction_ramp(result, dark_model)
-        elif isinstance(result, datamodels.HISPECL0Model):
-            result = dark_subtraction_rate(result, dark_model)
+        result = dark_subtraction_rate(result, dark_model)
         return Arguments(name=result)
-    
-    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
-        if selector is None:
-            selector = DarkSelector()
-        return super().get_calibration(name, selector, use_cached=use_cached, **kwargs)
+
+    def get_calibration_selector(self, name):
+        input_model = datamodels.open(name, meta_only=True)
+        if isinstance(input_model, datamodels.HISPECDataModel):
+            return HISPECDarkSelector()
+        elif isinstance(input_model, datamodels.PARVIDataModel):
+            return PARVIDarkSelector()
+        else:
+            raise ValueError(f"Unsupported input model type: {type(input_model)}")
+
         
-
-def dark_subtraction_ramp(
-        input_model : datamodels.HISPECRampModel,
-        dark_model : datamodels.HISPECDarkModel,
-    ) -> datamodels.HISPECRampModel:
-    """
-    Subtract the dark model from an input ramp model.
-    
-    Args:
-        input_model (RampModel): Input ramp model.
-        dark_model (DarkModel): Dark model.
-    
-    Returns:
-        RampModel: The dark-subtracted data.
-    """
-    input_model.data = input_model.data - dark_model.data[:, :, None] # NOTE: THIS WILL NEED TO BE UPDATED TO INCLUDE ITIME
-    # TODO: Sort out error handling for ramps.
-    return input_model
-
-
 def dark_subtraction_rate(
-        input_model : datamodels.HISPECL0Model,
-        dark_model : datamodels.HISPECDarkModel,
-    ) -> datamodels.HISPECL0Model:
+    input_model : datamodels.HISPECL0Model,
+    dark_model : datamodels.HISPECDarkModel,
+) -> datamodels.HISPECL0Model:
     """
     Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
 
