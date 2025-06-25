@@ -1,9 +1,8 @@
 from .. import datamodels
-from .metadata_db import Calibration, CalibrationDB
-from sqlalchemy import func
+from .metadata_database import CalibrationDB
 
 
-__all__ = ['CalibrationSelector', 'DarkSelector', 'FlatFieldSelector']
+__all__ = ['CalibrationSelector']
 
 
 class CalibrationSelector:
@@ -89,46 +88,3 @@ class CalibrationSelector:
             Fallback calibration file(s).
         """
         return None
-
-
-
-# Classes for different calibration types below
-
-class DarkSelector(CalibrationSelector):
-    """
-    Dark calibration selector. Rules:
-        - Calibration type == 'dark'
-        - Matching instrument era
-        - Matching spectrograph
-        - Master calibration
-        - Closest in time to the input data
-    """
-
-    def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
-        with db.session_manager() as session:
-            return session.query(Calibration).filter(
-                Calibration.cal_type == 'dark',
-                Calibration.instera == input.meta.instrument.era,
-                Calibration.spectrograph == input.meta.instrument.spectrograph,
-                Calibration.master == True
-            ).order_by(func.abs(Calibration.mjd_start - input.meta.exposure.mjd_start)).all()
-
-
-class FlatFieldSelector(CalibrationSelector):
-    """
-    Flat calibration selector. Rules:
-        - Calibration type == 'flat'
-        - Matching instrument era
-        - Matching spectrograph
-        - Master calibration
-        - Closest in time to the input data
-    """
-
-    def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
-        with db.session_manager() as session:
-            return session.query(Calibration).filter(
-                Calibration.cal_type == 'flat',
-                Calibration.instera == input.meta.instrument.era,
-                Calibration.spectrograph == input.meta.instrument.spectrograph,
-                Calibration.master == True
-            ).order_by(func.abs(Calibration.mjd_start - input.meta.exposure.mjd_start)).all()
