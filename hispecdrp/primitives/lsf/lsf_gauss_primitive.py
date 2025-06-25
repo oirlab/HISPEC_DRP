@@ -1,0 +1,199 @@
+from ..base_primitive import BasePrimitive
+from ... import datamodels
+
+from keckdrpframework.models.arguments import Arguments
+
+import numpy as np
+from ..wavesol.cheb2d import solve_chebyshev2d
+
+__all__ = ['GaussianLSFPrimitive']
+
+
+class GaussianLSFPrimitive(BasePrimitive):
+    """
+    Create a Gaussian LSF from the Gaussian mode fitting results.
+    """
+
+    ARGUMENTS = {
+        'do_fibers' : None,
+        'fit_orders' : None,
+        'deg_intra_order' : 3,
+        'deg_inter_order' : 'auto',
+        'opt_weights' : True,
+        'max_iters' : 100,
+        'sigma_cut' : 4.0,
+        'output_model' : None,
+    }
+
+    def _perform(self):
+
+        input_model = datamodels.open(self.args.name)
+
+        # Default inter order deg
+        if self.args.deg_inter_order == 'auto':
+            anchor_degree = 4
+            anchor_orders = 10
+            max_degree = 6
+            deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.args.fit_orders)) / np.log(anchor_orders)), max_degree))
+            self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
+        else:
+            deg_inter_order = self.args.deg_inter_order
+
+        fit_results = []
+
+        # Get the target output model
+        output_model = self.get_output_model(input_model, model_suffix='GaussianLSFModel')
+
+        for fiber in self.args.do_fibers:
+            params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
+            waves = params_table['WAVE']
+            pixels = params_table['MU_PIX']
+            orders = params_table['ORDER']
+            sigmas = params_table['SIGMA_WAVE']
+            sigma_errs = params_table['SIGMA_ERR_WAVE']
+            mask = np.nonzero(np.isin(orders, self.args.fit_orders))[0]
+            pixels = pixels[mask].copy()
+            orders = orders[mask].copy()
+            waves = waves[mask].copy()
+            sigmas = sigmas[mask].copy()
+            if self.args.opt_weights:
+                sigma_errs = sigma_errs[mask].copy()
+                weights = 1 / sigma_errs**2
+            else:
+                weights = None
+            fit_result = fit_gausslsf_chebyshev2d(
+                pixels, orders, sigmas, 
+                deg_intra_order=self.args.deg_intra_order, deg_inter_order=deg_inter_order,
+                max_iters=self.args.max_iters, sigma_cut=self.args.sigma_cut,
+                weights=weights,
+            )
+            fit_results.append(fit_result)
+
+            nx = getattr(input_model, f'spec_fib{fiber}').shape[1]
+            pixel_vec = np.arange(nx)
+            order_vec = self.make_order_vec(input_model)
+            output_model.meta.lsf.pixel_min_norm = fit_result['pixel_bounds'][0]
+            output_model.meta.lsf.pixel_max_norm = fit_result['pixel_bounds'][1]
+            output_model.meta.lsf.order_min_norm = fit_result['order_bounds'][0]
+            output_model.meta.lsf.order_max_norm = fit_result['order_bounds'][1]
+            lsf_sigmas_full = _build_lsf_poly2d_structured(
+                fit_result['coeffs'],
+                pixel_vec,
+                order_vec,
+                fit_result['pixel_bounds'], fit_result['order_bounds']
+            )
+            setattr(output_model, f'lsf_params_fib{fiber}', lsf_sigmas_full)
+
+        return Arguments(name=output_model, fit_results=fit_results)
+    
+    @staticmethod
+    def make_order_vec(model : datamodels.DataModel) -> np.ndarray:
+        mi = model.meta.order_start
+        mf = model.meta.order_end
+        step = 1 if mf >= mi else -1
+        return np.arange(mi, mf + step, step).astype(np.int16)
+    
+
+def fit_gausslsf_chebyshev2d(
+    pixels : np.ndarray,
+    orders : np.ndarray,
+    sigmas : np.ndarray,
+    deg_intra_order : int,
+    deg_inter_order : int,
+    pixel_bounds : tuple[float] | None = None,
+    order_bounds : tuple[float] | None = None,
+    max_iters : float | None = None,
+    sigma_cut : float | None = None,
+    weights : np.ndarray | None = None,
+) -> dict:
+    """
+    Fit a 2D Chebyshev polynomial to the Gaussian sigmas (units microns) as a function of pixel and echelle order.
+
+    Args:
+        pixels (np.ndarray): Pixel values.
+        orders (np.ndarray): Echelle order values.
+        sigmas (np.ndarray): Gaussian sigmas in units of wavelength.
+        deg_intra_order (int): Degree of the polynomial within an order.
+        deg_inter_order (int): Degree of the polynomial between orders.
+        pixel_bounds (tuple[float] | None): Bounds for pixel values for normalization of the data.
+        order_bounds (tuple[float] | None): Bounds for order values for normalization of the data.
+        max_iters (int | None): Maximum number of iterations for the fitting process.
+        sigma_cut (float | None): Cutoff for the residuals in terms of standard deviation.
+        weights (np.ndarray | None): Fit weights. Defaults to uniform weights.
+
+    Returns:
+        dict : Dictionary containing the results of the fit.
+    """
+
+    # Copy to not modify original data
+    pixels = np.copy(pixels)
+    orders = np.copy(orders)
+    if weights is None:
+        weights = np.ones(pixels.shape)
+    else:
+        weights = np.copy(weights)
+
+    if pixel_bounds is None:
+        pixel_bounds = (np.nanmin(pixels) - 10, np.nanmax(pixels) + 10)
+    if order_bounds is None:
+        order_bounds = (np.nanmin(orders) - 10, np.nanmax(orders) + 10)
+
+    # Get normalized vals
+    pixels_norm = _normalize_val(pixels, *pixel_bounds)
+    orders_norm = _normalize_val(orders, *order_bounds)
+
+    # Good vals
+    good = np.where(np.isfinite(weights) & (weights > 0))[0]
+    coeffs = None
+
+    # Iteratively fit
+    for i in range(max_iters):
+
+        # Fit
+        x = pixels_norm[good]
+        y = orders_norm[good]
+        z = sigmas[good]
+        w = weights[good]
+        coeffs = solve_chebyshev2d(x, y, z, w, deg_intra_order, deg_inter_order)
+
+        # Model and residuals
+        model_flat = _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)
+        residuals = sigmas - model_flat
+        if sigma_cut is not None:
+            sigma = np.nanstd(residuals)
+            good_new = np.where(
+                (weights > 0)
+                & np.isfinite(weights)
+                & (np.abs(residuals) < sigma_cut * sigma)
+            )[0]
+            if len(good) == len(good_new):
+                break
+            else:
+                good = good_new
+        else:
+            break
+
+    return dict(
+        coeffs=coeffs, good=good, iterations=i+1,
+        model=model_flat, residuals=residuals,
+        order_bounds=order_bounds, pixel_bounds=pixel_bounds
+    )
+
+
+
+def _normalize_val(x, lo, hi):
+    mu = (lo + hi) / 2
+    s = hi - lo
+    return 2 * (x - mu) / s
+
+def _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds):
+    pixels_norm = _normalize_val(pixels, *pixel_bounds)
+    orders_norm = _normalize_val(orders, *order_bounds)
+    return np.polynomial.chebyshev.chebval2d(pixels_norm, orders_norm, coeffs)
+
+def _build_lsf_poly2d_structured(coeffs, pixels, orders, pixel_bounds, order_bounds):
+    nx, n_orders = len(pixels), len(orders)
+    out = np.full((n_orders, nx), np.nan)
+    for i in range(n_orders):
+        out[i, :] = _build_lsf_poly2d_unstructured(coeffs, pixels, np.full(nx, orders[i]), pixel_bounds, order_bounds)
+    return out
