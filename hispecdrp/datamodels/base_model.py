@@ -173,14 +173,14 @@ class DataModel:
         Save the DataModel to a FITS file.
 
         Args:
-            - filepath (str, optional): The filepath to save to. Defaults to self._filepath.
-            - filename (str, optional): The filename to save to. Defaults to None.
-            - output_dir (str, optional): The directory to save to. Defaults to None.
-            - suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
-            - add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
-            - include_empty_extensions (bool, optional): Whether to include empty extensions in the output. Defaults to False.
-            - correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
-            - kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
+            filepath (str, optional): The filepath to save to. Defaults to self._filepath.
+            filename (str, optional): The filename to save to. Defaults to None.
+            output_dir (str, optional): The directory to save to. Defaults to None.
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
+            include_empty_extensions (bool, optional): Whether to include empty extensions in the output. Defaults to False.
+            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
+            kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
         """
         if filepath is not None:
             self._filepath = filepath
@@ -414,11 +414,11 @@ class DataModel:
         Includes section headers as COMMENT cards.
         
         Args:
-            - meta (MetaDict, optional): Dictionary containing data values.
+            meta (MetaDict, optional): Dictionary containing data values.
                 Keys should match the schema's property paths.
                 If None, the header will be created with default values.
-            - extname (str, optional): Name of the extension. Default is "PRIMARY".
-            - add_missing (bool, optional): If True, missing entries will be added with None values. Default is False.
+            extname (str, optional): Name of the extension. Default is "PRIMARY".
+            add_missing (bool, optional): If True, missing entries will be added with None values. Default is False.
 
         Returns:
             astropy.io.fits.Header : FITS header populated according to the schema
@@ -430,7 +430,6 @@ class DataModel:
             prop_extname = info.get('fits_hdu', self.meta._DEFAULTS['fits_hdu'])
             if extname != prop_extname:
                 continue
-            dtype = info.get('datatype', self.meta._DEFAULTS['datatype'])
 
             # Prop name
             prop_name = path[-1]
@@ -465,9 +464,6 @@ class DataModel:
     
     @property
     def extinfo(self):
-        """
-        Prints current extension information.
-        """
         for extname, info in self.EXTENSIONS.items():
             hdu_type = info['hdu_type']
             if hdu_type is fits.PrimaryHDU:
@@ -482,24 +478,7 @@ class DataModel:
 
     @property
     def data_level_suffix(self):
-        """
-        Datamodel level suffix to override for each datamodel.
-        """
         return None
-    
-    @property
-    def dirname(self):
-        """
-        Returns the directory of the DataModel if present.
-        """
-        return os.path.dirname(self._filepath) if self._filepath else None
-
-    @property
-    def basename(self):
-        """
-        Returns the base filename of the DataModel if present.
-        """
-        return os.path.basename(self._filepath) if self._filepath else None
     
     @classmethod
     def from_datamodel(cls, model : 'DataModel', copy : bool = True):

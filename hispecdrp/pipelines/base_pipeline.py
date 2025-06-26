@@ -10,9 +10,9 @@ class BasePipeline(ProcessingComponent):
     
     ARGUMENTS:
         save_result (str | None):
-            * `None` : Let primitives control saving results.
-            * `'all'` : Save the result from each primitive. Passes output_dir to each primitive if not already set.
-            * `'final'` : Save only the final result of the pipeline. This sets save_result to False for all primitives, and the final is saved after returning from the last primitive.
+            - `None` : Let primitives control saving results.
+            - `'all'` : Save the result from each primitive. Passes output_dir to each primitive if not already set.
+            - `'final'` : Save only the final result of the pipeline. This sets save_result to False for all primitives, and the final is saved after returning from the last primitive.
         
         output_dir (str | None): Directory to save results. Can be passed to primitives if save_result == 'all'
         suffix (str | None): Suffix to append to the output filename for the pipeline only.
@@ -30,6 +30,7 @@ class BasePipeline(ProcessingComponent):
         """
         Args:
             config (str | Config | None): The configuration file or Config to further specify parameters.
+            prim_args (dict | None): A dictionary of primitive arguments to set for this pipeline.
             **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
         """
         self.init_config(config)
@@ -69,7 +70,7 @@ class BasePipeline(ProcessingComponent):
                     else:
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {list(prim_instance.ARGUMENTS.keys())}")
             else:
-                raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.args.keys())}")
+                raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.args.iter_kw())}")
     
     def init_primitives(self, prim_args : dict | None = None):
         """

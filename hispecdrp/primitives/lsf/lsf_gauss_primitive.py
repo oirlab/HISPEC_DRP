@@ -4,14 +4,14 @@ from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 
 import numpy as np
-from ..wavesol.cheb2d import solve_chebyshev2d
+from ...utils.math import solve_chebyshev2d_ols
 
 __all__ = ['GaussianLSFPrimitive']
 
 
 class GaussianLSFPrimitive(BasePrimitive):
     """
-    Create a Gaussian LSF from the Gaussian mode fitting results.
+    Create a Gaussian LSF from the Gaussian line fitting results.
     """
 
     ARGUMENTS = {
@@ -154,7 +154,7 @@ def fit_gausslsf_chebyshev2d(
         y = orders_norm[good]
         z = sigmas[good]
         w = weights[good]
-        coeffs = solve_chebyshev2d(x, y, z, w, deg_intra_order, deg_inter_order)
+        coeffs = solve_chebyshev2d_ols(x, y, z, deg_x=deg_intra_order, deg_y=deg_inter_order, weights=w)
 
         # Model and residuals
         model_flat = _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)

@@ -49,6 +49,7 @@ class BasePrimitive(ProcessingComponent):
 
         Args:
             config (dict | str | None): The configuration object or path to the configuration file.
+            validate_class (bool): If True, validates that the class name in the configuration matches the class name of this primitive.
         """
         class_name = self.__class__.__module__ + '.' + self.__class__.__name__
         if config is None:
@@ -187,6 +188,9 @@ class BasePrimitive(ProcessingComponent):
         Args:
             input_model (DataModel | None): An existing model to base the output model on.
             model_suffix (str | None): A suffix to determine the output model type.
+
+        Returns:
+            DataModel: An instance of the output model type.
         """
         if hasattr(self.args, 'output_model') and self.args.output_model is not None:
             if self.args.output_model == 'input':

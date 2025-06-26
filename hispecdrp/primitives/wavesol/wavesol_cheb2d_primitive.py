@@ -1,8 +1,7 @@
 from ... import datamodels
 from ..base_primitive import BasePrimitive
 
-from ...utils import delta_wave_to_delta_v
-from .cheb2d import solve_chebyshev2d
+from ...utils.math import delta_wave_to_delta_v, solve_chebyshev2d_ols
 from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
@@ -13,14 +12,7 @@ __all__ = ['WLSChebyshev2DPrimitive']
 class WLSChebyshev2DPrimitive(BasePrimitive):
     """
     Finds and fits 1D LFC modes with a Gaussian + background profile.
-
-    ARGUMENTS:
-        sigma_bounds (tuple | None): Bounds on Gaussian sigma.
-        mu_bounds (tuple | None): Bounds on Gaussian mean (in pixels).
-        lfc_wavelength_solution (str): Name of the LFC wavelength solution to start from. If None, the LFC wls is queried.
     """
-
-    class_alias = 'lfc_wavesol'
 
     ARGUMENTS = {
         'deg_intra_order' : 'auto',
@@ -178,7 +170,7 @@ def fit_wavesol_chebyshev2d(
         y = orders_norm[good]
         z = orders_times_waves[good]
         w = weights[good]
-        coeffs = solve_chebyshev2d(x, y, z, w, deg_intra_order, deg_inter_order)
+        coeffs = solve_chebyshev2d_ols(x, y, z, deg_x=deg_intra_order, deg_y=deg_inter_order, weights=w)
 
         # Model and residuals
         model_flat = _build_wavesol_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)

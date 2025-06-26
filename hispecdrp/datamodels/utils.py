@@ -5,13 +5,11 @@ def open(init, copy : bool = False, **kwargs):
     """
     Creates a DataModel from a FITS file. More types might be added later.
 
-    Parameters:
+    Args:
         init:
-            - filepath: Full path to FITS file.
-            - DataModel: Return the given DataModel instance or make a copy if `copy=True`.
-
+            filepath: Full path to FITS file.
+            DataModel: Return the given DataModel instance or make a copy if `copy=True`.
         copy (bool): If True, return a copy of the DataModel instance. If `init` is a `str`, this is ignored.
-        
         kwargs: Additional keyword arguments for the DataModel constructor.
     
     Returns:
@@ -43,11 +41,11 @@ def model_type_from_hdu(hdu_list : fits.HDUList):
     """
     Get the model type from the primary header, lookup to get class
 
-    Parameters:
+    Args:
         init (HDUList): The initializer.
 
     Returns:
-        type | None: The DataModel class if found.
+        type: The DataModel class if found.
     """
     primary = hdu_list[0]
     model_type = primary.header.get('DATAMODL')
@@ -61,7 +59,7 @@ def model_type_from_name(model_type : str):
     """
     Get the model type from the primary header, lookup to get class
 
-    Parameters:
+    Args:
         model_type (str): Name of the data model class.
 
     Returns:
