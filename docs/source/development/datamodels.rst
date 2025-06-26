@@ -1,159 +1,152 @@
 Data Models
 ===========
 
-Data models handle the reading, writing, manipulation, and validation of data and metadata from FITS files. The base class for all data models is defined in `hispecdrp.datamodels.DataModel`.
+Data models handle the reading, writing, manipulation, and validation of data and metadata from FITS files. The base class for all data models is :py:class:`~hispecdrp.datamodels.base_model.DataModel`.
 
 
 Specification
 -------------
 
-**Extensions**: The `EXTENSIONS` class attribute specify the different HDUs (Header Data Units) contained in the FITS files. The `EXTENSIONS` attribute is a dictionary where the keys are the HDU names and the values are the HDU types. Data models do not need to specifiy entries specified in a parent class.
+**Extensions**: The ``EXTENSIONS`` class attribute specifies the different HDUs (Header Data Units) contained in the FITS files. It is a dictionary where the keys are the HDU names and the values are the HDU types. Data models do not need to specifiy entries specified in a parent class.
 
-For example, the `EXTENSIONS` attribute for the base data model class is specified as follows:
+For example, the default ``DataModel.EXTENSIONS`` attribute is specified as follows:
 
 .. code-block:: python
 
     EXTENSIONS = {
         'PRIMARY': {
             'hdu_type' : fits.PrimaryHDU,
-            'dtype' : None
         },
         'RECEIPT': {
             'hdu_type' : fits.BinTableHDU,
             'columns' : {
                 'Time' : str,
-                'Code_Release' : str,
-                'Branch_Name' : str,
-                'Commit_Hash' : str,
+                'HISPECDRP_Version' : str,
                 'Class' : str,
-                'Datamodel' : str,
+                'Filename' : str,
                 'Arguments' : str,
                 'Status' : str,
-            },
+            }
         }
     }
 
 
-**Metadata**: Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute `HEADER_SCHEMAS`, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>` for more information.
+**Metadata**: Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute ``HEADER_SCHEMAS``, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>` for more information.
 
-.. toctree::
-
-   metadata_schema
-
-The `HEADER_SCHEMAS` attribute for the base data model class is specified as follows:
+The ``HEADER_SCHEMAS`` attribute for the base HISPEC data model :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` class is simply specified as follows:
 
 .. code-block:: python
 
     HEADER_SCHEMAS = [
-        'core.yaml',
-        'instrument.yaml',
-        'exposure.yaml',
-        'target.yaml',
-        'drp_steps.yaml',
-        'calibration_files.yaml',
-        'keck_program.yaml',
+        'hispec_core.yaml',
     ]
 
-View all YAML schemas `here. <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/datamodels/schemas/>`_
+As a second example, the HISPEC LFC wavelength calibration model :py:class:`~hispecdrp.datamodels.hispec.lfcwavesol.HISPECLFCWaveSolModel` class further includes a special schema to specify metadata for the LFC wavelength solution:
+
+.. code-block:: python
+
+    HEADER_SCHEMAS = [
+        'hispec_lfcwavesol.yaml',
+    ]
+
+**All schemas:**
+
+* `HISPEC. <https://github.com/oirlab/HISPEC_DRP/tree/main/hispecdrp/datamodels/hispec/schemas>`_
+* `PARVI. <https://github.com/oirlab/HISPEC_DRP/tree/main/hispecdrp/datamodels/parvi/schemas>`_
 
 
 Data Handling
 -------------
 
+Open Model
+++++++++++
+
 The `datamodels.open` method reads in a file and constructs the appropriate data model class for that file as specified by the header key `model_type`.
 
-.. autofunction:: hispecdrp.datamodels.open
-
-
-Alternatively, a file can be passed to the constructor for the appropriate datamodel class:
-
-.. autofunction:: hispecdrp.datamodels.DataModel.__init__
-
-
-Saving a datamodel can be done with `DataModel.save`:
-
-.. autofunction:: hispecdrp.datamodels.DataModel.save
-
-
-Examples
---------
-
-Metadata example:
 
 .. code-block:: python
 
     from hispecdrp import datamodels
-    file_path = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
+    file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
     model = datamodels.open(file_path)
-    print(model.meta.date_obs) # -> '20240924'
-    print(model.meta.utc) # -> '000000' (HHMMSS)
+    print(model.meta.exposure.datetime_obs) # -> '2024-09-24T00:00:00.000'
     print(model.meta.model_type) # -> 'HISPECL0Model'
     print(model.meta.exposure.exposure_type) # -> 'SCI'
     print(model.meta.instrument.spectrograph )# -> 'BSPEC'
     print(model.meta.instrument.mode) # -> 'YJHK'
     print(model.data.shape) # -> (4096, 4096)
 
-    # Valid
-    model.meta.exposure.integration_time = 10.0
-
-    # Invalid, raises an error!
-    model.meta.exposure.integration_time = '10.0'
+.. autofunction:: hispecdrp.datamodels.open
 
 
+Alternatively, a file can be passed to the constructor for the appropriate datamodel class:
 
-Implement New DataModel
------------------------
-
-To implement a new data model, create a new class that inherits from the appropriate base type:
-
-1. :py:class:`~hispecdrp.datamodels.base_model.DataModel`  - Base class for all data models.
-2. :py:class:`~hispecdrp.datamodels.hispec_base.HISPECDataModel` - Base class for HISPEC data models, subtype of ``DataModel``.
-3. :py:class:`~hispecdrp.datamodels.hispec_calibration_base.HISPECCalibrationModel` - Base class for HISPEC calibration data models, subtype of ``HISPECDataModel``.
-
-All models should specify the two attributes:
-
-1. ``EXTENSIONS`` - A dictionary specifying the HDUs in the FITS file. By default, the class inherits the ``EXTENSIONS`` attribute from the parent class.
-2. ``HEADER_SCHEMAS`` - A list of metadata schema files specifying the metadata format. By default, the class inherits the ``HEADER_SCHEMAS`` attribute from the parent class.
-
-Calibration models should also specify the ``CAL_TYPE`` attribute.
-
-The new class should specify the ``EXTENSIONS`` attribute and the ``HEADER_SCHEMAS`` attribute. The ``EXTENSIONS`` attribute should specify the HDUs in the FITS file and the ``HEADER_SCHEMAS`` attribute should specify the metadata schema files.
-
-Lastly, the new class should implement the optional ``level`` property if appropriate for that class, which returns the level of the data model. The level is a string that specifies the level of the data model. If not specified, no level is returned. Currently, this is used to construct filenames (see :py:meth:`~hispecdrp.datamodels.HISPECDataModel._generate_filename`).
-
-For example, a flat model is implemented as follows:
 
 .. code-block:: python
 
-    from astropy.io import fits
-    from .hispec_calibration_base import HISPECCalibrationModel
-    import numpy as np
+    from hispecdrp import datamodels
+    file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
+    model = datamodels.HISPECL0Model(file_path)
+    print(model.meta.exposure.datetime_obs) # -> '2024-09-24T00:00:00.000'
+    print(model.meta.model_type) # -> 'HISPECL0Model'
+    print(model.meta.exposure.exposure_type) # -> 'SCI'
+    print(model.meta.instrument.spectrograph )# -> 'BSPEC'
+    print(model.meta.instrument.mode) # -> 'YJHK'
+    print(model.data.shape) # -> (4096, 4096)
 
-    __all__ = ['HISPECFlatModel']
+.. autofunction:: hispecdrp.datamodels.DataModel.__init__
 
-    class HISPECFlatModel(HISPECCalibrationModel):
 
-        EXTENSIONS = {
-            'DATA': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.float32
-            },
-            'ERR_ALL': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.float32
-            },
-            'ERR_FLOOR': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.float32
-            },
-            'DQ': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.uint32
-            }
-        }
+Save Model
+++++++++++
 
-        CAL_TYPE = 'flat'
+Saving a datamodel can be done with `DataModel.save`:
 
-        @property
-        def level(self):
-            return '0'
+
+.. code-block:: python
+
+    from hispecdrp import datamodels
+    file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
+    model = datamodels.open(file_path)
+    model.save(file_path.replace('.fits', '_copy.fits'))
+
+.. autofunction:: hispecdrp.datamodels.DataModel.save
+
+
+Implement New Data Model
+------------------------
+
+To implement a new data model, create a new class that inherits from the appropriate base type:
+
+1. :py:class:`~hispecdrp.datamodels.base_model.DataModel` - Base class for all data models. Inherit from if implementing a new instrument.
+
+2. :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` - Base class for HISPEC data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based HISPEC models or new abstract HISPEC models.
+
+3. :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` - Base class for PARVI data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based PARVI models or new abstract PARVI models.
+
+4. :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECCalibrationModel` - Base class for HISPEC calibration data models, subtype of :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel`.
+
+5. :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVICalibrationModel` - Base class for PARVI calibration data models, subtype of :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel`.
+
+
+**All models must specify the two attributes:**
+
+1. ``EXTENSIONS`` - A dictionary specifying the HDUs in the FITS file. By default, the class inherits the ``EXTENSIONS`` attribute from the parent class.
+2. ``HEADER_SCHEMAS`` - A list of additional metadata schema files specifying the metadata format. By default, the class inherits the ``HEADER_SCHEMAS`` attribute from the parent class.
+
+**Calibration models must also specify the** ``CAL_TYPE`` **attribute.**: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to weparate words if necessary.
+
+Lastly, concrete (i.e. not abstract), non-calibration models must implement the ``data_level_suffix`` property, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. See :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
+
+For example, the HISPEC LFC fit parameters model is defined as follows:
+
+.. literalinclude:: ../../../hispecdrp/datamodels/hispec/lfcfitparams.py
+   :language: python
+
+
+Metadata
+--------
+
+.. toctree::
+
+   metadata_schema

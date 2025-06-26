@@ -1,110 +1,114 @@
 import os
-import traceback
-
-from ..utils.config import Config
-from ..primitives.base_primitive import BasePrimitive
+from .. import utils
 from .. import datamodels
 
+from ..primitives.base_primitive import ProcessingComponent
 
-class BasePipeline(BasePrimitive):
-
-    ARGUMENTS = {
-        'save_result': 'final', # Overrides individual primitive save_result. Set to None to manually control each primitive.
-        'full_output': False, # If True, all primitives will return their full output, and the pipeline will collect these extra results in a dict.
-    }
+class BasePipeline(ProcessingComponent):
+    """
+    Base pipeline class for managing a sequence of primitives.
+    
+    ARGUMENTS:
+        save_result (str | None):
+            - `None` : Let primitives control saving results.
+            - `'all'` : Save the result from each primitive. Passes output_dir to each primitive if not already set.
+            - `'final'` : Save only the final result of the pipeline. This sets save_result to False for all primitives, and the final is saved after returning from the last primitive.
+        
+        output_dir (str | None): Directory to save results. Can be passed to primitives if save_result == 'all'
+        suffix (str | None): Suffix to append to the output filename for the pipeline only.
+        full_output (bool): If True, return the full output of all primitives.
+    """
 
     PRIMITIVES = {}
 
     def __init__(
-            self,
-            config : Config | None = None,
-            config_file : Config | str | None = None,
-            **kwargs
-        ):
+        self,
+        config : dict | str | None = None,
+        prim_args : dict | None = None,
+        **kwargs
+    ):
         """
         Args:
             config (str | Config | None): The configuration file or Config to further specify parameters.
+            prim_args (dict | None): A dictionary of primitive arguments to set for this pipeline.
             **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
         """
-        super().__init__(config=config, config_file=config_file, **kwargs)
-        self.init_primitives()
+        self.init_config(config)
+        self.set_args(**kwargs)
+        self.init_primitives(prim_args)
 
-    def init_primitives(self):
+    def set_args(self, **kwargs) -> dict:
+        """
+        If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
+        `self.args.name` should be the name of the primary datamodel or filename to be processed.
+        """
+        if not hasattr(self, 'args'):
+            self.init_args()
+        for key in kwargs:
+            if key in self.ARGUMENTS or key == 'name':
+                self.args[key] = kwargs[key]
+            else:
+                raise ValueError(f"Invalid argument '{key}' for primitive {self.__class__.__name__}. Valid arguments are: {list(self.ARGUMENTS.keys())}")
+        return self.args
+    
+    def set_prim_args(self, prim_args : dict | None = None):
+        """
+        Set the primitive arguments for this pipeline.
+        
+        Args:
+            prim_args (dict | None): A dictionary of primitive arguments to set.
+        """
+        if prim_args is None:
+            return
+        for prim_alias in prim_args:
+            if prim_alias in self.PRIMITIVES:
+                prim_instance = getattr(self, prim_alias)
+                prim_instance_args = getattr(prim_instance, 'args')
+                for arg_name in prim_args[prim_alias]:
+                    if arg_name in prim_instance.ARGUMENTS:
+                        setattr(prim_instance_args, arg_name, prim_args[prim_alias][arg_name])
+                    else:
+                        raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {list(prim_instance.ARGUMENTS.keys())}")
+            else:
+                raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.args.iter_kw())}")
+    
+    def init_primitives(self, prim_args : dict | None = None):
         """
         Initialize each primitive in the primitive table.
         """
-        # TODO: Sort out config dirs
-        if self.config_file is not None:
-            config_dir = os.path.dirname(self.config_file)
-        else:
-            config_dir = ""
         for prim_alias, prim_class in self.PRIMITIVES.items():
-            if prim_alias in self.config["primitives"]:
-                prim_config_from_pipeline = self.config["primitives"][prim_alias]
-                if "config_file" in prim_config_from_pipeline:
-                    prim_config_file = os.path.join(config_dir, prim_config_from_pipeline["config_file"])
-                else:
-                    prim_config_file = None
-            else:
-                prim_config_from_pipeline = None
-                prim_config_file = None
-
-            # !!! NOTE !!! Keep an eye on how we propogate the pipeline's logger to the primitive.
-            prim_config = prim_class._get_config(config_file=prim_config_file, config=prim_config_from_pipeline)
-            prim_config['logging'].update(**self.config['logging'])
-            primitive = prim_class(
-                config_file=prim_config_file,
-                config=prim_config,
-            )
-
-            # !!! NOTE !!! Keep an eye on how we propogate the pipeline's logger to the primitive.
-            if primitive.config.get('output_dir') is None and primitive.args.output_dir is None:
-                primitive.args.output_dir = self.args.output_dir
-            if self.args.save_result == 'final':
-                #primitive.config['save_result'] = False
-                primitive.args.save_result = False
-            if self.args.save_result == 'all':
-                #primitive.config['save_result'] = True
-                primitive.args.save_result = True
-
-            # Set the primitive
+            primitive = prim_class(config=self.config.get('primitives', {}).get(prim_alias, {}))
             setattr(self, prim_alias, primitive)
+        self.set_prim_args(prim_args)
 
-    def apply(self, name, **kwargs):
+    def apply(self, name, prim_args : dict | None = None, **kwargs):
         self.init_logger()
         self.output = None
-        self.args.full_output = any(
-            getattr(getattr(self, prim_alias).args, 'full_output', False) for prim_alias in self.PRIMITIVES
-        )
+
         try:
             self.set_args(name=name, **kwargs)
-            if not self._pre_condition():
-                self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
-                self.on_skip()
-            else:
-                self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
-                output = self._perform()
-                if self._post_condition():
-                    self.output = output
-                    if isinstance(self.output.name, datamodels.DataModel):
-                        #self.finalize_model(self.output.name)
+            self.set_prim_args(prim_args)
+            self.args.full_output = any(
+                getattr(getattr(self, prim_alias).args, 'full_output', False) for prim_alias in self.PRIMITIVES
+            ) or self.args.full_output
+            self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
+            self.output = self._perform()
+            if isinstance(self.output.name, datamodels.DataModel):
+                if self.args.save_result is True:
+                    self.save_model(self.output.name)
+            elif isinstance(self.output.name, list):
+                for result in self.output.name:
+                    if isinstance(result, datamodels.DataModel):
                         if self.args.save_result:
-                            self.save_model(self.output.name)
-                    elif isinstance(self.output.name, list):
-                        for result in self.output.name:
-                            if isinstance(result, datamodels.DataModel):
-                                self.finalize_model(result)
-                                if self.args.save_result:
-                                    self.save_model(result)
-                    elif isinstance(self.output, dict):
-                        for key in self.output:
-                            if isinstance(self.output[key], datamodels.DataModel):
-                                self.finalize_model(self.output[key])
-                                if self.args.save_result:
-                                    self.save_model(self.output[key])
+                            self.save_model(result)
+            elif isinstance(self.output, dict):
+                for key in self.output:
+                    if isinstance(self.output[key], datamodels.DataModel):
+                        if self.args.save_result:
+                            self.save_model(self.output[key])
         except Exception as e:
-            self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
-            if os.environ.get('HISPECDRP_DEBUG', '0') == '1':
+            self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
+            if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
             return name
         
@@ -112,32 +116,53 @@ class BasePipeline(BasePrimitive):
             return self.output
         else:
             return self.output.name
-        
-    def set_args(self, **kwargs) -> dict:
+    
+    def init_config(self, config : dict | str | None = None) -> dict:
         """
-        Set the arguments for this primitive or pipeline.
+        Initialize the configuration for this primitive.
+
         Args:
-            name: The primary input.
-            **kwargs: Additional keyword arguments to set in `self.args`. A special key `prim_args` can be used to set arguments for individual primitives in the pipeline, where each subkey is the alias of a primtiive.
+            config (dict | str | None): The configuration object or path to the configuration file.
         """
-        kwargs_sup = {k : v for k, v in kwargs.items() if k.lower() != 'prim_args'}
-        super().set_args(**kwargs_sup)
-        if 'prim_args' in kwargs:
-            prim_args = kwargs['prim_args']
-            for prim_alias in self.PRIMITIVES:
-                if prim_alias in prim_args:
-                    if not hasattr(self, prim_alias):
-                        raise ValueError(f"Bad key in prim_args: {prim_alias} for {self.__class__.__name__}. Available primitives: {list(self.PRIMITIVES.keys())}")
-                    prim = getattr(self, prim_alias)
-                    prim.set_args(**prim_args[prim_alias.lower()])
-
-    @classmethod
-    def _get_config(cls, config : Config | None = None, config_file : str | None = None) -> Config:
-        """
-        Load a config file for this primitive or pipeline, or construct one from scratch.
-        """
-        _config = super()._get_config(config_file=config_file, config=config)
-        if 'primitives' not in _config:
-            _config['primitives'] = {key : Config() for key in cls.PRIMITIVES.keys()}
-
-        return _config
+        if config is None:
+            self.config = {
+                'class': self.__class__.__module__ + '.' + self.__class__.__name__,
+                'arguments': {},
+                'logging': self.LOGGING.copy(),
+                'primitives': {key: {} for key in self.PRIMITIVES},
+            }
+        elif isinstance(config, dict):
+            self.config = config
+        elif isinstance(config, str):
+            self.config = utils.read_config_file(config)
+        else:
+            raise ValueError(f"Invalid config type: {type(config)}. Expected dict or str.")
+        
+        if 'logging' not in self.config:
+            self.config['logging'] = self.LOGGING.copy()
+        else:
+            self.config['logging'] = self.LOGGING | self.config['logging']
+        if 'arguments' not in self.config:
+            self.config['arguments'] = {}
+        for prim_alias in self.PRIMITIVES:
+            if prim_alias not in self.config['primitives']:
+                self.config['primitives'][prim_alias] = {}
+            self.config['primitives'][prim_alias]['class'] = self.PRIMITIVES[prim_alias].__module__ + '.' + self.PRIMITIVES[prim_alias].__name__
+            self.config['primitives'][prim_alias]['logging'] = self.LOGGING.copy()
+            if 'arguments' not in self.config['primitives'][prim_alias]:
+                self.config['primitives'][prim_alias]['arguments'] = {}
+            if 'config_file' in self.config['primitives'][prim_alias]:
+                prim_config_file = utils.find_config_path(self.config['primitives'][prim_alias]['config_file'])
+                prim_config_from_file = utils.read_config_file(prim_config_file)
+                prim_config_from_file = prim_config_from_file.get('arguments', {})
+                for key in prim_config_from_file:
+                    if key not in self.config['primitives'][prim_alias]['arguments']:
+                        self.config['primitives'][prim_alias]['arguments'][key] = prim_config_from_file[key]
+        return self.config
+    
+    def __repr__(self):
+        s = f"{self.__class__.__name__}:\n"
+        s += "  Primitives:\n"
+        for prim_alias, prim_class in self.PRIMITIVES.items():
+            s += f"    {prim_alias}: {prim_class.__name__}\n"
+        return s

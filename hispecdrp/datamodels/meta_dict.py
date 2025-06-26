@@ -12,14 +12,13 @@ class MetaDict:
     A dictionary that allows attribute-style access and creates nested MetaDicts
     during assignment or access and validates against a schema.
     
-    YAML:
-        - fits_keyword: The FITS keyword to be used in the header.
-        - comment: The comment to be added to the FITS header. Defaults to None.
+    Schema fields:
+        - keyword: The FITS keyword to be used in the header.
+        - comment: The comment to be added to the FITS header. Defaults to ''.
         - unit: The unit of the value, not used for validation. Defaults to None.
-        - type: The type of the value, used for validation. Defaults to str.
+        - datatype: The type of the value, used for validation (string, bool, integer, number). Defaults to string.
         - default: The default value to be used if not provided. Defaults to None.
         - fits_hdu: The HDU to which the keyword belongs. Defaults to 'PRIMARY'.
-        - Property: The Python path to the property (e.g. meta.instrument.name).
     """
 
     _DEFAULTS = {
@@ -231,10 +230,15 @@ class MetaDict:
         for k, v in self.__dict__.items():
             setattr(result, k, copy.deepcopy(v, memo))
         return result
+    
+    def copy(self):
+        return copy.deepcopy(self)
 
     @staticmethod
     def find_schema_path(schema_name : str) -> str:
-        """Search all datamodels/*/schemas/ for a schema file by base name."""
+        """
+        Search all `datamodels/*/schemas/` for a schema file by base name.
+        """
         base = importlib.resources.files("hispecdrp.datamodels")
         for subpkg in base.iterdir():
             schemas_dir = subpkg / "schemas"
@@ -273,7 +277,7 @@ class MetaDict:
         
         return dict(items)
     
-    def update(self, other):
+    def update(self, other, override : bool = True):
         """
         Update the MetaDict with another dictionary or MetaDict.
         
@@ -284,7 +288,8 @@ class MetaDict:
             prop = '.'.join(prop) if isinstance(prop, (list, tuple)) else prop
             if prop not in other:
                 continue
-            self[prop] = other[prop]
+            if self[prop] is None or override:
+                self[prop] = other[prop]
 
     @staticmethod
     def unflatten_dict(flat_dict, sep='.'):

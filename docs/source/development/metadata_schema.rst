@@ -9,15 +9,18 @@ FITS Header Properties
 .. code-block:: yaml
   
    property_name:
-     comment: # Optional FITS comment.
-     fits_keyword:  # FITS keyword. Required.
-     type: # `string`, `None`, `boolean`, `number`, `integer`. JSON schema type. Defaults to `string`.
-     default: # Optional default value.
+     keyword:  # FITS keyword. Required.
+     comment: # Optional FITS comment. Defaults to an empty string.
      fits_hdu: # Optional name of HDU for this entry. Defaults to `PRIMARY`.
+     datatype: # `string`, `None`, `boolean`, `number`, `integer`. JSON schema type. Defaults to `string`.
+     unit: # Optional units for this entry. Defaults to `None`.
+     default: # Optional default value.
 
 Examples
 --------
 
-**instrument.yaml**
+Below is the HISPEC
 
-.. literalinclude:: ../../../hispecdrp/datamodels/schemas/instrument.yaml
+**hispec_core.yaml**
+
+.. literalinclude:: ../../../hispecdrp/datamodels/hispec/schemas/hispec_core.yaml

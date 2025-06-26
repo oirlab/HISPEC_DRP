@@ -7,12 +7,14 @@ Overview
 
 The :py:mod:`~hispecdrp.calibrations` module contains code to:
 
-1. Access calibrations stored in a local cache directory.
-2. Sync the local cache with KOA as new calibrations are ingested.
-3. Query and filter calibration metadata through an SQLite database with logic to select the best calibration given an input data product.
+1. Interact with a local calibration cache that stores calibration files and uses an SQLite database to interace with metadata.
+2. Select the appropriate calibration file for a given input data product based on metadata and instrument configuration via SQL queries.
+3. Sync the metadata DB with KOA as new calibrations are ingested.
 
 .. toctree::
    :maxdepth: 2
    :glob:
     
-   ./*
+   selectors
+   database
+   store

@@ -1,0 +1,19 @@
+%YAML 1.2
+---
+wavesol:
+  pixel_min_norm:
+    comment: "Minimum pixel for normalization of Chebyshev coefficients"
+    keyword: PIXNORMI
+    datatype: number
+  pixel_max_norm:
+    comment: "Maximum pixel order for normalization of Chebyshev coefficients"
+    keyword: PIXNORMF
+    datatype: number
+  order_min_norm:
+    comment: "Minimum echelle order for normalization of Chebyshev coefficients"
+    keyword: ORDNORMI
+    datatype: integer
+  order_max_norm:
+    comment: "Maximum echelle order for normalization of Chebyshev coefficients"
+    keyword: ORDNORMF
+    datatype: integer

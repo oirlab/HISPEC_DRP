@@ -1,0 +1,59 @@
+from ..base_primitive import BasePrimitive
+from ...calibrations import HISPECDetectorFlatSelector, PARVIDetectorFlatSelector
+from ... import datamodels
+from keckdrpframework.models.arguments import Arguments
+
+__all__ = ['DetectorFlatPrimitive']
+
+
+class DetectorFlatPrimitive(BasePrimitive):
+    """
+    Corrects the detector level pixel sensitivity.
+
+    ARGUMENTS:
+        detflat (DetectorFlatModel | str | None): Detector flat model to apply to the input data.
+            If None, the detector flat model will be queried.
+    """
+
+    ARGUMENTS = {
+        'detflat' : None
+    }
+
+    def _perform(self):
+        input_model = datamodels.open(self.args.name)
+        if self.args.detflat is not None:
+            flat_model = datamodels.open(self.args.detflat)
+        else:
+            detflat_path = self.get_calibration(input_model, use_cached=True)
+            flat_model = datamodels.open(detflat_path)
+        result = input_model.copy()
+        self.log.info(f"Applying detector flat correction with {flat_model} to {input_model}")
+        result = detector_flat_correction(result, flat_model)
+        return Arguments(name=result)
+    
+    def get_calibration_selector(self, name):
+        input_model = datamodels.open(name, meta_only=True)
+        if isinstance(input_model, datamodels.HISPECDataModel):
+            return HISPECDetectorFlatSelector()
+        elif isinstance(input_model, datamodels.PARVIDataModel):
+            return PARVIDetectorFlatSelector()
+        else:
+            raise ValueError(f"Unsupported input model type: {type(input_model)}")
+
+
+def detector_flat_correction(input_model : datamodels.DataModel, detflat_model : datamodels.DataModel) -> datamodels.DataModel:
+    """
+    Correct the detector level flat field.
+
+    Args:
+        input_model (DataModel): Input model.
+        detflat_model (HISPECFlatModel): Input detector flat model.
+    
+    Returns:
+        DataModel: The model corrected in place.
+    """
+    z = input_model.data / detflat_model.data
+    input_model.err = z * np.sqrt((input_model.err / input_model.data)**2 + (detflat_model.err / detflat_model.data)**2)
+    input_model.dq |= detflat_model.dq
+    input_model.data = z
+    return input_model

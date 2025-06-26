@@ -9,8 +9,6 @@ __all__ = ['Stage0Pipeline']
 
 class Stage0Pipeline(BasePipeline):
 
-    class_alias = 'stage0'
-
     PRIMITIVES = {
         'nonlin_corr': NonlinearCorrectionPrimitive,
         'ramp_fit': FitRampPrimitive,

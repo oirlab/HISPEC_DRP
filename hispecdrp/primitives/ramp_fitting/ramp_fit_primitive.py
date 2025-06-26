@@ -18,11 +18,9 @@ class FitRampPrimitive(BasePrimitive):
         max_cores (int): maximum number of cores to use during ramp fitting.  Default is 1.
     """
 
-    class_alias = 'ramp_fit'
-
     ARGUMENTS = {
         'suffix' : 'rampfit',
-        'method' : 'ols',
+        'method' : 'jwst_ols',
         'num_coadd' : 1,
         'max_cores' : 1,
     }

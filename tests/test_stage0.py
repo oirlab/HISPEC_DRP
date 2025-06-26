@@ -8,7 +8,7 @@ def test_stage0(tmp_path):
     coeffs = np.broadcast_to(np.array([0, 1], dtype=np.float32), (4096, 4096, 2))
     thresh = np.zeros(shape=(4096, 4096), dtype=np.uint16)
     max = np.zeros(shape=(4096, 4096), dtype=np.uint16)
-    nonlin_model = datamodels.HISPECNonlinearCoeffModel(data=dict(coeffs=coeffs, thresh=thresh, max=max))
+    nonlin_model = datamodels.HISPECNonlinearCorrectionModel(data=dict(coeffs=coeffs, thresh=thresh, max=max))
     nonlin_model.meta.instrument.spectrograph = 'BSPEC'
     datamodels.get_hispec_meta(nonlin_model)
     
@@ -23,7 +23,7 @@ def test_stage0(tmp_path):
     stage0_pipe = Stage0Pipeline()
 
     # Set any primitive args
-    stage0_pipe.nonlin_corr.args.coeffs = nonlin_model
+    stage0_pipe.nonlin_corr.args.nonlin = nonlin_model
 
     # Run pipeline
     model_result = stage0_pipe.apply(ramp_model, output_dir=tmp_path)
