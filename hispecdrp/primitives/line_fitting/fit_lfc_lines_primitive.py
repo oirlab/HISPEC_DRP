@@ -3,27 +3,18 @@ from ... import datamodels
 
 from keckdrpframework.models.arguments import Arguments
 
-from .fit_lfc_modes import fit_modes, find_initial_modes
-from ...utils import delta_pix_to_delta_wave
+from .fit_lines_gauss import fit_lines_gauss, find_initial_lfc_lines
+from ...utils.math import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants
 
-__all__ = ['FitLFCModesPrimitive']
+__all__ = ['FitLFCLinesPrimitive']
 
 
-class FitLFCModesPrimitive(BasePrimitive):
+class FitLFCLinesPrimitive(BasePrimitive):
     """
-    Given a 1D spectrum, finds and fits the LFC modes with a Gaussian + background profile.
-
-    ARGUMENTS:
-        sigma_bounds (tuple | None): Bounds on Gaussian sigma.
-        mu_bounds (tuple | None): Bounds on Gaussian mean (in pixels).
-        max_fit_window (int | None): Maximum number of pixels to fit for a mode.
-        do_fibers (list | None): List of fibers to fit.
-        do_orders (list | None): List of orders to fit.
-        lfc_nu0 (float | None): Central frequency (pump line) of the LFC in GHz.
-        lfc_delta_nu (float | None): Frequency spacing of the LFC modes in GHz.
+    Given a 1D spectrum, finds and fits the LFC lines with a Gaussian + background profile.
     """
 
     ARGUMENTS = {
@@ -52,13 +43,13 @@ class FitLFCModesPrimitive(BasePrimitive):
                 # Relative order index
                 oi = np.abs(order - input_model.meta.order_start)
 
-                # Find the initial modes
-                modes = find_initial_modes(spec[oi, :], spec_err[oi, :])
+                # Find the initial lines
+                lines = find_initial_lfc_lines(spec[oi, :], spec_err[oi, :])
 
-                # Gaussin fit to modes
-                _fit_results = fit_modes(
+                # Gaussin fit to lines
+                _fit_results = fit_lines_gauss(
                     spec[oi, :], spec_err[oi, :], spec_dq[oi, :],
-                    modes=modes,
+                    lines=lines,
                     sigma_bounds=self.args.sigma_bounds, mu_bounds=self.args.mu_bounds,
                     max_fit_window=self.args.max_fit_window
                 )
@@ -68,8 +59,8 @@ class FitLFCModesPrimitive(BasePrimitive):
                 params_table = getattr(output_model, f'lfc_fitparams_fib{fiber}')
                 if order in params_table['ORDER']:
                     setattr(input_model, f'lfc_fitparams_fib{fiber}', params_table[params_table['ORDER'] != order])
-                n_modes = len(_fit_results['mu'])
-                for i in range(n_modes):
+                n_lines = len(_fit_results['mu'])
+                for i in range(n_lines):
                     r = {
                         'ORDER' : order,
                         'AMPLITUDE' : _fit_results['amplitude'][i],
@@ -80,9 +71,9 @@ class FitLFCModesPrimitive(BasePrimitive):
                         'SIGMA_ERR_PIX' : _fit_results['sigma_err'][i],
                     }
                     wave_closest = wave[oi, int(r['MU_PIX'])]
-                    mode_wave, _, mode_num = get_closest_lfc_mode(self.args.lfc_nu0, self.args.lfc_delta_nu, wave_closest)
-                    r['WAVE'] = mode_wave
-                    r['MODE_NUM'] = mode_num
+                    line_wave, _, line_num = get_closest_lfc_mode(self.args.lfc_nu0, self.args.lfc_delta_nu, wave_closest)
+                    r['WAVE'] = line_wave
+                    r['MODE_NUM'] = line_num
                     r['SIGMA_WAVE'] = delta_pix_to_delta_wave(r['SIGMA_PIX'], r['MU_PIX'], wave[oi, :])
                     r['SIGMA_ERR_WAVE'] = delta_pix_to_delta_wave(r['SIGMA_ERR_PIX'], r['MU_PIX'], wave[oi, :])
                     r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
