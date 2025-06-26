@@ -1,5 +1,5 @@
-LSF
-===
+Line Spread Function (LSF)
+==========================
 
 The effective line spread function (LSF) is modeled with a Gaussian where the width is described with a 2D polynomial (pixel, order, width).
 
