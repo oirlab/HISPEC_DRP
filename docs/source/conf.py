@@ -25,13 +25,15 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
-    #'sphinx.ext.imgmath',
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
     'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',
     'nbsphinx',
 ]
+
+napoleon_custom_sections = [('Returns', 'params_style')]
 
 autosummary_generate = True  # Generate autosummary stubs automatically
 autodoc_default_options = {
