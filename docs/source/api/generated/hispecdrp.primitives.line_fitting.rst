@@ -10,6 +10,5 @@ hispecdrp.primitives.line\_fitting
    :toctree:
    :recursive:
 
-   fit_lfc_modes
-   fit_lfc_modes_primitive
-   gaussfit
+   fit_lfc_lines_primitive
+   fit_lines_gauss

@@ -10,5 +10,4 @@ hispecdrp.primitives.wavesol
    :toctree:
    :recursive:
 
-   cheb2d
    wavesol_cheb2d_primitive

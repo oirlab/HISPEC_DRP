@@ -11,6 +11,5 @@ hispecdrp.primitives.ramp\_fitting
    :recursive:
 
    fit_ramp_jwst
-   fit_ramp_likely
    fit_ramp_numba
    ramp_fit_primitive

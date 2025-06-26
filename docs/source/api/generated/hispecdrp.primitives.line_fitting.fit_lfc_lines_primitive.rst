@@ -1,7 +1,7 @@
-hispecdrp.primitives.line\_fitting.fit\_lfc\_modes\_primitive
+hispecdrp.primitives.line\_fitting.fit\_lfc\_lines\_primitive
 =============================================================
 
-.. automodule:: hispecdrp.primitives.line_fitting.fit_lfc_modes_primitive
+.. automodule:: hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive
 
    
    .. rubric:: Functions
@@ -15,5 +15,5 @@ hispecdrp.primitives.line\_fitting.fit\_lfc\_modes\_primitive
 
    .. autosummary::
    
-      FitLFCModesPrimitive
+      FitLFCLinesPrimitive
    

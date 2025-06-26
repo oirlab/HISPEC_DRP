@@ -9,5 +9,4 @@ hispecdrp.primitives.nonlinear\_correction.nonlincorr\_numba
    .. autosummary::
    
       correct_nonlinearity
-      polyval
    
