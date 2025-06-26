@@ -67,9 +67,6 @@ class ProcessingComponent(_BasePrimitive):
             1. `self.args`
 
         And is stored in `self.args`.
-
-        Keyword Args:
-            Any valid arguments for the primitive.
         """
         self.args = Arguments(name=None)
         self.args.update(**self.ARGUMENTS.copy())

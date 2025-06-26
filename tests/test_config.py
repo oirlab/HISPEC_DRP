@@ -1,5 +1,5 @@
 from hispecdrp import datamodels
-from hispecdrp import FitLFCModesPrimitive, ProcessLFCPipeline
+from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
 
 import os
 import textwrap
@@ -12,7 +12,7 @@ def save_config_string(config_str : str, path : str):
 def test_primitive_config(tmp_path):
 
     # Test with no config file or args
-    prim = FitLFCModesPrimitive()
+    prim = FitLFCLinesPrimitive()
     assert prim.args.do_orders is None
     assert prim.args.sigma_bounds == prim.ARGUMENTS['sigma_bounds']
 
@@ -36,13 +36,13 @@ def test_primitive_config(tmp_path):
     save_config_string(config_string, config_path)
 
     # Test with config file
-    prim = FitLFCModesPrimitive(config=config_path)
+    prim = FitLFCLinesPrimitive(config=config_path)
     assert prim.args.do_orders == do_orders
     assert prim.args.sigma_bounds == sigma_bounds
     
     # Override config file argument with a different value
     do_orders = [90, 91, 92, 93, 94, 96]
-    prim = FitLFCModesPrimitive(config=config_path, do_orders=do_orders)
+    prim = FitLFCLinesPrimitive(config=config_path, do_orders=do_orders)
     assert prim.args.do_orders == do_orders
 
 
@@ -53,7 +53,7 @@ def test_pipeline_config(tmp_path):
     sigma_bounds = [0.1, 2.5]
     do_fibers = [3]
     prim_args = {
-        'fit_lfc_modes' : {
+        'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
             'sigma_bounds': sigma_bounds,
@@ -78,15 +78,15 @@ def test_pipeline_config(tmp_path):
 
     # Test with no config file or args
     pipe = ProcessLFCPipeline(prim_args=prim_args)
-    assert pipe.fit_lfc_modes.args.do_orders == do_orders
-    assert pipe.fit_lfc_modes.args.sigma_bounds == sigma_bounds
+    assert pipe.fit_lfc_lines.args.do_orders == do_orders
+    assert pipe.fit_lfc_lines.args.sigma_bounds == sigma_bounds
 
     # Pipeline config file
     config_string = f"""
     %YAML 1.2
     ---
     primitives:
-      fit_lfc_modes:
+      fit_lfc_lines:
         arguments:
           do_orders: {do_orders}
           do_fibers: {do_fibers}
@@ -99,12 +99,12 @@ def test_pipeline_config(tmp_path):
 
     # Test with config file
     pipe = ProcessLFCPipeline(config=config_path)
-    assert pipe.fit_lfc_modes.args.do_orders == do_orders
-    assert pipe.fit_lfc_modes.args.sigma_bounds == sigma_bounds
+    assert pipe.fit_lfc_lines.args.do_orders == do_orders
+    assert pipe.fit_lfc_lines.args.sigma_bounds == sigma_bounds
     
     # Override config file argument with a different value
     do_orders = [90, 91]
-    prim = FitLFCModesPrimitive(config=config_path, do_orders=do_orders)
+    prim = FitLFCLinesPrimitive(config=config_path, do_orders=do_orders)
     assert prim.args.do_orders == do_orders
 
     pipe_config_path = os.path.join(tmp_path, 'test_pipe_config.yaml')
@@ -126,7 +126,7 @@ def test_pipeline_config(tmp_path):
     %YAML 1.2
     ---
     primitives:
-      fit_lfc_modes:
+      fit_lfc_lines:
         config_file: {prim_config_path}
         arguments:
           do_orders: {do_orders}
@@ -140,10 +140,10 @@ def test_pipeline_config(tmp_path):
 
     # Test with config file
     pipe = ProcessLFCPipeline(config=pipe_config_path)
-    assert pipe.fit_lfc_modes.args.do_orders == do_orders
-    assert pipe.fit_lfc_modes.args.sigma_bounds == new_sigma_bounds
+    assert pipe.fit_lfc_lines.args.do_orders == do_orders
+    assert pipe.fit_lfc_lines.args.sigma_bounds == new_sigma_bounds
     
     # Override config file argument with a different value
     do_orders = [90, 91]
-    prim = FitLFCModesPrimitive(config=pipe_config_path, do_orders=do_orders)
+    prim = FitLFCLinesPrimitive(config=pipe_config_path, do_orders=do_orders)
     assert prim.args.do_orders == do_orders

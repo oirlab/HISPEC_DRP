@@ -1,5 +1,5 @@
 from hispecdrp import datamodels
-from hispecdrp import FitLFCModesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
+from hispecdrp import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
 
 import numpy as np
@@ -9,11 +9,11 @@ def test_process_lfc_parvi(tmp_path):
 
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
 
-    # Fit 1D LFC modes with Gaussian
+    # Fit 1D LFC lines with Gaussian
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     do_fibers = [3]
-    prim = FitLFCModesPrimitive()
-    mode_fit_result = prim.apply(
+    prim = FitLFCLinesPrimitive()
+    line_fit_result = prim.apply(
         lfc_path,
         full_output=True,
         do_orders=do_orders,
@@ -23,17 +23,17 @@ def test_process_lfc_parvi(tmp_path):
         lfc_nu0=datamodels.parvi.LFC_NU_0,
         lfc_delta_nu=datamodels.parvi.LFC_DELTA_NU,
     )
-    mode_fits_model = mode_fit_result.name
-    assert isinstance(mode_fits_model, datamodels.PARVILFCFitParamsModel)
-    assert mode_fits_model.meta.cal_type == 'lfc_fitparams'
-    assert len(mode_fits_model.lfc_fitparams_fib3) > 1000 # Number of modes found > 1000. NOTE: REVISIT THIS TEST!
+    line_fits_model = line_fit_result.name
+    assert isinstance(line_fits_model, datamodels.PARVILFCFitParamsModel)
+    assert line_fits_model.meta.cal_type == 'lfc_fitparams'
+    assert len(line_fits_model.lfc_fitparams_fib3) > 1000 # Number of modes found > 1000. NOTE: REVISIT THIS TEST!
 
     # Fit 2D Chebyshev polynomial to the LFC modes
     prim = WLSChebyshev2DPrimitive()
     deg_inter_order = 6
     deg_intra_order = 9
     wavesol_result = prim.apply(
-        mode_fits_model,
+        line_fits_model,
         full_output=True,
         fit_orders=do_orders,
         opt_weights=True,
@@ -71,7 +71,7 @@ def test_process_lfc_parvi(tmp_path):
     os.environ['HISPECDRP_CALIBRATION_CACHE'] = str(tmp_path) + '/HISPECDRP_CALIBRATION_CACHE/'
     pipe = ProcessLFCPipeline()
     prim_args = {
-        'fit_lfc_modes' : {
+        'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
             'sigma_bounds': (0.1, 2.5),
