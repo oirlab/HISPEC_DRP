@@ -1,5 +1,5 @@
 from .utils import *
-from .logging import *
+from . import logging
 from .gdrive import *
 from .endian_utils import *
 from . import math
