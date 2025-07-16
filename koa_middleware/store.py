@@ -1,11 +1,10 @@
 import os
-from .hispec_calibration_orm import HISPECCalibrationORM
-from .parvi_calibration_orm import PARVICalibrationORM
-from .local_database import LocalCalibrationDB
-from .remote_database import RemoteCalibrationDB
+from hispecdrp.calibrations import HISPECCalibrationORM, PARVICalibrationORM
 from .selector_base import CalibrationSelector
+from .database import LocalCalibrationDB
+from .database import RemoteCalibrationDB
 
-from .. import datamodels
+from hispecdrp import datamodels
 
 __all__ = ['get_calibration_store', 'CalibrationStore']
 

@@ -1,5 +1,5 @@
-from .. import datamodels
-from .metadata_database import CalibrationDB
+from hispecdrp import datamodels
+from .database import CalibrationDB
 
 
 __all__ = ['CalibrationSelector']

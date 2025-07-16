@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 import datetime
 from .orm_base import CalibrationORM
-from .. import datamodels
+from hispecdrp import datamodels
 
 __all__ = ['CalibrationDB']
 
