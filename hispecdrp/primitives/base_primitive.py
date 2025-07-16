@@ -6,7 +6,7 @@ import yaml
 from keckdrpframework.models.arguments import Arguments
 
 import hispecdrp
-from ..calibrations import get_calibration_store, CalibrationSelector
+from koa_middleware import get_calibration_store, CalibrationSelector
 from .. import datamodels
 from .. import utils
 

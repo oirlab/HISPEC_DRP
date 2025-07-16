@@ -100,7 +100,8 @@ def test_process_lfc_parvi(tmp_path):
     assert np.all(model_result.lsf_params_fib3 == lsf_model.lsf_params_fib3)
 
     # Check that the calibration was saved to the cache
-    from hispecdrp.calibrations import get_calibration_store
+    #from hispecdrp.calibrations import get_calibration_store
+    from koa_middleware import get_calibration_store
     store = get_calibration_store(instrument='parvi')
     results = store.local_db.query()
     assert len(results) == 2 # lfc_wavesol and lsf

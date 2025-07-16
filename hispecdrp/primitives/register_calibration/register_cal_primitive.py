@@ -1,9 +1,8 @@
 from ..base_primitive import BasePrimitive
-from ...calibrations import get_calibration_store
 from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 
-from ...calibrations import get_calibration_store
+from koa_middleware import get_calibration_store
 
 __all__ = ['RegisterCalibrationPrimitive']
 
