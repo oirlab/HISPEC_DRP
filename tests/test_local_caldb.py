@@ -22,7 +22,7 @@ def test_local_caldb(tmp_path):
         dark_model = datamodels.open(dark_path, meta_only=False)
         dark_model.meta.exposure.datetime_start = None
         dark_model.meta.exposure.mjd_start += 365 * i
-        datamodels.get_hispec_meta(dark_model)
+        datamodels.set_hispec_meta(dark_model)
         filepath = cal_cache_dir + 'calibrations/' + dark_model.generate_filename()
         dark_model.save(filepath=filepath)
 
