@@ -1,6 +1,7 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
+from koa_middleware import CalibrationStore
 
 import numpy as np
 import os
@@ -94,16 +95,13 @@ def test_process_lfc_parvi(tmp_path):
         },
     }
     model_result = pipe.apply(lfc_path, prim_args=prim_args)
-    #breakpoint()
     assert np.all(model_result.wave_fib3 == lsf_model.wave_fib3)
     assert np.all(model_result.lfc_fitparams_fib3 == lsf_model.lfc_fitparams_fib3)
     assert np.all(model_result.lsf_params_fib3 == lsf_model.lsf_params_fib3)
 
     # Check that the calibration was saved to the cache
-    #from hispecdrp.calibrations import get_calibration_store
-    from koa_middleware import get_calibration_store
-    store = get_calibration_store(instrument='parvi')
-    results = store.local_db.query()
-    assert len(results) == 2 # lfc_wavesol and lsf
-    assert results[0].cal_type == 'lfc_wavesol'
-    assert results[1].cal_type == 'lsf'
+    with CalibrationStore(instrument='PARVI') as store:
+        results = store.local_db.query()
+        assert len(results) == 2 # lfc_wavesol and lsf
+        assert results[0].cal_type == 'lfc_wavesol'
+        assert results[1].cal_type == 'lsf'

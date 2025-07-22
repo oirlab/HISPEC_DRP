@@ -1,5 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
-from koa_middleware import get_calibration_store
+from koa_middleware import CalibrationStore
 from hispecdrp import datamodels
 from hispecdrp.calibrations import HISPECDarkSelector
 import os
@@ -27,24 +27,23 @@ def test_local_caldb(tmp_path):
         dark_model.save(filepath=filepath)
 
     # Connect to DB
-    store = get_calibration_store(cache_dir=cal_cache_dir, instrument='HISPEC')
+    with CalibrationStore(cache_dir=cal_cache_dir, instrument='HISPEC') as store:
 
-    # Register the local files
-    store.update_from_cache()
+        # Register the local files
+        store.update_from_cache()
 
-    # Test if the local files are registered
-    results = store.local_db.query()
-    assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
+        # Test if the local files are registered
+        results = store.local_db.query()
+        assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
 
-    # Test retrieval of dark
-    dark1 = store.get_calibration(sci_model, HISPECDarkSelector(), use_cached=True)
-    assert dark1 is not None, "No dark model not found in local DB"
+        # Test retrieval of dark
+        dark1 = store.get_calibration(sci_model, HISPECDarkSelector(), use_cached=True)
+        assert dark1 is not None, "No dark model not found in local DB"
 
-    # Test retrieval of second dark
-    sci_model.meta.exposure.mjd_start += 365
-    dark2 = store.get_calibration(sci_model, HISPECDarkSelector(), use_cached=True)
-    store.close()
-    assert dark2 is not None, "No dark model not found in local DB"
+        # Test retrieval of second dark
+        sci_model.meta.exposure.mjd_start += 365
+        dark2 = store.get_calibration(sci_model, HISPECDarkSelector(), use_cached=True)
+        assert dark2 is not None, "No dark model not found in local DB"
 
-    # Test that the two darks are different
-    assert dark1 != dark2, "Dark models are the same"
+        # Test that the two darks are different
+        assert dark1 != dark2, "Dark models are the same"
