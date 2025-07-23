@@ -76,7 +76,7 @@ instance/
 docs/_build/
 docs/html
 docs/doctrees
-docs/source/api/generated/
+**/api/generated/**
 
 # PyBuilder
 target/
