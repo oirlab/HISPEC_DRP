@@ -173,8 +173,9 @@ class BasePrimitive(ProcessingComponent):
         self.add_receipt_entry(model_result)
         return model_result
     
-    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
-        with CalibrationStore(name) as store:
+    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool | None = None, **kwargs):
+        orm_class = self.get_orm_class(name)
+        with CalibrationStore(orm_class=orm_class, use_cached=use_cached) as store:
             if selector is None:
                 selector = self.get_calibration_selector(name)
             return store.get_calibration(name, selector=selector, use_cached=use_cached, **kwargs)

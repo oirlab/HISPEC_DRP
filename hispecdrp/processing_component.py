@@ -2,6 +2,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 from keckdrpframework.models.arguments import Arguments
 
 from . import datamodels
+from .calibrations import DATAMODEL_ORM_MAP
 from .utils.logging import get_logger
 
 __all__ = ['ProcessingComponent']
@@ -88,3 +89,15 @@ class ProcessingComponent(_BasePrimitive):
             output_dir=instance_output_dir,
             suffix=instance_suffix   
         )
+    
+    @classmethod
+    def get_orm_class(cls, input_model : str | datamodels.DataModel) -> type:
+        """
+        Get the ORM class associated with the input model type from the provided ORM register.
+        """
+        # NOTE: Consider alternative approaches to link datamodel with ORM class.
+        model_cls = type(input_model)
+        for base_cls, orm_cls in DATAMODEL_ORM_MAP.items():
+            if issubclass(model_cls, base_cls):
+                return orm_cls
+        raise ValueError(f"No ORM class registered for model type {model_cls}")
