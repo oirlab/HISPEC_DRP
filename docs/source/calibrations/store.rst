@@ -2,7 +2,7 @@
 Calibration Store
 =================
 
-The class :py:class:`~hispecdrp.calibrations.store.CalibrationStore` manages the local (Keck or DRP user) and remote (KOA) databases.
+The class :py:class:`~koa_middleware.store.CalibrationStore` manages the local (Keck or DRP user) and remote (KOA) databases.
 
 
 Calibration Cache
