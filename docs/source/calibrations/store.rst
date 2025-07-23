@@ -27,10 +27,10 @@ Environment Variables
 
 The following environment variables can be set to configure the calibration store:
 
-- **HISPECDRP_CALIBRATION_CACHE**: Required for normal operations. Path to the top-level directory for downloaded calibrations. If not provided, the cache_dir must be specified when creating the calibration store.
-- **HISPECDRP_CALIBRATION_DATABASE_FILENAME_<INSTRUMENT>**: Optional. Name of the local SQLite database file. Default is 'hispec_calibrations.db' for HISPEC and 'parvi_calibrations.db' for PARVI. Different env vars can be used with different instrument names.
-- **HISPECDRP_CALIBRATION_DATABASE_URL**: Optional. PostgreSQL URL for the remote database. Set to None for only local operations including PARVI. Default is None for now, eventually KOA once deployed.
-- **HISPECDRP_CALIBRATION_URL**: Optional. URL where actual calibrations (FITS files) are stored.
+- **KOA_CALIBRATION_CACHE**: Required for normal operations. Path to the top-level directory for downloaded calibrations. If not provided, the cache_dir must be specified when creating the calibration store.
+- **KOA_LOCAL_DATABASE_FILENAME**: Optional. Name of the local SQLite database file. Default is ``f'{instrument.lower()}_calibrations.db'``.
+- **KOA_REMOTE_DATABASE_URL**: Optional. PostgreSQL URL for the remote database. Set to None for only local operations including PARVI. Default is None for now, eventually will point to KOA once deployed.
+- **KOA_CALIBRATION_URL**: Optional. URL where actual calibrations (FITS files) are stored. Default is None for now, eventually will point to KOA once deployed.
 
 Examples
 --------
@@ -39,33 +39,46 @@ Examples
 
 .. code-block:: python
 
-    from hispecdrp import get_calibration_store
+    from hispecdrp import RegisterCalibrationPrimitive
+    from hispecdrp import datamodels
+    from hispecdrp.utils import download_gdrive_file
+    
+    import os
 
-    # Create calibration store
-    # Both the location and base folder name can be anything
-    store = get_calibration_store(cache_dir='/home/user/hispecdrp_calibration_cache/', instrument='hispec')
+    # Open dark model
+    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
+    dark_model = datamodels.open(dark_path)
 
-    # Update 'hispecdrp_calibration_cache/database/hispec_calibrations.db'
-    # with the contents of 'hispecdrp_calibration_cache/calibrations/'
-    store.update_local_db_from_cache()
+    # Set the cache path
+    os.environ['KOA_CALIBRATION_CACHE'] = '/home/user/hispecdrp_calibration_cache/'
 
+    # Store the dark model in the local cache
+    prim = RegisterCalibrationPrimitive()
+    prim.apply(dark_model)
 
 **2. How to retrieve a dark calibration.**
 
 .. code-block:: python
 
+    from koa_middleware import CalibrationStore
     from hispecdrp import DarkSubtractionPrimitive
+    from hispecdrp.calibrations import HISPECCalibrationORM, HISPECDarkSelector
     from hispecdrp import datamodels
+    from hispecdrp.utils import download_gdrive_file
+    
+    import os
 
-    sci_model = datamodels.open(filepath)  # Load a science exposure model
+    # Open science model
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
+    sci_model = datamodels.open(sci_path)
 
-    # Query for a dark calibration given a science exposure
-    # Effectively how the dark primitive retrieves a dark frame from a science exposure.
+    # Set the cache path
+    os.environ['KOA_CALIBRATION_CACHE'] = '/home/user/hispecdrp_calibration_cache/'
+
+    # Query for a dark calibration given a science exposure using the Dark Primitive
     dark_prim = DarkSubtractionPrimitive()
     dark_path = dark_prim.get_calibration(sci_model, use_cached=True)
-
-    # Alternatively, you can use the store directly if you know the selector to use.
-    from hispecdrp import get_calibration_store
-    from hispecdrp.calibrations import HISPECDarkSelector
-    store = get_calibration_store(instrument='hispec')
-    dark_path = store.get_calibration(sci_model, selector=HISPECDarkSelector(), use_cached=True)
+    
+    # Alternatively, query for a dark calibration using the CalibrationStore directly
+    with CalibrationStore(orm_class=HISPECCalibrationORM) as store:
+        dark_path = store.get_calibration(sci_model, selector=HISPECDarkSelector(), use_cached=True)
