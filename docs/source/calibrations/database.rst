@@ -2,7 +2,7 @@
 Calibration Database
 ====================
 
-Calibration metadata is stored in an SQL based database (DB) to allow for faster parsing of metadata to select an appropriate calibration file. The DB is implemented in `SQLAlchemy ORM <https://www.sqlalchemy.org/>`_ and supports SQLite and PostgreSQL.
+Calibration metadata is stored in an SQL-based database (DB) to allow for faster parsing of metadata to select an appropriate calibration file. The DB is implemented in `SQLAlchemy ORM <https://www.sqlalchemy.org/>`_ and supports SQLite and PostgreSQL.
 
 ORM
 ---
