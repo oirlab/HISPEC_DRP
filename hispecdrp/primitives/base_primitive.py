@@ -6,7 +6,7 @@ import yaml
 from keckdrpframework.models.arguments import Arguments
 
 import hispecdrp
-from ..calibrations import get_calibration_store, CalibrationSelector
+from koa_middleware import CalibrationStore, CalibrationSelector
 from .. import datamodels
 from .. import utils
 
@@ -173,11 +173,12 @@ class BasePrimitive(ProcessingComponent):
         self.add_receipt_entry(model_result)
         return model_result
     
-    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool = True, **kwargs):
-        store = get_calibration_store(name)
-        if selector is None:
-            selector = self.get_calibration_selector(name)
-        return store.get_calibration(name, selector=selector, use_cached=use_cached, **kwargs)
+    def get_calibration(self, name, selector : CalibrationSelector | None = None, use_cached : bool | None = None, **kwargs):
+        orm_class = self.get_orm_class(name)
+        with CalibrationStore(orm_class=orm_class, use_cached=use_cached) as store:
+            if selector is None:
+                selector = self.get_calibration_selector(name)
+            return store.get_calibration(name, selector=selector, use_cached=use_cached, **kwargs)
     
     def get_output_model(self, input_model : datamodels.DataModel | None = None, model_suffix : str | None = None) -> datamodels.DataModel:
         """

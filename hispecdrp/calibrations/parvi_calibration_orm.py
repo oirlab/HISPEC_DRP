@@ -6,7 +6,7 @@ import uuid
 import datetime
 from .. import datamodels
 
-from .orm_base import CalibrationORM
+from koa_middleware import CalibrationORM
 
 __all__ = ['PARVICalibrationORM']
 
