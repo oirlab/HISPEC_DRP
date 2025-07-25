@@ -1,6 +1,6 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
-from hispecdrp.utils import download_gdrive_file
+#from hispecdrp.utils import download_gdrive_file
 from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
 
@@ -9,7 +9,8 @@ import os
 
 def test_process_lfc_parvi(tmp_path):
 
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
+    #lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
+    lfc_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230725.83766.15_spec-LFC.fits'
 
     # Fit 1D LFC lines with Gaussian
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
@@ -20,8 +21,6 @@ def test_process_lfc_parvi(tmp_path):
         full_output=True,
         do_orders=do_orders,
         do_fibers=do_fibers,
-        sigma_bounds=(0.1, 2.5),
-        mu_bounds=(-1, 1),
         lfc_nu0=datamodels.parvi.LFC_NU_0,
         lfc_delta_nu=datamodels.parvi.LFC_DELTA_NU,
     )
@@ -76,8 +75,6 @@ def test_process_lfc_parvi(tmp_path):
         'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
-            'sigma_bounds': (0.1, 2.5),
-            'mu_bounds': (-1, 1),
             'lfc_nu0': datamodels.parvi.LFC_NU_0,
             'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
         },

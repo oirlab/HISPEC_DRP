@@ -21,7 +21,7 @@ class GaussianLSFPrimitive(BasePrimitive):
         'deg_inter_order' : 'auto',
         'opt_weights' : True,
         'max_iters' : 100,
-        'sigma_cut' : 4.0,
+        'FWHM_cut' : 4.0,
         'output_model' : None,
     }
 
@@ -49,22 +49,22 @@ class GaussianLSFPrimitive(BasePrimitive):
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
-            sigmas = params_table['SIGMA_WAVE']
-            sigma_errs = params_table['SIGMA_ERR_WAVE']
+            sigmas = params_table['FWHM_WAVE']
+            fwhm_errs = params_table['FWHM_ERR_WAVE']
             mask = np.nonzero(np.isin(orders, self.args.fit_orders))[0]
             pixels = pixels[mask].copy()
             orders = orders[mask].copy()
             waves = waves[mask].copy()
             sigmas = sigmas[mask].copy()
             if self.args.opt_weights:
-                sigma_errs = sigma_errs[mask].copy()
-                weights = 1 / sigma_errs**2
+                fwhm_errs = fwhm_errs[mask].copy()
+                weights = 1 / fwhm_errs**2
             else:
                 weights = None
             fit_result = fit_gausslsf_chebyshev2d(
                 pixels, orders, sigmas, 
                 deg_intra_order=self.args.deg_intra_order, deg_inter_order=deg_inter_order,
-                max_iters=self.args.max_iters, sigma_cut=self.args.sigma_cut,
+                max_iters=self.args.max_iters, FWHM_cut=self.args.FWHM_cut,
                 weights=weights,
             )
             fit_results.append(fit_result)
@@ -103,7 +103,7 @@ def fit_gausslsf_chebyshev2d(
     pixel_bounds : tuple[float] | None = None,
     order_bounds : tuple[float] | None = None,
     max_iters : float | None = None,
-    sigma_cut : float | None = None,
+    FWHM_cut : float | None = None,
     weights : np.ndarray | None = None,
 ) -> dict:
     """
@@ -118,7 +118,7 @@ def fit_gausslsf_chebyshev2d(
         pixel_bounds (tuple[float] | None): Bounds for pixel values for normalization of the data.
         order_bounds (tuple[float] | None): Bounds for order values for normalization of the data.
         max_iters (int | None): Maximum number of iterations for the fitting process.
-        sigma_cut (float | None): Cutoff for the residuals in terms of standard deviation.
+        FWHM_cut (float | None): Cutoff for the residuals in terms of standard deviation.
         weights (np.ndarray | None): Fit weights. Defaults to uniform weights.
 
     Returns:
@@ -159,12 +159,12 @@ def fit_gausslsf_chebyshev2d(
         # Model and residuals
         model_flat = _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)
         residuals = sigmas - model_flat
-        if sigma_cut is not None:
+        if FWHM_cut is not None:
             sigma = np.nanstd(residuals)
             good_new = np.where(
                 (weights > 0)
                 & np.isfinite(weights)
-                & (np.abs(residuals) < sigma_cut * sigma)
+                & (np.abs(residuals) < FWHM_cut * sigma)
             )[0]
             if len(good) == len(good_new):
                 break

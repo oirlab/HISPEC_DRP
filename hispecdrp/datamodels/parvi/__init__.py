@@ -10,4 +10,5 @@ from .ramp import *
 from .lfcwavesol import *
 from .gausslsf import *
 from .lfcfitparams import *
+from .etalonfitparams import *
 from .meta_utils import *

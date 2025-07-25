@@ -10,4 +10,5 @@ from .nonlin import *
 from .lfcwavesol import *
 from .gausslsf import *
 from .lfcfitparams import *
+from .etalonfitparams import *
 from .dqflags import *
