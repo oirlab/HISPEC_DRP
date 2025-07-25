@@ -13,3 +13,4 @@ Primitives
    lfc_line_fitting
    lfc_wavesol
    gauss_lsf
+   etalon_line_fitting.rst
