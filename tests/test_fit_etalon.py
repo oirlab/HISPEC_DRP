@@ -3,12 +3,10 @@ from hispecdrp import FitEtalonLinesPrimitive
 from hispecdrp.utils import download_gdrive_file
 
 import numpy as np
-import os
 
 def test_fit_etalon_parvi(tmp_path):
 
-    #etalon_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-ETALON.fits', use_cached=True)
-    etalon_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230725.83766.15_spec-ETALON.fits'
+    etalon_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-ETALON.fits', use_cached=True)
 
     # Fit 1D LFC lines with Gaussian
     do_orders = np.arange(90, 120).astype(int).tolist()
