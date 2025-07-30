@@ -9,12 +9,44 @@ __all__ = [
 ]
 
 def delta_wave_to_delta_v(dw, w):
+    """
+    Converts a wavelength difference to a velocity difference.
+
+    Args:
+        dw (float): Wavelength difference.
+        w (float): Wavelength.
+
+    Returns:
+        float: Velocity difference.
+    """
     return dw / w * scipy.constants.c
 
 def delta_v_to_delta_wave(dv, w):
+    """
+    Converts a velocity difference to a wavelength difference.
+
+    Args:
+        dv (float): Velocity difference.
+        w (float): Wavelength.
+
+    Returns:
+        float: Wavelength difference.
+    """
     return dv / scipy.constants.c * w
 
 def delta_pix_to_delta_wave(dx, x, wavesol=None, dispersion=None):
+    """
+    Converts a pixel difference to a wavelength difference.
+
+    Args:
+        dx (float): Pixel difference.
+        x (float): Pixel value.
+        wavesol (np.ndarray, optional): Wavelength solution array. Defaults to None.
+        dispersion (np.ndarray, optional): Dispersion array. Defaults to None.
+
+    Returns:
+        float: Wavelength difference.
+    """
     if dispersion is None:
         dispersion = np.gradient(wavesol)
     disp = np.interp(x, np.arange(len(dispersion)), dispersion)

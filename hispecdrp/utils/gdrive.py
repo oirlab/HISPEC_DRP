@@ -77,6 +77,20 @@ def download_gdrive_file(
 
 
 def resolve_relative_path(shared_folder_url, relative_path):
+    """
+    Resolves the Google Drive file ID for a given relative path within a shared folder.
+
+    Args:
+        shared_folder_url (str): The URL of the shared Google Drive folder.
+        relative_path (str): The relative path to the file within the shared folder.
+
+    Returns:
+        str: The Google Drive file ID.
+
+    Raises:
+        RuntimeError: If the shared folder cannot be parsed or the file is not found.
+        FileNotFoundError: If the file is not found in the folder.
+    """
 
     def _parse_google_drive_file(url, content):
         folder_soup = bs4.BeautifulSoup(content, features="html.parser")

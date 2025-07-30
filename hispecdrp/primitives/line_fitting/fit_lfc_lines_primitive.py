@@ -84,12 +84,24 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
 
 def gen_lfc_modes(nu0 : float, delta_nu : float, wave_start : float, wave_end : float):
+    """
+    Generates LFC modes (wavelengths and frequencies) within a given wavelength range.
+
+    Args:
+        nu0 (float): Reference frequency.
+        delta_nu (float): Frequency spacing.
+        wave_start (float): Start wavelength in meters.
+        wave_end (float): End wavelength in meters.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing arrays of wavelengths, frequencies, and mode numbers.
+    """
     nu_end = (scipy.constants.c / wave_start) * 1E6
     nu_start = (scipy.constants.c / wave_end) * 1E6
     n1 = int(np.ceil((nu_start - nu0) / delta_nu))
     n2 = int(np.ceil((nu_end - nu0) / delta_nu))
     integers = np.arange(min(n1, n2), max(n1, n2) + 1).astype(int)
-    waves, nus = _gen_lfc_modes(nus, delta_nu, integers)
+    waves, nus = _gen_lfc_modes(nu0, delta_nu, integers)
     waves = waves[::-1]
     nus = nus[::-1]
     integers = integers[::-1]

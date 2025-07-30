@@ -15,6 +15,23 @@ def create_ramp(
     poisson_noise : bool = True,
     mjd_start : float = 60577.0, # MJD start time, not first read
 ) -> dict[str, np.ndarray]:
+    """
+    Creates a simulated ramp for detector data.
+
+    Args:
+        source (np.ndarray): Source signal in electrons/second/pixel.
+        readtime (float): Read time in seconds.
+        n_reads (int): Number of reads.
+        bias (np.ndarray | float, optional): Bias in electrons. Defaults to 0.
+        read_noise (float, optional): Read noise in electrons RMS. Defaults to 0.
+        first_read_noise (float | None, optional): First read noise in electrons RMS. Defaults to None.
+        nonlin_coeffs (np.ndarray | None, optional): Nonlinearity coefficients. Defaults to None.
+        poisson_noise (bool, optional): Whether to add Poisson noise. Defaults to True.
+        mjd_start (float, optional): MJD start time, not first read. Defaults to 60577.0.
+
+    Returns:
+        dict[str, np.ndarray]: A dictionary containing 'times', 'data', and 'dq' (data quality) arrays.
+    """
     times = astropy.table.Table(
         names=['READNUM', 'TIMES', 'EXPTIME'],
         dtype=[np.int16, np.float64, np.float64]

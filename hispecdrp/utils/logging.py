@@ -3,8 +3,13 @@ import logging
 
 def get_level(lvl : str) -> int:
     """
-    Read the logging level (string) from config file and return 
-    the corresponding logging level (int)
+    Converts a string representation of a logging level to its integer equivalent.
+
+    Args:
+        lvl (str): The logging level as a string (e.g., 'debug', 'info', 'warning', 'error', 'critical').
+
+    Returns:
+        int: The corresponding integer logging level from the `logging` module.
     """
     lvl = lvl.lower()
     if lvl == 'debug': return logging.DEBUG

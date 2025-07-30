@@ -51,6 +51,15 @@ class ProcessingComponent(_BasePrimitive):
         cls.ARGUMENTS = ARGUMENTS
 
     def prepr_args(self, args : Arguments | None = None) -> str:
+        """
+        Prepares and formats the arguments for display.
+
+        Args:
+            args (Arguments | None): The arguments object to format. Defaults to self.args.
+
+        Returns:
+            str: A formatted string of the arguments.
+        """
         if args is None:
             args = self.args
         s = f'name = {args.name}\n'

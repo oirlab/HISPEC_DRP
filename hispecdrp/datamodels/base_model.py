@@ -102,7 +102,7 @@ class DataModel:
         extensions : str | list[str] | None = None,
     ) -> dict[str, fits.Header]:
         """
-        Set the metadata from the headers of the FITS file.
+        Sets the metadata from the headers of the FITS file.
         
         Args:
             extensions (str, list[str], optional): List of extensions to read. Defaults to None.
@@ -145,6 +145,16 @@ class DataModel:
         return self._data
     
     def read_extension_data(self, hdu : _VALID_HDU, correct_dtype : bool = False) -> np.ndarray | astropy.table.Table:
+        """
+        Reads data from a given HDU and returns it as a numpy array or astropy table.
+
+        Args:
+            hdu (_VALID_HDU): The HDU to read data from.
+            correct_dtype (bool, optional): Whether to correct the data type of the data. Defaults to False.
+
+        Returns:
+            np.ndarray | astropy.table.Table: The data from the HDU.
+        """
         hdu_type = type(hdu)
         data = hdu.data
         if hdu_type is fits.ImageHDU:

@@ -17,6 +17,9 @@ class HISPECRTIPipeline(BaseKeckPipeline):
     event_table = {}
 
     def action_planner(self, action, context):
+        """
+        Determines where to enter an event in the event table based on the action and context.
+        """
         # Determine where to enter event table
         # action and context tells us the kind of file
         # and if the DRP is in QL or normal mode
@@ -24,6 +27,9 @@ class HISPECRTIPipeline(BaseKeckPipeline):
         pass
 
     def _get_action_apply_method(self, _class : Type[BasePrimitive]):
+        """
+        Returns a function that applies the primitive's logic.
+        """
         # Instantiating a primitive with action/context is done through a classmethod
         def func(action, context):
             primitive = _class.from_action_context(action, context)

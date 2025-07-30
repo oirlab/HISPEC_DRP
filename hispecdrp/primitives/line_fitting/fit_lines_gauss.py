@@ -60,6 +60,17 @@ def fit_lines_gauss(
     )
 
 def estimate_lfc_background(spec : np.ndarray, min_line_spacing : int = 12, n_lines : int = 10) -> np.ndarray:
+    """
+    Estimates the background of an LFC spectrum.
+
+    Args:
+        spec (np.ndarray): Input 1D spectrum.
+        min_line_spacing (int, optional): Minimum spacing between LFC lines. Defaults to 12.
+        n_lines (int, optional): Number of lines to consider for background estimation. Defaults to 10.
+
+    Returns:
+        np.ndarray: The estimated background.
+    """
     filter_width = int(min_line_spacing / 3 * n_lines)
     if filter_width % 2 == 0:
         filter_width += 1  # Ensure filter width is odd
@@ -68,6 +79,16 @@ def estimate_lfc_background(spec : np.ndarray, min_line_spacing : int = 12, n_li
     return background
 
 def _nanmin_filter1d(data: np.ndarray, width: int) -> np.ndarray:
+    """
+    Applies a 1D nanmin filter to the input data.
+
+    Args:
+        data (np.ndarray): Input 1D array.
+        width (int): Width of the filter window.
+
+    Returns:
+        np.ndarray: Filtered array.
+    """
     if width % 2 == 0:
         width += 1  # ensure odd
     pad = width // 2
@@ -76,6 +97,17 @@ def _nanmin_filter1d(data: np.ndarray, width: int) -> np.ndarray:
     return np.nanmin(windows, axis=1)
 
 def find_initial_lfc_lines(spec, dq, min_line_spacing : float = 10) -> dict:
+    """
+    Finds initial LFC lines in a spectrum.
+
+    Args:
+        spec (np.ndarray): Input 1D spectrum.
+        dq (np.ndarray): Data quality flags for input spectrum.
+        min_line_spacing (float, optional): Minimum spacing between LFC lines. Defaults to 10.
+
+    Returns:
+        dict: A dictionary containing the initial line positions.
+    """
     
     # Estimate and remove background
     background = estimate_lfc_background(spec, min_line_spacing=min_line_spacing, n_lines=2)

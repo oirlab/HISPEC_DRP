@@ -53,7 +53,7 @@ class BasePipeline(ProcessingComponent):
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
-        Set the primitive arguments for this pipeline.
+        Sets the primitive arguments for this pipeline.
         
         Args:
             prim_args (dict | None): A dictionary of primitive arguments to set.
