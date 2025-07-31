@@ -27,6 +27,8 @@ class TracePositionPrimitive(BasePrimitive):
         output_model = self.get_output_model(input_model, model_suffix='HISPECTracePosModel')
         out_dict = {}
 
+        ### Make output data model with empty data 
+
         for fiber in self.args.do_fibers:
             ### I'm assuming fiber is an int for now, or has a corresponding int
             self.log.info(f"Performing trace finding on {input_model} fiber {fiber}")
@@ -34,7 +36,10 @@ class TracePositionPrimitive(BasePrimitive):
             fib_locs, fib_coeffs = find_trace_pos(input_model, fiber, self.args.deg, self.args.threshold_peak, self.args.cutsize) 
             out_dict[f'POS_FIB{fiber}'] = fib_locs
             out_dict[f'COEFF_FIB{fiber}'] = fib_coeffs
+
+        ### TODO Pack up and save the datamodel
         
+        ### arguments should also return image data for trace profile fitting
         return Arguments(name=output_model,fit_results=out_dict)
     
 def find_trace_pos(

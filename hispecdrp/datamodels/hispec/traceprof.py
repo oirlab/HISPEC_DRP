@@ -2,9 +2,9 @@ from astropy.io import fits
 from .hispec_calibration_base import HISPECCalibrationModel
 import numpy as np
 
-__all__ = ['HISPECTracePosModel']
+__all__ = ['HISPECTraceProfModel']
 
-class HISPECTracePosModel(HISPECCalibrationModel):
+class HISPECTraceProfModel(HISPECCalibrationModel):
 
     EXTENSIONS = {
         'PROF_FIB1': {
@@ -19,6 +19,9 @@ class HISPECTracePosModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
         },
+        ### Add data quality extensions
+
+        ### Also add positions to this datamodel
     }
 
     CAL_TYPE = 'tracepos'
