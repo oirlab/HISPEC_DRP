@@ -1,6 +1,8 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
+from hispecdrp.calibrations import PARVICalibrationORM
+from koa_middleware import CalibrationStore
 
 import numpy as np
 import os
@@ -68,7 +70,7 @@ def test_process_lfc_parvi(tmp_path):
     assert getattr(lsf_model, f'lsf_params_fib{do_fibers[0]}').shape == getattr(lsf_model, f'spec_fib{do_fibers[0]}').shape
 
     # Test Pipeline
-    os.environ['HISPECDRP_CALIBRATION_CACHE'] = str(tmp_path) + '/HISPECDRP_CALIBRATION_CACHE/'
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
     pipe = ProcessLFCPipeline()
     prim_args = {
         'fit_lfc_lines' : {
@@ -94,15 +96,13 @@ def test_process_lfc_parvi(tmp_path):
         },
     }
     model_result = pipe.apply(lfc_path, prim_args=prim_args)
-    #breakpoint()
     assert np.all(model_result.wave_fib3 == lsf_model.wave_fib3)
     assert np.all(model_result.lfc_fitparams_fib3 == lsf_model.lfc_fitparams_fib3)
     assert np.all(model_result.lsf_params_fib3 == lsf_model.lsf_params_fib3)
 
     # Check that the calibration was saved to the cache
-    from hispecdrp.calibrations import get_calibration_store
-    store = get_calibration_store(instrument='parvi')
-    results = store.local_db.query()
-    assert len(results) == 2 # lfc_wavesol and lsf
-    assert results[0].cal_type == 'lfc_wavesol'
-    assert results[1].cal_type == 'lsf'
+    with CalibrationStore(orm_class=PARVICalibrationORM) as store:
+        results = store.local_db.query()
+        assert len(results) == 2 # lfc_wavesol and lsf
+        assert results[0].cal_type == 'lfc_wavesol'
+        assert results[1].cal_type == 'lsf'

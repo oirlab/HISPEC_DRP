@@ -2,7 +2,7 @@
 Calibration Database
 ====================
 
-Calibration metadata is stored in an SQL based database (DB) to allow for faster parsing of metadata to select an appropriate calibration file. The DB is implemented in `SQLAlchemy ORM <https://www.sqlalchemy.org/>`_ and supports SQLite and PostgreSQL.
+Calibration metadata is stored in an SQL-based database (DB) to allow for faster parsing of metadata to select an appropriate calibration file. The DB is implemented in `SQLAlchemy ORM <https://www.sqlalchemy.org/>`_ and supports SQLite and PostgreSQL.
 
 ORM
 ---
@@ -36,19 +36,19 @@ The database columns are declared in a standard Python class with additional met
 CalibrationDB
 -------------
 
-The base class :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` wraps the SQLAlchemy interface to a database (i.e. the SQLAlchemy engine and session). It defines the core logic for interfacing with a local (SQLite) or remote (PostgreSQL) DB. Two subclasses are provided for managing the local and remote databases, respectively.
+The base class :py:class:`~koa_middleware.metadata_database.CalibrationDB` wraps the SQLAlchemy interface to a database (i.e. the SQLAlchemy engine and session). It defines the core logic for interfacing with a local (SQLite) or remote (PostgreSQL) DB. Two subclasses are provided for managing the local and remote databases, respectively.
 
 Key methods:
 
-- :py:meth:`~hispecdrp.calibrations.metadata_database.CalibrationDB.add`
+- :py:meth:`~koa_middleware.metadata_database.CalibrationDB.add`
 
    Add one or many ``CalibrationORM``'s to the database.
 
-- :py:meth:`~hispecdrp.calibrations.metadata_database.CalibrationDB.query`
+- :py:meth:`~koa_middleware.metadata_database.CalibrationDB.query`
 
    Higher level query method to retrieve ``CalibrationORM``'s based on a specified calibration type and datetime start/end. The utility of this method will be revisited as the DRP is developed.
 
-- :py:meth:`~hispecdrp.calibrations.metadata_database.CalibrationDB.get_last_updated`
+- :py:meth:`~koa_middleware.metadata_database.CalibrationDB.get_last_updated`
 
    Retrieve the most recent last_updated timestamp.
 
@@ -56,12 +56,12 @@ Key methods:
 Remote Database
 ---------------
 
-Subclass of :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` for remote databases (e.g., PostgreSQL).
+Subclass of :py:class:`~koa_middleware.metadata_database.CalibrationDB` for remote databases (e.g., PostgreSQL).
 No custom logic yet beyond initialization.
 
 
 Local Database
 --------------
 
-Subclass of :py:class:`~hispecdrp.calibrations.metadata_db.CalibrationDB` for local SQLite databases.
+Subclass of :py:class:`~koa_middleware.metadata_database.CalibrationDB` for local SQLite databases.
 The local DB can also be instantiated from a local cache of calibration files without needing to be connected to a remote DB.

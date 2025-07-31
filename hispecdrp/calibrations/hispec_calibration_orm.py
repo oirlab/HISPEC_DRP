@@ -9,7 +9,7 @@ from ..keck import koa
 
 __all__ = ['HISPECCalibrationORM']
 
-from .orm_base import CalibrationORM
+from koa_middleware import CalibrationORM
 
 # Use the environment variable for database connection
 _Base = declarative_base()

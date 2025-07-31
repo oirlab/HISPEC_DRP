@@ -1,8 +1,8 @@
 from .. import datamodels
-from .metadata_database import CalibrationDB
+from koa_middleware import CalibrationDB
 from sqlalchemy import func
 
-from .selector_base import CalibrationSelector
+from koa_middleware.selector_base import CalibrationSelector
 
 __all__ = [
     'PARVIDarkSelector',

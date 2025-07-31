@@ -1,28 +1,27 @@
 from ..base_primitive import BasePrimitive
-from ...calibrations import get_calibration_store
 from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 
-from ...calibrations import get_calibration_store
+from koa_middleware import CalibrationStore
 
 __all__ = ['RegisterCalibrationPrimitive']
 
 
 class RegisterCalibrationPrimitive(BasePrimitive):
     """
-    ARGUMENTS:
-        calibration (DataModel | str): Calibration to register.
+    Registers a calibration model in the local calibration database.
     """
 
     ARGUMENTS = {
     } # NOTE: Soon to add additional args here as interface with KOA is developed.
 
     def _perform(self):
-        input_model = datamodels.open(self.args.name)
+        cal_model = datamodels.open(self.args.name)
         assert isinstance(
-            input_model,
+            cal_model,
             (datamodels.HISPECCalibrationModel, datamodels.PARVICalibrationModel)
-        ), f"Input model must be a valid CalibrationModel, got {type(input_model)}"
-        store = get_calibration_store(input_model)
-        store.register_local_calibration(input_model) # Probably passing args here.
-        return Arguments(name=input_model)
+        ), f"Input model must be a valid CalibrationModel, got {type(cal_model)}"
+        orm_class = self.get_orm_class(cal_model)
+        with CalibrationStore(orm_class=orm_class) as store:
+            calibration = store.register_local_calibration(cal_model) # Probably passing args here.
+        return Arguments(name=cal_model, calibration=calibration)

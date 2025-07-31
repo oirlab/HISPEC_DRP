@@ -2,10 +2,10 @@ import astropy.time
 
 from .parvi_base import PARVIDataModel
 
-__all__ = ['get_parvi_meta']
+__all__ = ['set_parvi_meta']
 
 
-def get_parvi_meta(model : PARVIDataModel, meta : dict | None = None):
+def set_parvi_meta(model : PARVIDataModel, meta : dict | None = None):
     """
     Populate certain model metadata defaults for development and testing data for now.
 
@@ -17,7 +17,7 @@ def get_parvi_meta(model : PARVIDataModel, meta : dict | None = None):
         update_model_meta(model, meta)
 
     # Add exposure metadata
-    get_parvi_exposure_meta(model)
+    set_parvi_exposure_meta(model)
 
     # Date time
     if model.meta.date_obs is None:
@@ -33,7 +33,7 @@ def get_parvi_meta(model : PARVIDataModel, meta : dict | None = None):
     return model
 
 
-def get_parvi_exposure_meta(model : PARVIDataModel):
+def set_parvi_exposure_meta(model : PARVIDataModel):
     if model.meta.exposure.datetime_start is None and model.meta.exposure.mjd_start is None:
         model.meta.exposure.datetime_start = '2024-09-24T00:00:00.000'  # Default value
     if model.meta.exposure.datetime_start is None and model.meta.exposure.mjd_start is not None:
