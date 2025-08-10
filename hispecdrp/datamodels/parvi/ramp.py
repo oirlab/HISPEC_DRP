@@ -23,11 +23,11 @@ class PARVIRampModel(PARVIDataModel):
         'TIMES': _READTIMES_HDU,
         'DQ': {
             'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
+            'dtype' : np.uint32
         },
         'ERR': {
             'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
+            'dtype' : np.float32
         },
         'VAR_RNOISE': {
             'hdu_type' : fits.ImageHDU,
