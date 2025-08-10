@@ -1,5 +1,5 @@
 from ..base_primitive import BasePrimitive
-from ...calibrations import HISPECNonlinearCorrectionSelector, PARVINonlinearCorrectionSelector
+from ...calibrations import NonlinearCorrectionSelector
 from ... import datamodels
 import numpy as np
 
@@ -22,11 +22,11 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.args.name)
-        if self.args.nonlin is None:
-            nonlin_path = self.get_calibration(input_model)
+        input_model = datamodels.open(self.name)
+        if self.nonlin is None:
+            nonlin_path = self.get_calibration(input_model, selector=NonlinearCorrectionSelector())
         else:
-            nonlin_path = self.args.nonlin
+            nonlin_path = self.nonlin
         nonlin_model = datamodels.open(nonlin_path)
         result = input_model.copy()
         self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
@@ -34,12 +34,3 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         correct_nonlinearity(data, nonlin_model.coeffs)
         result.data = data.astype(np.float32)
         return Arguments(name=result)
-
-    def get_calibration_selector(self, name):
-        input_model = datamodels.open(name, meta_only=True)
-        if isinstance(input_model, datamodels.HISPECDataModel):
-            return HISPECNonlinearCorrectionSelector()
-        elif isinstance(input_model, datamodels.PARVIDataModel):
-            return PARVINonlinearCorrectionSelector()
-        else:
-            raise ValueError(f"Unsupported input model type: {type(input_model)}")

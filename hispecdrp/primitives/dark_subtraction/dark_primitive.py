@@ -1,5 +1,5 @@
 from ..base_primitive import BasePrimitive
-from ...calibrations import HISPECDarkSelector, PARVIDarkSelector
+from ...calibrations import DarkSelector
 from ... import datamodels
 from keckdrpframework.models.arguments import Arguments
 import numpy as np
@@ -16,31 +16,37 @@ class DarkSubtractionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
         'suffix' : 'darksub',
-        'dark' : None,
+    }
+
+    CALIBRATIONS = {
+        'dark': {
+            'selector': DarkSelector,
+            'selector_kwargs': {}
+        }
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.args.name)
-        if self.args.dark is None:
-            dark_path = self.get_calibration(input_model, use_cached=True)
-        else:
-            dark_path = self.args.dark
+
+        # Load the input model
+        input_model = datamodels.open(self.name)
+
+        # Get the dark model
+        dark_path = self.get_calibration(input_model, 'dark')
         dark_model = datamodels.open(dark_path)
-        result = input_model.copy()
-        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
-        result = dark_subtraction_rate(result, dark_model)
-        return Arguments(name=result)
-
-    def get_calibration_selector(self, name):
-        input_model = datamodels.open(name, meta_only=True)
-        if isinstance(input_model, datamodels.HISPECDataModel):
-            return HISPECDarkSelector()
-        elif isinstance(input_model, datamodels.PARVIDataModel):
-            return PARVIDarkSelector()
-        else:
-            raise ValueError(f"Unsupported input model type: {type(input_model)}")
-
         
+        # Output
+        result = input_model.copy()
+
+        # Log
+        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
+
+        # Perform dark subtraction
+        output_model = dark_subtraction_rate(result, dark_model)
+
+        # Output
+        return Arguments(name=output_model, dark=dark_model)
+
+
 def dark_subtraction_rate(
     input_model : datamodels.HISPECL0Model,
     dark_model : datamodels.HISPECDarkModel,

@@ -31,7 +31,7 @@ class BasePipeline(ProcessingComponent):
         Args:
             config (str | Config | None): The configuration file or Config to further specify parameters.
             prim_args (dict | None): A dictionary of primitive arguments to set for this pipeline.
-            **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
+            **kwargs: Any additional keyword arguments to set as direct attributes for this pipeline.
         """
         self.init_config(config)
         self.set_args(**kwargs)
@@ -39,17 +39,18 @@ class BasePipeline(ProcessingComponent):
 
     def set_args(self, **kwargs) -> dict:
         """
-        If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
-        `self.args.name` should be the name of the primary datamodel or filename to be processed.
+        Set arguments directly as top-level attributes on the instance.
         """
-        if not hasattr(self, 'args'):
+        if not hasattr(self, '_args_initialized'):
             self.init_args()
-        for key in kwargs:
-            if key in self.ARGUMENTS or key == 'name':
-                self.args[key] = kwargs[key]
-            else:
-                raise ValueError(f"Invalid argument '{key}' for primitive {self.__class__.__name__}. Valid arguments are: {list(self.ARGUMENTS.keys())}")
-        return self.args
+            self._args_initialized = True
+        
+        for key, value in kwargs.items():
+            if key in self.ARGUMENTS:
+                setattr(self, key, value)
+            # NOTE: Ignore invalid keys?
+
+        return kwargs
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
@@ -63,14 +64,13 @@ class BasePipeline(ProcessingComponent):
         for prim_alias in prim_args:
             if prim_alias in self.PRIMITIVES:
                 prim_instance = getattr(self, prim_alias)
-                prim_instance_args = getattr(prim_instance, 'args')
                 for arg_name in prim_args[prim_alias]:
                     if arg_name in prim_instance.ARGUMENTS:
-                        setattr(prim_instance_args, arg_name, prim_args[prim_alias][arg_name])
+                        prim_instance.set_args(**{arg_name: prim_args[prim_alias][arg_name]})
                     else:
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {list(prim_instance.ARGUMENTS.keys())}")
             else:
-                raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.args.iter_kw())}")
+                raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.PRIMITIVES.keys())}")
     
     def init_primitives(self, prim_args : dict | None = None):
         """
@@ -83,39 +83,38 @@ class BasePipeline(ProcessingComponent):
 
     def apply(self, name, prim_args : dict | None = None, **kwargs):
         self.init_logger()
-        self.output = None
-
+        self._output = None
         try:
             self.set_args(name=name, **kwargs)
             self.set_prim_args(prim_args)
-            self.args.full_output = any(
-                getattr(getattr(self, prim_alias).args, 'full_output', False) for prim_alias in self.PRIMITIVES
-            ) or self.args.full_output
-            self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args(self.args)}")
-            self.output = self._perform()
-            if isinstance(self.output.name, datamodels.DataModel):
-                if self.args.save_result is True:
-                    self.save_model(self.output.name)
-            elif isinstance(self.output.name, list):
-                for result in self.output.name:
+            self.full_output = any(
+                getattr(getattr(self, prim_alias), 'full_output', False) for prim_alias in self.PRIMITIVES
+            ) or getattr(self, 'full_output', False)
+            self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
+            self._output = self._perform()
+            if isinstance(self._output.name, datamodels.DataModel):
+                if getattr(self, 'save_result', False) is True:
+                    self.save_model(self._output.name)
+            elif isinstance(self._output.name, list):
+                for result in self._output.name:
                     if isinstance(result, datamodels.DataModel):
-                        if self.args.save_result:
+                        if getattr(self, 'save_result', False):
                             self.save_model(result)
-            elif isinstance(self.output, dict):
-                for key in self.output:
-                    if isinstance(self.output[key], datamodels.DataModel):
-                        if self.args.save_result:
-                            self.save_model(self.output[key])
+            elif isinstance(self._output.name, dict):
+                for key in self._output.name:
+                    if isinstance(self._output.name[key], datamodels.DataModel):
+                        if getattr(self, 'save_result', False):
+                            self.save_model(self._output.name[key])
         except Exception as e:
             self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
             return name
         
-        if self.args.full_output:
-            return self.output
+        if getattr(self, 'full_output', False):
+            return self._output
         else:
-            return self.output.name
+            return self._output.name
     
     def init_config(self, config : dict | str | None = None) -> dict:
         """
