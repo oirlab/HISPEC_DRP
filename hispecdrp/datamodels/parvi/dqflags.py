@@ -21,7 +21,7 @@ DQ_FLAGS = {
     'TELEGRAPH':        2**15,  # Telegraph pixel
     'NONLINEAR':        2**16,  # Pixel highly nonlinear
     'BAD_REF_PIXEL':    2**17,  # Reference pixel cannot be used
-    'CROSS_BAD ':       2**18,  # Center of cross-shaped bad pixel
+    'CROSS_BAD':       2**18,  # Center of cross-shaped bad pixel
     'CROSS_BAD_NEIGH':  2**19,  # Neighbor of cross-shaped bad pixel
     'RESERVED_4':       2**20,  # RESERVED_4/TBD
     'RESERVED_5':       2**21,  # RESERVED_5/TBD
@@ -29,10 +29,10 @@ DQ_FLAGS = {
     'UNRELIABLE_DARK':  2**23,  # Dark variance large
     'UNRELIABLE_SLOPE': 2**24,  # Slope variance large (i.e., noisy pixel)
     'UNRELIABLE_FLAT':  2**25,  # Flat variance large
-    'UNRELIABLE_WS ':   2**26,  # Unreliable wavelength solution
-    'LOW_INST_TRANS ':  2**27,  # Low instrument transmission (blaze < ~90%)
-    'TELLURIC ':        2**28,  # Telluric absorption line
-    'OH_LINE ':         2**29,  # OH emission line
+    'UNRELIABLE_WS':   2**26,  # Unreliable wavelength solution
+    'LOW_INST_TRANS':  2**27,  # Low instrument transmission (blaze < ~90%)
+    'TELLURIC':        2**28,  # Telluric absorption line
+    'OH_LINE':         2**29,  # OH emission line
     'OTHER_BAD_PIXEL':  2**30,  # A catch-all flag
     'REFERENCE_PIXEL':  2**31,  # Pixel is a reference pixel
 }
