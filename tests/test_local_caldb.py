@@ -1,7 +1,7 @@
 from hispecdrp.utils import download_gdrive_file
 from koa_middleware import CalibrationStore
 from hispecdrp import datamodels
-from hispecdrp import DarkSubtractionPrimitive
+from hispecdrp import DarkSubtractionPrimitive, RegisterCalibrationPrimitive
 from hispecdrp.calibrations import HISPECCalibrationORM
 from hispecdrp.calibrations import DarkSelector
 
@@ -23,23 +23,24 @@ def test_local_caldb(tmp_path):
     # Store 5 files in the local cache
     N = 5
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-    os.makedirs(os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/', exist_ok=True)
-    dark_paths = []
+    #os.makedirs(os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/', exist_ok=True)
+    dark_models = []
     for i in range(N):
         dark_model = datamodels.open(dark_path, meta_only=False)
         dark_model.meta.exposure.datetime_start = None
         dark_model.meta.exposure.mjd_start += 365 * i
         datamodels.set_hispec_meta(dark_model)
-        filepath = os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/' + dark_model.generate_filename()
-        dark_model.save(filepath=filepath)
-        dark_paths.append(filepath)
+        prim = RegisterCalibrationPrimitive()
+        prim.apply(dark_model)
+        #filepath = os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/' + dark_model.generate_filename()
+        #dark_model.save(filepath=filepath)
+        dark_models.append(dark_model)
 
     # Connect to DB
     with CalibrationStore(orm_class=HISPECCalibrationORM, use_cached=True) as store:
 
         # Register the local files
-        for dark_path in dark_paths:
-            dark_model = datamodels.open(dark_path)
+        for dark_model in dark_models:
             store.register_local_calibration(dark_model)
 
         # Test if the local files are registered
@@ -47,12 +48,12 @@ def test_local_caldb(tmp_path):
         assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
 
         # Test retrieval of dark
-        dark1 = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
+        dark1, dark1_orm = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
         assert dark1 is not None, "No dark model not found in local DB"
 
         # Test retrieval of second dark
         sci_model.meta.exposure.mjd_start += 365
-        dark2 = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
+        dark2, dark2_orm = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
         assert dark2 is not None, "No dark model not found in local DB"
 
         # Test that the two darks are different
@@ -63,14 +64,12 @@ def test_local_caldb(tmp_path):
         dark3 = dark_prim.get_calibration(sci_model, 'dark')
         assert dark3 is not None, "No dark model not found in local DB"
 
+        darks = [dark1, dark2, dark3]
+        dark_models = [datamodels.open(d) for d in darks]
 
-import shutil
-
-tmp_path = '/Users/cale/Desktop/HISPEC_DRP_TEMP/'
-# Remove the tmp_path if it exists
-if os.path.exists(tmp_path):
-    shutil.rmtree(tmp_path)
-# Recreate the tmp_path
-os.makedirs(tmp_path, exist_ok=True)
-
-test_local_caldb(tmp_path)
+        # Check calibration retrieval by ID
+        for dark_model in dark_models:
+            dark_path, dark_orm = store.get_calibration_by_id(dark_model.meta.cal_id)
+            dark_cal = datamodels.open(dark_path)
+            assert os.path.basename(dark_path) == dark_cal.meta.filename, "Calibration filename mismatch"
+            assert dark_orm.id == dark_model.meta.cal_id, "Calibration ID mismatch"
