@@ -1,8 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 
-from keckdrpframework.models.arguments import Arguments
-
 import numpy as np
 from ...utils.math import solve_chebyshev2d_ols
 
@@ -88,7 +86,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
             )
             setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
 
-        return Arguments(name=output_model, fit_results=fit_results)
+        return dict(name=output_model, fit_results=fit_results)
 
 def fit_gausslsf_chebyshev2d(
     pixels : np.ndarray,

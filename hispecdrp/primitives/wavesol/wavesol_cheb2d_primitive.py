@@ -2,7 +2,6 @@ from ... import datamodels
 from ..base_primitive import BasePrimitive
 
 from ...utils.math import delta_wave_to_delta_vel, solve_chebyshev2d_ols
-from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
 
@@ -43,7 +42,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         fit_results = []
 
         # Get the output model type
-        output_model = self.get_output_model(input_model, output_model='PARVILFCWavesolModel')
+        output_model = self.get_output_model(input_model, output_model='LFCWavesolModel')
 
         for fiber in self.do_fibers:
 
@@ -116,7 +115,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                     if k2 < nx - 1:
                         dq[oi, k2+1:] |= flag_value
                         
-        return Arguments(name=output_model, fit_results=fit_results)
+        return dict(name=output_model, fit_results=fit_results)
 
 
 def _normalize_val(x, lo, hi):

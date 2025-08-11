@@ -1,8 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 
-from keckdrpframework.models.arguments import Arguments
-
 from .fit_lines import fit_lines, find_initial_lines
 from ...utils.math import delta_pix_to_delta_wave
 
@@ -76,7 +74,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
-        return Arguments(name=output_model, fit_results=fit_results)
+        return dict(name=output_model, fit_results=fit_results)
 
 
 def gen_lfc_modes(nu0 : float, delta_nu : float, wave_start : float, wave_end : float):

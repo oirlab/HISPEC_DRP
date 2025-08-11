@@ -1,7 +1,6 @@
 
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
 __all__ = ['DetectorFlatPrimitive']
@@ -30,7 +29,7 @@ class DetectorFlatPrimitive(BasePrimitive):
         result = input_model.copy()
         self.log.info(f"Applying detector flat correction with {flat_model} to {input_model}")
         result = detector_flat_correction(result, flat_model)
-        return Arguments(name=result)
+        return dict(name=result, detflat=self.detflat)
 
 
 def detector_flat_correction(input_model : datamodels.DataModel, detflat_model : datamodels.DataModel) -> datamodels.DataModel:

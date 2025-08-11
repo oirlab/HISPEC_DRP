@@ -31,32 +31,29 @@ class DarkSubtractionPrimitive(BasePrimitive):
         input_model = datamodels.open(self.name)
 
         # Get the dark model
-        dark_path = self.get_calibration(input_model, 'dark')
-        dark_model = datamodels.open(dark_path)
-        
+        dark, _ = self.get_calibration(input_model, 'dark')
+        dark_model = datamodels.open(dark)
+
         # Output
         result = input_model.copy()
 
         # Log
-        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
+        self.log.info(f"Applying dark correction with {dark} to {input_model}")
 
         # Perform dark subtraction
         output_model = dark_subtraction_rate(result, dark_model)
 
         # Output
-        return Arguments(name=output_model, dark=dark_model)
+        return dict(name=output_model, dark=dark)
 
 
-def dark_subtraction_rate(
-    input_model : datamodels.HISPECL0Model,
-    dark_model : datamodels.HISPECDarkModel,
-) -> datamodels.HISPECL0Model:
+def dark_subtraction_rate(input_model, dark_model):
     """
     Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
 
     Args:
-        input_model (HISPECL0Model): Input level 0 model.
-        dark_model (HISPECDarkModel): Dark model.
+        input_model: Input level 0 model.
+        dark_model: Dark calibration model.
     
     Returns:
         HISPECL0Model: The dark-subtracted data.

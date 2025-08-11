@@ -1,6 +1,5 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from keckdrpframework.models.arguments import Arguments
 
 from koa_middleware import CalibrationStore
 
@@ -23,4 +22,4 @@ class RegisterCalibrationPrimitive(BasePrimitive):
         ), f"Input model must be a valid CalibrationModel, got {type(cal_model)}"
         with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS) as store:
             calibration = store.register_local_calibration(cal_model) # Probably passing args here.
-        return Arguments(name=cal_model, calibration=calibration)
+        return dict(name=cal_model, calibration=calibration)

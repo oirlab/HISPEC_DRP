@@ -1,8 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 
-from keckdrpframework.models.arguments import Arguments
-
 from .fit_lines import fit_lines, find_initial_lines
 from ...utils.math import delta_pix_to_delta_wave
 
@@ -59,7 +57,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                     profile_type=self.profile_type,
                 )
                 #except:
-                import matplotlib.pyplot as plt
+                #import matplotlib.pyplot as plt
                     #breakpoint()
                 fit_results[fiber].append(_fit_results)
 
@@ -85,7 +83,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
 
-        return Arguments(name=output_model, fit_results=fit_results)
+        return dict(name=output_model, fit_results=fit_results)
     
 
 def etalon_spacing_pixels(fsr : float, wave : np.ndarray) -> float:

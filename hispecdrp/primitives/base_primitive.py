@@ -45,7 +45,7 @@ class BasePrimitive(ProcessingComponent):
         # Init the output, status, and calibrations used
         self._output = None
         self._status = None
-        self._calibrations_used = []
+        self._calibrations_used = {}
 
     def init_config(self, config : dict | str | None = None, validate_class : bool = False) -> dict:
         """
@@ -98,8 +98,8 @@ class BasePrimitive(ProcessingComponent):
             # This allows pipelines to directly pass the result from a primitive to the next primitive if full_output is True or False.
             # Pipelines can pass in a datamodel or an Arguments object, in which case the first arg is fetched.
             # NOTE: Consider alternative approach.
-            if isinstance(name, Arguments):
-                name = name.name
+            if isinstance(name, dict) and 'name' in name:
+                name = name['name']
             self.set_args(name=name, **kwargs)
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
@@ -110,14 +110,14 @@ class BasePrimitive(ProcessingComponent):
                 if self._status is None:
                     self._status = "COMPLETE"
                     self._output = output
-                self.finalize_model(self._output.name)
+                self.finalize_model(self._output['name'])
                 if self.save_result:
-                    self.save_model(self._output.name)
+                    self.save_model(self._output['name'])
         except Exception as e:
             self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
             self.on_exception(e)
-            if self._output is not None and hasattr(self._output, 'name'):
-                self.finalize_model(self._output.name)
+            if self._output is not None and 'name' in self._output:
+                self.finalize_model(self._output['name'])
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
             return name
@@ -125,7 +125,7 @@ class BasePrimitive(ProcessingComponent):
         if self.full_output:
             return self._output
         else:
-            return self._output.name
+            return self._output['name']
 
     def set_args(self, **kwargs) -> dict:
         """
@@ -219,19 +219,20 @@ class BasePrimitive(ProcessingComponent):
         name : str | datamodels.DataModel,
         cal_role : str, # Match key in self.CALIBRATIONS. Typically 1-1 with ORM.cal_type but not always e.g. (etalon_before, etalon_after).
         use_cached : bool | None = None,
-        return_orm : bool = False,
         **kwargs
-    ) -> str:
+    ) -> tuple[str | datamodels.DataModel, CalibrationORM | None]:
         """
         Primary method for a primitive to call in order to get a calibration file.
 
         Args:
             name (str): The filepath or datamodel to get a calibration for.
-            cal_type (str): The type of calibration to get, which should match a key in `self.CALIBRATIONS`.
+            cal_role (str): The type of calibration to get, which should match a key in `self.CALIBRATIONS`.
             use_cached (bool | None): If True, use cached calibrations if available. If None, use the default setting from the configuration.
-            return_orm (bool): If True, return the ORM object of the calibration instead of the file path. Default is False.
             **kwargs: Additional keyword arguments to pass to the selector.
 
+        Returns:
+            tuple[str | datamodels.DataModel, CalibrationORM | None]: A tuple of (calibration_file_or_model, calibration_orm).
+                The ORM will be None if the calibration is not in the database.
         """
 
         # User provided value
@@ -253,10 +254,7 @@ class BasePrimitive(ProcessingComponent):
                     if result:
                         calibration_orm = result[1]
                         self._calibrations_used[cal_role] = calibration_orm
-                        if return_orm:
-                            return input_model, calibration_orm
-                        else:
-                            return input_model
+                        return input_model, calibration_orm
                     else:
                         # Msg probably not necessary, but useful for debugging.
                         self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
@@ -283,10 +281,7 @@ class BasePrimitive(ProcessingComponent):
             if cal_id is None:
                 self.log.warning(f"No calibration ID provided for selected calibration: {input_model}.")
                 self._calibrations_used[cal_role] = input_model
-                if return_orm:
-                    return input_model, None # No ORM available if not in DB, don't create dummy ORM for now.
-                else:
-                    return input_model
+                return input_model, None  # No ORM available if not in DB
 
             # Check if the calibration is in the DB.
             with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=True) as store:
@@ -294,10 +289,7 @@ class BasePrimitive(ProcessingComponent):
                 if result:
                     calibration_orm = result[1]
                     self._calibrations_used.append(calibration_orm)
-                    if return_orm:
-                        return input_model, calibration_orm
-                    else:
-                        return input_model
+                    return input_model, calibration_orm
                 else:
                     # Msg probably not necessary, but useful for debugging.
                     self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
@@ -309,10 +301,7 @@ class BasePrimitive(ProcessingComponent):
         if isinstance(cal_value, CalibrationORM):
             self._calibrations_used[cal_role] = cal_value
             local_filepath = None  # Get local filepath with store
-            if return_orm:
-                return local_filepath, cal_value
-            else:
-                return local_filepath
+            return local_filepath, cal_value
 
         ################################################################
         ##### Case 4: None - use default selector from CALIBRATIONS ####
@@ -328,10 +317,7 @@ class BasePrimitive(ProcessingComponent):
             input_model = datamodels.open(name, meta_only=True)
             with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS) as store:
                 local_filepath, calibration_orm = store.get_calibration(input_model.meta.to_flat_dict(), selector=selector)
-                if return_orm:
-                    return local_filepath, calibration_orm
-                else:
-                    return local_filepath
+                return local_filepath, calibration_orm
 
         # Else raise error
         msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
