@@ -10,7 +10,6 @@ import os
 def test_process_lfc_parvi(tmp_path):
 
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
-    #lfc_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230725.83766.15_spec-LFC.fits'
 
     # Fit 1D LFC lines with Gaussian
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
@@ -40,8 +39,8 @@ def test_process_lfc_parvi(tmp_path):
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
     )
-    wavesol_model = wavesol_result.name
-    fit_results = wavesol_result.fit_results
+    wavesol_model = wavesol_result['output']
+    fit_results = wavesol_result['fit_results']
     assert isinstance(wavesol_model, datamodels.PARVILFCWavesolModel)
     assert wavesol_model.meta.cal_type == 'lfc_wavesol'
     assert wavesol_model.cc_coeff_fib3.shape == (deg_intra_order + 1, deg_inter_order + 1)
@@ -62,7 +61,7 @@ def test_process_lfc_parvi(tmp_path):
         deg_intra_order=deg_intra_order,
         fit_orders=do_orders,
     )
-    lsf_model = result.name
+    lsf_model = result['output']
     assert isinstance(lsf_model, datamodels.PARVIGaussianLSFModel)
     assert lsf_model.meta.cal_type == 'lsf'
     assert getattr(lsf_model, f'lsf_params_fib{do_fibers[0]}').shape == getattr(lsf_model, f'spec_fib{do_fibers[0]}').shape
@@ -91,9 +90,9 @@ def test_process_lfc_parvi(tmp_path):
             'fit_orders': do_orders,
         },
     }
-    model_results = pipe.apply(lfc_path, prim_args=prim_args)
-    wavesol_model = model_results['wavesol']
-    lsf_model = model_results['lsf']
+    result = pipe.apply(lfc_path, prim_args=prim_args)
+    wavesol_model = result['wavesol']
+    lsf_model = result['lsf']
 
     # Check that the calibration was saved to the cache
     with CalibrationStore(orm_class=PARVICalibrationORM) as store:

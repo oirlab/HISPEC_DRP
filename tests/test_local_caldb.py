@@ -14,16 +14,14 @@ def test_local_caldb(tmp_path):
     sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
     dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
 
-    #sci_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
-    #dark_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/Cals/HB.20240924.0000.00.master-dark.fits'
-
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True)
 
+    # Calibration cache
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+
     # Store 5 files in the local cache
     N = 5
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-    #os.makedirs(os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/', exist_ok=True)
     dark_models = []
     for i in range(N):
         dark_model = datamodels.open(dark_path, meta_only=False)
@@ -32,16 +30,10 @@ def test_local_caldb(tmp_path):
         datamodels.set_hispec_meta(dark_model)
         prim = RegisterCalibrationPrimitive()
         prim.apply(dark_model)
-        #filepath = os.environ['KOA_CALIBRATION_CACHE'] + 'calibrations/' + dark_model.generate_filename()
-        #dark_model.save(filepath=filepath)
         dark_models.append(dark_model)
 
     # Connect to DB
     with CalibrationStore(orm_class=HISPECCalibrationORM, use_cached=True) as store:
-
-        # Register the local files
-        for dark_model in dark_models:
-            store.register_local_calibration(dark_model)
 
         # Test if the local files are registered
         results = store.local_db.query()
@@ -61,11 +53,10 @@ def test_local_caldb(tmp_path):
 
         # Test retrieval from DarkPrimitive
         dark_prim = DarkSubtractionPrimitive()
-        dark3 = dark_prim.get_calibration(sci_model, 'dark')
+        dark3, dark3_orm = dark_prim.get_calibration(sci_model, 'dark')
         assert dark3 is not None, "No dark model not found in local DB"
 
-        darks = [dark1, dark2, dark3]
-        dark_models = [datamodels.open(d) for d in darks]
+        dark_orms = [dark1_orm, dark2_orm, dark3_orm]
 
         # Check calibration retrieval by ID
         for dark_model in dark_models:

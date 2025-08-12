@@ -11,9 +11,8 @@ def test_dark_level0(tmp_path):
     sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
     dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
 
-    #sci_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
-    #dark_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/Cals/HB.20240924.0000.00.master-dark.fits'
-    #dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
+    # Calibration cache
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # Setup and call the dark primitive
     dark_prim = DarkSubtractionPrimitive()
@@ -41,7 +40,5 @@ def test_dark_level0(tmp_path):
     model_result = dark_prim.apply(input_model, output_dir=tmp_path, dark=dark_path)
 
     # Check the calibrations used
-    index = np.where(model_result.calibrations['CAL_TYPE'] == 'dark')[0]
-    assert len(index) == 1, "Expected one dark calibration to be used."
-    index = index[0]
-    assert model_result.calibrations[index]['FILENAME'] == os.path.basename(dark_path), "Dark calibration path does not match expected value."
+    dark_cal_row = model_result.get_calibration_from_role('dark')
+    assert dark_cal_row['FILENAME'] == os.path.basename(dark_path), "Dark calibration path does not match expected value."
