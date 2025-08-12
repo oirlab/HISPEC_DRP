@@ -139,25 +139,6 @@ class PARVICalibrationModel(PARVIDataModel):
             suffix=suffix
         )
 
-    def get_calibration_id(self, regenerate_id: bool = False, last_updated: str | None = None) -> str:
-        """
-        Generate and store the calibration ID in meta.cal_id.
-        
-        Args:
-            regenerate_id (bool): If True, regenerate the ID even if one already exists.
-            last_updated (str | None): Timestamp to use for ID generation. If None, generates current timestamp.
-            
-        Returns:
-            str: The calibration ID
-        """
-        if hasattr(self.meta, 'cal_id') and self.meta.cal_id is not None and not regenerate_id:
-            return self.meta.cal_id
-        else:
-            if last_updated is None:
-                last_updated = datetime.now().isoformat()
-            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
-            return self.meta.cal_id
-
     def generate_calibration_id(self, last_updated: str) -> str:
         """
         Generate the calibration ID.
@@ -186,7 +167,7 @@ class PARVICalibrationModel(PARVIDataModel):
             raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
         
         # Generate timestamp once for consistency
-        last_updated = datetime.now().isoformat()
+        last_updated = datetime.now().isoformat(timespec="milliseconds")
         
         # Get data from the datamodel
         datetime_obs = self.meta.exposure.datetime_start
@@ -194,11 +175,12 @@ class PARVICalibrationModel(PARVIDataModel):
         drp_version = self.meta.drp_version
 
         # Generate or use existing UUID using the dedicated method with consistent timestamp
-        _id = self.get_calibration_id(regenerate_id=regenerate_id, last_updated=last_updated)
+        if self.meta.cal_id is None or regenerate_id:
+            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
         
         # Create and populate the ORM instance
         orm = orm_class(
-            id=_id,
+            id=self.meta.cal_id,
             filename=filename,
             cal_type=self.meta.cal_type.lower(),
             instera=self.meta.instrument.era,

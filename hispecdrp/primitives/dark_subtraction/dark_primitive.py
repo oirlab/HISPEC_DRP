@@ -44,6 +44,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         output_model = dark_subtraction_rate(result, dark_model)
 
         # Output
+        
         return dict(output=output_model, dark=dark)
 
 

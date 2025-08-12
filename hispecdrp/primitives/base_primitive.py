@@ -215,6 +215,7 @@ class BasePrimitive(ProcessingComponent):
             raise TypeError("Unsupported output type.")
         
     def finalize_model(self, model : datamodels.DataModel):
+        #model = datamodels.open(model)
         model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
         self.add_receipt_entry(model, date_time=self._date_time)
         for cal_role, calibration in self._calibrations_used.items():

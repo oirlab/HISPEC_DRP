@@ -168,25 +168,6 @@ class HISPECCalibrationModel(HISPECDataModel):
             suffix=suffix
         )
 
-    def get_calibration_id(self, regenerate_id: bool = False, last_updated: str | None = None) -> str:
-        """
-        Generate and store the calibration ID in meta.cal_id.
-        
-        Args:
-            regenerate_id (bool): If True, regenerate the ID even if one already exists.
-            last_updated (str | None): Timestamp to use for ID generation. If None, generates current timestamp.
-            
-        Returns:
-            str: The calibration ID
-        """
-        if hasattr(self.meta, 'cal_id') and self.meta.cal_id is not None and not regenerate_id:
-            return self.meta.cal_id
-        else:
-            if last_updated is None:
-                last_updated = datetime.now().isoformat()
-            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
-            return self.meta.cal_id
-
     def generate_calibration_id(self, last_updated: str) -> str:
         """
         Generate the calibration ID.
@@ -209,13 +190,14 @@ class HISPECCalibrationModel(HISPECDataModel):
         regenerate_id : bool = False,
         fill_koa : bool = False
     ) -> HISPECCalibrationORM:
+        
         if orm_class is None:
             orm_class = self.CAL_ORM_CLASS
         if orm_class is None:
             raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
         
         # Generate timestamp once for consistency
-        last_updated = datetime.now().isoformat()
+        last_updated = datetime.now().isoformat(timespec="milliseconds")
         
         # Get data from the datamodel
         datetime_obs = self.meta.exposure.datetime_start
@@ -224,9 +206,14 @@ class HISPECCalibrationModel(HISPECDataModel):
         
         # Conditionally generate KOA paths based on parameter
         if fill_koa:
+            spectrograph = spectrograph.upper()
+            if spectrograph in HISPECDataModel.SPECTROGRAPH_ALIASES:
+                instrument_prefix = HISPECDataModel.SPECTROGRAPH_ALIASES[spectrograph]
+            else:
+                raise ValueError(f"Spectrograph must be BSPEC or RSPEC, got {spectrograph}")
             koa_filepath = generate_koa_filepath(
                 instrument=self.meta.instrument.name,
-                instrument_prefix='HS',
+                instrument_prefix=instrument_prefix,
                 data_level='cal',
                 date_obs=self.meta.date_obs,
                 utc_obs=self.meta.utc
@@ -237,31 +224,29 @@ class HISPECCalibrationModel(HISPECDataModel):
             koa_id = None
         
         # Generate or use existing UUID using the dedicated method with consistent timestamp
-        _id = self.get_calibration_id(regenerate_id=regenerate_id, last_updated=last_updated)
+        if self.meta.cal_id is None or regenerate_id:
+            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
         
-        # Create ORM instance with conditional KOA fields
-        orm_kwargs = {
-            'id': _id,
-            'filename': filename,
-            'master': self.meta.master_cal,
-            'cal_type': self.meta.cal_type.lower(),
-            'instera': self.meta.instrument.era,
-            'read_mode': self.meta.exposure.read_mode,
-            'target_name': self.meta.target.name,
-            'object_fiber1': self.meta.target.object_fiber1,
-            'object_fiber2': self.meta.target.object_fiber2,
-            'object_fiber3': self.meta.target.object_fiber3,
-            'spectrograph': self.meta.instrument.spectrograph,
-            'mjd_start': self.meta.exposure.mjd_start,
-            'datetime_obs': datetime_obs,
-            'drp_version': drp_version,
-            'note': note,
-            'last_updated': last_updated,
-            'koa_id': koa_id,
-            'koa_filepath': koa_filepath
-        }
-
-        # Create and populate the ORM instance
-        orm = orm_class(**orm_kwargs)
+        # Create ORM instance with conditional KOA fields (inlined kwargs)
+        orm = orm_class(
+            id=self.meta.cal_id,
+            filename=filename,
+            master=self.meta.master_cal,
+            cal_type=self.meta.cal_type.lower(),
+            instera=self.meta.instrument.era,
+            read_mode=self.meta.exposure.read_mode,
+            target_name=self.meta.target.name,
+            object_fiber1=self.meta.target.object_fiber1,
+            object_fiber2=self.meta.target.object_fiber2,
+            object_fiber3=self.meta.target.object_fiber3,
+            spectrograph=self.meta.instrument.spectrograph,
+            mjd_start=self.meta.exposure.mjd_start,
+            datetime_obs=datetime_obs,
+            drp_version=drp_version,
+            note=note,
+            last_updated=last_updated,
+            koa_id=koa_id,
+            koa_filepath=koa_filepath,
+        )
         
         return orm

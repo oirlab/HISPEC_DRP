@@ -75,7 +75,7 @@ class DataModel:
     CAL_ORM_CLASS = None
 
     ALLOWED_ATTRIBUTES = [
-        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'CAL_ORM_CLASS'
+        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'CAL_ORM_CLASS',
         'meta', '_data', '_filepath',
     ]
 
@@ -617,7 +617,7 @@ class DataModel:
                 # Update the existing row with new data
                 new_row = {}
                 new_row['TIME_APPLIED'] = date_time
-                new_row['CAL_ROLE'] = cal_role.upper()
+                new_row['CAL_ROLE'] = cal_role
                 
                 if isinstance(calibration, CalibrationORM):
                     cal_orm_fields = {c.key.lower(): c.key for c in inspect(calibration).mapper.column_attrs}
@@ -653,7 +653,7 @@ class DataModel:
         # No existing entry found, create new row
         new_row = {}
         new_row['TIME_APPLIED'] = date_time
-        new_row['CAL_ROLE'] = cal_role.upper()
+        new_row['CAL_ROLE'] = cal_role
 
         if isinstance(calibration, CalibrationORM):
             # Extract from ORM object
@@ -689,7 +689,6 @@ class DataModel:
         # Add new row
         self.calibrations.add_row(new_row)
 
-
     def load_calibration_from_role(
         self,
         cal_role : str,
@@ -703,19 +702,30 @@ class DataModel:
         Returns:
             DataModel: The loaded calibration ORM object.
         """
-        # Match on cal_type and role
-        mask = np.ones(len(self.calibrations), dtype=bool)
-
-        # Match based on role
-        if cal_role is not None:
-            mask &= self.calibrations['CAL_ROLE'] == cal_role
-
-        indices = np.where(mask)[0]
-
-        # Get the calibration ID from the matched row
-        row_index = indices[0]
-        calibration_id = self.calibrations['ID'][row_index]
-        
-        # Load the calibration using CalibrationStore
+        row = self.get_calibration_from_role(cal_role)
+        cal_id = row['ID']
         with CalibrationStore(orm_class=self.CAL_ORM_CLASS) as store:
-            return store.get_calibration_by_id(calibration_id)
+            return store.get_calibration_by_id(cal_id)
+
+    def get_calibration_from_role(self, cal_role : str) -> DataModel:
+        """
+        Return the row from the DataModel's calibrations table.
+
+        Args:
+            cal_role (str): The role of the calibration to load.
+
+        Returns:
+            dict: The row from the DataModel's calibrations table.
+        """
+        # Match on cal_type and role
+        mask = self.calibrations['CAL_ROLE'] == cal_role
+        indices = np.where(mask)[0]
+        if len(indices) == 0:
+            return None
+        if len(indices) > 1:
+            raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
+        row_index = indices[0]
+        return dict(self.calibrations[row_index])
+        
+
+    
