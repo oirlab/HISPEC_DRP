@@ -74,7 +74,10 @@ class DataModel:
 
     CAL_ORM_CLASS = None
 
-    ALLOWED_ATTRIBUTES = ['EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'meta', '_data', '_filepath', 'CAL_ORM_CLASS']
+    ALLOWED_ATTRIBUTES = [
+        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'CAL_ORM_CLASS'
+        'meta', '_data', '_filepath',
+    ]
 
     def __init__(
         self,
