@@ -28,7 +28,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
 
         # Get the dark model
         dark, _ = self.get_calibration(input_model, 'dark')
@@ -44,7 +44,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         output_model = dark_subtraction_rate(result, dark_model)
 
         # Output
-        return dict(name=output_model, dark=dark)
+        return dict(output=output_model, dark=dark)
 
 
 def dark_subtraction_rate(input_model, dark_model):

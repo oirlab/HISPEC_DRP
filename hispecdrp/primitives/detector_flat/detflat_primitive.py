@@ -20,7 +20,7 @@ class DetectorFlatPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
         if self.detflat is not None:
             flat_model = datamodels.open(self.detflat)
         else:
@@ -29,7 +29,7 @@ class DetectorFlatPrimitive(BasePrimitive):
         result = input_model.copy()
         self.log.info(f"Applying detector flat correction with {flat_model} to {input_model}")
         result = detector_flat_correction(result, flat_model)
-        return dict(name=result, detflat=self.detflat)
+        return dict(output=result, detflat=self.detflat)
 
 
 def detector_flat_correction(input_model : datamodels.DataModel, detflat_model : datamodels.DataModel) -> datamodels.DataModel:

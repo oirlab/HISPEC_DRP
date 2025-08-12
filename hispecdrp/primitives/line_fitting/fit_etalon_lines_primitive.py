@@ -27,7 +27,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
         output_model = self.get_output_model(input_model)
         fit_results = {fiber : [] for fiber in self.do_fibers}
 
@@ -83,7 +83,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
 
-        return dict(name=output_model, fit_results=fit_results)
+        return dict(output=output_model, fit_results=fit_results)
     
 
 def etalon_spacing_pixels(fsr : float, wave : np.ndarray) -> float:

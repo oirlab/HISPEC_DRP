@@ -8,7 +8,7 @@ __all__ = ['ProcessingComponent']
 class ProcessingComponent(_BasePrimitive):
 
     ARGUMENTS = {
-        'name': None,
+        'input': None,
         'save_result': False,
         'output_path': None,
         'output_dir': None,
@@ -52,12 +52,21 @@ class ProcessingComponent(_BasePrimitive):
         """
         return print(self.prepr_args())
     
-    def __init_subclass__(cls):
-        ARGUMENTS = {}
+    def __init_subclass__(cls, **kwargs):
+        # Ensure proper cooperative multiple inheritance behavior
+        super().__init_subclass__(**kwargs)
+
+        # Merge ARGUMENTS from the full (reversed) MRO so base defaults apply first
+        merged_args = {}
         for _cls in cls.mro()[::-1]:
-            if issubclass(_cls, ProcessingComponent):
-                ARGUMENTS.update(_cls.ARGUMENTS)
-        cls.ARGUMENTS = ARGUMENTS
+            merged_args.update(getattr(_cls, 'ARGUMENTS', {}) or {})
+        cls.ARGUMENTS = merged_args
+
+        # Merge CALIBRATIONS similarly; not all classes will define this.
+        merged_cals = {}
+        for _cls in cls.mro()[::-1]:
+            merged_cals.update(getattr(_cls, 'CALIBRATIONS', {}) or {})
+        cls.CALIBRATIONS = merged_cals
 
     def prepr_args(self) -> str:
         s = ''
@@ -78,7 +87,7 @@ class ProcessingComponent(_BasePrimitive):
             2. `self.config['arguments']` (from config)
             1. Direct attribute setting (highest priority)
         """
-        # Set defaults from ARGUMENTS (including name)
+        # Set defaults from ARGUMENTS (including input)
         for key, default_value in self.ARGUMENTS.items():
             setattr(self, key, default_value)
         
@@ -93,22 +102,42 @@ class ProcessingComponent(_BasePrimitive):
                 if not hasattr(self, cal_key):
                     setattr(self, cal_key, None)
     
-    def save_model(self, model: datamodels.DataModel) -> str:
+    def save_output(self) -> str:
         """
-        Save a datamodel to a file.
+        Save the result from _perform after processing and finalize_output are called.
 
         Args:
-            model (DataModel): The model to save.
+            model (output): The output to save.
         """
+        assert self._output is not None and 'output' in self._output, 'No output to save.'
+        output = self._output['output']
         instance_output_path = getattr(self, 'output_path', None)
         instance_output_dir = getattr(self, 'output_dir', None)
         instance_suffix = getattr(self, 'suffix', None)
-        return model.save(
-            filepath=instance_output_path,
-            output_dir=instance_output_dir,
-            suffix=instance_suffix   
-        )
-    
+        if isinstance(output, datamodels.DataModel): # Assume it can't be a string
+            output.save(
+                filepath=instance_output_path,
+                output_dir=instance_output_dir,
+                suffix=instance_suffix   
+            )
+        elif isinstance(output, dict):
+            for model in output.values():
+                model.save(
+                    filepath=instance_output_path,
+                    output_dir=instance_output_dir,
+                    suffix=instance_suffix
+                )
+        elif isinstance(output, list):
+            for model in output:
+                model.save(
+                    filepath=instance_output_path,
+                    output_dir=instance_output_dir,
+                    suffix=instance_suffix
+                )
+        else:
+            self.log.error("Unsupported output type.")
+            raise TypeError("Unsupported output type.")
+
     def reset_args(self):
         """
         Reset all arguments to their default values by clearing the initialization flag 

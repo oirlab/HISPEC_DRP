@@ -81,9 +81,10 @@ class BasePrimitive(ProcessingComponent):
     def _pre_condition(self):
         return self.run
 
-    def apply(self, name, **kwargs):
+    def apply(self, input, **kwargs):
         
         # CURRENT PROCESSING TIME, USED FOR CONSISTENT LOGGING OF PROCESSING AT DIFFERENT PLACES.
+        # NOTE: TBD IF THIS IS THE RIGHT APPROACH
         self._date_time = datetime.datetime.now().isoformat()
 
         # Init logger for this primitive
@@ -96,36 +97,34 @@ class BasePrimitive(ProcessingComponent):
 
         try:
             # This allows pipelines to directly pass the result from a primitive to the next primitive if full_output is True or False.
-            # Pipelines can pass in a datamodel or an Arguments object, in which case the first arg is fetched.
-            # NOTE: Consider alternative approach.
-            if isinstance(name, dict) and 'name' in name:
-                name = name['name']
-            self.set_args(name=name, **kwargs)
+            # Pipelines can pass in a datamodel or a dict object, in which case the first arg is fetched.
+            if isinstance(input, dict) and 'output' in input:
+                input = input['output']
+            self.set_args(input=input, **kwargs)
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self.on_skip()
             else:
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
-                output = self._perform()
+                self._output = self._perform()
                 if self._status is None:
                     self._status = "COMPLETE"
-                    self._output = output
-                self.finalize_model(self._output['name'])
+                self.finalize_output()
                 if self.save_result:
-                    self.save_model(self._output['name'])
+                    self.save_output(self._output['output'])
         except Exception as e:
             self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
+            self._output = dict(output=input)
             self.on_exception(e)
-            if self._output is not None and 'name' in self._output:
-                self.finalize_model(self._output['name'])
+            self.finalize_output()
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
-            return name
+            return input
         
         if self.full_output:
             return self._output
         else:
-            return self._output['name']
+            return self._output['output']
 
     def set_args(self, **kwargs) -> dict:
         """
@@ -160,8 +159,8 @@ class BasePrimitive(ProcessingComponent):
 
     def __repr__(self):
         s = self.__class__.__name__
-        if hasattr(self, 'name'):
-            s += f"\n  name: {self.name}"
+        if hasattr(self, 'input'):
+            s += f"\n  input: {self.input}"
         for key in self.ARGUMENTS:
             if hasattr(self, key):
                 s += f"\n  {key}: {getattr(self, key)}"
@@ -187,7 +186,7 @@ class BasePrimitive(ProcessingComponent):
     
     def _get_args_repr(self):
         """Helper to get a string representation of current arguments."""
-        args_dict = {'name': getattr(self, 'name', None)}
+        args_dict = {'input': getattr(self, 'input', None)}
         for key in self.ARGUMENTS:
             if hasattr(self, key):
                 args_dict[key] = getattr(self, key)
@@ -197,23 +196,30 @@ class BasePrimitive(ProcessingComponent):
                     args_dict[key] = getattr(self, key)
         return str(args_dict)
 
-    def finalize_model(self, model_result : datamodels.DataModel):
+    def finalize_output(self):
         """
-        Hook called at the end of `primitive.apply` to finalize the model. Only called if _post_condition() is True.
-
-        Args:
-            model_result (DataModel): The model to finalize.
+        Hook called at the end of `primitive.apply` to finalize the output. Only called if _post_condition() is True.
         """
-        model_result.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
-
-        # Update the receipt table
-        self.add_receipt_entry(model_result, date_time=self._date_time)
-
-        # Update the calibrations used
+        assert self._output is not None and 'output' in self._output, 'No output to finalize.'
+        output = self._output['output']
+        if isinstance(output, datamodels.DataModel):
+            self.finalize_model(output)
+        elif isinstance(output, dict):
+            for model in output.values():
+                self.finalize_model(model)
+        elif isinstance(output, list):
+            for model in output:
+                self.finalize_model(model)
+        else:
+            self.log.error("Unsupported output type.")
+            raise TypeError("Unsupported output type.")
+        
+    def finalize_model(self, model : datamodels.DataModel):
+        model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
+        self.add_receipt_entry(model, date_time=self._date_time)
         for cal_role, calibration in self._calibrations_used.items():
-            model_result.add_calibration(calibration, cal_role, date_time=self._date_time)
-        return model_result
-    
+            model.add_calibration(calibration, cal_role, date_time=self._date_time)
+
     def get_calibration(
         self,
         name : str | datamodels.DataModel,

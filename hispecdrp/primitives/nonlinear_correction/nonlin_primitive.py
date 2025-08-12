@@ -20,7 +20,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
         if self.nonlin is None:
             nonlin_path = self.get_calibration(input_model, selector=NonlinearCorrectionSelector())
         else:
@@ -31,4 +31,4 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         data = result.data.astype(np.float64)
         correct_nonlinearity(data, nonlin_model.coeffs)
         result.data = data.astype(np.float32)
-        return dict(name=result, nonlin=nonlin_path)
+        return dict(output=result, nonlin=nonlin_path)

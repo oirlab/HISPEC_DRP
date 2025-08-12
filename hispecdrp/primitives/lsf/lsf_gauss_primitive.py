@@ -25,14 +25,19 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
 
         # Default inter order deg
         if self.deg_inter_order == 'auto':
-            anchor_degree = 4
-            anchor_orders = 10
-            max_degree = 6
-            deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
+            if len(self.fit_orders) == 1:
+                deg_inter_order = 0
+            elif len(self.fit_orders) == 2:
+                deg_inter_order = 1
+            else:
+                anchor_degree = 4
+                anchor_orders = 10
+                max_degree = 6
+                deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
             self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
@@ -86,7 +91,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
             )
             setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
 
-        return dict(name=output_model, fit_results=fit_results)
+        return dict(output=output_model, fit_results=fit_results)
 
 def fit_gausslsf_chebyshev2d(
     pixels : np.ndarray,

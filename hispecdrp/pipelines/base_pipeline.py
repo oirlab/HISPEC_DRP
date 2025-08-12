@@ -81,40 +81,40 @@ class BasePipeline(ProcessingComponent):
             setattr(self, prim_alias, primitive)
         self.set_prim_args(prim_args)
 
-    def apply(self, name, prim_args : dict | None = None, **kwargs):
+    def apply(self, input, prim_args : dict | None = None, **kwargs):
         self.init_logger()
         self._output = None
         try:
-            self.set_args(name=name, **kwargs)
+            self.set_args(input=input, **kwargs)
             self.set_prim_args(prim_args)
             self.full_output = any(
                 getattr(getattr(self, prim_alias), 'full_output', False) for prim_alias in self.PRIMITIVES
             ) or getattr(self, 'full_output', False)
             self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
             self._output = self._perform()
-            if isinstance(self._output.name, datamodels.DataModel):
+            if isinstance(self._output['output'], datamodels.DataModel):
                 if getattr(self, 'save_result', False) is True:
-                    self.save_model(self._output.name)
-            elif isinstance(self._output.name, list):
-                for result in self._output.name:
+                    self.save_model(self._output['output'])
+            elif isinstance(self._output['output'], list):
+                for result in self._output['output']:
                     if isinstance(result, datamodels.DataModel):
                         if getattr(self, 'save_result', False):
                             self.save_model(result)
-            elif isinstance(self._output.name, dict):
-                for key in self._output.name:
-                    if isinstance(self._output.name[key], datamodels.DataModel):
+            elif isinstance(self._output['output'], dict):
+                for key in self._output['output']:
+                    if isinstance(self._output['output'][key], datamodels.DataModel):
                         if getattr(self, 'save_result', False):
-                            self.save_model(self._output.name[key])
+                            self.save_model(self._output['output'][key])
         except Exception as e:
             self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
-            return name
+            return input
         
         if getattr(self, 'full_output', False):
             return self._output
         else:
-            return self._output.name
+            return self._output['output']
     
     def init_config(self, config : dict | str | None = None) -> dict:
         """

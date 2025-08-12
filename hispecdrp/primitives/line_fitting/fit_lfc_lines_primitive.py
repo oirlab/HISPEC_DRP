@@ -27,7 +27,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.name)
+        input_model = datamodels.open(self.input)
         output_model = self.get_output_model(input_model, output_model='LFCFitParamsModel')
         fit_results = {fiber : [] for fiber in self.do_fibers}
 
@@ -74,7 +74,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
-        return dict(name=output_model, fit_results=fit_results)
+        return dict(output=output_model, fit_results=fit_results)
 
 
 def gen_lfc_modes(nu0 : float, delta_nu : float, wave_start : float, wave_end : float):

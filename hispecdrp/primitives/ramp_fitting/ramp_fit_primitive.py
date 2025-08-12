@@ -24,7 +24,7 @@ class FitRampPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.name, copy=False)
+        input_model = datamodels.open(self.input, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 
         var_poisson = None
@@ -71,5 +71,5 @@ class FitRampPrimitive(BasePrimitive):
             meta=input_model.meta
         )
 
-        return dict(name=model_result, method=self.method)
+        return dict(output=model_result, method=self.method)
     
