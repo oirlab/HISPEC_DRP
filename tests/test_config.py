@@ -13,12 +13,12 @@ def test_primitive_config(tmp_path):
 
     # Test with no config file or args
     prim = FitLFCLinesPrimitive()
-    assert prim.args.do_orders is None
-    assert prim.args.sigma_bounds == prim.ARGUMENTS['sigma_bounds']
+    assert prim.do_orders is None
+    assert prim.fwhm_bounds == prim.ARGUMENTS['fwhm_bounds']
 
     # Initial args
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    sigma_bounds = [0.1, 2.5]
+    fwhm_bounds = [0.1, 2.5]
     do_fibers = [3]
 
     # Specify config file
@@ -28,7 +28,7 @@ def test_primitive_config(tmp_path):
     arguments:
       do_orders: {do_orders}
       do_fibers: {do_fibers}
-      sigma_bounds: {sigma_bounds}
+      fwhm_bounds: {fwhm_bounds}
       lfc_nu0: {datamodels.parvi.LFC_NU_0}
       lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
     """
@@ -37,26 +37,26 @@ def test_primitive_config(tmp_path):
 
     # Test with config file
     prim = FitLFCLinesPrimitive(config=config_path)
-    assert prim.args.do_orders == do_orders
-    assert prim.args.sigma_bounds == sigma_bounds
-    
+    assert prim.do_orders == do_orders
+    assert prim.fwhm_bounds == fwhm_bounds
+
     # Override config file argument with a different value
     do_orders = [90, 91, 92, 93, 94, 96]
     prim = FitLFCLinesPrimitive(config=config_path, do_orders=do_orders)
-    assert prim.args.do_orders == do_orders
+    assert prim.do_orders == do_orders
 
 
 def test_pipeline_config(tmp_path):
 
     # Initial args
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    sigma_bounds = [0.1, 2.5]
+    fwhm_bounds = [0.1, 2.5]
     do_fibers = [3]
     prim_args = {
         'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
-            'sigma_bounds': sigma_bounds,
+            'fwhm_bounds': fwhm_bounds,
             'mu_bounds': (-1, 1),
             'lfc_nu0': datamodels.parvi.LFC_NU_0,
             'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
@@ -78,8 +78,8 @@ def test_pipeline_config(tmp_path):
 
     # Test with no config file or args
     pipe = ProcessLFCPipeline(prim_args=prim_args)
-    assert pipe.fit_lfc_lines.args.do_orders == do_orders
-    assert pipe.fit_lfc_lines.args.sigma_bounds == sigma_bounds
+    assert pipe.fit_lfc_lines.do_orders == do_orders
+    assert pipe.fit_lfc_lines.fwhm_bounds == fwhm_bounds
 
     # Pipeline config file
     config_string = f"""
@@ -90,7 +90,7 @@ def test_pipeline_config(tmp_path):
         arguments:
           do_orders: {do_orders}
           do_fibers: {do_fibers}
-          sigma_bounds: {sigma_bounds}
+          fwhm_bounds: {fwhm_bounds}
           lfc_nu0: {datamodels.parvi.LFC_NU_0}
           lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
     """
@@ -99,13 +99,13 @@ def test_pipeline_config(tmp_path):
 
     # Test with config file
     pipe = ProcessLFCPipeline(config=config_path)
-    assert pipe.fit_lfc_lines.args.do_orders == do_orders
-    assert pipe.fit_lfc_lines.args.sigma_bounds == sigma_bounds
-    
+    assert pipe.fit_lfc_lines.do_orders == do_orders
+    assert pipe.fit_lfc_lines.fwhm_bounds == fwhm_bounds
+
     # Override config file argument with a different value
     do_orders = [90, 91]
     prim = FitLFCLinesPrimitive(config=config_path, do_orders=do_orders)
-    assert prim.args.do_orders == do_orders
+    assert prim.do_orders == do_orders
 
     pipe_config_path = os.path.join(tmp_path, 'test_pipe_config.yaml')
     prim_config_path = os.path.join(tmp_path, 'test_prim_config.yaml')
@@ -117,11 +117,11 @@ def test_pipeline_config(tmp_path):
     arguments:
       do_orders: {do_orders}
       do_fibers: {do_fibers}
-      sigma_bounds: {list(sigma_bounds)}
+      fwhm_bounds: {list(fwhm_bounds)}
       lfc_nu0: {datamodels.parvi.LFC_NU_0}
       lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
     """
-    new_sigma_bounds = [0.5, 1.0]
+    new_fwhm_bounds = [0.5, 1.0]
     pipe_config_string = f"""
     %YAML 1.2
     ---
@@ -131,7 +131,7 @@ def test_pipeline_config(tmp_path):
         arguments:
           do_orders: {do_orders}
           do_fibers: {do_fibers}
-          sigma_bounds: {new_sigma_bounds}
+          fwhm_bounds: {new_fwhm_bounds}
           lfc_nu0: {datamodels.parvi.LFC_NU_0}
           lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
     """
@@ -140,10 +140,10 @@ def test_pipeline_config(tmp_path):
 
     # Test with config file
     pipe = ProcessLFCPipeline(config=pipe_config_path)
-    assert pipe.fit_lfc_lines.args.do_orders == do_orders
-    assert pipe.fit_lfc_lines.args.sigma_bounds == new_sigma_bounds
-    
+    assert pipe.fit_lfc_lines.do_orders == do_orders
+    assert pipe.fit_lfc_lines.fwhm_bounds == new_fwhm_bounds
+
     # Override config file argument with a different value
     do_orders = [90, 91]
     prim = FitLFCLinesPrimitive(config=pipe_config_path, do_orders=do_orders)
-    assert prim.args.do_orders == do_orders
+    assert prim.do_orders == do_orders

@@ -1,0 +1,87 @@
+from koa_middleware import CalibrationDB
+from sqlalchemy import func
+
+from koa_middleware.selector_base import CalibrationSelector
+
+__all__ = [
+    'DarkSelector',
+    'NonlinearCorrectionSelector',
+    'DetectorFlatSelector',
+    'WavelengthSolutionSelector',
+]
+
+class DarkSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument.name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'dark',
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.spectrograph == meta['instrument.spectrograph'],
+                    db.orm_class.master == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+            elif meta['instrument.name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'dark',
+                    db.orm_class.instera == meta['instrument.era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+
+
+class NonlinearCorrectionSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument.name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'nonlin',
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.spectrograph == meta['instrument.spectrograph'],
+                    db.orm_class.master == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+            elif meta['instrument.name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'nonlin',
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.master == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+
+
+class DetectorFlatSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument.name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'detflat',
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.spectrograph == meta['instrument.spectrograph'],
+                    db.orm_class.master == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+            elif meta['instrument.name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'detflat',
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.master == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+        
+
+class WavelengthSolutionSelector(CalibrationSelector):
+
+    def __init__(self, cal_type : str = 'lfc_wavesol'):
+        super().__init__()
+        self.cal_type = cal_type
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument.name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == self.cal_type,
+                    db.orm_class.instera == meta['instrument.era'],
+                    db.orm_class.spectrograph == meta['instrument.spectrograph'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()
+            elif meta['instrument.name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == self.cal_type,
+                    db.orm_class.instera == meta['instrument.era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['exposure.mjd_start'])).all()

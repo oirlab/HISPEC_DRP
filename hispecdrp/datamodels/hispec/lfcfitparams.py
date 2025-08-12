@@ -11,7 +11,7 @@ for i in range(1, 5):
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _LFCFITPARAMS_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCFITPARAMS_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
     _LFCFITPARAMS_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
     _LFCFITPARAMS_EXTENSIONS[f'LFC_FITPARAMS_FIB{i}'] = {
         'hdu_type': fits.BinTableHDU,

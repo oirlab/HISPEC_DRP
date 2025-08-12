@@ -1,15 +1,13 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 
-from keckdrpframework.models.arguments import Arguments
-
 import numpy as np
 from ...utils.math import solve_chebyshev2d_ols
 
-__all__ = ['GaussianLSFPrimitive']
+__all__ = ['CalculateGaussianLSFPrimitive']
 
 
-class GaussianLSFPrimitive(BasePrimitive):
+class CalculateGaussianLSFPrimitive(BasePrimitive):
     """
     Create a Gaussian LSF from the Gaussian line fitting results.
     """
@@ -27,77 +25,78 @@ class GaussianLSFPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.args.name)
+        input_model = datamodels.open(self.input)
 
         # Default inter order deg
-        if self.args.deg_inter_order == 'auto':
-            anchor_degree = 4
-            anchor_orders = 10
-            max_degree = 6
-            deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.args.fit_orders)) / np.log(anchor_orders)), max_degree))
+        if self.deg_inter_order == 'auto':
+            if len(self.fit_orders) == 1:
+                deg_inter_order = 0
+            elif len(self.fit_orders) == 2:
+                deg_inter_order = 1
+            else:
+                anchor_degree = 4
+                anchor_orders = 10
+                max_degree = 6
+                deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
             self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
-            deg_inter_order = self.args.deg_inter_order
+            deg_inter_order = self.deg_inter_order
 
         fit_results = []
 
         # Get the target output model
-        output_model = self.get_output_model(input_model, model_suffix='GaussianLSFModel')
+        output_model = self.get_output_model(input_model, output_model='GaussianLSFModel')
 
-        for fiber in self.args.do_fibers:
+        for fiber in self.do_fibers:
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
+            lsfnorm_table = getattr(output_model, f'lsfnorm_fib{fiber}')
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
-            sigmas = params_table['SIGMA_WAVE']
-            sigma_errs = params_table['SIGMA_ERR_WAVE']
-            mask = np.nonzero(np.isin(orders, self.args.fit_orders))[0]
+            fwhms = params_table['FWHM_WAVE']
+            fwhm_errs = params_table['FWHM_ERR_WAVE']
+            mask = np.nonzero(np.isin(orders, self.fit_orders))[0]
             pixels = pixels[mask].copy()
             orders = orders[mask].copy()
             waves = waves[mask].copy()
-            sigmas = sigmas[mask].copy()
-            if self.args.opt_weights:
-                sigma_errs = sigma_errs[mask].copy()
-                weights = 1 / sigma_errs**2
+            fwhms = fwhms[mask].copy()
+            if self.opt_weights:
+                fwhm_errs = fwhm_errs[mask].copy()
+                weights = 1 / fwhm_errs**2
             else:
                 weights = None
             fit_result = fit_gausslsf_chebyshev2d(
-                pixels, orders, sigmas, 
-                deg_intra_order=self.args.deg_intra_order, deg_inter_order=deg_inter_order,
-                max_iters=self.args.max_iters, sigma_cut=self.args.sigma_cut,
+                pixels, orders, fwhms,
+                deg_intra_order=self.deg_intra_order, deg_inter_order=deg_inter_order,
+                max_iters=self.max_iters, sigma_cut=self.sigma_cut,
                 weights=weights,
             )
             fit_results.append(fit_result)
 
             nx = getattr(input_model, f'spec_fib{fiber}').shape[1]
             pixel_vec = np.arange(nx)
-            order_vec = self.make_order_vec(input_model)
-            output_model.meta.lsf.pixel_min_norm = fit_result['pixel_bounds'][0]
-            output_model.meta.lsf.pixel_max_norm = fit_result['pixel_bounds'][1]
-            output_model.meta.lsf.order_min_norm = fit_result['order_bounds'][0]
-            output_model.meta.lsf.order_max_norm = fit_result['order_bounds'][1]
-            lsf_sigmas_full = _build_lsf_poly2d_structured(
+            order_vec = input_model.make_order_vec()
+            lsfnorm_table.add_row({
+                'FIBER': fiber,
+                'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
+                'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
+                'ORDER_NORM_MIN': fit_result['order_bounds'][0],
+                'ORDER_NORM_MAX': fit_result['order_bounds'][1],
+            })
+            lsf_fwhms_full = _build_lsf_poly2d_structured(
                 fit_result['coeffs'],
                 pixel_vec,
                 order_vec,
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
-            setattr(output_model, f'lsf_params_fib{fiber}', lsf_sigmas_full)
+            setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
 
-        return Arguments(name=output_model, fit_results=fit_results)
-    
-    @staticmethod
-    def make_order_vec(model : datamodels.DataModel) -> np.ndarray:
-        mi = model.meta.order_start
-        mf = model.meta.order_end
-        step = 1 if mf >= mi else -1
-        return np.arange(mi, mf + step, step).astype(np.int16)
-    
+        return dict(output=output_model, fit_results=fit_results)
 
 def fit_gausslsf_chebyshev2d(
     pixels : np.ndarray,
     orders : np.ndarray,
-    sigmas : np.ndarray,
+    fwhms : np.ndarray,
     deg_intra_order : int,
     deg_inter_order : int,
     pixel_bounds : tuple[float] | None = None,
@@ -112,7 +111,7 @@ def fit_gausslsf_chebyshev2d(
     Args:
         pixels (np.ndarray): Pixel values.
         orders (np.ndarray): Echelle order values.
-        sigmas (np.ndarray): Gaussian sigmas in units of wavelength.
+        fwhms (np.ndarray): Gaussian FWHMs in units of wavelength.
         deg_intra_order (int): Degree of the polynomial within an order.
         deg_inter_order (int): Degree of the polynomial between orders.
         pixel_bounds (tuple[float] | None): Bounds for pixel values for normalization of the data.
@@ -152,19 +151,19 @@ def fit_gausslsf_chebyshev2d(
         # Fit
         x = pixels_norm[good]
         y = orders_norm[good]
-        z = sigmas[good]
+        z = fwhms[good]
         w = weights[good]
         coeffs = solve_chebyshev2d_ols(x, y, z, deg_x=deg_intra_order, deg_y=deg_inter_order, weights=w)
 
         # Model and residuals
         model_flat = _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)
-        residuals = sigmas - model_flat
+        residuals = fwhms - model_flat
         if sigma_cut is not None:
-            sigma = np.nanstd(residuals)
+            stddev = np.nanstd(residuals)
             good_new = np.where(
                 (weights > 0)
                 & np.isfinite(weights)
-                & (np.abs(residuals) < sigma_cut * sigma)
+                & (np.abs(residuals) < sigma_cut * stddev)
             )[0]
             if len(good) == len(good_new):
                 break
@@ -178,8 +177,6 @@ def fit_gausslsf_chebyshev2d(
         model=model_flat, residuals=residuals,
         order_bounds=order_bounds, pixel_bounds=pixel_bounds
     )
-
-
 
 def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2

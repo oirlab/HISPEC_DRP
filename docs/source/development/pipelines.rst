@@ -10,13 +10,13 @@ Pipelines are a collection of primitives that are executed in a specified order.
 Pipeline Arguments
 ------------------
 
-Like primitives, pipelines also use an ``ARGUMENTS`` variable to parametrize their behavior and is accessable via ``pipeline.args``.
+Like primitives, pipelines also use an ``ARGUMENTS`` variable to parametrize their behavior and are available as attributes.
 
 
 Pipeline Configuration Files
 ----------------------------
 
-Pipelines can also utilize configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
+Pipelines may also utilize configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
 
 .. code-block:: yaml
     
@@ -33,7 +33,7 @@ Pipelines can also utilize configuration files. An example configuration for the
     primitives:
       dark_sub:
         config_file: 'dark_config.yaml' # Optional
-        arguments: # Additional arguments will override those in 'dark_primitive.yaml'
+        arguments: # Additional arguments will override those in 'dark_config.yaml'
           suffix: 'exampledarksuffix'
       flat_field:
         arguments:

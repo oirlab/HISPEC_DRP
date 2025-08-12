@@ -1,15 +1,14 @@
 from ... import datamodels
 from ..base_primitive import BasePrimitive
 
-from ...utils.math import delta_wave_to_delta_v, solve_chebyshev2d_ols
-from keckdrpframework.models.arguments import Arguments
+from ...utils.math import delta_wave_to_delta_vel, solve_chebyshev2d_ols
 import numpy as np
 
 
-__all__ = ['WLSChebyshev2DPrimitive']
+__all__ = ['CalculateChebyshev2DWLSPrimitive']
 
 
-class WLSChebyshev2DPrimitive(BasePrimitive):
+class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
     """
     Finds and fits 1D LFC modes with a Gaussian + background profile.
     """
@@ -28,37 +27,45 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
     def _perform(self):
 
         # Open the input model
-        input_model = datamodels.open(self.args.name)
+        input_model = datamodels.open(self.input)
 
         # Default inter order deg
-        if self.args.deg_intra_order == 'auto':
-            anchor_degree = 6
-            anchor_orders = 10
-            max_degree = 10
-            deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(self.args.fit_orders)) / np.log(anchor_orders)), max_degree))
+        if self.deg_intra_order == 'auto':
+            if len(self.fit_orders) == 1:
+                deg_inter_order = 0
+            elif len(self.fit_orders) == 2:
+                deg_inter_order = 1
+            else:
+                anchor_degree = 6
+                anchor_orders = 10
+                max_degree = 10
+                deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
             self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
-            deg_inter_order = self.args.deg_inter_order
+            deg_inter_order = self.deg_inter_order
 
         fit_results = []
 
         # Get the output model type
-        output_model = self.get_output_model(input_model, model_suffix='LFCWavesolModel')
+        output_model = self.get_output_model(input_model, output_model='LFCWavesolModel')
 
-        for fiber in self.args.do_fibers:
+        for fiber in self.do_fibers:
 
             # Get the table for the fiber
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
+
+            # Get the wavesol norm table for the fiber
+            wavesolnorm_table = getattr(output_model, f'wavesolnorm_fib{fiber}')
 
             # Setup input vectors
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
             waves = params_table['WAVE']
-            mask = np.nonzero(np.isin(orders, self.args.fit_orders))[0]
+            mask = np.nonzero(np.isin(orders, self.fit_orders))[0]
             pixels = pixels[mask]
             orders = orders[mask]
             waves = waves[mask]
-            if self.args.opt_weights:
+            if self.opt_weights:
                 weights = 1 / params_table['MU_ERR_WAVE'][mask]**2
             else:
                 weights = None
@@ -66,8 +73,8 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
             # 2D Fit
             fit_result = fit_wavesol_chebyshev2d(
                 pixels, orders, waves,
-                deg_intra_order=self.args.deg_intra_order, deg_inter_order=deg_inter_order,
-                max_iters=self.args.max_iters, sigma_cut=self.args.sigma_cut, max_vel_cut=self.args.max_vel_cut,
+                deg_intra_order=self.deg_intra_order, deg_inter_order=deg_inter_order,
+                max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
                 weights=weights,
             )
             fit_results.append(fit_result)
@@ -76,11 +83,14 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
             setattr(output_model, f'cc_coeff_fib{fiber}', fit_result['coeffs'])
             nx = getattr(output_model, f'spec_fib{fiber}').shape[1]
             pixel_vec = np.arange(nx)
-            order_vec = self.make_order_vec(output_model)
-            output_model.meta.wavesol.pixel_min_norm = fit_result['pixel_bounds'][0]
-            output_model.meta.wavesol.pixel_max_norm = fit_result['pixel_bounds'][1]
-            output_model.meta.wavesol.order_min_norm = fit_result['order_bounds'][0]
-            output_model.meta.wavesol.order_max_norm = fit_result['order_bounds'][1]
+            order_vec = output_model.make_order_vec()
+            wavesolnorm_table.add_row({
+                'FIBER': fiber,
+                'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
+                'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
+                'ORDER_NORM_MIN': fit_result['order_bounds'][0],
+                'ORDER_NORM_MAX': fit_result['order_bounds'][1],
+            })
             wavesol_full = _build_wavesol_poly2d_structured(
                 fit_result['coeffs'],
                 pixel_vec,
@@ -88,15 +98,29 @@ class WLSChebyshev2DPrimitive(BasePrimitive):
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
             setattr(output_model, f'wave_fib{fiber}', wavesol_full)
-        
-        return Arguments(name=output_model, fit_results=fit_results)
 
-    @staticmethod
-    def make_order_vec(model : datamodels.DataModel) -> np.ndarray:
-        mi = model.meta.order_start
-        mf = model.meta.order_end
-        step = 1 if mf >= mi else -1
-        return np.arange(mi, mf + step, step).astype(np.int16)
+            # Set unreliable WLS in DQ
+            bad_orders = np.setdiff1d(order_vec, self.fit_orders)
+            dq = getattr(output_model, f'spec_dq_fib{fiber}')
+            flag_value = output_model.DQ_FLAGS['UNRELIABLE_WS']
+            for order in bad_orders:
+                oi = np.abs(order - output_model.meta.order_start)
+                dq[oi, :] |= flag_value
+            
+            params_table_good = params_table[fit_result['good']]
+            for order in self.fit_orders:
+                order_mask = params_table_good['ORDER'] == order
+                if np.sum(order_mask) > 0:
+                    oi = np.abs(order - output_model.meta.order_start)
+                    line_centers_pix = params_table_good['MU_PIX'][order_mask]
+                    k1 = int(np.floor(np.min(line_centers_pix)))
+                    k2 = int(np.ceil(np.max(line_centers_pix)))
+                    if k1 > 0:
+                        dq[oi, :k1] |= flag_value
+                    if k2 < nx - 1:
+                        dq[oi, k2+1:] |= flag_value
+                        
+        return dict(output=output_model, fit_results=fit_results)
 
 
 def _normalize_val(x, lo, hi):
@@ -177,7 +201,7 @@ def fit_wavesol_chebyshev2d(
         residuals = waves - model_flat
         if sigma_cut is not None or max_vel_cut is not None:
             sigma = np.nanstd(residuals)
-            residuals_vel = delta_wave_to_delta_v(residuals, waves)
+            residuals_vel = delta_wave_to_delta_vel(residuals, waves)
             good_new = np.where(
                 (weights > 0)
                 & np.isfinite(weights)

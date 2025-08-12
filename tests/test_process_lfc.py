@@ -1,5 +1,5 @@
 from hispecdrp import datamodels
-from hispecdrp import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, ProcessLFCPipeline
+from hispecdrp import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
 from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
@@ -15,47 +15,44 @@ def test_process_lfc_parvi(tmp_path):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     do_fibers = [3]
     prim = FitLFCLinesPrimitive()
-    line_fit_result = prim.apply(
+    line_fits_model = prim.apply(
         lfc_path,
-        full_output=True,
         do_orders=do_orders,
         do_fibers=do_fibers,
-        sigma_bounds=(0.1, 2.5),
-        mu_bounds=(-1, 1),
         lfc_nu0=datamodels.parvi.LFC_NU_0,
         lfc_delta_nu=datamodels.parvi.LFC_DELTA_NU,
     )
-    line_fits_model = line_fit_result.name
     assert isinstance(line_fits_model, datamodels.PARVILFCFitParamsModel)
     assert line_fits_model.meta.cal_type == 'lfc_fitparams'
     assert len(line_fits_model.lfc_fitparams_fib3) > 1000 # Number of modes found > 1000. NOTE: REVISIT THIS TEST!
 
     # Fit 2D Chebyshev polynomial to the LFC modes
-    prim = WLSChebyshev2DPrimitive()
+    prim = CalculateChebyshev2DWLSPrimitive()
     deg_inter_order = 6
     deg_intra_order = 9
     wavesol_result = prim.apply(
         line_fits_model,
-        full_output=True,
         fit_orders=do_orders,
         opt_weights=True,
+        full_output=True,
         do_fibers=[3],
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
     )
-    wavesol_model = wavesol_result.name
-    fit_result = wavesol_result.fit_results[0]
+    wavesol_model = wavesol_result['output']
+    fit_results = wavesol_result['fit_results']
     assert isinstance(wavesol_model, datamodels.PARVILFCWavesolModel)
     assert wavesol_model.meta.cal_type == 'lfc_wavesol'
-    assert fit_result['coeffs'].shape == (deg_intra_order + 1, deg_inter_order + 1)
+    assert wavesol_model.cc_coeff_fib3.shape == (deg_intra_order + 1, deg_inter_order + 1)
     # Overall contribution from wavesol over bandpass is < 5 m/s (actual ~2 for parvi) # NOTE: REVISIT THIS TEST!
-    assert np.std(fit_result['residuals_vel'][fit_result['good']]) / np.sqrt(len(fit_result['good'])) < 5
+    assert np.std(fit_results[0]['residuals_vel'][fit_results[0]['good']]) / np.sqrt(len(fit_results[0]['good'])) < 5
     assert getattr(wavesol_model, f'wave_fib{do_fibers[0]}').shape == getattr(wavesol_model, f'spec_fib{do_fibers[0]}').shape
 
     # Fit 2D Chebyshev polynomial to best fit Gaussian sigmas to determine LSF width at each pixel
-    prim = GaussianLSFPrimitive()
+    prim = CalculateGaussianLSFPrimitive()
     deg_inter_order = 3
     deg_intra_order = 3
+    
     result = prim.apply(
         wavesol_model,
         full_output=True,
@@ -64,7 +61,7 @@ def test_process_lfc_parvi(tmp_path):
         deg_intra_order=deg_intra_order,
         fit_orders=do_orders,
     )
-    lsf_model = result.name
+    lsf_model = result['output']
     assert isinstance(lsf_model, datamodels.PARVIGaussianLSFModel)
     assert lsf_model.meta.cal_type == 'lsf'
     assert getattr(lsf_model, f'lsf_params_fib{do_fibers[0]}').shape == getattr(lsf_model, f'spec_fib{do_fibers[0]}').shape
@@ -76,8 +73,6 @@ def test_process_lfc_parvi(tmp_path):
         'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
-            'sigma_bounds': (0.1, 2.5),
-            'mu_bounds': (-1, 1),
             'lfc_nu0': datamodels.parvi.LFC_NU_0,
             'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
         },
@@ -95,10 +90,9 @@ def test_process_lfc_parvi(tmp_path):
             'fit_orders': do_orders,
         },
     }
-    model_result = pipe.apply(lfc_path, prim_args=prim_args)
-    assert np.all(model_result.wave_fib3 == lsf_model.wave_fib3)
-    assert np.all(model_result.lfc_fitparams_fib3 == lsf_model.lfc_fitparams_fib3)
-    assert np.all(model_result.lsf_params_fib3 == lsf_model.lsf_params_fib3)
+    result = pipe.apply(lfc_path, prim_args=prim_args)
+    wavesol_model = result['wavesol']
+    lsf_model = result['lsf']
 
     # Check that the calibration was saved to the cache
     with CalibrationStore(orm_class=PARVICalibrationORM) as store:

@@ -1,6 +1,12 @@
 from ..base_model import DataModel
+from ...calibrations import PARVICalibrationORM
+from .dqflags import DQ_FLAGS
+
 import astropy.time
 from datetime import datetime
+
+import uuid
+import numpy as np
 
 __all__ = ['PARVIDataModel', 'PARVICalibrationModel']
 
@@ -9,6 +15,10 @@ class PARVIDataModel(DataModel):
     HEADER_SCHEMAS = [
         'parvi_core.yaml',
     ]
+
+    CAL_ORM_CLASS = PARVICalibrationORM
+
+    DQ_FLAGS = DQ_FLAGS
 
     @staticmethod
     def _generate_filename(
@@ -68,6 +78,14 @@ class PARVICalibrationModel(PARVIDataModel):
         if self.meta.cal_type is None and self.CAL_TYPE is not None:
             self.meta.cal_type = self.CAL_TYPE
 
+    def on_save(self):
+        """
+        Override the save method to ensure that the cal_type is set.
+        """
+        super().on_save()
+        if self.meta.cal_type is None and self.CAL_TYPE is not None:
+            self.meta.cal_type = self.CAL_TYPE
+
 
     @staticmethod
     def _generate_filename(
@@ -114,10 +132,68 @@ class PARVICalibrationModel(PARVIDataModel):
         date_time = self.meta.exposure.datetime_start
         cal_type = self.CAL_TYPE
         master = self.meta.master_cal
-        date_time = self.meta.exposure.datetime_start
         return self._generate_filename(
             date_time=date_time,
             cal_type=cal_type,
             master=master,
             suffix=suffix
         )
+
+    def generate_calibration_id(self, last_updated: str) -> str:
+        """
+        Generate the calibration ID.
+        
+        Args:
+            last_updated (str): Timestamp to use for ID generation
+            
+        Returns:
+            str: The calibration ID
+        """
+        filename = self.meta.filename or 'unknown'
+        drp_version = self.meta.drp_version or 'unknown'
+        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
+        _id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return _id
+
+    def to_orm(
+        self, orm_class : type[PARVICalibrationORM] | None = None,
+        note : str | None = None,
+        regenerate_id : bool = False
+    ) -> PARVICalibrationORM:
+        
+        if orm_class is None:
+            orm_class = self.CAL_ORM_CLASS
+        if orm_class is None:
+            raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
+        
+        # Generate timestamp once for consistency
+        last_updated = datetime.now().isoformat(timespec="milliseconds")
+        
+        # Get data from the datamodel
+        datetime_obs = self.meta.exposure.datetime_start
+        filename = self.meta.filename
+        drp_version = self.meta.drp_version
+
+        # Generate or use existing UUID using the dedicated method with consistent timestamp
+        if self.meta.cal_id is None or regenerate_id:
+            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
+        
+        # Create and populate the ORM instance
+        orm = orm_class(
+            id=self.meta.cal_id,
+            filename=filename,
+            cal_type=self.meta.cal_type.lower(),
+            instera=self.meta.instrument.era,
+            read_mode=self.meta.exposure.read_mode,
+            target_name=self.meta.target.name,
+            object_fiber1=self.meta.target.object_fiber1,
+            object_fiber2=self.meta.target.object_fiber2,
+            object_fiber3=self.meta.target.object_fiber3,
+            object_fiber4=self.meta.target.object_fiber4,
+            mjd_start=self.meta.exposure.mjd_start,
+            datetime_obs=datetime_obs,
+            drp_version=drp_version,
+            note=note,
+            last_updated=last_updated,
+        )
+        return orm

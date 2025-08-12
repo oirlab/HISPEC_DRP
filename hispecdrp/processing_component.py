@@ -1,8 +1,6 @@
 from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePrimitive
-from keckdrpframework.models.arguments import Arguments
 
 from . import datamodels
-from .calibrations import DATAMODEL_ORM_MAP
 from .utils.logging import get_logger
 
 __all__ = ['ProcessingComponent']
@@ -10,6 +8,7 @@ __all__ = ['ProcessingComponent']
 class ProcessingComponent(_BasePrimitive):
 
     ARGUMENTS = {
+        'input': None,
         'save_result': False,
         'output_path': None,
         'output_dir': None,
@@ -43,61 +42,108 @@ class ProcessingComponent(_BasePrimitive):
     def log(self):
         return self._logger
     
-    def __init_subclass__(cls):
-        ARGUMENTS = {}
-        for _cls in cls.mro()[::-1]:
-            if issubclass(_cls, ProcessingComponent):
-                ARGUMENTS.update(_cls.ARGUMENTS)
-        cls.ARGUMENTS = ARGUMENTS
+    @property
+    def arguments(self) -> str:
+        """
+        Pretty print the current arguments and calibrations.
+        
+        Returns:
+            str: A formatted string showing all current argument values.
+        """
+        return print(self.prepr_args())
+    
+    def __init_subclass__(cls, **kwargs):
+        # Ensure proper cooperative multiple inheritance behavior
+        super().__init_subclass__(**kwargs)
 
-    def prepr_args(self, args : Arguments | None = None) -> str:
-        if args is None:
-            args = self.args
-        s = f'name = {args.name}\n'
-        for k in args.iter_kw():
-            if k != 'name':
-                s += f'{k} = {args[k]}\n'
-        s = s[:-1]
+        # Merge ARGUMENTS from the full (reversed) MRO so base defaults apply first
+        merged_args = {}
+        for _cls in cls.mro()[::-1]:
+            merged_args.update(getattr(_cls, 'ARGUMENTS', {}) or {})
+        cls.ARGUMENTS = merged_args
+
+        # Merge CALIBRATIONS similarly; not all classes will define this.
+        merged_cals = {}
+        for _cls in cls.mro()[::-1]:
+            merged_cals.update(getattr(_cls, 'CALIBRATIONS', {}) or {})
+        cls.CALIBRATIONS = merged_cals
+
+    def prepr_args(self) -> str:
+        s = ''
+        for k in self.ARGUMENTS:
+            if hasattr(self, k):
+                s += f'{k} = {getattr(self, k)}\n'
+        if hasattr(self, 'CALIBRATIONS'):
+            for k in self.CALIBRATIONS:
+                if hasattr(self, k):
+                    s += f'{k} = {getattr(self, k)}\n'
+        s = s[:-1] if s.endswith('\n') else s
         return s
     
-    def init_args(self) -> dict:
+    def init_args(self) -> None:
         """
-        Coalesces the user input into a single `Arguments` object from scratch with the following priorities:
-            3. `self.ARGUMENTS`
-            2. `self.config`
-            1. `self.args`
-
-        And is stored in `self.args`.
+        Initialize arguments and calibrations as top-level attributes with the following priorities:
+            3. `self.ARGUMENTS` (defaults)
+            2. `self.config['arguments']` (from config)
+            1. Direct attribute setting (highest priority)
         """
-        self.args = Arguments(name=None)
-        self.args.update(**self.ARGUMENTS.copy())
-        self.args.update(**self.config['arguments'])
-        return self.args
+        # Set defaults from ARGUMENTS (including input)
+        for key, default_value in self.ARGUMENTS.items():
+            setattr(self, key, default_value)
+        
+        # Override with config values
+        for key, config_value in self.config['arguments'].items():
+            if key in self.ARGUMENTS:
+                setattr(self, key, config_value)
+        
+        # Initialize calibration attributes to None (will be set by user or remain None for defaults)
+        if hasattr(self, 'CALIBRATIONS'):
+            for cal_key in self.CALIBRATIONS.keys():
+                if not hasattr(self, cal_key):
+                    setattr(self, cal_key, None)
     
-    def save_model(self, model: datamodels.DataModel) -> str:
+    def save_output(self) -> str:
         """
-        Save a datamodel to a file.
+        Save the result from _perform after processing and finalize_output are called.
 
         Args:
-            model (DataModel): The model to save.
+            model (output): The output to save.
         """
-        instance_output_path = getattr(self.args, 'output_path', None)
-        instance_output_dir = getattr(self.args, 'output_dir', None)
-        instance_suffix = getattr(self.args, 'suffix', None)
-        return model.save(
-            filepath=instance_output_path,
-            output_dir=instance_output_dir,
-            suffix=instance_suffix   
-        )
-    
-    @classmethod
-    def get_orm_class(cls, input_model : str | datamodels.DataModel) -> type:
+        assert self._output is not None and 'output' in self._output, 'No output to save.'
+        output = self._output['output']
+        instance_output_path = getattr(self, 'output_path', None)
+        instance_output_dir = getattr(self, 'output_dir', None)
+        instance_suffix = getattr(self, 'suffix', None)
+        if isinstance(output, datamodels.DataModel): # Assume it can't be a string
+            output.save(
+                filepath=instance_output_path,
+                output_dir=instance_output_dir,
+                suffix=instance_suffix   
+            )
+        elif isinstance(output, dict):
+            for model in output.values():
+                model.save(
+                    filepath=instance_output_path,
+                    output_dir=instance_output_dir,
+                    suffix=instance_suffix
+                )
+        elif isinstance(output, list):
+            for model in output:
+                model.save(
+                    filepath=instance_output_path,
+                    output_dir=instance_output_dir,
+                    suffix=instance_suffix
+                )
+        else:
+            self.log.error("Unsupported output type.")
+            raise TypeError("Unsupported output type.")
+
+    def reset_args(self):
         """
-        Get the ORM class associated with the input model type from the provided ORM register.
+        Reset all arguments to their default values by clearing the initialization flag 
+        and calling init_args again.
         """
-        # NOTE: Consider alternative approaches to link datamodel with ORM class.
-        model_cls = type(input_model)
-        for base_cls, orm_cls in DATAMODEL_ORM_MAP.items():
-            if issubclass(model_cls, base_cls):
-                return orm_cls
-        raise ValueError(f"No ORM class registered for model type {model_cls}")
+        if hasattr(self, '_args_initialized'):
+            delattr(self, '_args_initialized')
+        self.init_args()
+        self._args_initialized = True

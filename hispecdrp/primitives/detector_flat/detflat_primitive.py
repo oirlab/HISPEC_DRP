@@ -1,7 +1,7 @@
+
 from ..base_primitive import BasePrimitive
-from ...calibrations import HISPECDetectorFlatSelector, PARVIDetectorFlatSelector
 from ... import datamodels
-from keckdrpframework.models.arguments import Arguments
+import numpy as np
 
 __all__ = ['DetectorFlatPrimitive']
 
@@ -20,25 +20,16 @@ class DetectorFlatPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.args.name)
-        if self.args.detflat is not None:
-            flat_model = datamodels.open(self.args.detflat)
+        input_model = datamodels.open(self.input)
+        if self.detflat is not None:
+            flat_model = datamodels.open(self.detflat)
         else:
             detflat_path = self.get_calibration(input_model, use_cached=True)
             flat_model = datamodels.open(detflat_path)
         result = input_model.copy()
         self.log.info(f"Applying detector flat correction with {flat_model} to {input_model}")
         result = detector_flat_correction(result, flat_model)
-        return Arguments(name=result)
-    
-    def get_calibration_selector(self, name):
-        input_model = datamodels.open(name, meta_only=True)
-        if isinstance(input_model, datamodels.HISPECDataModel):
-            return HISPECDetectorFlatSelector()
-        elif isinstance(input_model, datamodels.PARVIDataModel):
-            return PARVIDetectorFlatSelector()
-        else:
-            raise ValueError(f"Unsupported input model type: {type(input_model)}")
+        return dict(output=result, detflat=self.detflat)
 
 
 def detector_flat_correction(input_model : datamodels.DataModel, detflat_model : datamodels.DataModel) -> datamodels.DataModel:

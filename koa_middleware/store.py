@@ -1,6 +1,7 @@
 import os
 from .selector_base import CalibrationSelector
 from .database import LocalCalibrationDB, RemoteCalibrationDB, CalibrationORM
+import warnings
 
 __all__ = ['CalibrationStore']
 
@@ -68,8 +69,9 @@ class CalibrationStore:
         if local_database_filename is None:
             local_database_filename = os.environ.get('KOA_LOCAL_DATABASE_FILENAME')
             if local_database_filename is None:
-                assert self.orm_class.instrument is not None, "ORM class must have an instrument attribute set."
-                local_database_filename = f'{self.orm_class.instrument.lower()}_calibrations.db'
+                # NOTE: KEEP AN EYE ON HOW LOCAL DB FILENAMES ARE GENERATED
+                local_database_filename = f'{self.orm_class.__tablename__.lower()}_calibrations.db'
+        
         os.makedirs(self.cache_dir, exist_ok=True)
         os.makedirs(os.path.join(self.cache_dir, 'calibrations'), exist_ok=True)
         os.makedirs(os.path.join(self.cache_dir, 'database'), exist_ok=True)
@@ -108,9 +110,9 @@ class CalibrationStore:
         selector : CalibrationSelector,
         use_cached : bool | None = None,
         **kwargs
-    ) -> str:
+    ) -> tuple[CalibrationORM, str]:
         """
-        Select the best calibration(s) based on the input data and a selection rule, download if not already cached.
+        Select the best calibration based on the input data and a selection rule, download if not already cached.
         
         Args:
             input: Input data product.
@@ -119,10 +121,24 @@ class CalibrationStore:
             kwargs: Additional parameters to pass to Selector.select().
         
         Returns:
-            str: Selected calibration file(s).
+            str: The local file path of the calibration file.
+            CalibrationORM: The ORM instance and local filepath.
         """
-        result = selector.select(input, self.local_db, **kwargs)
-        return self._get_calibration(result, use_cached=use_cached)
+        orm_result = selector.select(input, self.local_db, **kwargs)
+        local_filepath = self._get_calibration(orm_result, use_cached=use_cached)
+        return local_filepath, orm_result
+
+    def get_calibration_by_id(self, calibration_id : str) -> tuple[CalibrationORM, str]:
+        with self.local_db.session_manager() as session:
+            calibration = self.local_db.query_by_id(calibration_id, session=session)
+            if calibration is None or len(calibration) == 0:
+                raise ValueError(f"Calibration with ID {calibration_id} not found in local database.")
+            if len(calibration) > 1:
+                warnings.warn(f"Multiple calibrations found with ID {calibration_id}, returning first found.")
+            calibration = calibration[0]
+            local_filepath = self._get_calibration(calibration)
+            return local_filepath, calibration
+            
 
     def download_calibration(self, calibration : CalibrationORM) -> str:
         """
@@ -203,9 +219,9 @@ class CalibrationStore:
             CalibrationORM: The ORM instance representing the registered calibration.
         """
         output_dir = os.path.join(self.cache_dir, 'calibrations') + os.sep
-        calibration.save(output_dir=output_dir)
-        cal_orm = self.orm_class.from_datamodel(calibration)
-        return self.local_db.add(cal_orm)
+        local_filepath = calibration.save(output_dir=output_dir)
+        cal_orm = calibration.to_orm()
+        return local_filepath, self.local_db.add(cal_orm)
     
     def sync_from_remote(self) -> list[CalibrationORM]:
         """
@@ -216,12 +232,6 @@ class CalibrationStore:
         if len(calibrations) > 0:
             self.local_db.add(calibrations)
         return calibrations
-    
-    def update_from_cache(self):
-        """
-        Utility method to update the local SQLite DB from pre-existing calibrations in the cache directory.
-        """
-        return self.local_db.update_from_cache(self.cache_dir)
     
     def __enter__(self):
         """

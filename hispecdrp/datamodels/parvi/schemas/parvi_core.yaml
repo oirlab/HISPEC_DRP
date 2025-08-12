@@ -218,13 +218,13 @@ cal_file:
   etalon_anchor:
     keyword: C_ETAN
     comment: Etalon anchor reference file
-  gascell_wavecal:
+  gascell_wavesol:
     keyword: C_GWC
     comment: Gas cell wavelength calibration reference file
-  hcl_wavecal:
+  hcl_wavesol:
     keyword: C_HWC
     comment: Hollow cathode lamp wavelength calibration reference file
-  lfc_wavecal:
+  lfc_wavesol:
     keyword: C_LWC
     comment: Laser frequency comb wavelength calibration reference file
   lsf:

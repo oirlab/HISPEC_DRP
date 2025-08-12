@@ -1,8 +1,6 @@
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
-from ...primitives import FitLFCLinesPrimitive, WLSChebyshev2DPrimitive, GaussianLSFPrimitive, RegisterCalibrationPrimitive
-
-from keckdrpframework.models.arguments import Arguments
+from ...primitives import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, RegisterCalibrationPrimitive
 
 __all__ = ['ProcessLFCPipeline']
 
@@ -11,17 +9,17 @@ class ProcessLFCPipeline(CalibrationPipeline):
 
     PRIMITIVES = {
         'fit_lfc_lines': FitLFCLinesPrimitive,
-        'lfc_wavesol': WLSChebyshev2DPrimitive,
-        'lsf': GaussianLSFPrimitive,
+        'lfc_wavesol': CalculateChebyshev2DWLSPrimitive,
         'register_wave_cal' : RegisterCalibrationPrimitive,
+        'lsf': CalculateGaussianLSFPrimitive,
         'register_lsf_cal' : RegisterCalibrationPrimitive,
     }
 
     def _perform(self):
-        model_to_process = datamodels.open(self.args.name)
-        result = self.fit_lfc_lines.apply(model_to_process)
-        result = self.lfc_wavesol.apply(result)
-        self.register_wave_cal.apply(result)
-        result = self.lsf.apply(result)
-        self.register_lsf_cal.apply(result)
-        return Arguments(name=result)
+        input_model = datamodels.open(self.input)
+        line_fit_result = self.fit_lfc_lines.apply(input_model)
+        wavesol_result = self.lfc_wavesol.apply(line_fit_result)
+        self.register_wave_cal.apply(wavesol_result)
+        lsf_result = self.lsf.apply(wavesol_result)
+        self.register_lsf_cal.apply(lsf_result)
+        return dict(output=dict(wavesol=wavesol_result, lsf=lsf_result))
