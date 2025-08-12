@@ -7,7 +7,10 @@ Data models handle the reading, writing, manipulation, and validation of data an
 Specification
 -------------
 
-**Extensions**: The ``EXTENSIONS`` class attribute specifies the different HDUs (Header Data Units) contained in the FITS files. It is a dictionary where the keys are the HDU names and the values are the HDU types. Data models do not need to specifiy entries specified in a parent class.
+Extensions
+++++++++++
+
+The ``EXTENSIONS`` class attribute specifies the different HDUs (Header Data Units) contained in the FITS files. It is a dictionary where the keys are the HDU names and the values are the HDU types. Data models do not need to specifiy entries specified in a parent class.
 
 For example, the default ``DataModel.EXTENSIONS`` attribute is specified as follows:
 
@@ -20,18 +23,21 @@ For example, the default ``DataModel.EXTENSIONS`` attribute is specified as foll
         'RECEIPT': {
             'hdu_type' : fits.BinTableHDU,
             'columns' : {
-                'Time' : str,
-                'HISPECDRP_Version' : str,
-                'Class' : str,
-                'Filename' : str,
-                'Arguments' : str,
-                'Status' : str,
+                'PROC_TIME' : str,
+                'DRP_VERSION' : str,
+                'CLASS' : str,
+                'FILENAME' : str,
+                'ARGUMENTS' : str,
+                'STATUS' : str,
             }
         }
     }
 
 
-**Metadata**: Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute ``HEADER_SCHEMAS``, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>` for more information.
+Metadata
+++++++++
+
+Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute ``HEADER_SCHEMAS``, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>`.
 
 The ``HEADER_SCHEMAS`` attribute for the base HISPEC data model :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` class is simply specified as follows:
 
@@ -39,14 +45,6 @@ The ``HEADER_SCHEMAS`` attribute for the base HISPEC data model :py:class:`~hisp
 
     HEADER_SCHEMAS = [
         'hispec_core.yaml',
-    ]
-
-As a second example, the HISPEC LFC wavelength calibration model :py:class:`~hispecdrp.datamodels.hispec.lfcwavesol.HISPECLFCWaveSolModel` class further includes a special schema to specify metadata for the LFC wavelength solution:
-
-.. code-block:: python
-
-    HEADER_SCHEMAS = [
-        'hispec_lfcwavesol.yaml',
     ]
 
 **All schemas:**
@@ -61,7 +59,7 @@ Data Handling
 Open Model
 ++++++++++
 
-The `datamodels.open` method reads in a file and constructs the appropriate data model class for that file as specified by the header key `model_type`.
+The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and constructs the appropriate data model class for that file as specified by the header key `model_type`.
 
 
 .. code-block:: python
@@ -129,14 +127,11 @@ To implement a new data model, create a new class that inherits from the appropr
 5. :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVICalibrationModel` - Base class for PARVI calibration data models, subtype of :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel`.
 
 
-**All models must specify the two attributes:**
-
-1. ``EXTENSIONS`` - A dictionary specifying the HDUs in the FITS file. By default, the class inherits the ``EXTENSIONS`` attribute from the parent class.
-2. ``HEADER_SCHEMAS`` - A list of additional metadata schema files specifying the metadata format. By default, the class inherits the ``HEADER_SCHEMAS`` attribute from the parent class.
+**Specify additional extensions** in ``EXTENSIONS`` and metadata in ``HEADER_SCHEMAS``.
 
 **Calibration models must also specify the** ``CAL_TYPE`` **attribute.**: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to weparate words if necessary.
 
-Lastly, concrete (i.e. not abstract), non-calibration models must implement the ``data_level_suffix`` property, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. See :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
+**Implement the ``data_level_suffix`` property**, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. See :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
 
 For example, the HISPEC LFC fit parameters model is defined as follows:
 

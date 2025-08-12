@@ -15,7 +15,7 @@ Extensions
 ----------
 
 .. csv-table::
-   :header: "#", "Name", "HDU TYPE", "Data Type", "Dimensions", "Units", "Description"
+   :header: "HDU Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
 
    "SPEC_UNCAL_FIB#", "Image", "Float32", "Nord x 4096", "e-/s", "L1 spectrum."
    "SPEC_UNCAL_ERR_FIB#", "Image", "Float32", "Nord x 4096", "e-/s", "L1 spectrum error (all sources)."
