@@ -17,7 +17,7 @@ for i in range(1, 5):
     _LFCWAVESOL_EXTENSIONS[f'WAVESOLNORM_FIB{i}'] = {
         'hdu_type': fits.BinTableHDU,
         'columns': {
-            'FIBER': np.int16,
+            'FIBER': str,
             'PIXEL_NORM_MIN': np.float64,
             'PIXEL_NORM_MAX': np.float64,
             'ORDER_NORM_MIN': np.int16,
