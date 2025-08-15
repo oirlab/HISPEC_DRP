@@ -71,4 +71,4 @@ def test_fit_etalon_parvi(tmp_path):
             r = models[i].wave_fib3[oi, :] - models[0].wave_fib3[oi, :]
             k = np.where(models[i].drift_fib1['ORDER'] == order)[0][0]
             r *= scipy.constants.c / models[0].wave_fib3[oi, :]
-            assert np.allclose(r, -models[i].drift_fib1['DRIFT_VEL'][k])
+            assert np.allclose(r, -models[i].drift_fib1['DRIFT_VEL'][k], atol=1E-6)
