@@ -19,13 +19,13 @@ Converts the nonlinear signal to a linear signal through a polynomial transforma
 Arguments
 ---------
 
-- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
     The input file or data model to process. Should be a raw (UTR ramp) data product.
-- **nonlin** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.nonlin.HISPECNonlinearCorrectionModel` | ``None``
-    The name of the nonlinear correction file or data model. If not provided, the file is fetched from the calibration database.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'nonlin').
 
-
-Calibration Files
------------------
+Calibrations
+------------
 
 - :doc:`nonlin <../datamodels/nonlin>`
+    - Selector: :py:class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`

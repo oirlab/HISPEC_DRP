@@ -8,7 +8,7 @@ Overview
 Fit each laser frequency comb (LFC) line with a Gaussian profile. This is useful for calculating the wavelength solution and the the line spread function (LSF).
 
 
-**Class**: :py:class:`~hispecdrp.primitives.line_fitting.fit_lfc_modes_primitive.FitLFCModesPrimitive`
+**Class**: :py:class:`~hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.FitLFCLinesPrimitive`
 
 
 Algorithm
@@ -19,12 +19,12 @@ Each LFC line is first identified with `scipy.signal.find_peaks <https://docs.sc
 Arguments
 ---------
 
-- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
     The input file or data model to process. Should be a level 0 (rate map) data product.
-- **sigma_bounds** : ``tuple[float, float]``
-    The bounds for the standard deviation of the Gaussian fit.
+- **fwhm_bounds** : ``tuple[float, float]``
+    The bounds for the FWHM of the fit.
 - **mu_bounds** : ``tuple[float, float]``
-    The bounds for the mean of the Gaussian fit (in pixels) relative the centroid.
+    The bounds for the mean of the fit (in pixels) relative the centroid.
 - **max_fit_window** : ``float``
     The maximum number of pixels to fit for a mode.
 - **do_orders** : ``list[int]`` | ``None``
@@ -35,9 +35,11 @@ Arguments
     The central frequency (pump line) of the LFC in GHz.
 - **lfc_delta_nu** : ``float``
     The frequency spacing of the LFC modes in GHz.
+- **profile_type** : ``str``
+    The profile type to use for fitting. Options are "gaussian" or "lorentzian". Defaults to "gaussian".
 
 
-Calibration Files
------------------
+Calibrations
+------------
 
-None.
+None. *NOTE: LFC params may be stored in dedicated calibration files in the future*

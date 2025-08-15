@@ -19,8 +19,10 @@ Several methods are supported, see below.
 Arguments
 ---------
 
-- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
     The raw (UTR) model to fit slopes to.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'rampfit').
 - **method** : ``str``
     The method to use to fit the ramps. Defaults to ``'jwst_ols'``.
     
@@ -34,9 +36,3 @@ Arguments
     Number of coadds for ``method='mcds'``.
 - **max_cores** : ``int``
     Maximum number of cores to use for parallel processing for method. Defaults to 1 (no parallel processing). Only supported by jwst methods for now.
-
-
-Calibration Files
------------------
-
-None.

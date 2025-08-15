@@ -7,7 +7,7 @@ The following examples demonstrate how to run a single primitive. Files are retr
 Subtract Dark Frame
 -------------------
 
-This example subtracts a dark frame from an input frame at level L0 (rate map). In this case, a dark frame is needed to run the dark subtraction primitive. Calibrations are typically associated and retrieved automatically by the DRP (see :doc:`calibrations <../calibrations/calibrations>` and :doc:`Primitive Design <../design/primitives.rst>`). Below we show the different methods for associated calibrations through a primitive's configuraiton.
+This example subtracts a dark frame from an input frame at level L0 (rate map). In this case, a dark frame is needed to run the dark subtraction primitive. Calibrations are typically associated and retrieved automatically by the DRP (see :doc:`calibrations <../calibrations/calibrations>` and :doc:`Primitive Design <../development/primitives>`). Below we show the different methods for associated calibrations through a primitive's configuraiton.
 
 .. code-block:: python
 
