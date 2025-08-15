@@ -6,8 +6,6 @@ import numpy as np
 import scipy.constants
 import os
 
-import matplotlib.pyplot as plt
-
 def test_fit_etalon_parvi(tmp_path):
 
     solar_files = [
