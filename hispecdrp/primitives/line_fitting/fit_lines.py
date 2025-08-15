@@ -27,7 +27,6 @@ def fit_lines(
         x_fit = xarr[ki:kf+1].copy()
         y_fit = spec[ki:kf+1].copy()
         yerr_fit = specerr[ki:kf+1].copy()
-        #breakpoint()
         fit_result = profile_background_fit(
             x_fit, y_fit, yerr_fit,
             fwhm_bounds=fwhm_bounds,

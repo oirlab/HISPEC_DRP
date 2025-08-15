@@ -9,9 +9,6 @@ __all__ = ['CalculateChebyshev2DWLSPrimitive']
 
 
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
-    """
-    Finds and fits 1D LFC modes with a Gaussian + background profile.
-    """
 
     ARGUMENTS = {
         'deg_intra_order' : 'auto',

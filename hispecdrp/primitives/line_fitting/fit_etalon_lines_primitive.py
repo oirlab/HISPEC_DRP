@@ -11,9 +11,6 @@ __all__ = ['FitEtalonLinesPrimitive']
 
 
 class FitEtalonLinesPrimitive(BasePrimitive):
-    """
-    Given a 1D spectrum, finds and fits the Etalon lines with a Gaussian + background profile.
-    """
 
     ARGUMENTS = {
         'fwhm_bounds' : None,
@@ -57,7 +54,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                     profile_type=self.profile_type,
                 )
                 #except:
-                #import matplotlib.pyplot as plt
+                import matplotlib.pyplot as plt
                     #breakpoint()
                 fit_results[fiber].append(_fit_results)
 

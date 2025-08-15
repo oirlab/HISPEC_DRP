@@ -1,19 +1,13 @@
 from ..base_primitive import BasePrimitive
 from ...calibrations import DarkSelector
 from ... import datamodels
-from keckdrpframework.models.arguments import Arguments
 import numpy as np
 
 __all__ = ['DarkSubtractionPrimitive']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
-    """
-    ARGUMENTS:
-        dark (DataModel | str | None): Dark model to apply to the input data.
-            If None, the dark model will be queried.
-    """
-
+    
     ARGUMENTS = {
         'suffix' : 'darksub',
     }
@@ -44,7 +38,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         output_model = dark_subtraction_rate(result, dark_model)
 
         # Output
-        
+
         return dict(output=output_model, dark=dark)
 
 
