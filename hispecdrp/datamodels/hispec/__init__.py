@@ -11,3 +11,4 @@ from .lfcwavesol import *
 from .gausslsf import *
 from .lfcfitparams import *
 from .dqflags import *
+from .ref_etalon import *
