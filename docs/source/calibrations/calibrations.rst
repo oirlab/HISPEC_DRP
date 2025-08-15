@@ -13,10 +13,12 @@ The :py:mod:`~hispecdrp.calibrations` module contains code to:
 
 In order to select and retrieve calibrations for processing, the HISPEC DRP interacts with the `KOA Middleware <https://oirlab.github.io/koa_middleware/>`_ package. This package can download science and calibration files from the Keck Observatory Archive (KOA) and provides a local cache for these files. `koa_middleware` also provides a framework for matching calibration files to science data products based on metadata.
 
+See *<link TBD>* for how to implement new calibration selectors.
+
 .. toctree::
    :maxdepth: 2
    :glob:
-    
+
+   cache
    database
-   store
    selectors

@@ -1,12 +1,6 @@
 =================
-Calibration Store
-=================
-
-The class :py:class:`~koa_middleware.store.CalibrationStore` manages the local (Keck or DRP user) and remote (KOA) databases.
-
-
 Calibration Cache
------------------
+=================
 
 The local calibration cache must have the directory structure below. The sub-folders will be created if they do not exist. The local SQLite database must be named ``<instrument_name>_calibrations.db`` where ``instrument_name`` is currently either ``parvi`` or ``hispec`` and be located in the ``database/`` subdirectory. The calibration files are located in the ``calibrations/`` subdirectory.
 
