@@ -1,6 +1,6 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, ProcessLFCPipeline
-from hispecdrp.utils import download_gdrive_file
+from .utils import download_gdrive_file
 from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
 
