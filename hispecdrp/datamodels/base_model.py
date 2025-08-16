@@ -548,6 +548,7 @@ class DataModel:
         This is useful when the fiber is a dynamic variable and can be used in place of getattr(model, '<attr>_fib{fiber}').
         By default, any attribute with '_fib' in its name is included.
         This property may be removed in future versions unless it demonstrates significant utility.
+        This property should not be used in large for loops if the rest of the computation is trivial as it adds some overhead.
 
         Examples:
             >>> model.traces # -> {1 : {'wave' : ..., 'spec' : ..., 'spec_err' : ...}, 2 : {...}, ...}
@@ -575,6 +576,8 @@ class DataModel:
         calibration : CalibrationORM | DataModel | str | dict,
         cal_role : str,
         date_time : str,
+        note : str | None = None,
+        replace_existing : bool = True,
     ) -> None:
         """
         Add a calibration to the DataModel's calibrations table.
@@ -587,107 +590,60 @@ class DataModel:
             date_time (str): The datetime the calibration was used in ISO format.
             role (str): The role of this calibration. Defaults to 'SINGLE'.
         """
-        # First, determine the cal_type to check for existing entries
-        # TODO: REVIEW THIS FUNCTION
-        
-        cal_type = None
-        
-        if isinstance(calibration, CalibrationORM):
-            cal_type = calibration.cal_type
-        elif isinstance(calibration, (str, DataModel)):
-            from .utils import open as open_datamodel
-            cal_model = open_datamodel(calibration, meta_only=True)
-            cal_orm = cal_model.to_orm()
-            cal_type = cal_orm.cal_type
-        elif isinstance(calibration, dict): # WHAT IS THIS? meta data?
-            cal_type = calibration.get('CAL_TYPE') or calibration.get('cal_type')
-        else:
-            raise TypeError(f"calibration must be CalibrationORM, str, or dict, got {type(calibration)}")
 
-        # Check for existing entry with same cal_type AND role
-        if cal_type:
-            mask = (self.calibrations['CAL_TYPE'] == cal_type) & (self.calibrations['CAL_ROLE'] == cal_role.upper())
-            indices = np.where(mask)[0]
-            
-            if len(indices) > 0:
-                # Update existing row
-                assert len(indices) == 1, f"Multiple entries found for calibration type {cal_type} with role {cal_role}: {self}"
-                existing_index = indices[0]
-                
-                # Update the existing row with new data
-                new_row = {}
-                new_row['TIME_APPLIED'] = date_time
-                new_row['CAL_ROLE'] = cal_role
-                
-                if isinstance(calibration, CalibrationORM):
-                    cal_orm_fields = {c.key.lower(): c.key for c in inspect(calibration).mapper.column_attrs}
-                    for col_name in self.calibrations.colnames:
-                        if col_name.lower() in cal_orm_fields:
-                            value = getattr(calibration, cal_orm_fields[col_name.lower()])
-                            if value is None:
-                                value = ''
-                            new_row[col_name] = value
-                elif isinstance(calibration, (str, DataModel)):
-                    from .utils import open as open_datamodel
-                    cal_model = open_datamodel(calibration, meta_only=True)
-                    cal_orm = cal_model.to_orm()
-                    cal_orm_fields = {c.key.lower(): c.key for c in inspect(cal_orm).mapper.column_attrs}
-                    for col_name in self.calibrations.colnames:
-                        if col_name.lower() in cal_orm_fields:
-                            value = getattr(cal_orm, cal_orm_fields[col_name.lower()])
-                            if value is None:
-                                value = ''
-                            new_row[col_name] = value
-                elif isinstance(calibration, dict):
-                    for col_name in self.calibrations.colnames:
-                        if col_name in calibration:
-                            new_row[col_name] = calibration[col_name]
-                        elif col_name.lower() in calibration:
-                            new_row[col_name] = calibration[col_name.lower()]
-                
-                # Update the existing row
-                for key, value in new_row.items():
-                    self.calibrations[key][existing_index] = value
+        # Check if role already exists
+        remove_row_index = None
+        if cal_role in self.calibrations['CAL_ROLE']:
+            if replace_existing:
+                remove_row_index = self.calibrations['CAL_ROLE'].index(cal_role)
+            else:
+                warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
                 return
 
-        # No existing entry found, create new row
-        new_row = {}
-        new_row['TIME_APPLIED'] = date_time
-        new_row['CAL_ROLE'] = cal_role
-
+        # Case 1: CalibrationORM object
+        #   New row from ORM object
         if isinstance(calibration, CalibrationORM):
-            # Extract from ORM object
-            cal_orm_fields = {c.key.lower(): c.key for c in inspect(calibration).mapper.column_attrs}
-            for col_name in self.calibrations.colnames:
-                if col_name.lower() in cal_orm_fields:
-                    value = getattr(calibration, cal_orm_fields[col_name.lower()])
-                    if value is None:
-                        value = ''
-                    new_row[col_name] = value
-        
+            new_row = {
+                'ID' : calibration.id,
+                'FILENAME' : calibration.filename,
+                'CAL_TYPE' : calibration.cal_type,
+                'CAL_ROLE' : cal_role,
+                'DATETIME_OBS' : calibration.datetime_obs,
+                'DRP_VERSION' : calibration.drp_version,
+                'NOTE' : calibration.note,
+                'LAST_UPDATED' : calibration.last_updated,
+                'TIME_APPLIED' : date_time,
+            }
+
+        # Case 2: filepath or DataModel
+        # NOTE: This path should be used with caution
+        #   and limited to dev purposes or limited user cases, never at Keck.
         elif isinstance(calibration, (str, DataModel)):
-            # Load from filepath
             from .utils import open as open_datamodel
             cal_model = open_datamodel(calibration, meta_only=True)
-            cal_orm = cal_model.to_orm()
-            cal_orm_fields = {c.key.lower(): c.key for c in inspect(cal_orm).mapper.column_attrs}
-            for col_name in self.calibrations.colnames:
-                if col_name.lower() in cal_orm_fields:
-                    value = getattr(cal_orm, cal_orm_fields[col_name.lower()])
-                    if value is None:
-                        value = ''
-                    new_row[col_name] = value
-        
-        elif isinstance(calibration, dict):
-            # Direct column mapping
-            for col_name in self.calibrations.colnames:
-                if col_name in calibration:
-                    new_row[col_name] = calibration[col_name]
-                elif col_name.lower() in calibration:
-                    new_row[col_name] = calibration[col_name.lower()]
-        
+            new_row = {
+                'ID' : cal_model.meta.cal_id or '',
+                'FILENAME' : cal_model.meta.filename or '',
+                'CAL_TYPE' : cal_model.CAL_TYPE,
+                'CAL_ROLE' : cal_role,
+                'DATETIME_OBS' : cal_model.meta.exposure.datetime_start,
+                'DRP_VERSION' : __version__,
+                'NOTE' : note or '',
+                'LAST_UPDATED' : '',
+                'TIME_APPLIED' : date_time,
+            }
+        else:
+            raise ValueError("Invalid calibration input")
+
+        # Delete existing row if specified
+        if remove_row_index is not None:
+            self.calibrations.remove_row(remove_row_index)
+
         # Add new row
         self.calibrations.add_row(new_row)
+
+        # Return new row
+        return new_row
 
     def load_calibration_from_role(
         self,

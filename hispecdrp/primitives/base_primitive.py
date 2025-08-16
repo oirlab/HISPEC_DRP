@@ -197,7 +197,7 @@ class BasePrimitive(ProcessingComponent):
         """
         assert self._output is not None and 'output' in self._output, 'No output to finalize.'
         output = self._output['output']
-        if isinstance(output, datamodels.DataModel):
+        if isinstance(output, (str, datamodels.DataModel)):
             self.finalize_model(output)
         elif isinstance(output, dict):
             for model in output.values():
@@ -210,7 +210,7 @@ class BasePrimitive(ProcessingComponent):
             raise TypeError("Unsupported output type.")
         
     def finalize_model(self, model : datamodels.DataModel):
-        #model = datamodels.open(model)
+        model = datamodels.open(model)
         model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
         self.add_receipt_entry(model, date_time=self._date_time)
         for cal_role, calibration in self._calibrations_used.items():
@@ -281,7 +281,7 @@ class BasePrimitive(ProcessingComponent):
 
             # If no cal_id, return the model itself.
             if cal_id is None:
-                self.log.warning(f"No calibration ID provided for selected calibration: {cal_model}.")
+                self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
                 self._calibrations_used[cal_role] = cal_model
                 return cal_model, None  # No ORM available if not in DB
 
