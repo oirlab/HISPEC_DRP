@@ -1,10 +1,7 @@
 
 import datetime
 import os
-import yaml
 import uuid
-
-from keckdrpframework.models.arguments import Arguments
 
 import hispecdrp
 from koa_middleware import CalibrationStore
@@ -159,8 +156,6 @@ class BasePrimitive(ProcessingComponent):
 
     def __repr__(self):
         s = self.__class__.__name__
-        if hasattr(self, 'input'):
-            s += f"\n  input: {self.input}"
         for key in self.ARGUMENTS:
             if hasattr(self, key):
                 s += f"\n  {key}: {getattr(self, key)}"
@@ -202,7 +197,7 @@ class BasePrimitive(ProcessingComponent):
         """
         assert self._output is not None and 'output' in self._output, 'No output to finalize.'
         output = self._output['output']
-        if isinstance(output, datamodels.DataModel):
+        if isinstance(output, (str, datamodels.DataModel)):
             self.finalize_model(output)
         elif isinstance(output, dict):
             for model in output.values():
@@ -215,7 +210,7 @@ class BasePrimitive(ProcessingComponent):
             raise TypeError("Unsupported output type.")
         
     def finalize_model(self, model : datamodels.DataModel):
-        #model = datamodels.open(model)
+        model = datamodels.open(model)
         model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
         self.add_receipt_entry(model, date_time=self._date_time)
         for cal_role, calibration in self._calibrations_used.items():
@@ -273,30 +268,30 @@ class BasePrimitive(ProcessingComponent):
         if isinstance(cal_value, (str, datamodels.DataModel)):
 
             # Open to get cal id (open in full mode to return for processing)
-            input_model = datamodels.open(cal_value)
+            cal_model = datamodels.open(cal_value)
             assert isinstance(
-                input_model,
+                cal_model,
                 (
                     datamodels.HISPECCalibrationModel,
                     datamodels.PARVICalibrationModel,
                 )
             ), "Input must be a valid CalibrationDataModel."
 
-            cal_id = input_model.meta.cal_id
+            cal_id = cal_model.meta.cal_id
 
             # If no cal_id, return the model itself.
             if cal_id is None:
-                self.log.warning(f"No calibration ID provided for selected calibration: {input_model}.")
-                self._calibrations_used[cal_role] = input_model
-                return input_model, None  # No ORM available if not in DB
+                self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
+                self._calibrations_used[cal_role] = cal_model
+                return cal_model, None  # No ORM available if not in DB
 
             # Check if the calibration is in the DB.
-            with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=True) as store:
+            with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS, use_cached=True) as store:
                 result = store.get_calibration_by_id(cal_id=cal_id)
                 if result:
                     calibration_orm = result[1]
                     self._calibrations_used.append(calibration_orm)
-                    return input_model, calibration_orm
+                    return cal_model, calibration_orm
                 else:
                     # Msg probably not necessary, but useful for debugging.
                     self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")

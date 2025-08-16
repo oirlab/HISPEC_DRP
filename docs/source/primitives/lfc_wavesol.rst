@@ -8,7 +8,7 @@ Overview
 Determine the wavelength solution from the laser frequency comb (LFC) line positions.
 
 
-**Class**: :py:class:`~hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive.WLSChebyshev2DPrimitive`
+**Class**: :py:class:`~hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive.CalculateChebyshev2DWLSPrimitive`
 
 
 Algorithm
@@ -19,6 +19,8 @@ The unstructured set of points :math:`\{x_i,\ m_i, \lambda_i\}` is fit with a 2D
 Arguments
 ---------
 
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+    The input file or data model of the LFC. Should be a level 2 data product.
 - **deg_intra_order** : ``int``
     Degree within an echelle order.
 - **deg_inter_order** : ``int`` | ``str``
@@ -35,9 +37,3 @@ Arguments
     Specific orders to include in the fit. If ``None``, fit all available orders.
 - **do_fibers** : ``list[int]`` | ``None``
     Which fiber(s) to fit.
-
-
-Calibration Files
------------------
-
-None.

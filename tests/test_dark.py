@@ -1,5 +1,5 @@
 from hispecdrp import DarkSubtractionPrimitive
-from hispecdrp.utils import download_gdrive_file
+from .utils import download_gdrive_file
 from hispecdrp import datamodels
 import numpy as np
 import os

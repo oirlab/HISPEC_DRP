@@ -9,26 +9,25 @@ __all__ = ['NonlinearCorrectionPrimitive']
 
 
 class NonlinearCorrectionPrimitive(BasePrimitive):
-    """
-    ARGUMENTS:
-        nonlin: Nonlinear model to apply to the input data.
-    """
 
     ARGUMENTS = {
         'suffix' : 'nonlin',
-        'nonlin' : None
+    }
+
+    CALIBRATIONS = {
+        'nonlin': {
+            'selector': NonlinearCorrectionSelector,
+            'selector_kwargs': {}
+        }
     }
 
     def _perform(self):
         input_model = datamodels.open(self.input)
-        if self.nonlin is None:
-            nonlin_path = self.get_calibration(input_model, selector=NonlinearCorrectionSelector())
-        else:
-            nonlin_path = self.nonlin
-        nonlin_model = datamodels.open(nonlin_path)
+        nonlin, _ = self.get_calibration(input_model, 'nonlin')
+        nonlin_model = datamodels.open(nonlin)
         result = input_model.copy()
         self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
         data = result.data.astype(np.float64)
         correct_nonlinearity(data, nonlin_model.coeffs)
         result.data = data.astype(np.float32)
-        return dict(output=result, nonlin=nonlin_path)
+        return dict(output=result, nonlin=nonlin)

@@ -1,6 +1,6 @@
 from hispecdrp import datamodels
 import numpy as np
-from hispecdrp.utils import download_gdrive_file
+from .utils import download_gdrive_file
 
 def test_hispec_level0(tmp_path):
     

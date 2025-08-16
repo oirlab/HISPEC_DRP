@@ -1,6 +1,6 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, ProcessLFCPipeline
-from hispecdrp.utils import download_gdrive_file
+from .utils import download_gdrive_file
 from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
 
@@ -13,7 +13,7 @@ def test_process_lfc_parvi(tmp_path):
 
     # Fit 1D LFC lines with Gaussian
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    do_fibers = [3]
+    do_fibers = ['3']
     prim = FitLFCLinesPrimitive()
     line_fits_model = prim.apply(
         lfc_path,
@@ -35,7 +35,7 @@ def test_process_lfc_parvi(tmp_path):
         fit_orders=do_orders,
         opt_weights=True,
         full_output=True,
-        do_fibers=[3],
+        do_fibers=['3'],
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
     )

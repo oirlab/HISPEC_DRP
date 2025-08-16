@@ -19,13 +19,13 @@ The appropriate master dark calibration is subtracted from the input data. The i
 Arguments
 ---------
 
-- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level0.HISPECL0Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level0.HISPECL0Model`
     The input file or data model to process. For now this is a level 0 (rate map) data product.
-- **dark** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.dark.HISPECDarkModel` | ``None``
-    The name of the dark calibration file or data model. If not provided, the dark is fetched from the calibration database.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'darksub').
 
-
-Calibration Files
------------------
+Calibrations
+------------
 
 - :doc:`dark <../datamodels/dark>`
+    - Selector: :py:class:`~hispecdrp.calibrations.selectors.DarkSelector`

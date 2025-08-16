@@ -12,4 +12,7 @@ Primitives
    register_cal
    lfc_line_fitting
    lfc_wavesol
+   set_wavesol
+   etalon_line_fitting
+   drift_correction
    gauss_lsf

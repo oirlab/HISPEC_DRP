@@ -8,9 +8,6 @@ __all__ = ['CalculateGaussianLSFPrimitive']
 
 
 class CalculateGaussianLSFPrimitive(BasePrimitive):
-    """
-    Create a Gaussian LSF from the Gaussian line fitting results.
-    """
 
     ARGUMENTS = {
         'do_fibers' : None,

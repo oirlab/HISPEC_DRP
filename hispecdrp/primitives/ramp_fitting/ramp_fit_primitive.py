@@ -9,12 +9,6 @@ __all__ = ['FitRampPrimitive']
 
 
 class FitRampPrimitive(BasePrimitive):
-    """
-    ARGUMENTS:
-        method (str): Ramp fitting method. Options are 'cds', 'mcds', 'ols', 'jwst_likely', 'jwst_ols'. Default is ols.
-        num_coadd (int): Number of coadds for MCDS method. Default is 1, equivalent to method='cds'.
-        max_cores (int): maximum number of cores to use during ramp fitting.  Default is 1.
-    """
 
     ARGUMENTS = {
         'suffix' : 'rampfit',

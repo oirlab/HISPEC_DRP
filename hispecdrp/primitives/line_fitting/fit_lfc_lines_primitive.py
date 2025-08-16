@@ -11,9 +11,6 @@ __all__ = ['FitLFCLinesPrimitive']
 
 
 class FitLFCLinesPrimitive(BasePrimitive):
-    """
-    Given a 1D spectrum, finds and fits the LFC lines with a Gaussian + background profile.
-    """
 
     ARGUMENTS = {
         'fwhm_bounds' : (0.2, 8),

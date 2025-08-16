@@ -18,13 +18,14 @@ The appropriate master detector flat calibration is dividided into the input dat
 Arguments
 ---------
 
-- **name** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level0.HISPECL0Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level0.HISPECL0Model`
     The input file or data model to process. Should be a level 0 (rate map) data product.
-- **detflat** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.detector_flat.HISPECDetectorFlatModel` | ``None``
-    The name of the detector flat field calibration file or data model. If not provided, the flat is fetched from the calibration database.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'detflat').
 
 
-Calibration Files
------------------
+Calibrations
+------------
 
 - :doc:`detflat <../datamodels/detector_flat>`
+    - Selector: :py:class:`~hispecdrp.calibrations.selectors.DetectorFlatSelector`
