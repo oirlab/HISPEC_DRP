@@ -156,8 +156,6 @@ class BasePrimitive(ProcessingComponent):
 
     def __repr__(self):
         s = self.__class__.__name__
-        if hasattr(self, 'input'):
-            s += f"\n  input: {self.input}"
         for key in self.ARGUMENTS:
             if hasattr(self, key):
                 s += f"\n  {key}: {getattr(self, key)}"
@@ -270,30 +268,30 @@ class BasePrimitive(ProcessingComponent):
         if isinstance(cal_value, (str, datamodels.DataModel)):
 
             # Open to get cal id (open in full mode to return for processing)
-            input_model = datamodels.open(cal_value)
+            cal_model = datamodels.open(cal_value)
             assert isinstance(
-                input_model,
+                cal_model,
                 (
                     datamodels.HISPECCalibrationModel,
                     datamodels.PARVICalibrationModel,
                 )
             ), "Input must be a valid CalibrationDataModel."
 
-            cal_id = input_model.meta.cal_id
+            cal_id = cal_model.meta.cal_id
 
             # If no cal_id, return the model itself.
             if cal_id is None:
-                self.log.warning(f"No calibration ID provided for selected calibration: {input_model}.")
-                self._calibrations_used[cal_role] = input_model
-                return input_model, None  # No ORM available if not in DB
+                self.log.warning(f"No calibration ID provided for selected calibration: {cal_model}.")
+                self._calibrations_used[cal_role] = cal_model
+                return cal_model, None  # No ORM available if not in DB
 
             # Check if the calibration is in the DB.
-            with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=True) as store:
+            with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS, use_cached=True) as store:
                 result = store.get_calibration_by_id(cal_id=cal_id)
                 if result:
                     calibration_orm = result[1]
                     self._calibrations_used.append(calibration_orm)
-                    return input_model, calibration_orm
+                    return cal_model, calibration_orm
                 else:
                     # Msg probably not necessary, but useful for debugging.
                     self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
