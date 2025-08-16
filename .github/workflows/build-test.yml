@@ -23,11 +23,15 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install the package and dependencies
+    - name: Update setuptools and wheel
       run: |
           python -m pip install --upgrade pip setuptools wheel
+    - name: Install the package and dependencies
+      run: |
           pip install .
-    - name: Run tests
+    - name: Install the test dependencies
       run: |
           pip install .[test]
+    - name: Run tests
+      run: |
           pytest
