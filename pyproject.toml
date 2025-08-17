@@ -56,7 +56,6 @@ dependencies = [
   "tqdm",
   "stcal",
   "gdown",
-  "beautifulsoup4",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
