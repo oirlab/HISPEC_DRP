@@ -57,7 +57,7 @@ dependencies = [
   "stcal",
   "gdown",
   "beautifulsoup4",
-  #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
+  "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
 
@@ -75,7 +75,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["hispecdrp*", "koa_middleware*"]
+include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
