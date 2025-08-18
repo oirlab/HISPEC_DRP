@@ -1,5 +1,5 @@
 from hispecdrp import FitEtalonLinesPrimitive, CalculateEtalonDriftCorrectionPrimitive, ApplyDriftCorrectionPrimitive, SetInitialWLSPrimitive
-from .utils import download_gdrive_file
+from hispecdrp.utils import download_gdrive_file
 
 import numpy as np
 import scipy.constants

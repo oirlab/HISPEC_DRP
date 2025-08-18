@@ -1,4 +1,4 @@
-from .utils import download_gdrive_file
+from hispecdrp.utils import download_gdrive_file
 from koa_middleware import CalibrationStore
 from hispecdrp import datamodels
 from hispecdrp import DarkSubtractionPrimitive, RegisterCalibrationPrimitive
