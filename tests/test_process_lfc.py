@@ -7,9 +7,9 @@ from koa_middleware import CalibrationStore
 import numpy as np
 import os
 
-def test_process_lfc_parvi(tmp_path):
+def test_process_lfc_parvi(tmp_path, datadir):
 
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
+    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True, output_dir=datadir)
 
     # Fit 1D LFC lines with Gaussian
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]

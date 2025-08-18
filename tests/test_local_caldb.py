@@ -6,13 +6,14 @@ from hispecdrp.calibrations import HISPECCalibrationORM
 from hispecdrp.calibrations import DarkSelector
 
 import os
+from datetime import datetime
 
 
-def test_local_caldb(tmp_path):
+def test_local_caldb(tmp_path, datadir):
     
     # Files
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
-    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
 
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True)
@@ -28,6 +29,8 @@ def test_local_caldb(tmp_path):
         dark_model.meta.exposure.datetime_start = None
         dark_model.meta.exposure.mjd_start += 365 * i
         datamodels.set_hispec_meta(dark_model)
+        dark_model.meta.last_updated = datetime.now().isoformat(timespec="milliseconds")
+        dark_model.generate_calibration_id()
         prim = RegisterCalibrationPrimitive()
         prim.apply(dark_model)
         dark_models.append(dark_model)
