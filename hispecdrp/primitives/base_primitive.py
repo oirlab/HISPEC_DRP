@@ -165,10 +165,11 @@ class BasePrimitive(ProcessingComponent):
                     s += f"\n  {key}: {getattr(self, key)}"
         return s
     
-    def add_receipt_entry(self, model : datamodels.DataModel, date_time : str):
+    def add_receipt_entry(self, model : datamodels.DataModel, date_time : str | None = None):
         """
         Add an entry to the receipt table of the model.
         """
+        date_time = self._date_time or date_time
         row = {
             'PROC_TIME' : date_time,
             'DRP_VERSION': hispecdrp.__version__,
@@ -212,6 +213,8 @@ class BasePrimitive(ProcessingComponent):
     def finalize_model(self, model : datamodels.DataModel):
         model = datamodels.open(model)
         model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
+        if self.run:
+            model.meta.last_updated = self._date_time
         self.add_receipt_entry(model, date_time=self._date_time)
         for cal_role, calibration in self._calibrations_used.items():
             model.add_calibration(calibration, cal_role, date_time=self._date_time)
@@ -252,15 +255,14 @@ class BasePrimitive(ProcessingComponent):
                 pass
             if is_uuid:
                 with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=use_cached) as store:
-                    result = store.get_calibration_by_id(cal_id=cal_id)
-                    if result:
-                        calibration_orm = result[1]
+                    local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+                    if local_filepath is not None:
                         self._calibrations_used[cal_role] = calibration_orm
                         return input_model, calibration_orm
                     else:
                         # Msg probably not necessary, but useful for debugging.
                         self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
-                        raise ValueError(f"No calibration found for cal_id: {cal_id}")
+                        return None, None
 
         ###############################################################
         #### Case 2: filepath string or datamodel (uuid ruled out) ####
@@ -287,15 +289,14 @@ class BasePrimitive(ProcessingComponent):
 
             # Check if the calibration is in the DB.
             with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS, use_cached=True) as store:
-                result = store.get_calibration_by_id(cal_id=cal_id)
-                if result:
-                    calibration_orm = result[1]
-                    self._calibrations_used.append(calibration_orm)
+                local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+                if local_filepath is not None:
+                    self._calibrations_used[cal_role] = calibration_orm
                     return cal_model, calibration_orm
                 else:
-                    # Msg probably not necessary, but useful for debugging.
                     self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
-                    raise ValueError(f"No calibration found for cal_id: {cal_id}")
+                    self._calibrations_used[cal_role] = cal_model
+                    return cal_model, None
 
         #######################################
         #### Case 3: CalibrationORM object ####

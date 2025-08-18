@@ -168,36 +168,31 @@ class HISPECCalibrationModel(HISPECDataModel):
             suffix=suffix
         )
 
-    def generate_calibration_id(self, last_updated: str) -> str:
+    def generate_calibration_id(self) -> str:
         """
         Generate the calibration ID.
-        
-        Args:
-            last_updated (str): Timestamp to use for ID generation
-            
+
         Returns:
             str: The calibration ID
         """
         filename = self.meta.filename or 'unknown'
         drp_version = self.meta.drp_version or 'unknown'
+        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
         UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
-        _id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
-        return _id
+        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return self.meta.cal_id
 
     def to_orm(
         self, orm_class : type[HISPECCalibrationORM] | None = None,
         note : str | None = None,
         regenerate_id : bool = False,
-        fill_koa : bool = False
+        fill_koa : bool = False,
     ) -> HISPECCalibrationORM:
         
         if orm_class is None:
             orm_class = self.CAL_ORM_CLASS
         if orm_class is None:
             raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
-        
-        # Generate timestamp once for consistency
-        last_updated = datetime.now().isoformat(timespec="milliseconds")
         
         # Get data from the datamodel
         datetime_obs = self.meta.exposure.datetime_start
@@ -206,26 +201,23 @@ class HISPECCalibrationModel(HISPECDataModel):
         
         # Conditionally generate KOA paths based on parameter
         if fill_koa:
-            spectrograph = spectrograph.upper()
+            spectrograph = self.meta.instrument.spectrograph.upper()
             if spectrograph in HISPECDataModel.SPECTROGRAPH_ALIASES:
                 instrument_prefix = HISPECDataModel.SPECTROGRAPH_ALIASES[spectrograph]
             else:
                 raise ValueError(f"Spectrograph must be BSPEC or RSPEC, got {spectrograph}")
-            koa_filepath = generate_koa_filepath(
+            self.meta.koa_filepath = generate_koa_filepath(
                 instrument=self.meta.instrument.name,
                 instrument_prefix=instrument_prefix,
                 data_level='cal',
                 date_obs=self.meta.date_obs,
                 utc_obs=self.meta.utc
             )
-            koa_id = koa_filepath.split('/')[-1]
-        else:
-            koa_filepath = None
-            koa_id = None
+            self.meta.koa_id = self.meta.koa_filepath.split('/')[-1]
         
         # Generate or use existing UUID using the dedicated method with consistent timestamp
         if self.meta.cal_id is None or regenerate_id:
-            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
+            self.meta.cal_id = self.generate_calibration_id()
         
         # Create ORM instance with conditional KOA fields (inlined kwargs)
         orm = orm_class(
@@ -244,9 +236,9 @@ class HISPECCalibrationModel(HISPECDataModel):
             datetime_obs=datetime_obs,
             drp_version=drp_version,
             note=note,
-            last_updated=last_updated,
-            koa_id=koa_id,
-            koa_filepath=koa_filepath,
+            last_updated=self.meta.last_updated,
+            koa_id=self.meta.koa_id,
+            koa_filepath=self.meta.koa_filepath,
         )
         
         return orm

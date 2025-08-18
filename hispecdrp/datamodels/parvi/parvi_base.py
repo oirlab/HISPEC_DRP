@@ -139,21 +139,19 @@ class PARVICalibrationModel(PARVIDataModel):
             suffix=suffix
         )
 
-    def generate_calibration_id(self, last_updated: str) -> str:
+    def generate_calibration_id(self) -> str:
         """
         Generate the calibration ID.
-        
-        Args:
-            last_updated (str): Timestamp to use for ID generation
-            
+
         Returns:
             str: The calibration ID
         """
         filename = self.meta.filename or 'unknown'
         drp_version = self.meta.drp_version or 'unknown'
+        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
         UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
-        _id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
-        return _id
+        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return self.meta.cal_id
 
     def to_orm(
         self, orm_class : type[PARVICalibrationORM] | None = None,
@@ -166,9 +164,6 @@ class PARVICalibrationModel(PARVIDataModel):
         if orm_class is None:
             raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
         
-        # Generate timestamp once for consistency
-        last_updated = datetime.now().isoformat(timespec="milliseconds")
-        
         # Get data from the datamodel
         datetime_obs = self.meta.exposure.datetime_start
         filename = self.meta.filename
@@ -176,7 +171,7 @@ class PARVICalibrationModel(PARVIDataModel):
 
         # Generate or use existing UUID using the dedicated method with consistent timestamp
         if self.meta.cal_id is None or regenerate_id:
-            self.meta.cal_id = self.generate_calibration_id(last_updated=last_updated)
+            self.meta.cal_id = self.generate_calibration_id()
         
         # Create and populate the ORM instance
         orm = orm_class(
@@ -194,6 +189,6 @@ class PARVICalibrationModel(PARVIDataModel):
             datetime_obs=datetime_obs,
             drp_version=drp_version,
             note=note,
-            last_updated=last_updated,
+            last_updated=self.meta.last_updated,
         )
         return orm

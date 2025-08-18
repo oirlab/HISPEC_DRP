@@ -29,3 +29,12 @@ Optionally one can install the test dependencies and run the tests:
 
    pip install -e ".[test]"
    pytest -s
+
+
+By default, testing data is downloaded to `~/.astropy/cache/download/url/`. To specify a directory for the testing data, one can run:
+
+.. code-block:: bash
+
+   pytest -s --datadir=/path/to/cache/dir/
+
+In both cases, the testing data is persistent and **not deleted** after tests are finished.

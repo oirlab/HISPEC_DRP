@@ -283,7 +283,7 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
-        self.meta.date_created = datetime.datetime.now().isoformat()
+        self.meta.last_updated = self.meta.last_updated or datetime.datetime.now().isoformat(timespec="milliseconds")
         self.meta.model_type = self.__class__.__name__
 
     def make_hdu(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = True) -> _VALID_HDU:

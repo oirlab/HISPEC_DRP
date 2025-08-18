@@ -1,11 +1,11 @@
 from hispecdrp import datamodels
 import numpy as np
-from .utils import download_gdrive_file
+from hispecdrp.utils import download_gdrive_file
 
-def test_hispec_level0(tmp_path):
+def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
+    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument.name == 'HISPEC'
@@ -52,10 +52,10 @@ def test_hispec_level0(tmp_path):
     _test_model_attrs(model)
 
 
-def test_parvi_level0(tmp_path):
+def test_parvi_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True)
+    filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True, output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument.name == 'PARVI'

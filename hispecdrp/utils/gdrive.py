@@ -2,6 +2,8 @@ import os
 import gdown
 import astropy.utils.data
 
+__all__ = ['download_gdrive_file']
+
 from .testing_data import GDRIVE_FILES
 
 def get_id_from_path(filepath: str) -> str:
