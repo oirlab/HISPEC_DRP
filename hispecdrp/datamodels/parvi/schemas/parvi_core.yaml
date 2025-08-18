@@ -1,8 +1,8 @@
 %YAML 1.2
 ---
-date_created:
-  keyword: DATECRT
-  comment: ISO 8601 datetime file was created YYYYMMDDTHHMMSS
+last_updated:
+  keyword: LASTUPD
+  comment: ISO 8601 datetime file was last updated YYYYMMDDTHHMMSS
 date_obs:
   keyword: DATE-OBS
   comment: ISO 8601 datetime of the observation YYYYMMDD for KOA
