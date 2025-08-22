@@ -2,10 +2,10 @@ import astropy.time
 
 from .hispec_base import HISPECDataModel
 
-__all__ = ['get_hispec_meta']
+__all__ = ['set_hispec_meta']
 
 
-def get_hispec_meta(model : HISPECDataModel, meta : dict | None = None):
+def set_hispec_meta(model : HISPECDataModel, meta : dict | None = None):
     """
     Populate certain model metadata defaults for development and testing data for now.
 
@@ -21,16 +21,17 @@ def get_hispec_meta(model : HISPECDataModel, meta : dict | None = None):
         model.meta.telescope = 'Keck-II'
 
     # Add exposure metadata
-    get_hispec_exposure_meta(model)
+    set_hispec_exposure_meta(model)
 
     # Add instrument metadata
-    get_hispec_instrument_meta(model)
+    set_hispec_instrument_meta(model)
 
     # Date time for KOA
     if model.meta.date_obs is None:
-        dt = astropy.time.Time(model.meta.exposure.datetime_start, format='isot')
-        model.meta.date_obs = dt.strftime('%Y%m%d')
-        model.meta.utc = dt.strftime('%H:%M:%S.%f')
+        if model.meta.exposure.datetime_start is not None:
+            dt = astropy.time.Time(model.meta.exposure.datetime_start, format='isot')
+            model.meta.date_obs = dt.strftime('%Y%m%d')
+            model.meta.utc = dt.strftime('%H:%M:%S.%f')
     
     # Reference models
     if hasattr(model, 'CAL_TYPE'):
@@ -40,7 +41,7 @@ def get_hispec_meta(model : HISPECDataModel, meta : dict | None = None):
     return model
 
 
-def get_hispec_exposure_meta(model : HISPECDataModel):
+def set_hispec_exposure_meta(model : HISPECDataModel):
     if model.meta.exposure.datetime_start is None and model.meta.exposure.mjd_start is None:
         model.meta.exposure.datetime_start = '2024-09-24T00:00:00.000'  # Default value
     if model.meta.exposure.datetime_start is None and model.meta.exposure.mjd_start is not None:
@@ -57,7 +58,7 @@ def get_hispec_exposure_meta(model : HISPECDataModel):
         model.meta.exposure.data_quality = 'GOOD'
     return model
 
-def get_hispec_instrument_meta(model : HISPECDataModel):
+def set_hispec_instrument_meta(model : HISPECDataModel):
     if model.meta.instrument.spectrograph is None:
         model.meta.instrument.spectrograph = 'BSPEC'
     return model

@@ -1,14 +1,24 @@
 from ..base_model import DataModel
+from ...calibrations import PARVICalibrationORM
+from .dqflags import DQ_FLAGS
+
 import astropy.time
 from datetime import datetime
 
-__all__ = ['PARVIDataModel']
+import uuid
+import numpy as np
+
+__all__ = ['PARVIDataModel', 'PARVICalibrationModel']
 
 class PARVIDataModel(DataModel):
 
     HEADER_SCHEMAS = [
         'parvi_core.yaml',
     ]
+
+    CAL_ORM_CLASS = PARVICalibrationORM
+
+    DQ_FLAGS = DQ_FLAGS
 
     @staticmethod
     def _generate_filename(
@@ -18,8 +28,8 @@ class PARVIDataModel(DataModel):
         """
         Create a filename for a PARVI data product.
 
-        Format: PR_{date}_{suffix}.fits
-            - datetime : YYYYMMDDTHHMMSS
+        Format: PR.{datetime}_{suffix}.fits
+            - datetime : YYYYMMDDSSSSS.SS
             - suffix : optional suffix
 
         Args:
@@ -56,3 +66,129 @@ class PARVIDataModel(DataModel):
             suffix=suffix
         )
     
+
+class PARVICalibrationModel(PARVIDataModel):
+
+    HEADER_SCHEMAS = ['parvi_calibration.yaml']
+
+    CAL_TYPE = None # String: The type of calibration data.
+
+    def on_init(self):
+        super().on_init()
+        if self.meta.cal_type is None and self.CAL_TYPE is not None:
+            self.meta.cal_type = self.CAL_TYPE
+
+    def on_save(self):
+        """
+        Override the save method to ensure that the cal_type is set.
+        """
+        super().on_save()
+        if self.meta.cal_type is None and self.CAL_TYPE is not None:
+            self.meta.cal_type = self.CAL_TYPE
+
+
+    @staticmethod
+    def _generate_filename(
+        date_time : str,
+        cal_type : str,
+        master : bool = False,
+        suffix : str | None = None
+    ) -> str:
+        """
+        Create a filename for a PARVI calibration data product.
+
+        Format: PR_{date}_[master-]{cal_type}_{suffix}.fits
+            datetime : YYYYMMDDTHHMMSS.
+            cal_type : The type of calibration data.
+            master : Insert 'master-' before the cal_type if `master=True`.
+            suffix : optional suffix
+
+        Args:
+            datetime (str): The date and time of the observation.
+            cal_type (str): The type of calibration data.
+            master (bool, optional): If True, insert 'master-' before the cal_type. Defaults to False.
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+
+        Returns:
+            str : The filename
+        """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        if master:
+            cal_type = f"master-{cal_type}"
+        filename = f"PR.{date_time}.{cal_type}.fits"
+        if suffix is not None:
+            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
+        return filename
+    
+
+    def generate_filename(self, suffix : str | None = None) -> str:
+        """
+        See _generate_filename for additional arguments.
+        """
+        date_time = self.meta.exposure.datetime_start
+        cal_type = self.CAL_TYPE
+        master = self.meta.master_cal
+        return self._generate_filename(
+            date_time=date_time,
+            cal_type=cal_type,
+            master=master,
+            suffix=suffix
+        )
+
+    def generate_calibration_id(self) -> str:
+        """
+        Generate the calibration ID.
+
+        Returns:
+            str: The calibration ID
+        """
+        filename = self.meta.filename or 'unknown'
+        drp_version = self.meta.drp_version or 'unknown'
+        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
+        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
+        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return self.meta.cal_id
+
+    def to_orm(
+        self, orm_class : type[PARVICalibrationORM] | None = None,
+        note : str | None = None,
+        regenerate_id : bool = False
+    ) -> PARVICalibrationORM:
+        
+        if orm_class is None:
+            orm_class = self.CAL_ORM_CLASS
+        if orm_class is None:
+            raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
+        
+        # Get data from the datamodel
+        datetime_obs = self.meta.exposure.datetime_start
+        filename = self.meta.filename
+        drp_version = self.meta.drp_version
+
+        # Generate or use existing UUID using the dedicated method with consistent timestamp
+        if self.meta.cal_id is None or regenerate_id:
+            self.meta.cal_id = self.generate_calibration_id()
+        
+        # Create and populate the ORM instance
+        orm = orm_class(
+            id=self.meta.cal_id,
+            filename=filename,
+            cal_type=self.meta.cal_type.lower(),
+            instera=self.meta.instrument.era,
+            read_mode=self.meta.exposure.read_mode,
+            target_name=self.meta.target.name,
+            object_fiber1=self.meta.target.object_fiber1,
+            object_fiber2=self.meta.target.object_fiber2,
+            object_fiber3=self.meta.target.object_fiber3,
+            object_fiber4=self.meta.target.object_fiber4,
+            mjd_start=self.meta.exposure.mjd_start,
+            datetime_obs=datetime_obs,
+            drp_version=drp_version,
+            note=note,
+            last_updated=self.meta.last_updated,
+        )
+        return orm

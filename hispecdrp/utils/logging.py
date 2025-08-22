@@ -1,5 +1,4 @@
 import logging
-from .config import Config
 
 
 def get_level(lvl : str) -> int:
@@ -15,15 +14,11 @@ def get_level(lvl : str) -> int:
     elif lvl == 'critical': return logging.CRITICAL
     else: return logging.NOTSET
 
-
-def get_logger(name: str, config: Config) -> logging.Logger | None:
+def get_logger(name: str, config : dict) -> logging.Logger:
     """
     Args:
         name (str): Name of logger, which will be shown in each log msg.
-        config (Config): Config object with logging settings.
     """
-    if not config.get('logging', {}).get('enabled', True):
-        return None
 
     # Initialize the logger
     logger = logging.getLogger(name)
@@ -59,7 +54,7 @@ def get_logger(name: str, config: Config) -> logging.Logger | None:
         s_handle.setFormatter(formatter)
 
     # File handler
-    if log_path:
+    if log_path is not None:
         if logging.FileHandler not in existing_handlers or (
             isinstance(existing_handlers.get(logging.FileHandler), logging.FileHandler) and
             existing_handlers[logging.FileHandler].baseFilename != log_path

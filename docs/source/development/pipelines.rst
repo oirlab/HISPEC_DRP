@@ -5,15 +5,18 @@ Pipelines
 Overview
 --------
 
-Pipelines are a collection of primitives that are executed in a specific order to process the data. The base class :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines.
+Pipelines are a collection of primitives that are executed in a specified order. The base class :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines. The pipeline level interface largely matches the primitive interface.
 
-The Pipeline interface is built on top of the primitive interface and is used in nearly an identicaly manner. Pipeline-specific configuration is stored in ``pipeline.args``, and the primary filename or datamodel to process can be accessed with ``pipeline.args.name``. A class attribute called ``PRIMITIVES`` specifies which primitives are instantiated and available for the pipeline to execute.
+Pipeline Arguments
+------------------
+
+Like primitives, pipelines also use an ``ARGUMENTS`` variable to parametrize their behavior and are available as attributes.
 
 
 Pipeline Configuration Files
 ----------------------------
 
-Like primitives, pipelines can also utilize config files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
+Pipelines may also utilize configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
 
 .. code-block:: yaml
     
@@ -21,55 +24,59 @@ Like primitives, pipelines can also utilize config files. An example configurati
     ---
 
     logging:
-      enable: True
       level: info
-      verbose: True
       log_path: None
 
     arguments:
-      run: True
-      save_results: True
-      output_dir: None
-      suffix: 'examplesuffix'
+      # Can specify pipeline level arguments here.
 
     primitives:
       dark_sub:
         config_file: 'dark_config.yaml' # Optional
-        arguments: # Additional arguments will override those in 'dark_primitive.yaml'
-          run: True
+        arguments: # Additional arguments will override those in 'dark_config.yaml'
+          suffix: 'exampledarksuffix'
       flat_field:
         arguments:
           run: True
-          save_results: False
-          suffix: 'examplesuffix'
+          save_results: True
+          suffix: 'exampleflatsuffix'
 
+
+Logging
++++++++
+
+By default, pipelines will pass any logging-specific config to each primitive it uses.
+
+
+Saving Results
+++++++++++++++
+
+The argument ``save_result`` can take on different values for a pipeline:
+
+- ``all``: Pipeline will save results of every primitive.
+- ``final``: Pipeline will only save the final result of the pipeline.
+- ``None``: Primitives will manage their own saving behavior.
+
+Primitives will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments.
+
+Pipeline Methods
+----------------
+
+Below are most methods one can implement or override when creating custom pipelines. Note some are required for certain behavior. See the full API for full documentation of available methods.
+
+* _perform(self) -> Arguments
+    - Required. This method takes in no arguments. It contains the primary logic of the pipeline and returns an instance of ``Arguments`` where the attribute ``name`` contains the primary output model. Extra outputs may be stored in the output ``Arguments`` object. If ``full_output`` is ``True``, the entire ``Arguments`` object is returned, otherwise only the ``name`` attribute is returned. _perform will call each primitive's ``apply`` method in any order specified, but should reflect the ordering in ``PRIMITIVES``.
 
 
 Implementing a Pipeline
 -----------------------
 
-For example, the stage 1 pipeline might be implemented as follows and stored in hispecdrp/pipelines/stage1/stage1_pipeline.py
+Pipelines must extend either:
 
-.. code-block:: python
-    
-    
-    from ..base_pipeline import BasePipeline
-    from ...primitives import DarkSubtractionPrimitive, FlatFieldPrimitive
+* :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline` for general science pipelines.
+* :py:class:`hispecdrp.pipelines.calibration.base_calibration_pipeline.BaseCalibrationPipeline`. for pipelines which create calibration products.
 
-    __all__ = ['Stage1Pipeline']
+Below is the implementation of the LFC processing pipeline.
 
-    class Stage1Pipeline(BasePipeline):
-
-        class_alias = 'stage1'
-
-        PRIMITIVES = {
-            'dark_sub': DarkSubtractionPrimitive,
-            'flat_field': FlatFieldPrimitive,
-        }
-
-
-        def _perform(self):
-            model_to_process = self.open_model(self.args.name)
-            result = self.dark_sub.apply(model_to_process)
-            result = self.flat_field.apply(result)
-            return result
+.. literalinclude:: ../../../hispecdrp/pipelines/calibration/process_lfc_pipeline.py
+   :language: python

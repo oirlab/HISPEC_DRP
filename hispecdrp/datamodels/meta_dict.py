@@ -12,14 +12,13 @@ class MetaDict:
     A dictionary that allows attribute-style access and creates nested MetaDicts
     during assignment or access and validates against a schema.
     
-    CSV Columns:
-        - fits_keyword: The FITS keyword to be used in the header.
-        - comment: The comment to be added to the FITS header. Defaults to None.
+    Schema fields:
+        - keyword: The FITS keyword to be used in the header.
+        - comment: The comment to be added to the FITS header. Defaults to ''.
         - unit: The unit of the value, not used for validation. Defaults to None.
-        - type: The type of the value, used for validation. Defaults to str.
+        - datatype: The type of the value, used for validation (string, bool, integer, number). Defaults to string.
         - default: The default value to be used if not provided. Defaults to None.
         - fits_hdu: The HDU to which the keyword belongs. Defaults to 'PRIMARY'.
-        - Property: The Python path to the property (e.g. meta.instrument.name).
     """
 
     _DEFAULTS = {
@@ -136,9 +135,15 @@ class MetaDict:
         return list(set(super().__dir__() + list(self._data.keys())))
     
     def __contains__(self, item):
-        if isinstance(item, (list, tuple)):
-            item = '.'.join(item)
-        return item in self._data
+        if isinstance(item, str):
+            keys = item.split(".")
+        d = self
+        for key in keys:
+            if isinstance(d, (dict, MetaDict)) and key in d._data:
+                d = d[key]
+            else:
+                return False
+        return True
         
     def validate(self, prop, value):
         """
@@ -225,10 +230,15 @@ class MetaDict:
         for k, v in self.__dict__.items():
             setattr(result, k, copy.deepcopy(v, memo))
         return result
+    
+    def copy(self):
+        return copy.deepcopy(self)
 
     @staticmethod
     def find_schema_path(schema_name : str) -> str:
-        """Search all datamodels/*/schemas/ for a schema file by base name."""
+        """
+        Search all `datamodels/*/schemas/` for a schema file by base name.
+        """
         base = importlib.resources.files("hispecdrp.datamodels")
         for subpkg in base.iterdir():
             schemas_dir = subpkg / "schemas"
@@ -238,60 +248,90 @@ class MetaDict:
                     return str(candidate)
         raise FileNotFoundError(f"No valid schema found for: {schema_name}")
     
-    @staticmethod
-    def flatten_dict(nested_dict, parent_key='', sep='.'):
+    def update(self, other, override : bool = True):
         """
-        Flatten a nested dictionary using dots to separate nested levels.
-        Preserves the structure of leaf dictionaries that contain non-dict values.
+        Update the MetaDict with another dictionary or MetaDict.
         
         Args:
-            nested_dict (dict): The nested dictionary to flatten
-            parent_key (str): The parent key for recursion (used internally)
-            sep (str): Separator to use between nested levels (default: '.')
+            other (dict | MetaDict): The dictionary or MetaDict to merge into this one.
+        """
+        for prop, _ in self.walk_schema(sections=False):
+            prop = '.'.join(prop) if isinstance(prop, (list, tuple)) else prop
+            if prop not in other:
+                continue
+            if self[prop] is None or override:
+                self[prop] = other[prop]
+    
+    def to_dict(self):
+        """
+        Convert the MetaDict to a regular nested dictionary.
         
         Returns:
-            dict: Flattened dictionary with dot-separated keys
-        """
-        items = []
-        
-        for key, value in nested_dict.items():
-            new_key = f"{parent_key}{sep}{key}" if parent_key else key
-            
-            if isinstance(value, dict):
-                if all(not isinstance(v, dict) for v in value.values()):
-                    items.append((new_key, value))
-                else:
-                    items.extend(MetaDict.flatten_dict(value, new_key, sep).items())
-            else:
-                items.append((new_key, value))
-        
-        return dict(items)
-
-    @staticmethod
-    def unflatten_dict(flat_dict, sep='.'):
-        """
-        Convert a flattened dictionary back to nested structure.
-        
-        Args:
-            flat_dict (dict): Dictionary with dot-separated keys
-            sep (str): Separator used between nested levels (default: '.')
-        
-        Returns:
-            dict: Nested dictionary structure
+            dict: A nested dictionary representation of the MetaDict
         """
         result = {}
         
-        for key, value in flat_dict.items():
-            keys = key.split(sep)
-            current = result
-            
-            # Navigate/create nested structure
-            for k in keys[:-1]:
-                if k not in current:
-                    current[k] = {}
-                current = current[k]
-            
-            # Set the final value
-            current[keys[-1]] = value
+        for key, value in self._data.items():
+            if isinstance(value, MetaDict):
+                result[key] = value.to_dict()
+            else:
+                result[key] = value
         
         return result
+
+    def to_flat_dict(self, sep='.', prefix=''):
+        """
+        Convert the MetaDict to a flattened dictionary with dot-separated keys.
+        
+        Args:
+            sep (str): Separator to use between nested levels (default: '.')
+            prefix (str): Prefix for keys (used internally for recursion)
+        
+        Returns:
+            dict: A flattened dictionary with dot-separated keys
+        """
+        result = {}
+        
+        for key, value in self._data.items():
+            full_key = f"{prefix}{sep}{key}" if prefix else key
+            
+            if isinstance(value, MetaDict):
+                # Recursively flatten nested MetaDict
+                result.update(value.to_flat_dict(sep=sep, prefix=full_key))
+            else:
+                # Add the leaf value
+                result[full_key] = value
+        
+        return result
+
+    def __delitem__(self, key):
+        """
+        Delete an item from the MetaDict.
+        
+        Args:
+            key (str | list | tuple): The key to delete. Can be:
+                - A string with dot notation (e.g., 'level1.level2.key')
+                - A list/tuple of keys (e.g., ['level1', 'level2', 'key'])
+                - A simple string key
+        """
+        if isinstance(key, (list, tuple)):
+            # Handle nested deletion for list/tuple paths
+            if len(key) == 1:
+                del self._data[key[0]]
+            else:
+                current = self
+                for k in key[:-1]:
+                    current = current[k]
+                del current._data[key[-1]]
+            return
+        
+        # Handle dot notation string
+        if isinstance(key, str) and '.' in key:
+            self.__delitem__(key.split('.'))
+            return
+        
+        # Handle simple key deletion
+        if key in self._data:
+            del self._data[key]
+        else:
+            raise KeyError(f"Key '{key}' not found in MetaDict")

@@ -1,7 +1,32 @@
 import importlib
+import yaml
 
-__all__ = ['resolve_primitive_class']
+__all__ = ['resolve_primitive_class', 'find_config_path', 'read_config_file']
 
+import os
+
+@staticmethod
+def read_config_file(filepath : str) -> dict:
+    """
+    Load a config file.
+
+    Args:
+        filepath (str): The path to the YAML configuration file.
+    """
+    with open(filepath, 'r') as f:
+        return yaml.safe_load(f)
+
+def find_config_path(config_name : str) -> str:
+    """Search hispecdrp/configs/ for a config file."""
+    if os.path.exists(config_name):
+        return config_name
+    else:
+        config_dir = importlib.resources.files("hispecdrp.configs")
+        if config_dir.is_dir():
+            candidate = config_dir / config_name
+            if candidate.is_file():
+                return str(candidate)
+        raise FileNotFoundError(f"No valid config file found for: {config_name}")
 
 def resolve_primitive_class(name: str):
     """

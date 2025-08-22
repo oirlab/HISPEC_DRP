@@ -7,12 +7,12 @@ Installation
 
     git clone https://github.com/oirlab/HISPEC_DRP
 
-2. Create and activate a virtual environment. Anaconda and Python 3.12 are recommended, but not required. The minimum tested version is *currently* Python 3.11.
+2. Create and activate a virtual environment. Python 3.12 is required.
 
 .. code-block:: bash
 
-    conda create -n "hispec_drp_env" python=3.12
-    conda activate hispec_drp_env
+    conda create -n "hispec" python=3.12
+    conda activate hispec
 
 3. Install live version with pip:
 
@@ -22,3 +22,19 @@ Installation
    pip install -e .
 
 Specifically, the ``-e`` (editable) flag uses the specified directory as the "live" source code, and does not copy it to the usual site-packages directory.
+
+Optionally one can install the test dependencies and run the tests:
+
+.. code-block:: bash
+
+   pip install -e ".[test]"
+   pytest -s
+
+
+By default, testing data is downloaded to `~/.astropy/cache/download/url/`. To specify a directory for the testing data, one can run:
+
+.. code-block:: bash
+
+   pytest -s --datadir=/path/to/cache/dir/
+
+In both cases, the testing data is persistent and **not deleted** after tests are finished.
