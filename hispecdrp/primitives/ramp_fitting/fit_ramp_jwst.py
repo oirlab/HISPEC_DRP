@@ -14,7 +14,7 @@ def _fit_ramps_jwst_row(indata):
     Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit methods.
 
     Args:
-        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]: 
+        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]: 
             Tuple containing the row index, and the following data arrays for a single row:
                 ramp row index, read times, ramp data, readnoise, gain, data quality, dark current, algorithm
     Returns:
