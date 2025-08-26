@@ -16,13 +16,14 @@ class CoaddPrimitive(BasePrimitive):
     class_alias = 'coadd_frames'
 
     ARGUMENTS = {
+        'names' : list
         'suffix' : 'coadded',
     }
 
     def _perform(self):
         ### This is assuming self.args.name is a list, we need some way to pass
         ### an arbitrary number of L0 datamodels to this primitive
-        input_models = [datamodels.open(name) for name in self.args.name]
+        input_models = [datamodels.open(name) for name in names]
         ### Do we want to include names of coadded files?
         coadded = coadd_frames(input_models)
         ### Not sure if this is what we should be returning

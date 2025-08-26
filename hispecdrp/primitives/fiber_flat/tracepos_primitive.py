@@ -37,7 +37,8 @@ class TracePositionPrimitive(BasePrimitive):
             out_dict[f'POS_FIB{fiber}'] = fib_locs
             out_dict[f'COEFF_FIB{fiber}'] = fib_coeffs
 
-        ### TODO Pack up and save the datamodel
+        ### I think this is how you assign a dict to a datamodel where the keys are the extensions but I'm not sure
+        output_model.data = out_dict
         
         ### arguments should also return image data for trace profile fitting
         return Arguments(name=output_model,fit_results=out_dict)
