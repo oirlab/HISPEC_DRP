@@ -5,7 +5,7 @@ import numpy as np
 
 def test_stage0(tmp_path):
     
-    coeffs = np.broadcast_to(np.array([0, 1], dtype=np.float32), (4096, 4096, 2))
+    coeffs = np.broadcast_to(np.array([[[0]], [[1]]], dtype=np.float32), (2, 4096, 4096))
     thresh = np.zeros(shape=(4096, 4096), dtype=np.uint16)
     max = np.zeros(shape=(4096, 4096), dtype=np.uint16)
     nonlin_model = datamodels.HISPECNonlinearCorrectionModel(data=dict(coeffs=coeffs, thresh=thresh, max=max))

@@ -5,8 +5,8 @@ __all__ = ['correct_nonlinearity']
 
 @njit(nogil=True)
 def correct_nonlinearity(ramps, coeffs):
-    ny, nx, _ = ramps.shape
+    _, ny, nx = ramps.shape
     for i in range(ny):
         for j in range(nx):
-            ramps[i, j, :] = polyval1d(coeffs[i, j, :], ramps[i, j, :])
+            ramps[:, i, j] = polyval1d(coeffs[:, i, j], ramps[:, i, j])
     return ramps

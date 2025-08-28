@@ -112,7 +112,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.  The output also contains 'dq' for output data quality, 'var_poisson' for variance in Poisson noise, and 'var_rnoise' for variance in read noise.
     """
 
-    ny, nx, n_reads = ramps.shape
+    n_reads, ny, nx = ramps.shape
 
     if algorithm.lower() in ('jwst_likely', 'jwst_like', 'jwst_likelihood'):
         algorithm = 'LIKELY'
@@ -120,9 +120,6 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         algorithm = 'OLS_C'
     else:
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
-
-    # JWST assumes that ramps are in first index, so transpose to n_reads x ny x nx
-    ramps = ramps.transpose(2, 0, 1)
 
     # Create remaining dummy variables if input arrays are not provided
     if dq is None:
