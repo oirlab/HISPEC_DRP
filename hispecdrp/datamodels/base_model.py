@@ -683,3 +683,29 @@ class DataModel:
             raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
         row_index = indices[0]
         return dict(self.calibrations[row_index])
+    
+
+
+class CalibrationModel(DataModel):
+
+    CAL_TYPE = None # Type of calibration
+
+    def on_init(self):
+        super().on_init()
+        self.meta.cal_type = self.CAL_TYPE
+        if self.meta.cal_id is None:
+            self.generate_calibration_id()
+
+    def generate_calibration_id(self) -> str:
+        """
+        Generate the calibration ID.
+
+        Returns:
+            str: The calibration ID
+        """
+        filename = self.meta.filename or 'unknown'
+        drp_version = self.meta.drp_version or 'unknown'
+        last_updated = self.meta.last_updated or datetime.datetime.now().isoformat(timespec="milliseconds")
+        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
+        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return self.meta.cal_id
