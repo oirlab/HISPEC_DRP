@@ -1,22 +1,24 @@
-from ..base_model import DataModel
-from ...calibrations import PARVICalibrationORM
+from .parvi_meta import PARVICoreMeta, PARVICalibrationMeta
+from ..base_model import DataModel, CalibrationModel
 from .dqflags import DQ_FLAGS
 
 import astropy.time
 from datetime import datetime
 
 import uuid
-import numpy as np
 
 __all__ = ['PARVIDataModel', 'PARVICalibrationModel']
 
 class PARVIDataModel(DataModel):
 
-    HEADER_SCHEMAS = [
-        'parvi_core.yaml',
-    ]
+    META_MODEL = PARVICoreMeta
 
-    CAL_ORM_CLASS = PARVICalibrationORM
+    META_DEFAULTS = {
+        'instrument_name' : 'PARVI',
+        'telescope' : 'Palomar',
+        'order_start' : 125,
+        'order_end' : 85,
+    }
 
     DQ_FLAGS = DQ_FLAGS
 
@@ -54,7 +56,7 @@ class PARVIDataModel(DataModel):
         """
         See _generate_filename for details.
         """
-        date_time = self.meta.exposure.datetime_start
+        date_time = self.meta.datetime_obs
         if suffix is None:
             if self.data_level_suffix is not None:
                 suffix = self.data_level_suffix
@@ -67,25 +69,9 @@ class PARVIDataModel(DataModel):
         )
     
 
-class PARVICalibrationModel(PARVIDataModel):
+class PARVICalibrationModel(CalibrationModel, PARVIDataModel):
 
-    HEADER_SCHEMAS = ['parvi_calibration.yaml']
-
-    CAL_TYPE = None # String: The type of calibration data.
-
-    def on_init(self):
-        super().on_init()
-        if self.meta.cal_type is None and self.CAL_TYPE is not None:
-            self.meta.cal_type = self.CAL_TYPE
-
-    def on_save(self):
-        """
-        Override the save method to ensure that the cal_type is set.
-        """
-        super().on_save()
-        if self.meta.cal_type is None and self.CAL_TYPE is not None:
-            self.meta.cal_type = self.CAL_TYPE
-
+    META_MODEL = PARVICalibrationMeta
 
     @staticmethod
     def _generate_filename(
@@ -124,12 +110,11 @@ class PARVICalibrationModel(PARVIDataModel):
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
     
-
     def generate_filename(self, suffix : str | None = None) -> str:
         """
         See _generate_filename for additional arguments.
         """
-        date_time = self.meta.exposure.datetime_start
+        date_time = self.meta.datetime_obs
         cal_type = self.CAL_TYPE
         master = self.meta.master_cal
         return self._generate_filename(
@@ -138,57 +123,3 @@ class PARVICalibrationModel(PARVIDataModel):
             master=master,
             suffix=suffix
         )
-
-    def generate_calibration_id(self) -> str:
-        """
-        Generate the calibration ID.
-
-        Returns:
-            str: The calibration ID
-        """
-        filename = self.meta.filename or 'unknown'
-        drp_version = self.meta.drp_version or 'unknown'
-        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
-        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
-        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
-        return self.meta.cal_id
-
-    def to_orm(
-        self, orm_class : type[PARVICalibrationORM] | None = None,
-        note : str | None = None,
-        regenerate_id : bool = False
-    ) -> PARVICalibrationORM:
-        
-        if orm_class is None:
-            orm_class = self.CAL_ORM_CLASS
-        if orm_class is None:
-            raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
-        
-        # Get data from the datamodel
-        datetime_obs = self.meta.exposure.datetime_start
-        filename = self.meta.filename
-        drp_version = self.meta.drp_version
-
-        # Generate or use existing UUID using the dedicated method with consistent timestamp
-        if self.meta.cal_id is None or regenerate_id:
-            self.meta.cal_id = self.generate_calibration_id()
-        
-        # Create and populate the ORM instance
-        orm = orm_class(
-            id=self.meta.cal_id,
-            filename=filename,
-            cal_type=self.meta.cal_type.lower(),
-            instera=self.meta.instrument.era,
-            read_mode=self.meta.exposure.read_mode,
-            target_name=self.meta.target.name,
-            object_fiber1=self.meta.target.object_fiber1,
-            object_fiber2=self.meta.target.object_fiber2,
-            object_fiber3=self.meta.target.object_fiber3,
-            object_fiber4=self.meta.target.object_fiber4,
-            mjd_start=self.meta.exposure.mjd_start,
-            datetime_obs=datetime_obs,
-            drp_version=drp_version,
-            note=note,
-            last_updated=self.meta.last_updated,
-        )
-        return orm

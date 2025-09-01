@@ -1,7 +1,7 @@
 from __future__ import annotations
-from ..base_model import DataModel
+from ..base_model import DataModel, CalibrationModel
 from ... import datamodels
-from ...calibrations import HISPECCalibrationORM
+from .hispec_meta import HISPECCoreMeta, HISPECCalibrationMeta
 from .dqflags import DQ_FLAGS
 
 from koa_middleware.file_utils import generate_koa_filepath
@@ -14,11 +14,14 @@ __all__ = ['HISPECDataModel', 'HISPECCalibrationModel']
 
 class HISPECDataModel(DataModel):
 
-    HEADER_SCHEMAS = [
-        'hispec_core.yaml',
-    ]
+    META_MODEL = HISPECCoreMeta
 
-    CAL_ORM_CLASS = HISPECCalibrationORM
+    META_DEFAULTS = {
+        'instrument_name' : 'HISPEC',
+        'telescope' : 'Keck-II',
+        'order_start' : 125,
+        'order_end' : 85,
+    }
 
     SPECTROGRAPH_ALIASES = {'BSPEC': 'HB', 'RSPEC': 'HR'}
 
@@ -89,24 +92,9 @@ class HISPECDataModel(DataModel):
         self.calibrations.add_row(row)
     
 
-class HISPECCalibrationModel(HISPECDataModel):
+class HISPECCalibrationModel(CalibrationModel, HISPECDataModel):
 
-    HEADER_SCHEMAS = ['hispec_calibration.yaml']
-
-    CAL_TYPE = None # String: The type of calibration data.
-
-    def on_init(self):
-        super().on_init()
-        if self.meta.cal_type is None and self.CAL_TYPE is not None:
-            self.meta.cal_type = self.CAL_TYPE
-
-    def on_save(self):
-        """
-        Override the save method to ensure that the cal_type is set.
-        """
-        super().on_save()
-        if self.meta.cal_type is None and self.CAL_TYPE is not None:
-            self.meta.cal_type = self.CAL_TYPE
+    META_MODEL = HISPECCalibrationMeta
 
     @staticmethod
     def _generate_filename(
@@ -156,8 +144,8 @@ class HISPECCalibrationModel(HISPECDataModel):
         """
         See _generate_filename for additional arguments.
         """
-        spectrograph = self.meta.instrument.spectrograph
-        date_time = self.meta.exposure.datetime_start
+        spectrograph = self.meta.spectrograph
+        date_time = self.meta.datetime_obs
         cal_type = self.CAL_TYPE
         master = self.meta.master_cal
         return self._generate_filename(
@@ -167,78 +155,3 @@ class HISPECCalibrationModel(HISPECDataModel):
             master=master,
             suffix=suffix
         )
-
-    def generate_calibration_id(self) -> str:
-        """
-        Generate the calibration ID.
-
-        Returns:
-            str: The calibration ID
-        """
-        filename = self.meta.filename or 'unknown'
-        drp_version = self.meta.drp_version or 'unknown'
-        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
-        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
-        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
-        return self.meta.cal_id
-
-    def to_orm(
-        self, orm_class : type[HISPECCalibrationORM] | None = None,
-        note : str | None = None,
-        regenerate_id : bool = False,
-        fill_koa : bool = False,
-    ) -> HISPECCalibrationORM:
-        
-        if orm_class is None:
-            orm_class = self.CAL_ORM_CLASS
-        if orm_class is None:
-            raise ValueError("ORM class must be provided or set as CAL_ORM_CLASS.")
-        
-        # Get data from the datamodel
-        datetime_obs = self.meta.exposure.datetime_start
-        filename = self.meta.filename
-        drp_version = self.meta.drp_version
-        
-        # Conditionally generate KOA paths based on parameter
-        if fill_koa:
-            spectrograph = self.meta.instrument.spectrograph.upper()
-            if spectrograph in HISPECDataModel.SPECTROGRAPH_ALIASES:
-                instrument_prefix = HISPECDataModel.SPECTROGRAPH_ALIASES[spectrograph]
-            else:
-                raise ValueError(f"Spectrograph must be BSPEC or RSPEC, got {spectrograph}")
-            self.meta.koa_filepath = generate_koa_filepath(
-                instrument=self.meta.instrument.name,
-                instrument_prefix=instrument_prefix,
-                data_level='cal',
-                date_obs=self.meta.date_obs,
-                utc_obs=self.meta.utc
-            )
-            self.meta.koa_id = self.meta.koa_filepath.split('/')[-1]
-        
-        # Generate or use existing UUID using the dedicated method with consistent timestamp
-        if self.meta.cal_id is None or regenerate_id:
-            self.meta.cal_id = self.generate_calibration_id()
-        
-        # Create ORM instance with conditional KOA fields (inlined kwargs)
-        orm = orm_class(
-            id=self.meta.cal_id,
-            filename=filename,
-            master=self.meta.master_cal,
-            cal_type=self.meta.cal_type.lower(),
-            instera=self.meta.instrument.era,
-            read_mode=self.meta.exposure.read_mode,
-            target_name=self.meta.target.name,
-            object_fiber1=self.meta.target.object_fiber1,
-            object_fiber2=self.meta.target.object_fiber2,
-            object_fiber3=self.meta.target.object_fiber3,
-            spectrograph=self.meta.instrument.spectrograph,
-            mjd_start=self.meta.exposure.mjd_start,
-            datetime_obs=datetime_obs,
-            drp_version=drp_version,
-            note=note,
-            last_updated=self.meta.last_updated,
-            koa_id=self.meta.koa_id,
-            koa_filepath=self.meta.koa_filepath,
-        )
-        
-        return orm
