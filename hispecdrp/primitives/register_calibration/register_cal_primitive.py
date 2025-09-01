@@ -4,6 +4,8 @@ from ... import datamodels
 from koa_middleware import CalibrationStore
 from hispecdrp import __version__
 
+import os
+
 __all__ = ['RegisterCalibrationPrimitive']
 
 
@@ -22,14 +24,9 @@ class RegisterCalibrationPrimitive(BasePrimitive):
             cal_model,
             (datamodels.HISPECCalibrationModel, datamodels.PARVICalibrationModel)
         ), f"Input model must be a valid CalibrationModel, got {type(cal_model)}"
-        with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS) as store:
-            local_filepath, calibration_orm = store.register_local_calibration(cal_model) # Probably passing args here.
-        return dict(output=cal_model, calibration_orm=calibration_orm, local_filepath=local_filepath)
-    
-    # def finalize_model(self, model : datamodels.DataModel):
-    #     # model = datamodels.open(model)
-    #     # model.meta.drp_version = __version__
-    #     # model.meta.last_updated = self._date_time
-    #     # self.add_receipt_entry(model, date_time=self._date_time)
-    #     super().finalize_model(model)
-        
+        with CalibrationStore(orm_class=cal_model.meta.get_orm_class()) as store:
+            output_dir = os.path.join(store.cache_dir, 'calibrations') + os.sep
+            local_filepath = cal_model.save(output_dir=output_dir)
+            cal_orm = cal_model.meta.to_orm()
+            store.register_local_calibration(cal_orm)
+        return dict(output=cal_model, calibration_orm=cal_orm, local_filepath=local_filepath)
