@@ -65,8 +65,8 @@ class HISPECDataModel(DataModel):
         """
         See _generate_filename for details.
         """
-        date_time = self.meta.exposure.datetime_start
-        spectrograph = self.meta.instrument.spectrograph
+        date_time = self.meta.datetime_obs
+        spectrograph = self.meta.spectrograph
         if suffix is None:
             if self.data_level_suffix is not None:
                 suffix = self.data_level_suffix
