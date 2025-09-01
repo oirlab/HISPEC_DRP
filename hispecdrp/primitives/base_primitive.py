@@ -20,6 +20,7 @@ class BasePrimitive(ProcessingComponent):
 
     ARGUMENTS = {
         'run': True,
+        'output_model' : 'input',
     }
 
     def __init__(
@@ -363,7 +364,7 @@ class BasePrimitive(ProcessingComponent):
                     out_model = model_class.from_datamodel(input_model)
                     return out_model
                 elif any(m.endswith(output_model) for m in datamodels.MODEL_REGISTER):
-                    instrument = input_model.meta.instrument.name
+                    instrument = input_model.meta.instrument_name
                     model_class = datamodels.model_type_from_name(instrument.upper() + output_model)
                     out_model = model_class.from_datamodel(input_model)
                     return out_model
