@@ -5,7 +5,7 @@ from astropy.io import fits
 from copy import deepcopy
 from typing import TypeVar
 import datetime
-from .meta_dict import MetaDict
+from .meta_data import MetaModel
 from hispecdrp import __version__
 import numpy as np
 import warnings
