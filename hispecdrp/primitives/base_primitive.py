@@ -254,7 +254,8 @@ class BasePrimitive(ProcessingComponent):
             except ValueError:
                 pass
             if is_uuid:
-                with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=use_cached) as store:
+                input_model = datamodels.open(name, meta_only=True)
+                with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class(), use_cached=use_cached) as store:
                     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
                     if local_filepath is not None:
                         self._calibrations_used[cal_role] = calibration_orm
@@ -288,7 +289,7 @@ class BasePrimitive(ProcessingComponent):
                 return cal_model, None  # No ORM available if not in DB
 
             # Check if the calibration is in the DB.
-            with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS, use_cached=True) as store:
+            with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
                 local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
                 if local_filepath is not None:
                     self._calibrations_used[cal_role] = calibration_orm
@@ -318,7 +319,7 @@ class BasePrimitive(ProcessingComponent):
             selector_kwargs = calibration_config.get('selector_kwargs', {})
             selector = selector_class(**selector_kwargs)
             input_model = datamodels.open(name, meta_only=True)
-            with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS) as store:
+            with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
                 local_filepath, calibration_orm = store.get_calibration(input_model.meta.to_flat_dict(), selector=selector)
                 return local_filepath, calibration_orm
 
