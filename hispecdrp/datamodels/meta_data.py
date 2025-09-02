@@ -3,6 +3,8 @@ from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 from sqlalchemy import Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import declarative_base
 
+from koa_middleware import CalibrationORM
+
 __all__ = [
     'FitsField', 'MetaModel',
     'CoreMeta',
@@ -92,7 +94,7 @@ class MetaModel(BaseModel):
             if field.json_schema_extra['orm_field']:
                 field_name = cls.get_orm_field_name(attr, field)
                 model_attrs[field_name] = cls.field_to_mapped(attr, field)
-        orm_class = type(f"{cls.__name__}ORM", (Base,), model_attrs)
+        orm_class = type(f"{cls.__name__}ORM", (CalibrationORM, Base), model_attrs)
         return orm_class
 
     def to_orm(self) -> dict:
