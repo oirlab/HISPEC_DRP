@@ -321,7 +321,7 @@ class BasePrimitive(ProcessingComponent):
             selector = selector_class(**selector_kwargs)
             input_model = datamodels.open(name, meta_only=True)
             with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
-                local_filepath, calibration_orm = store.get_calibration(input_model.meta.to_flat_dict(), selector=selector)
+                local_filepath, calibration_orm = store.get_calibration(input_model.meta.model_dump(), selector=selector)
                 return local_filepath, calibration_orm
 
         # Else raise error
