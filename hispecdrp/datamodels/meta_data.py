@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 from sqlalchemy import Column, Integer, String, Float, Boolean
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
 from koa_middleware import CalibrationORM
 
@@ -12,7 +12,8 @@ __all__ = [
     'CalibrationCoreMeta', 'CoreMeta',
 ]
 
-Base = declarative_base()
+class _DeclarativeBase(DeclarativeBase):
+    pass
 
 def FitsField(*,
     default : Any = None,
@@ -39,10 +40,6 @@ class MetaModel(BaseModel):
         'validate_assignment' : True,
         'extra' : 'forbid',
     }
-    # __pydantic_extra__ = {
-    #     'SECTION_NAME' : ClassVar[str | None],
-    #     'ORM_TABLE_NAME' : ClassVar[str | None],
-    # }
 
     def __setitem__(self, item, value):
         setattr(self, item, value)
@@ -94,7 +91,7 @@ class MetaModel(BaseModel):
             if field.json_schema_extra['orm_field']:
                 field_name = cls.get_orm_field_name(attr, field)
                 model_attrs[field_name] = cls.field_to_mapped(attr, field)
-        orm_class = type(f"{cls.__name__}ORM", (CalibrationORM, Base), model_attrs)
+        orm_class = type(f"{cls.__name__}ORM", (_DeclarativeBase, CalibrationORM), model_attrs)
         return orm_class
 
     def to_orm(self) -> dict:
