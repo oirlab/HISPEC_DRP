@@ -22,6 +22,17 @@ def FitsField(*,
     orm_field : bool | str = False,
     **kwargs
 ):
+    """
+    Special constructor for creating pydantic Field objects based on Fits metadata.
+
+    Args:
+        default: The default value for the field.
+        fits_keyword (str): The FITS keyword associated with the field.
+        unit (str | None): The unit of the field (optional).
+        fits_hdu (str): The FITS HDU (Header Data Unit) associated with the field. Defaults to 'PRIMARY'.
+        orm_field (bool | str): Whether the field should be included in the ORM mapping. If `True`, the field will be included using the field's attribute name. If a string is provided, it will be used as the ORM column name. If `False`, the field will not be included in the ORM mapping.
+        **kwargs: Additional keyword arguments accepted by pydantic's Field constructor.
+    """
     extra = kwargs.pop("json_schema_extra", {})
     extra["fits_keyword"] = fits_keyword
     extra["unit"] = unit
@@ -31,6 +42,9 @@ def FitsField(*,
 
 
 class MetaModel(BaseModel):
+    """
+    Base class for all FITS metadata models.
+    """
 
     SECTION_NAME : ClassVar[str | None] = None
 
