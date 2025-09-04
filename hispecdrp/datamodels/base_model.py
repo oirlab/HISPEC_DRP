@@ -70,10 +70,9 @@ class DataModel:
     INHERIT_EXTENSIONS = True
     META_MODEL = None
     META_DEFAULTS = {}
-    INHERIT_SCHEMAS = True
 
     ALLOWED_ATTRIBUTES = [
-        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'META_MODEL', 'INHERIT_SCHEMAS',
+        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'META_MODEL',
         'meta', '_data', '_filepath',
     ]
 
