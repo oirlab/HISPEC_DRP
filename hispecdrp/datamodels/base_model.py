@@ -73,7 +73,7 @@ class DataModel:
 
     ALLOWED_ATTRIBUTES = [
         'EXTENSIONS', 'INHERIT_EXTENSIONS', 'META_MODEL',
-        'meta', '_data', '_filepath',
+        'meta', '_data', '_filepath', 'ALLOWED_ATTRIBUTES', 'META_DEFAULTS'
     ]
 
     EXCLUDE_META_KEYS_COPY = ['id']
