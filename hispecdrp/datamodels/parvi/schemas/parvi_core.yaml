@@ -1,8 +1,8 @@
 %YAML 1.2
 ---
-date_created:
-  keyword: DATECRT
-  comment: ISO 8601 datetime file was created YYYYMMDDTHHMMSS
+last_updated:
+  keyword: LASTUPD
+  comment: ISO 8601 datetime file was last updated YYYYMMDDTHHMMSS
 date_obs:
   keyword: DATE-OBS
   comment: ISO 8601 datetime of the observation YYYYMMDD for KOA
@@ -218,13 +218,13 @@ cal_file:
   etalon_anchor:
     keyword: C_ETAN
     comment: Etalon anchor reference file
-  gascell_wavecal:
+  gascell_wavesol:
     keyword: C_GWC
     comment: Gas cell wavelength calibration reference file
-  hcl_wavecal:
+  hcl_wavesol:
     keyword: C_HWC
     comment: Hollow cathode lamp wavelength calibration reference file
-  lfc_wavecal:
+  lfc_wavesol:
     keyword: C_LWC
     comment: Laser frequency comb wavelength calibration reference file
   lsf:

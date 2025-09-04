@@ -1,3 +1,4 @@
+from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import os
 import astropy.table
 from astropy.io import fits
@@ -8,16 +9,32 @@ from .meta_dict import MetaDict
 from hispecdrp import __version__
 import numpy as np
 import warnings
+from sqlalchemy.inspection import inspect
 from astropy.io.fits.verify import VerifyWarning
+
+from koa_middleware import CalibrationORM
+from koa_middleware import CalibrationStore
 
 # Receipt columns
 _RECEIPT_COLS = {
-    'Time' : str,
-    'HISPECDRP_Version' : str,
-    'Class' : str,
-    'Filename' : str,
-    'Arguments' : str,
-    'Status' : str,
+    'PROC_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
+    'DRP_VERSION' : str, # DRP semver
+    'CLASS' : str, # Primitive class
+    'FILENAME' : str, # Input base filename
+    'ARGUMENTS' : str, # JSON rep of args ?
+    'STATUS' : str, # COMPLETED, FAILED, SKIPPED
+}
+
+_CALIBRATION_COLS = {
+    'ID': str, # UUID
+    'FILENAME': str, # Base filename of the calibration
+    'CAL_TYPE': str, # Type of calibration
+    'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
+    'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
+    'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
+    'NOTE': str, # Note for calibration matching ORM
+    'LAST_UPDATED': str, # When calibration was last updated in the DB.
+    'TIME_APPLIED' : str # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
 }
 
 # So that dict[str, A] <: dict[str, B] when A <: B
@@ -34,6 +51,7 @@ class DataModel:
         HEADER_SCHEMAS (list): List of schema files to load for the header.
         INHERIT_SCHEMAS (bool): Whether to inherit schemas from parent class. Defaults to True.
         ALLOWED_ATTRIBUTES (list): List of attributes that can be set directly on the DataModel.
+        CAL_ORM_CLASS (type): The calibration ORM class corresponding to this datamodel.
     """
 
     EXTENSIONS = {
@@ -43,6 +61,10 @@ class DataModel:
         'RECEIPT': {
             'hdu_type' : fits.BinTableHDU,
             'columns' : _RECEIPT_COLS
+        },
+        'CALIBRATIONS': {
+            'hdu_type' : fits.BinTableHDU,
+            'columns' : _CALIBRATION_COLS
         }
     }
     INHERIT_EXTENSIONS = True
@@ -50,7 +72,12 @@ class DataModel:
     HEADER_SCHEMAS = []
     INHERIT_SCHEMAS = True
 
-    ALLOWED_ATTRIBUTES = ['EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'meta', '_data', '_filepath']
+    CAL_ORM_CLASS = None
+
+    ALLOWED_ATTRIBUTES = [
+        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'CAL_ORM_CLASS',
+        'meta', '_data', '_filepath',
+    ]
 
     def __init__(
         self,
@@ -256,7 +283,7 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
-        self.meta.date_created = datetime.datetime.now().isoformat()
+        self.meta.last_updated = self.meta.last_updated or datetime.datetime.now().isoformat(timespec="milliseconds")
         self.meta.model_type = self.__class__.__name__
 
     def make_hdu(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = True) -> _VALID_HDU:
@@ -492,5 +519,169 @@ class DataModel:
         if copy:
             _data = deepcopy(_data)
         model_out = cls(data=_data)
-        model_out.meta.update(model.meta, override=False)
+        meta = deepcopy(model.meta) # if copy else model.meta
+        exclude_keys_copy = ['cal_id']
+        for key in exclude_keys_copy:
+            if key in meta:
+                del meta[key]
+        model_out.meta.update(meta, override=False)
         return model_out
+    
+    def make_order_vec(self) -> np.ndarray:
+        return self._make_order_vec(self.meta.order_start, self.meta.order_end)
+        
+    @staticmethod
+    def _make_order_vec(order_start : int, order_end : int) -> np.ndarray:
+        """
+        Create an order vector based on the order start and end metadata. If order_end < order_start, the vector will be in descending order.
+        
+        Returns:
+            np.ndarray: An array of integers from order_start to order_end.
+        """
+        step = 1 if order_end >= order_start else -1
+        return np.arange(order_start, order_end + step, step).astype(np.int16)
+
+    @property
+    def traces(self):
+        """
+        Convenience property to return a dictionary of traces for each fiber in the model.
+        This is useful when the fiber is a dynamic variable and can be used in place of getattr(model, '<attr>_fib{fiber}').
+        By default, any attribute with '_fib' in its name is included.
+        This property may be removed in future versions unless it demonstrates significant utility.
+        This property should not be used in large for loops if the rest of the computation is trivial as it adds some overhead.
+
+        Examples:
+            >>> model.traces # -> {1 : {'wave' : ..., 'spec' : ..., 'spec_err' : ...}, 2 : {...}, ...}
+            >>> model.traces[1]['wave'] # Equivalent to model.wave_fib1
+
+        Returns:
+            dict: A dictionary where keys are fiber numbers and values are dictionaries of attributes without the '_fib#' suffix.
+        """
+        data = {}
+        for attr in self._data:
+            attr_lower = attr.lower()
+            if '_fib' in attr_lower:
+                try:
+                    kind, fiber = attr_lower.rsplit('_fib', 1)
+                    fiber = int(fiber)
+                except ValueError:
+                    continue
+                if fiber not in data:
+                    data[fiber] = {}
+                data[fiber][kind] = getattr(self, attr)
+        return data
+
+    def add_calibration(
+        self,
+        calibration : CalibrationORM | DataModel | str | dict,
+        cal_role : str,
+        date_time : str,
+        note : str | None = None,
+        replace_existing : bool = True,
+    ) -> None:
+        """
+        Add a calibration to the DataModel's calibrations table.
+        
+        Args:
+            calibration (CalibrationORM | str | dict): The calibration to add. Can be:
+                - CalibrationORM object
+                - String filepath (will load metadata to create entry)
+                - Dict with calibration column values
+            date_time (str): The datetime the calibration was used in ISO format.
+            role (str): The role of this calibration. Defaults to 'SINGLE'.
+        """
+
+        # Check if role already exists
+        remove_row_index = None
+        if cal_role in self.calibrations['CAL_ROLE']:
+            if replace_existing:
+                remove_row_index = self.calibrations['CAL_ROLE'].index(cal_role)
+            else:
+                warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
+                return
+
+        # Case 1: CalibrationORM object
+        #   New row from ORM object
+        if isinstance(calibration, CalibrationORM):
+            new_row = {
+                'ID' : calibration.id,
+                'FILENAME' : calibration.filename,
+                'CAL_TYPE' : calibration.cal_type,
+                'CAL_ROLE' : cal_role,
+                'DATETIME_OBS' : calibration.datetime_obs,
+                'DRP_VERSION' : calibration.drp_version,
+                'NOTE' : calibration.note,
+                'LAST_UPDATED' : calibration.last_updated,
+                'TIME_APPLIED' : date_time,
+            }
+
+        # Case 2: filepath or DataModel
+        # NOTE: This path should be used with caution
+        #   and limited to dev purposes or limited user cases, never at Keck.
+        elif isinstance(calibration, (str, DataModel)):
+            from .utils import open as open_datamodel
+            cal_model = open_datamodel(calibration, meta_only=True)
+            new_row = {
+                'ID' : cal_model.meta.cal_id or '',
+                'FILENAME' : cal_model.meta.filename or '',
+                'CAL_TYPE' : cal_model.CAL_TYPE,
+                'CAL_ROLE' : cal_role,
+                'DATETIME_OBS' : cal_model.meta.exposure.datetime_start,
+                'DRP_VERSION' : __version__,
+                'NOTE' : note or '',
+                'LAST_UPDATED' : '',
+                'TIME_APPLIED' : date_time,
+            }
+        else:
+            raise ValueError("Invalid calibration input")
+
+        # Delete existing row if specified
+        if remove_row_index is not None:
+            self.calibrations.remove_row(remove_row_index)
+
+        # Add new row
+        self.calibrations.add_row(new_row)
+
+        # Return new row
+        return new_row
+
+    def load_calibration_from_role(
+        self,
+        cal_role : str,
+    ) -> DataModel:
+        """
+        Load a calibration from the DataModel's calibrations table.
+
+        Args:
+            cal_role (str): The role of the calibration to load.
+
+        Returns:
+            DataModel: The loaded calibration ORM object.
+        """
+        row = self.get_calibration_from_role(cal_role)
+        cal_id = row['ID']
+        with CalibrationStore(orm_class=self.CAL_ORM_CLASS) as store:
+            return store.get_calibration_by_id(cal_id)
+
+    def get_calibration_from_role(self, cal_role : str) -> DataModel:
+        """
+        Return the row from the DataModel's calibrations table.
+
+        Args:
+            cal_role (str): The role of the calibration to load.
+
+        Returns:
+            dict: The row from the DataModel's calibrations table.
+        """
+        # Match on cal_type and role
+        mask = self.calibrations['CAL_ROLE'] == cal_role
+        indices = np.where(mask)[0]
+        if len(indices) == 0:
+            return None
+        if len(indices) > 1:
+            raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
+        row_index = indices[0]
+        return dict(self.calibrations[row_index])
+        
+
+    

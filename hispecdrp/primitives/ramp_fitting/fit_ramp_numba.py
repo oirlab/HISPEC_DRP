@@ -74,34 +74,34 @@ def _fit_ramp_slope_fixed_pedestal(times, ramp, b):
 
 @njit(nogil=True)
 def _fit_ramps_slope_pedestal(times, ramps):
-    ny, nx, _ = ramps.shape
+    _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_pedestal(times, ramps[i, j, :])
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_pedestal(times, ramps[:, i, j])
     return slope_image, slope_errors
 
 
 @njit(nogil=True)
 def _fit_ramps_slope_fixed_pedestal_array(times, ramps, b):
-    ny, nx, _ = ramps.shape
+    _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_pedestal(times, ramps[i, j, :], b[i, j])
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_pedestal(times, ramps[:, i, j], b[i, j])
     return slope_image, slope_errors
 
 
 @njit(nogil=True)
 def _fit_ramps_slope_fixed_pedestal_float(times, ramps, b):
-    ny, nx, _ = ramps.shape
+    _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_pedestal(times, ramps[i, j, :], b)
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_slope_fixed_pedestal(times, ramps[:, i, j], b)
     return slope_image, slope_errors
 
 
@@ -112,7 +112,7 @@ def fit_ramps_ols(times, ramps, b=None):
 
     Args:
         times (np.ndarray): Read times.
-        ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
+        ramps (np.ndarray): 3D array of ramp data with shape (n_reads, ny, nx).
         b (float | np.ndarray, optional): Fixed y-intercept value. If None, y-intercept will be fit.
 
     Returns:
@@ -155,12 +155,12 @@ def _fit_ramp_mcds(times, ramp, num_coadd=1):
 
 @njit(nogil=True)
 def _fit_ramps_mcds(times, ramps, num_coadd=1):
-    ny, nx, _ = ramps.shape
+    _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = _fit_ramp_mcds(times, ramps[i, j, :], num_coadd=num_coadd)
+            slope_image[i, j], slope_errors[i, j] = _fit_ramp_mcds(times, ramps[:, i, j], num_coadd=num_coadd)
     return slope_image, slope_errors
 
 
@@ -170,7 +170,7 @@ def fit_ramps_mcds(times, ramps, num_coadd=1):
 
     Args:
         times (np.ndarray): Read times.
-        ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
+        ramps (np.ndarray): 3D array of ramp data with shape (n_reads, ny, nx).
         num_coadd (int): Number of coadds.
 
     Returns:

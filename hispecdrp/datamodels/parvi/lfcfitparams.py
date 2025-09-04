@@ -11,7 +11,7 @@ for i in range(1, 5):
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCFITPARAMS_EXTENSIONS[f'SPEC_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _LFCFITPARAMS_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCFITPARAMS_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
     _LFCFITPARAMS_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
     _LFCFITPARAMS_EXTENSIONS[f'LFC_FITPARAMS_FIB{i}'] = {
         'hdu_type': fits.BinTableHDU,
@@ -21,10 +21,10 @@ for i in range(1, 5):
             'MU_PIX': np.float64,
             'MU_ERR_PIX': np.float64,
             'MU_ERR_WAVE': np.float64,
-            'SIGMA_PIX': np.float64,
-            'SIGMA_ERR_PIX': np.float64,
-            'SIGMA_WAVE': np.float64,
-            'SIGMA_ERR_WAVE': np.float64,
+            'FWHM_PIX': np.float64,
+            'FWHM_ERR_PIX': np.float64,
+            'FWHM_WAVE': np.float64,
+            'FWHM_ERR_WAVE': np.float64,
             'B': np.float64,
             'B_ERR': np.float64,
             'MODE_NUM': np.int16,

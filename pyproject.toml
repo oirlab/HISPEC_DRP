@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
 version_file = "hispecdrp/_version.py"
 version_scheme = "post-release"
-local_scheme = "no-local"
+local_scheme = "no-local-version"
 
 
 [project]
@@ -56,8 +56,7 @@ dependencies = [
   "tqdm",
   "stcal",
   "gdown",
-  "beautifulsoup4",
-  #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
+  "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
 ]
 
@@ -75,14 +74,12 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["hispecdrp*", "koa_middleware*"]
+include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
 hispecdrp = ["datamodels/hispec/schemas/*.yaml", "datamodels/parvi/schemas/*.yaml", "configs/*.yaml"]
 
-# [tool.pytest.ini_options]
-# pythonpath = ["."]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--rootdir=."

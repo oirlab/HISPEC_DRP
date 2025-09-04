@@ -7,7 +7,7 @@ Overview
 
 Determine the line spread function (LSF) of the instrument using Gaussian fits to the LFC lines.
 
-**Class**: :py:class:`~hispecdrp.primitives.lsf.lsf_gauss_primitive.GaussianLSFPrimitive`
+**Class**: :py:class:`~hispecdrp.primitives.lsf.lsf_gauss_primitive.CalculateGaussianLSFPrimitive`
 
 
 Algorithm
@@ -18,6 +18,8 @@ The unstructured set of points :math:`\{x_i,\ m_i, \sigma_i\}` is fit with a 2D 
 Arguments
 ---------
 
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+    The input file or data model to process. Should be a level 2 data product.
 - **deg_intra_order** : ``int``
     Degree within an echelle order.
 - **deg_inter_order** : ``int`` | ``str``
@@ -32,9 +34,3 @@ Arguments
     Specific orders to include in the fit. If ``None``, fit all available orders.
 - **do_fibers** : ``list[int]`` | ``None``
     Which fiber(s) to fit.
-
-
-Calibration Files
------------------
-
-None.

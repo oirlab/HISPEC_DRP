@@ -19,19 +19,19 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
     from hispecdrp import ProcessLFCPipeline
     from hispecdrp.utils import download_gdrive_file
 
-    # Input files
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True)
-
     import numpy as np
     import os
+    import textwrap
 
-    # Path to the local calibration cache
-    # CHANGE THIS!
-    os.environ['HISPECDRP_CALIBRATION_CACHE'] = '/PATH/TO/HISPEC_CALIBRATION_CACHE/'
+    # Input files
+    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits')
 
-    # Specify which orders and fibers to fit
-    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
+    # Path to the local calibration cache (home dir, can be anywhere)
+    os.environ['HISPECDRP_CALIBRATION_CACHE'] = os.path.expanduser('~/HISPEC_CALIBRATION_CACHE')
+
+    # Specify which fibers and orders to fit
     do_fibers = [3]
+    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
 
     # Init pipeline object
     pipe = ProcessLFCPipeline()
@@ -60,8 +60,8 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
             'fit_orders': do_orders,
         },
     }
-    # Alternatively, one can also set args with:
-    #     pipe.fit_lfc_modes.do_orders = do_orders
+    # Alternatively, one can also set an argument with:
+    #   pipe.fit_lfc_modes.do_orders = do_orders
 
     # Call the pipeline with these arguments.
     model_result = pipe.apply(lfc_path, prim_args=prim_args)
@@ -104,8 +104,7 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
     """
 
     config_file = 'test_config.yaml'
-    import textwrap
     with open(config_file, 'w') as f:
         f.write(textwrap.dedent(config_raw))
-    pipe = ProcessLFCPipeline(config_file=config_file)
+    pipe = ProcessLFCPipeline(config=config_file)
     result = pipe.apply(lfc_path)

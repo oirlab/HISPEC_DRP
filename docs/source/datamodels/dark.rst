@@ -15,7 +15,7 @@ Extensions
 ----------
 
 .. csv-table::
-   :header: "Name", "HDU TYPE", "Data Type", "Dimensions", "Units", "Description"
+   :header: "Hdu Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
 
    DATA, Image, Float32, "4096 x 4096", "e-/s", "Dark current data."
    ERR, Image, Float32, "4096 x 4096", "e-/s", "Dark current error (all sources)."

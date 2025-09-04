@@ -11,9 +11,19 @@ for i in range(1, 5):
     _LFCWAVESOL_EXTENSIONS[f'SPEC_ERR_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCWAVESOL_EXTENSIONS[f'SPEC_VAR_POISSON_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
     _LFCWAVESOL_EXTENSIONS[f'SPEC_VAR_RNOISE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
-    _LFCWAVESOL_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float32}
+    _LFCWAVESOL_EXTENSIONS[f'SPEC_DQ_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.uint32}
     _LFCWAVESOL_EXTENSIONS[f'WAVE_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
     _LFCWAVESOL_EXTENSIONS[f'CC_COEFF_FIB{i}'] = {'hdu_type': fits.ImageHDU, 'dtype': np.float64}
+    _LFCWAVESOL_EXTENSIONS[f'WAVESOLNORM_FIB{i}'] = {
+        'hdu_type': fits.BinTableHDU,
+        'columns': {
+            'FIBER': np.int16,
+            'PIXEL_NORM_MIN': np.float64,
+            'PIXEL_NORM_MAX': np.float64,
+            'ORDER_NORM_MIN': np.int16,
+            'ORDER_NORM_MAX': np.int16,
+        }
+    }
     _LFCWAVESOL_EXTENSIONS[f'LFC_FITPARAMS_FIB{i}'] = {
         'hdu_type': fits.BinTableHDU,
         'columns': {
@@ -38,6 +48,3 @@ for i in range(1, 5):
 class HISPECLFCWavesolModel(HISPECCalibrationModel):
     CAL_TYPE = 'lfc_wavesol'
     EXTENSIONS = _LFCWAVESOL_EXTENSIONS
-    HEADER_SCHEMAS = [
-        'hispec_lfcwavesol.yaml',
-    ]

@@ -12,7 +12,7 @@ class Stage1Pipeline(BasePipeline):
     }
 
     def _perform(self):
-        model_to_process = datamodels.open(self.args.name)
+        model_to_process = datamodels.open(self.input)
         result = self.dark_sub.apply(model_to_process)
         result = self.det_flat.apply(result)
-        return result
+        return dict(output=result)
