@@ -1,5 +1,3 @@
-from .hispec_calibration_orm import *
-from .parvi_calibration_orm import *
 from .selectors import *
 
 _local_dict = dict(locals())
