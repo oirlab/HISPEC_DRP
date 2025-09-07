@@ -15,39 +15,18 @@ This example subtracts a dark frame from an input frame at level L0 (rate map). 
     from hispecdrp import DarkSubtractionPrimitive
     from hispecdrp.utils import download_gdrive_file
     from hispecdrp import datamodels
-    import numpy as np
 
     # Input files
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits')
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits')
     dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits')
     dark_model = datamodels.open(dark_path)
 
-    # Use default selection logic based on
-    # primitive.CALIBRATIONS['dark']['selector'] and primitive.CALIBRATIONS['dark']['selector_kwargs']
+    # Use default behavior
     dark_prim = DarkSubtractionPrimitive()
-    model_result = dark_prim.apply(sci_path)
-
-    # 1. Pass custom selector or default selector with custom kwargs
-    dark_prim = DarkSubtractionPrimitive()
-    model_result = dark_prim.apply(sci_path, dark=DarkSelector(...)) # Pass kwargs to DarkSelector()
-
-    # 2. Adjust selector kwargs after instantiation
-    dark_prim = DarkSubtractionPrimitive()
-    dark_prim.dark['selector_kwargs'] = {'custom_kwarg': 'value'} # Kwarg recognized by DarkSelector
-    model_result = dark_prim.apply(sci_path)
-
-    # Manually pass a dark filepath (or DataModel)
-    dark_prim = DarkSubtractionPrimitive()
-    model_result = dark_prim.apply(sci_path, dark=dark_path)
-
-    # Manually pass a dark calibration ID
-    # In this scenario, dark_model has already been downloaded.
-    # In other cases, the file might not live locally yet.
-    dark_prim = DarkSubtractionPrimitive()
-    model_result = dark_prim.apply(sci_path, dark=dark_model.meta.cal_id)
+    model_result = dark_prim.apply(sci_path, dark=dark_model) # dark can be dark_path or dark_model
 
 
-**In all cases, the associated dark calibration can be found with:** ``model_result.get_calibration_from_role('dark')``.
+**The associated dark calibration can be found with:** ``model_result.get_calibration_from_role('dark')``.
 
 
 Fit 1D LFC Modes
@@ -57,9 +36,8 @@ This example fits the 1D LFC modes from a Level 2 LFC file.
 
 .. code-block:: python
 
-    from hispecdrp import FitLFCModesPrimitive
+    from hispecdrp import FitLFCLinesPrimitive
     from hispecdrp.utils import download_gdrive_file
-    from hispecdrp import datamodels
 
     import textwrap
 
@@ -71,25 +49,21 @@ This example fits the 1D LFC modes from a Level 2 LFC file.
     do_fibers = [3]
 
     # Setup and call the LFC modes fitting primitive
-    prim = FitLFCModesPrimitive()
+    prim = FitLFCLinesPrimitive()
     mode_fit_result = prim.apply(
         lfc_path,
         do_orders=do_orders,
         do_fibers=do_fibers,
         sigma_bounds=(0.1, 2.5),
         mu_bounds=(-1, 1),
-        lfc_nu0=datamodels.parvi.LFC_NU_0,
-        lfc_delta_nu=datamodels.parvi.LFC_DELTA_NU,
     )
 
     # Alternatively, one can set arguments as follows:
-    prim = FitLFCModesPrimitive()
+    prim = FitLFCLinesPrimitive()
     prim.do_orders = do_orders
     prim.do_fibers = do_fibers
     prim.sigma_bounds = (0.1, 2.5)
     prim.mu_bounds = (-1, 1)
-    prim.lfc_nu0 = datamodels.parvi.LFC_NU_0
-    prim.lfc_delta_nu = datamodels.parvi.LFC_DELTA_NU
     mode_fit_result = prim.apply(lfc_path)
 
     # Lastly, one can use a config file to set arguments as follows:
@@ -109,13 +83,9 @@ This example fits the 1D LFC modes from a Level 2 LFC file.
       do_fibers: {do_fibers}
       sigma_bounds: [0.1, 2.5] # Needs to be a list!
       mu_bounds: [-1, 1] # Needs to be a list!
-      lfc_nu0: {datamodels.parvi.LFC_NU_0}
-      lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
     """
     config_file = 'test_config.yaml'
     with open(config_file, 'w') as f:
         f.write(textwrap.dedent(config_raw))
-    prim = FitLFCModesPrimitive(config=config_file)
+    prim = FitLFCLinesPrimitive(config=config_file)
     mode_fit_result = prim.apply(lfc_path)
-
-

@@ -15,22 +15,16 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
 
 .. code-block:: python
 
-    from hispecdrp import datamodels
     from hispecdrp import ProcessLFCPipeline
     from hispecdrp.utils import download_gdrive_file
 
-    import numpy as np
-    import os
     import textwrap
 
     # Input files
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits')
 
-    # Path to the local calibration cache (home dir, can be anywhere)
-    os.environ['HISPECDRP_CALIBRATION_CACHE'] = os.path.expanduser('~/HISPEC_CALIBRATION_CACHE')
-
     # Specify which fibers and orders to fit
-    do_fibers = [3]
+    do_fibers = ['3']
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
 
     # Init pipeline object
@@ -38,13 +32,11 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
 
     # Specify the primitive arguments here
     prim_args = {
-        'fit_lfc_modes' : {
+        'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
-            'sigma_bounds': (0.1, 2.5),
+            'fwhm_bounds': (0.1, 2.5),
             'mu_bounds': (-1, 1),
-            'lfc_nu0': datamodels.parvi.LFC_NU_0,
-            'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
         },
         'lfc_wavesol' : {
             'fit_orders': do_orders,
@@ -59,9 +51,15 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
             'deg_intra_order': 3,
             'fit_orders': do_orders,
         },
+        'register_wave_cal' : {
+            'run': False,
+        },
+        'register_lsf_cal' : {
+            'run': False,
+        },
     }
     # Alternatively, one can also set an argument with:
-    #   pipe.fit_lfc_modes.do_orders = do_orders
+    #   pipe.fit_lfc_lines.do_orders = do_orders
 
     # Call the pipeline with these arguments.
     model_result = pipe.apply(lfc_path, prim_args=prim_args)
@@ -80,14 +78,12 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
       save_result: False
 
     primitives:
-      fit_lfc_modes:
+      fit_lfc_lines:
         arguments:
           do_orders: {do_orders}
           do_fibers: {do_fibers}
-          sigma_bounds: [0.1, 2.5]
+          fwhm_bounds: [0.1, 2.5]
           mu_bounds: [-1, 1]
-          lfc_nu0: {datamodels.parvi.LFC_NU_0}
-          lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
       lfc_wavesol:
         arguments:
           fit_orders: {do_orders}
@@ -101,6 +97,12 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
           deg_inter_order: 3
           deg_intra_order: 3
           fit_orders: {do_orders}
+      register_wave_cal:
+        arguments:
+          run: False
+      register_lsf_cal:
+        arguments:
+          run: False
     """
 
     config_file = 'test_config.yaml'
