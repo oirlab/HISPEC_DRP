@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import IMAGE_FLOAT32_HDU, IMAGE_UINT16_HDU
 
-__all__ = ['HISPECNonlinearCorrectionModel', 'PARVINonlinearCorrectionModel']
+__all__ = ['NonlinearCorrectionModel', 'HISPECNonlinearCorrectionModel', 'PARVINonlinearCorrectionModel']
 
 class NonlinearCorrectionModel(CalibrationModel):
     EXTENSIONS = {
