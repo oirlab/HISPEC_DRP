@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import create_L0_extensions
 
-__all__ = ['HISPECDarkModel', 'PARVIDarkModel']
+__all__ = ['DarkModel', 'HISPECDarkModel', 'PARVIDarkModel']
 
 
 class DarkModel(CalibrationModel):

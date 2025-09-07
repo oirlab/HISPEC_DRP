@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
-__all__ = ['HISPECLFCWavesolModel', 'PARVILFCWavesolModel']
+__all__ = ['LFCChebyshevWavesolModel', 'HISPECLFCWavesolModel', 'PARVILFCWavesolModel']
 
 
 def _create_lfcwavesol_extensions(num_fibers: int):

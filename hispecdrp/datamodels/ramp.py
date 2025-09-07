@@ -3,7 +3,7 @@ from .hispec_base import HISPECDataModel
 from .parvi_base import PARVIDataModel
 from .extensions import IMAGE_UINT16_HDU, DQ_RAW, READTIMES
 
-__all__ = ['HISPECRampModel', 'PARVIRampModel']
+__all__ = ['RampModel', 'HISPECRampModel', 'PARVIRampModel']
 
 
 class RampModel(DataModel):

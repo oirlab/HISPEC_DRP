@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from astropy.io import fits
 
-__all__ = ['HISPECInstrumentParametersModel', 'PARVIInstrumentParametersModel']
+__all__ = ['InstrumentParametersModel', 'HISPECInstrumentParametersModel', 'PARVIInstrumentParametersModel']
 
 
 class InstrumentParametersModel(CalibrationModel):

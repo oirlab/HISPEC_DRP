@@ -3,7 +3,7 @@ from .hispec_base import HISPECDataModel
 from .parvi_base import PARVIDataModel
 from .extensions import create_L0_extensions
 
-__all__ = ['HISPECL0Model', 'PARVIL0Model']
+__all__ = ['L0Model', 'HISPECL0Model', 'PARVIL0Model']
 
 class L0Model(DataModel):
 

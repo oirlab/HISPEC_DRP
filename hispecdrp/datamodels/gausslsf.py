@@ -5,7 +5,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import IMAGE_FLOAT32_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
-__all__ = ['HISPECGaussianLSFModel', 'PARVIGaussianLSFModel']
+__all__ = ['GaussianLSFModel', 'HISPECGaussianLSFModel', 'PARVIGaussianLSFModel']
 
 
 def _create_gausslsf_extensions(num_fibers : int):

@@ -5,7 +5,7 @@ from .parvi_base import PARVIDataModel
 
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_rv_extensions, create_drift_extensions, create_etalonfitparam_extensions
 
-__all__ = ['HISPECL2Model', 'PARVIL2Model']
+__all__ = ['L2Model', 'HISPECL2Model', 'PARVIL2Model']
 
 def create_l2_extensions(num_fibers : int):
     ext = {}

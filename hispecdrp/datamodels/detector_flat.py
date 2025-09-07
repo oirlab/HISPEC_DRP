@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import create_L0_extensions
 
-__all__ = ['HISPECDetectorFlatModel', 'PARVIDetectorFlatModel']
+__all__ = ['DetectorFlatModel', 'HISPECDetectorFlatModel', 'PARVIDetectorFlatModel']
 
 
 class DetectorFlatModel(CalibrationModel):

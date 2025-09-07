@@ -4,7 +4,7 @@ from .parvi_base import PARVICalibrationModel
 
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_etalonfitparam_extensions, create_drift_extensions, create_barycorr_extensions
 
-__all__ = ['PARVIReferenceEtalonModel']
+__all__ = ['ReferenceEtalonModel', 'HISPECReferenceEtalonModel', 'PARVIReferenceEtalonModel']
 
 def _create_refetalon_extensions(num_fibers: int):
     ext = {}
