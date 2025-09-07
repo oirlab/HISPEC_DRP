@@ -11,11 +11,8 @@ from datetime import datetime
 def test_local_caldb(tmp_path, datadir):
     
     # Files
-    #sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
-    #dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
-
-    sci_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
-    dark_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/Cals/HB.20240924.0000.00.master-dark.fits'
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
 
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True)
