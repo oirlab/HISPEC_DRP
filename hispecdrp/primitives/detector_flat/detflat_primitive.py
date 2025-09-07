@@ -12,6 +12,7 @@ class DetectorFlatPrimitive(BasePrimitive):
 
     ARGUMENTS = {
         'suffix' : 'detflat',
+        'output_model' : 'input'
     }
 
     CALIBRATIONS = {
@@ -31,7 +32,7 @@ class DetectorFlatPrimitive(BasePrimitive):
         detflat_model = datamodels.open(detflat)
 
         # Output
-        result = input_model.copy()
+        result = self.get_output_model(input_model)
 
         # Log
         self.log.info(f"Applying detector flat correction with {detflat} to {input_model}")

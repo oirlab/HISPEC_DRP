@@ -10,6 +10,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     
     ARGUMENTS = {
         'suffix' : 'darksub',
+        'output_model' : 'input'
     }
 
     CALIBRATIONS = {
@@ -29,7 +30,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         dark_model = datamodels.open(dark)
 
         # Output
-        result = input_model.copy()
+        result = self.get_output_model(input_model)
 
         # Log
         self.log.info(f"Applying dark correction with {dark} to {input_model}")

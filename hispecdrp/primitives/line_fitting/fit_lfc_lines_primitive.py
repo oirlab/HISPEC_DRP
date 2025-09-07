@@ -21,23 +21,28 @@ class FitLFCLinesPrimitive(BasePrimitive):
         'lfc_nu0' : None,
         'lfc_delta_nu' : None,
         'profile_type' : 'gaussian',
+        'output_model' : 'LFCFitParamsModel',
     }
 
     def _perform(self):
         input_model = datamodels.open(self.input)
-        output_model = self.get_output_model(input_model, output_model='LFCFitParamsModel')
-        fit_results = {fiber : [] for fiber in self.do_fibers}
+        output_model = self.get_output_model(input_model)
+
+        # Which traces to process
+        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
 
         # LFC parameters
         lfc_nu0 = self.lfc_nu0 if self.lfc_nu0 is not None else input_model.meta.lfc_nu0
         lfc_delta_nu = self.lfc_delta_nu if self.lfc_delta_nu is not None else input_model.meta.lfc_delta_nu
 
-        for fiber in self.do_fibers:
+        fit_results = {fiber : [] for fiber in do_fibers}
+
+        for fiber in do_fibers:
             wave = getattr(input_model, f'wave_fib{fiber}')
             spec = getattr(input_model, f'spec_fib{fiber}')
             spec_err = getattr(input_model, f'spec_err_fib{fiber}')
             spec_dq = getattr(input_model, f'spec_dq_fib{fiber}')
-            for order in self.do_orders:
+            for order in do_orders:
                 # Relative order index
                 oi = np.abs(order - input_model.meta.order_start)
                 # Find the initial lines

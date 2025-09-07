@@ -19,6 +19,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         'opt_weights' : False,
         'fit_orders' : None,
         'do_fibers' : None,
+        'output_model' : 'LFCWavesolModel',
     }
 
     def _perform(self):
@@ -26,17 +27,20 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         # Open the input model
         input_model = datamodels.open(self.input)
 
+        # Get fibers and orders
+        do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
+
         # Default inter order deg
         if self.deg_intra_order == 'auto':
-            if len(self.fit_orders) == 1:
+            if len(fit_orders) == 1:
                 deg_inter_order = 0
-            elif len(self.fit_orders) == 2:
+            elif len(fit_orders) == 2:
                 deg_inter_order = 1
             else:
                 anchor_degree = 6
                 anchor_orders = 10
                 max_degree = 10
-                deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
+                deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
             self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
@@ -44,9 +48,9 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         fit_results = []
 
         # Get the output model type
-        output_model = self.get_output_model(input_model, output_model='LFCWavesolModel')
+        output_model = self.get_output_model(input_model)
 
-        for fiber in self.do_fibers:
+        for fiber in do_fibers:
 
             # Get the table for the fiber
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
@@ -58,7 +62,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
             waves = params_table['WAVE']
-            mask = np.nonzero(np.isin(orders, self.fit_orders))[0]
+            mask = np.nonzero(np.isin(orders, fit_orders))[0]
             pixels = pixels[mask]
             orders = orders[mask]
             waves = waves[mask]
@@ -97,7 +101,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             setattr(output_model, f'wave_fib{fiber}', wavesol_full)
 
             # Set unreliable WLS in DQ
-            bad_orders = np.setdiff1d(order_vec, self.fit_orders)
+            bad_orders = np.setdiff1d(order_vec, fit_orders)
             dq = getattr(output_model, f'spec_dq_fib{fiber}')
             flag_value = output_model.DQ_FLAGS['UNRELIABLE_WS']
             for order in bad_orders:
@@ -105,7 +109,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                 dq[oi, :] |= flag_value
             
             params_table_good = params_table[fit_result['good']]
-            for order in self.fit_orders:
+            for order in fit_orders:
                 order_mask = params_table_good['ORDER'] == order
                 if np.sum(order_mask) > 0:
                     oi = np.abs(order - output_model.meta.order_start)

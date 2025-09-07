@@ -375,3 +375,15 @@ class BasePrimitive(ProcessingComponent):
         else:
             # Default
             return input_model
+        
+    @staticmethod
+    def get_do_traces(input_model : datamodels.DataModel, do_fibers : list[int] | None = None, do_orders : list[int] | None = None) -> tuple[list[str], list[int]]:
+        """
+        Helper to get the fibers and orders to process.
+        NOTE: This will need updated once we dynamically determine which fibers contain what data.
+        """
+        if do_fibers is None:
+            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
+        if do_orders is None:
+            do_orders = input_model.make_order_vec()
+        return do_fibers, do_orders
