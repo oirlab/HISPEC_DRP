@@ -28,6 +28,10 @@ class FitLFCLinesPrimitive(BasePrimitive):
         output_model = self.get_output_model(input_model, output_model='LFCFitParamsModel')
         fit_results = {fiber : [] for fiber in self.do_fibers}
 
+        # LFC parameters
+        lfc_nu0 = self.lfc_nu0 if self.lfc_nu0 is not None else input_model.meta.lfc_nu0
+        lfc_delta_nu = self.lfc_delta_nu if self.lfc_delta_nu is not None else input_model.meta.lfc_delta_nu
+
         for fiber in self.do_fibers:
             wave = getattr(input_model, f'wave_fib{fiber}')
             spec = getattr(input_model, f'spec_fib{fiber}')
@@ -63,7 +67,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
                         'FWHM_ERR_PIX' : _fit_results[i]['fwhm_err'],
                     }
                     wave_closest = wave[oi, int(r['MU_PIX'])]
-                    line_wave, _, line_num = get_closest_lfc_mode(self.lfc_nu0, self.lfc_delta_nu, wave_closest)
+                    line_wave, _, line_num = get_closest_lfc_mode(lfc_nu0, lfc_delta_nu, wave_closest)
                     r['WAVE'] = line_wave
                     r['MODE_NUM'] = line_num
                     r['FWHM_WAVE'] = delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :])
