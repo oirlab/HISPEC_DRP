@@ -1,18 +1,20 @@
 from hispecdrp import datamodels
 import numpy as np
 from hispecdrp.utils import download_gdrive_file
+from pydantic import ValidationError
 
 def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    #filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
 
     def _test_model_attrs(model):
-        assert model.meta.instrument.name == 'HISPEC'
-        assert model.meta.exposure.exposure_type == "SCI"
-        assert model.meta.instrument.spectrograph == 'BSPEC'
+        assert model.meta.instrument_name == 'HISPEC'
+        assert model.meta.exposure_type == "SCI"
+        assert model.meta.spectrograph == 'BSPEC'
         assert model.meta.model_type == 'HISPECL0Model'
-        assert model.meta.instrument.mode == 'YJHK'
+        assert model.meta.instrument_mode == 'YJHK'
         shape = (4096, 4096)
         assert model.data.shape == shape
         assert model.err.shape == shape
@@ -29,14 +31,15 @@ def test_hispec_level0(tmp_path, datadir):
     model = datamodels.HISPECL0Model(filepath)
 
     # Set arbitrary metadata
-    model.meta.exposure.exposure_time = 10.0 # valid
+    model.meta.exposure_time = 10.0 # valid
 
     # Set invalid metadata
     try:
-        model.meta.exposure.exposure_time = '10.0'  # invalid
-        raise RuntimeError("Invalid metadata was set.")
-    except ValueError:
+        model.meta.exposure_time = 'abc'
+    except ValidationError:
         pass
+    else:
+        raise RuntimeError("Invalid metadata was set.")
     
     # Print model metadata, shown with pytest -s
     model.meta.pprint(show_none=True)
@@ -55,11 +58,12 @@ def test_hispec_level0(tmp_path, datadir):
 def test_parvi_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True, output_dir=datadir)
+    #filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True, output_dir=datadir)
+    filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits'
 
     def _test_model_attrs(model):
-        assert model.meta.instrument.name == 'PARVI'
-        assert model.meta.exposure.exposure_type == "SCI"
+        assert model.meta.instrument_name == 'PARVI'
+        assert model.meta.exposure_type == "SCI"
         assert model.meta.model_type == 'PARVIL0Model'
         shape = (2048, 2048)
         assert model.data.shape == shape

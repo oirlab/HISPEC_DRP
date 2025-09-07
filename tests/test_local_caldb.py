@@ -2,7 +2,6 @@ from hispecdrp.utils import download_gdrive_file
 from koa_middleware import CalibrationStore
 from hispecdrp import datamodels
 from hispecdrp import DarkSubtractionPrimitive, RegisterCalibrationPrimitive
-from hispecdrp.calibrations import HISPECCalibrationORM
 from hispecdrp.calibrations import DarkSelector
 
 import os
@@ -12,8 +11,11 @@ from datetime import datetime
 def test_local_caldb(tmp_path, datadir):
     
     # Files
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
-    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
+    #sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    #dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
+
+    sci_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
+    dark_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/Cals/HB.20240924.0000.00.master-dark.fits'
 
     # Open the science file to get the metadata
     sci_model = datamodels.open(sci_path, meta_only=True)
@@ -26,9 +28,9 @@ def test_local_caldb(tmp_path, datadir):
     dark_models = []
     for i in range(N):
         dark_model = datamodels.open(dark_path, meta_only=False)
-        dark_model.meta.exposure.datetime_start = None
-        dark_model.meta.exposure.mjd_start += 365 * i
-        datamodels.set_hispec_meta(dark_model)
+        dark_model.meta.datetime_obs = None
+        dark_model.meta.mjd_start += 365 * i
+        datamodels.set_default_meta(dark_model)
         dark_model.meta.last_updated = datetime.now().isoformat(timespec="milliseconds")
         dark_model.generate_calibration_id()
         prim = RegisterCalibrationPrimitive()
@@ -36,19 +38,19 @@ def test_local_caldb(tmp_path, datadir):
         dark_models.append(dark_model)
 
     # Connect to DB
-    with CalibrationStore(orm_class=HISPECCalibrationORM, use_cached=True) as store:
+    with CalibrationStore(orm_class=dark_models[0].meta.get_orm_class(), use_cached=True) as store:
 
         # Test if the local files are registered
         results = store.local_db.query()
         assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
 
         # Test retrieval of dark
-        dark1, dark1_orm = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
+        dark1, dark1_orm = store.get_calibration(sci_model.meta.model_dump(), DarkSelector())
         assert dark1 is not None, "No dark model not found in local DB"
 
         # Test retrieval of second dark
-        sci_model.meta.exposure.mjd_start += 365
-        dark2, dark2_orm = store.get_calibration(sci_model.meta.to_flat_dict(), DarkSelector())
+        sci_model.meta.mjd_start += 365
+        dark2, dark2_orm = store.get_calibration(sci_model.meta.model_dump(), DarkSelector())
         assert dark2 is not None, "No dark model not found in local DB"
 
         # Test that the two darks are different

@@ -7,14 +7,23 @@ import os
 
 def test_fit_etalon_parvi(tmp_path, datadir):
 
+    # solar_files = [
+    #     'PARVI/L2/PR.20230803.62022.01_spec-SOLAR.fits',
+    #     'PARVI/L2/PR.20230803.65376.76_spec-SOLAR.fits',
+    #     'PARVI/L2/PR.20230803.68709.72_spec-SOLAR.fits'
+    # ]
+    # solar_files = [download_gdrive_file(f, use_cached=True, output_dir=datadir) for f in solar_files]
+    # lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83766.15.lfc_wavesol.fits', use_cached=True, output_dir=datadir)
+    # ref_etalon = download_gdrive_file('PARVI/Cals/PR.20230803.62022.01.ref_etalon.fits', use_cached=True, output_dir=datadir)
+
     solar_files = [
-        'PARVI/L2/PR.20230803.62022.01_spec-SOLAR.fits',
-        'PARVI/L2/PR.20230803.65376.76_spec-SOLAR.fits',
-        'PARVI/L2/PR.20230803.68709.72_spec-SOLAR.fits'
+        '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.62022.01_spec-SOLAR.fits',
+        '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.65376.76_spec-SOLAR.fits',
+        '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.68709.72_spec-SOLAR.fits',
     ]
-    solar_files = [download_gdrive_file(f, use_cached=True, output_dir=datadir) for f in solar_files]
-    lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83766.15.lfc_wavesol.fits', use_cached=True, output_dir=datadir)
-    ref_etalon = download_gdrive_file('PARVI/Cals/PR.20230803.62022.01.ref_etalon.fits', use_cached=True, output_dir=datadir)
+    lfc_wavesol = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/Cals/PR.20230725.83766.15.master-lfc_wavesol.fits'
+    ref_etalon = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/Cals/PR.20230803.62022.01.master-ref_etalon.fits'
+    
     do_orders = np.arange(90, 100).astype(int).tolist()
     models = []
 
