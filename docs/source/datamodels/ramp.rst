@@ -5,8 +5,9 @@ The Teledyne Hawaii HXRG detectors use up-the-ramp (UTR) non-destructive reads, 
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
-* :py:class:`~hispecdrp.datamodels.parvi.ramp.PARVIRampModel`
+* :py:class:`~hispecdrp.datamodels.ramp.RampModel`
+* :py:class:`~hispecdrp.datamodels.ramp.HISPECRampModel`
+* :py:class:`~hispecdrp.datamodels.ramp.PARVIRampModel`
 
 **File suffix:** raw
 

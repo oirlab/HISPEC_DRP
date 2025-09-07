@@ -4,11 +4,12 @@ GDRIVE_FILES = {
     'HISPEC/Cals/HB.20240924.0000.00.master-dark.fits' : '1QtkCCZoW-AxIM-aiQ4AZms9bSbh1XCAl',
     'HISPEC/Cals/HB.20240924.0000.00.master-detflat.fits' : '1lZ3JAzPC9DrtWb30Ik0scVW9p9E4zPx2',
     # HISPEC L0
-    'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits' : '1VKSyg30Fd7Q6SE1EFC_JcG9CeVxdTdMe',
+    'HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits' : '1i3KwvGcm-QoJ5yoylpkuXwVLfyPosuFE',
     # PARVI Cals
-    'PARVI/Cals/PR.20230725.83766.15.lfc_wavesol.fits' : '1mggWgcqLIg0L7yprA0jpLvxmH6O1wHmh',
-    'PARVI/Cals/PR.20230725.83766.15.lsf.fits' : '126gA908LONf1BUoDpiEc-vGy3BZkSIZX',
-    'PARVI/Cals/PR.20230803.62022.01.ref_etalon.fits' : '1pfmX_mv6WMsuS-Ek8Dwp5C1VUWk_iKp8',
+    'PARVI/Cals/PR.20230725.83766.15.master-lfc_wavesol.fits' : '1GbbkXjSXiruaaIi22ysJrCdD2OBqYYXB',
+    'PARVI/Cals/PR.20230725.83766.15.master-lsf.fits' : '1baGSI8p0oas5VSHqQ1oGN1GPQTK1b7mU',
+    'PARVI/Cals/PR.20230803.62022.01.master-ref_etalon.fits' : '1YbKV7q4s8RbSBedqUIExT1QbaH74qdbx',
+    'PARVI/Cals/PR.20240924.0000.00.master-instrument_params.fits' : '1UlRPBYM4SIJDzF_7zlXU3plhTIoImv4R',
     # PARVI Raw
     'PARVI/Raw/PR.20250407.39453.59_raw-GamDra.fits' : '1y63JFgLQfqUj32QQGSiBcSgD1ssQPYUZ',
     # PARVI L0

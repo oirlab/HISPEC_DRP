@@ -3,42 +3,19 @@ import os
 import astropy.table
 from astropy.io import fits
 from copy import deepcopy
-from typing import TypeVar
-import datetime
-from .meta_dict import MetaDict
+from datetime import datetime
+from .meta_data import MetaModel
 from hispecdrp import __version__
 import numpy as np
 import warnings
-from sqlalchemy.inspection import inspect
 from astropy.io.fits.verify import VerifyWarning
+import uuid
+from .utils import open as datamodel_open
+
+from .extensions import RECEIPT, CALIBRATIONS
 
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
-
-# Receipt columns
-_RECEIPT_COLS = {
-    'PROC_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
-    'DRP_VERSION' : str, # DRP semver
-    'CLASS' : str, # Primitive class
-    'FILENAME' : str, # Input base filename
-    'ARGUMENTS' : str, # JSON rep of args ?
-    'STATUS' : str, # COMPLETED, FAILED, SKIPPED
-}
-
-_CALIBRATION_COLS = {
-    'ID': str, # UUID
-    'FILENAME': str, # Base filename of the calibration
-    'CAL_TYPE': str, # Type of calibration
-    'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
-    'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
-    'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
-    'NOTE': str, # Note for calibration matching ORM
-    'LAST_UPDATED': str, # When calibration was last updated in the DB.
-    'TIME_APPLIED' : str # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
-}
-
-# So that dict[str, A] <: dict[str, B] when A <: B
-_VALID_HDU = TypeVar('T', bound=fits.hdu.base._ValidHDU, covariant=True)
 
 
 class DataModel:
@@ -48,45 +25,34 @@ class DataModel:
     Class Attributes:
         EXTENSIONS (dict): Extensions and their properties.
         INHERIT_EXTENSIONS (bool): Whether to inherit extensions from parent class. Defaults to True.
-        HEADER_SCHEMAS (list): List of schema files to load for the header.
-        INHERIT_SCHEMAS (bool): Whether to inherit schemas from parent class. Defaults to True.
+        META_MODEL (MetaModel): MetaModel specifying the datamodel.
         ALLOWED_ATTRIBUTES (list): List of attributes that can be set directly on the DataModel.
-        CAL_ORM_CLASS (type): The calibration ORM class corresponding to this datamodel.
     """
 
     EXTENSIONS = {
-        'PRIMARY': {
-            'hdu_type' : fits.PrimaryHDU,
-        },
-        'RECEIPT': {
-            'hdu_type' : fits.BinTableHDU,
-            'columns' : _RECEIPT_COLS
-        },
-        'CALIBRATIONS': {
-            'hdu_type' : fits.BinTableHDU,
-            'columns' : _CALIBRATION_COLS
-        }
+        'PRIMARY' : {'hdu_type' : fits.PrimaryHDU, 'dtype' : None},
+        **RECEIPT,
+        **CALIBRATIONS
     }
+
     INHERIT_EXTENSIONS = True
-
-    HEADER_SCHEMAS = []
-    INHERIT_SCHEMAS = True
-
-    CAL_ORM_CLASS = None
+    META_MODEL = None
+    META_DEFAULTS = {}
 
     ALLOWED_ATTRIBUTES = [
-        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'HEADER_SCHEMAS', 'INHERIT_SCHEMAS', 'CAL_ORM_CLASS',
-        'meta', '_data', '_filepath',
+        'EXTENSIONS', 'INHERIT_EXTENSIONS', 'META_MODEL',
+        'meta', '_data', '_filepath', 'ALLOWED_ATTRIBUTES', 'META_DEFAULTS'
     ]
+
+    EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename']
 
     def __init__(
         self,
         filepath : str | None = None,
         data : dict | None = None,
-        meta : MetaDict | None = None,
+        meta : MetaModel | None = None,
         meta_only : bool = False,
         extensions : str | list[str] | None = None,
-        validate_metadata : bool = True,
         correct_dtypes : bool = False,
     ):
         """
@@ -98,7 +64,6 @@ class DataModel:
             meta (dict, optional): Dictionary containing metadata. Keys should match the schema's property paths.
             meta_only (bool, optional): If True, only metadata is loaded and no data is read from the FITS file. Defaults to False.
             extensions (str, list[str], optional): List of extensions to load from the FITS file. Defaults to all extensions.
-            validate_metadata (bool, optional): Whether to validate the metadata against the schema. Defaults to True.
             correct_dtypes (bool, optional): Whether to correct the data types of the data arrays upon reading them in. Defaults to False.
         """
 
@@ -107,7 +72,7 @@ class DataModel:
             if not os.path.isfile(filepath):
                 raise FileNotFoundError(f"File not found: {filepath}")
             self._filepath = os.path.abspath(filepath)
-            self.init_meta(validate_metadata=validate_metadata)
+            self.init_meta(meta=meta)
             self.set_meta_from_headers(extensions=extensions)
             if not meta_only:
                 self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
@@ -115,7 +80,7 @@ class DataModel:
                 self._data = {}
         else:
             self._filepath = None
-            self.init_meta(meta=meta, validate_metadata=validate_metadata)
+            self.init_meta(meta=meta)
             if not meta_only:
                 self.init_data(data=data, correct_dtypes=correct_dtypes)
             else:
@@ -136,13 +101,12 @@ class DataModel:
         """
         extensions = self._resolve_extensions(extensions)
         with fits.open(self._filepath, memmap=True) as hdulist:
-            for path, info in self.meta.walk_schema(sections=False):
-                fits_hdu = info.get('fits_hdu', self.meta._DEFAULTS['fits_hdu'])
-                fits_keyword = info['keyword']
+            for attr, field in self.meta.__class__.model_fields.items():
+                fits_hdu = field.json_schema_extra['fits_hdu']
+                fits_keyword = field.json_schema_extra['fits_keyword']
                 header = hdulist[fits_hdu].header
                 if fits_keyword in header:
-                    val = header[fits_keyword]
-                    self.meta[path] = val
+                    self.meta[attr] = header[fits_keyword]
         return self.meta
     
     def read_data(
@@ -243,7 +207,7 @@ class DataModel:
             filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
         return filepath
 
-    def to_fits(self, include_empty_extensions : bool = False, add_missing_metadata : bool = False, correct_dtypes : bool = True, **kwargs):
+    def to_fits(self, include_empty_extensions : bool = False, add_missing_metadata : bool = False, correct_dtypes : bool = True, output_verify : str = 'fix', **kwargs):
         """
         Write the DataModel to a FITS file.
         
@@ -264,7 +228,7 @@ class DataModel:
             hdulist.append(hdu)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', VerifyWarning)
-            hdulist.writeto(self._filepath, **kwargs)
+            hdulist.writeto(self._filepath, output_verify=output_verify, **kwargs)
 
     def on_init(self):
         """
@@ -283,7 +247,8 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
-        self.meta.last_updated = self.meta.last_updated or datetime.datetime.now().isoformat(timespec="milliseconds")
+        if self.meta.last_updated is None:
+            self.meta.last_updated = datetime.now().isoformat(timespec="milliseconds")
         self.meta.model_type = self.__class__.__name__
 
     def make_hdu(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = True) -> _VALID_HDU:
@@ -296,7 +261,7 @@ class DataModel:
             correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
         """
         hdu_class = self.EXTENSIONS[extname]['hdu_type']
-        header = self.make_header(extname=extname, add_missing_metadata=add_missing_metadata)
+        header = self.meta.to_header(extname=extname, add_missing_metadata=add_missing_metadata)
         if hdu_class is fits.PrimaryHDU:
             return hdu_class(header=header)
         if hdu_class is fits.ImageHDU:
@@ -329,10 +294,6 @@ class DataModel:
                 cls.EXTENSIONS = {'PRIMARY': cls.EXTENSIONS['PRIMARY'], **{k: v for k, v in cls.EXTENSIONS.items() if k != 'PRIMARY'}}
             if 'RECEIPT' in cls.EXTENSIONS:
                 cls.EXTENSIONS = {**{k: v for k, v in cls.EXTENSIONS.items() if k != 'RECEIPT'}, 'RECEIPT': cls.EXTENSIONS['RECEIPT']}
-            if hasattr(_cls, "HEADER_SCHEMAS") and cls.INHERIT_SCHEMAS:
-                for schema_file in _cls.HEADER_SCHEMAS:
-                    if schema_file not in cls.HEADER_SCHEMAS:
-                        cls.HEADER_SCHEMAS.append(schema_file)
 
     def copy(self):
         """
@@ -408,17 +369,22 @@ class DataModel:
                 else:
                     self._data[extname] = None # Keep Image HDUs as None
 
-    def init_meta(self, meta : MetaDict | None = None, validate_metadata : bool = True) -> MetaDict:
+    def init_meta(self, meta : MetaModel | dict | None = None) -> MetaModel:
         """
         Initialize the metadata and optionally merge in provided metadata.
 
         Args:
-            meta (dict, optional): Metadata to merge in. Defaults to None.
+            meta (MetaModel | dict, optional): Metadata to merge in. Defaults to None.
         """
-        if isinstance(meta, MetaDict):
+        if isinstance(meta, MetaModel):
+            assert isinstance(meta, self.META_MODEL), f"meta must be of type {self.META_MODEL}, got {type(meta)}"
             self.meta = meta
+        elif isinstance(meta, dict):
+            self.meta = self.META_MODEL(**{**self.META_DEFAULTS, **meta})
+        elif meta is None:
+            self.meta = self.META_MODEL(**self.META_DEFAULTS)
         else:
-            self.meta = MetaDict(schema=self.HEADER_SCHEMAS, validate=validate_metadata)
+            raise ValueError(f"Unknown type for meta: {type(meta)}")
         return self.meta
 
     def init_receipt(self):
@@ -431,64 +397,6 @@ class DataModel:
                 for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()
             })
 
-    def make_header(
-        self,
-        extname : str = 'PRIMARY',
-        add_missing_metadata : bool = False
-    ) -> fits.Header:
-        """
-        Create an Astropy FITS header dynamically from a schema dict.
-        Includes section headers as COMMENT cards.
-        
-        Args:
-            meta (MetaDict, optional): Dictionary containing data values.
-                Keys should match the schema's property paths.
-                If None, the header will be created with default values.
-            extname (str, optional): Name of the extension. Default is "PRIMARY".
-            add_missing (bool, optional): If True, missing entries will be added with None values. Default is False.
-
-        Returns:
-            astropy.io.fits.Header : FITS header populated according to the schema
-        """
-        header = fits.Header()
-        for path, info in self.meta.walk_schema(sections=True):
-
-            # FITS HDU and kind of entry
-            prop_extname = info.get('fits_hdu', self.meta._DEFAULTS['fits_hdu'])
-            if extname != prop_extname:
-                continue
-
-            # Prop name
-            prop_name = path[-1]
-
-            # Section header
-            #if dtype == 'object':
-            if 'keyword' not in info:
-                # Add section header as COMMENT
-                header.append(('COMMENT', '=' * 40), end=True)
-                header.append(('COMMENT', f' {prop_name.upper()}'), end=True)
-                header.append(('COMMENT', '=' * 40), end=True)
-
-            # Handle individual properties
-            else:
-
-                keyword = info['keyword']
-                comment = info.get('comment', None)
-                unit = info.get('unit', self.meta._DEFAULTS['unit'])
-                if unit is not None:
-                    if unit.lower() != 'none':
-                        comment += f" ({unit})"
-                value = self.meta[path]  # Get value from metadata
-                
-                # Skip if no value and not adding empty entries
-                if value is None and not add_missing_metadata:
-                    continue
-
-                # Add to header
-                header.append((keyword, value, comment), end=True)
-
-        return header
-    
     @property
     def extinfo(self):
         for extname, info in self.EXTENSIONS.items():
@@ -508,7 +416,7 @@ class DataModel:
         return None
     
     @classmethod
-    def from_datamodel(cls, model : 'DataModel', copy : bool = True):
+    def from_datamodel(cls, model : 'DataModel' | type['DataModel'], copy : bool = True) -> 'DataModel':
         """
         Create a new DataModel from another DataModel by copying over any valid data and metadata entries. The _filepath is not copied.
         
@@ -518,13 +426,11 @@ class DataModel:
         _data = {k : v for k, v in model._data.items() if k in cls.EXTENSIONS}
         if copy:
             _data = deepcopy(_data)
-        model_out = cls(data=_data)
-        meta = deepcopy(model.meta) # if copy else model.meta
-        exclude_keys_copy = ['cal_id']
-        for key in exclude_keys_copy:
+        meta = deepcopy(model.meta.model_dump())
+        for key in cls.EXCLUDE_META_KEYS_COPY:
             if key in meta:
-                del meta[key]
-        model_out.meta.update(meta, override=False)
+                meta[key] = None
+        model_out = cls(data=_data, meta=meta)
         return model_out
     
     def make_order_vec(self) -> np.ndarray:
@@ -573,7 +479,7 @@ class DataModel:
 
     def add_calibration(
         self,
-        calibration : CalibrationORM | DataModel | str | dict,
+        calibration : MetaModel | DataModel | str | dict,
         cal_role : str,
         date_time : str,
         note : str | None = None,
@@ -583,8 +489,9 @@ class DataModel:
         Add a calibration to the DataModel's calibrations table.
         
         Args:
-            calibration (CalibrationORM | str | dict): The calibration to add. Can be:
-                - CalibrationORM object
+            calibration (MetaModel | DataModel | str | dict): The calibration to add. Can be:
+                - MetaModel object
+                - DataModel object
                 - String filepath (will load metadata to create entry)
                 - Dict with calibration column values
             date_time (str): The datetime the calibration was used in ISO format.
@@ -600,11 +507,11 @@ class DataModel:
                 warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
                 return
 
-        # Case 1: CalibrationORM object
+        # Case 1: MetaModel object
         #   New row from ORM object
-        if isinstance(calibration, CalibrationORM):
+        if isinstance(calibration, MetaModel):
             new_row = {
-                'ID' : calibration.id,
+                'ID' : calibration.cal_id,
                 'FILENAME' : calibration.filename,
                 'CAL_TYPE' : calibration.cal_type,
                 'CAL_ROLE' : cal_role,
@@ -626,7 +533,7 @@ class DataModel:
                 'FILENAME' : cal_model.meta.filename or '',
                 'CAL_TYPE' : cal_model.CAL_TYPE,
                 'CAL_ROLE' : cal_role,
-                'DATETIME_OBS' : cal_model.meta.exposure.datetime_start,
+                'DATETIME_OBS' : cal_model.meta.datetime_obs,
                 'DRP_VERSION' : __version__,
                 'NOTE' : note or '',
                 'LAST_UPDATED' : '',
@@ -660,7 +567,7 @@ class DataModel:
         """
         row = self.get_calibration_from_role(cal_role)
         cal_id = row['ID']
-        with CalibrationStore(orm_class=self.CAL_ORM_CLASS) as store:
+        with CalibrationStore(orm_class=self.META_MODEL) as store:
             return store.get_calibration_by_id(cal_id)
 
     def get_calibration_from_role(self, cal_role : str) -> DataModel:
@@ -682,6 +589,131 @@ class DataModel:
             raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
         row_index = indices[0]
         return dict(self.calibrations[row_index])
-        
 
+    def update_calibration_table(self, calibration : CalibrationModel | str, note : str | None = None):
+        cal_model = datamodel_open(calibration, meta_only=True)
+        cal_orm = cal_model.to_orm(note=note)
+        row = {}
+        for cal_column in self.calibrations.colnames:
+            if cal_column in cal_orm.__table__.columns:
+                val = getattr(cal_orm, cal_column)
+                if val is None:
+                    val = ''
+                row[cal_column] = val
+        self.calibrations.add_row(row)
     
+    @staticmethod
+    def _generate_filename(
+        instrument_alias : str,
+        date_time : str,
+        suffix : str | None = None
+    ) -> str:
+        """
+        Create a filename for a HISPEC data product.
+        Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}_{suffix}.fits
+
+        Args:
+            instrument_alias (str): The two letter instrument alias.
+            date_time (str): The properly formated datetime of the observation in .
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+
+        Returns:
+            str : The filename
+        """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        filename = f"{instrument_alias}.{date_time}.fits"
+        if suffix:
+            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
+        return filename
+
+
+class CalibrationModel(DataModel):
+
+    CAL_TYPE = None # Type of calibration
+
+    def on_init(self):
+        super().on_init()
+        self.meta.cal_type = self.CAL_TYPE
+        if self.meta.cal_id is None:
+            self.generate_calibration_id()
+
+    def generate_calibration_id(self) -> str:
+        """
+        Generate the calibration ID.
+
+        Returns:
+            str: The calibration ID
+        """
+        filename = self.meta.filename or 'unknown'
+        drp_version = self.meta.drp_version or 'unknown'
+        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
+        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
+        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        return self.meta.cal_id
+    
+    @staticmethod
+    def _generate_filename(
+        instrument_alias : str,
+        date_time : str,
+        cal_type : str,
+        master : bool = False,
+        suffix : str | None = None
+    ) -> str:
+        """
+        Create a filename for a PARVI calibration data product.
+
+        Format: {instrument_alias}_{date_time}_[master-]{cal_type}_{suffix}.fits
+            datetime : YYYYMMDDTHHMMSS.
+            cal_type : The type of calibration data.
+            master : Insert 'master-' before the cal_type if `master=True`.
+            suffix : optional suffix
+
+        Args:
+            date_time (str): The date and time of the observation.
+            cal_type (str): The type of calibration data.
+            master (bool, optional): If True, insert 'master-' before the cal_type. Defaults to False.
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+
+        Returns:
+            str : The filename
+        """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        if master:
+            cal_type = f"master-{cal_type}"
+        filename = f"{instrument_alias}.{date_time}.{cal_type}.fits"
+        if suffix is not None:
+            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
+        return filename
+    
+    @classmethod
+    def get_orm_class(cls) -> type[CalibrationORM]:
+        """
+        Get the ORM class for the CalibrationModel metadata model.
+
+        Returns:
+            type[CalibrationORM]: The ORM class.
+        """
+        return cls.META_MODEL.get_orm_class()
+    
+    def to_orm(self, note : str | None = None) -> CalibrationORM:
+        """
+        Convert the CalibrationModel metadata to a CalibrationORM object.
+
+        Args:
+            note (str, optional): An optional note to add to the ORM object. Defaults to None.
+
+        Returns:
+            CalibrationORM: The CalibrationORM object.
+        """
+        cal_orm = self.meta.to_orm()
+        if note is not None:
+            cal_orm.note = note
+        return cal_orm

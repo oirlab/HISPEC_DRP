@@ -5,8 +5,9 @@ The HISPEC detector flat is a 2D image that corrects the intrinsic pixel-to-pixe
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.detflat.HISPECDetectorFlatModel`
-* :py:class:`~hispecdrp.datamodels.parvi.detflat.PARVIDetectorFlatModel`
+* :py:class:`~hispecdrp.datamodels.detector_flat.DetectorFlatModel`
+* :py:class:`~hispecdrp.datamodels.detector_flat.HISPECDetectorFlatModel`
+* :py:class:`~hispecdrp.datamodels.detector_flat.PARVIDetectorFlatModel`
 
 **Calibration type:** detflat
 

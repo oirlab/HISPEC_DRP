@@ -12,7 +12,7 @@ class SetInitialWLSPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'wavesolinit',
         'do_fibers' : None,
-        'do_orders' : None,
+        'output_model' : 'input',
     }
 
     CALIBRATIONS = {
@@ -29,17 +29,22 @@ class SetInitialWLSPrimitive(BasePrimitive):
         wavesol_path, _ = self.get_calibration(input_model, 'wavesol')
         wavesol_model = datamodels.open(wavesol_path)
 
-        for fiber in self.do_fibers:
+        output_model = self.get_output_model(input_model)
+
+        # Get fibers and orders
+        do_fibers, _ = self.get_do_traces(input_model, self.do_fibers, None)
+
+        for fiber in do_fibers:
             
             # Get the wavelength solution for the fiber
             wave = getattr(wavesol_model, f'wave_fib{fiber}')
-            setattr(input_model, f'wave_fib{fiber}', wave)
+            setattr(output_model, f'wave_fib{fiber}', wave)
 
             # Update unreliable DQ flags
-            input_dq = getattr(input_model, f'spec_dq_fib{fiber}')
+            input_dq = getattr(output_model, f'spec_dq_fib{fiber}')
             wave_dq = getattr(wavesol_model, f'spec_dq_fib{fiber}')
-            flag_value = input_model.DQ_FLAGS['UNRELIABLE_WS']
+            flag_value = output_model.DQ_FLAGS['UNRELIABLE_WS']
             mask = (wave_dq & flag_value) != 0
             input_dq[mask] |= flag_value
 
-        return dict(output=input_model, wavesol=wavesol_model)
+        return dict(output=output_model, wavesol=wavesol_model)

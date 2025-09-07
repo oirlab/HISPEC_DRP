@@ -1,4 +1,3 @@
-from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
 
 import os
@@ -20,6 +19,8 @@ def test_primitive_config(tmp_path):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     fwhm_bounds = [0.1, 2.5]
     do_fibers = [3]
+    lfc_nu0 = 100.0
+    lfc_delta_nu = 0.1
 
     # Specify config file
     config_string = f"""
@@ -29,8 +30,8 @@ def test_primitive_config(tmp_path):
       do_orders: {do_orders}
       do_fibers: {do_fibers}
       fwhm_bounds: {fwhm_bounds}
-      lfc_nu0: {datamodels.parvi.LFC_NU_0}
-      lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
+      lfc_nu0: {lfc_nu0}
+      lfc_delta_nu: {lfc_delta_nu}
     """
     config_path = os.path.join(tmp_path, 'test_config.yaml')
     save_config_string(config_string, config_path)
@@ -52,14 +53,16 @@ def test_pipeline_config(tmp_path):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     fwhm_bounds = [0.1, 2.5]
     do_fibers = [3]
+    lfc_nu0 = 100.0
+    lfc_delta_nu = 0.1
     prim_args = {
         'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
             'fwhm_bounds': fwhm_bounds,
             'mu_bounds': (-1, 1),
-            'lfc_nu0': datamodels.parvi.LFC_NU_0,
-            'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
+            'lfc_nu0': lfc_nu0,
+            'lfc_delta_nu': lfc_delta_nu,
         },
         'lfc_wavesol' : {
             'fit_orders': do_orders,
@@ -91,8 +94,8 @@ def test_pipeline_config(tmp_path):
           do_orders: {do_orders}
           do_fibers: {do_fibers}
           fwhm_bounds: {fwhm_bounds}
-          lfc_nu0: {datamodels.parvi.LFC_NU_0}
-          lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
+          lfc_nu0: {lfc_nu0}
+          lfc_delta_nu: {lfc_delta_nu}
     """
     config_path = os.path.join(tmp_path, 'test_pipe_config.yaml')
     save_config_string(config_string, config_path)
@@ -118,8 +121,8 @@ def test_pipeline_config(tmp_path):
       do_orders: {do_orders}
       do_fibers: {do_fibers}
       fwhm_bounds: {list(fwhm_bounds)}
-      lfc_nu0: {datamodels.parvi.LFC_NU_0}
-      lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
+      lfc_nu0: {lfc_nu0}
+      lfc_delta_nu: {lfc_delta_nu}
     """
     new_fwhm_bounds = [0.5, 1.0]
     pipe_config_string = f"""
@@ -132,8 +135,8 @@ def test_pipeline_config(tmp_path):
           do_orders: {do_orders}
           do_fibers: {do_fibers}
           fwhm_bounds: {new_fwhm_bounds}
-          lfc_nu0: {datamodels.parvi.LFC_NU_0}
-          lfc_delta_nu: {datamodels.parvi.LFC_DELTA_NU}
+          lfc_nu0: {lfc_nu0}
+          lfc_delta_nu: {lfc_delta_nu}
     """
     save_config_string(prim_config_string, prim_config_path)
     save_config_string(pipe_config_string, pipe_config_path)

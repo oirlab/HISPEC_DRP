@@ -20,21 +20,26 @@ class FitEtalonLinesPrimitive(BasePrimitive):
         'do_fibers' : None,
         'do_orders' : None,
         'profile_type' : 'lorentzian',
+        'output_model' : 'input',
     }
 
     def _perform(self):
 
         input_model = datamodels.open(self.input)
         output_model = self.get_output_model(input_model)
-        fit_results = {fiber : [] for fiber in self.do_fibers}
 
-        for fiber in self.do_fibers:
+        # Which traces to process
+        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
+        
+        fit_results = {fiber : [] for fiber in do_fibers}
+
+        for fiber in do_fibers:
             wave = getattr(input_model, f'wave_fib{fiber}')
             spec = getattr(input_model, f'spec_fib{fiber}')
             spec_err = getattr(input_model, f'spec_err_fib{fiber}')
             spec_dq = getattr(input_model, f'spec_dq_fib{fiber}')
             xarr = np.arange(wave.shape[1])
-            for order in self.do_orders:
+            for order in do_orders:
 
                 # Relative order index
                 oi = np.abs(order - input_model.meta.order_start)
@@ -53,9 +58,6 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                     max_fit_window=self.max_fit_window,
                     profile_type=self.profile_type,
                 )
-                #except:
-                import matplotlib.pyplot as plt
-                    #breakpoint()
                 fit_results[fiber].append(_fit_results)
 
                 # Store results in the model

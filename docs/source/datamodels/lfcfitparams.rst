@@ -5,8 +5,9 @@ Contains the best fit Gaussian parameters for each LFC mode.
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.lfcfitparams.HISPECLFCFitParamsModel`
-* :py:class:`~hispecdrp.datamodels.parvi.lfcfitparams.PARVILFCFitParamsModel`
+* :py:class:`~hispecdrp.datamodels.lfcfitparams.LFCFitParamsModel`
+* :py:class:`~hispecdrp.datamodels.lfcfitparams.HISPECLFCFitParamsModel`
+* :py:class:`~hispecdrp.datamodels.lfcfitparams.PARVILFCFitParamsModel`
 
 **Calibration type:** lfc_fitparams
 
