@@ -5,8 +5,9 @@ The dark current (and any other contribution to the dark) is assumed to be linea
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.dark.HISPECDarkModel`
-* :py:class:`~hispecdrp.datamodels.parvi.dark.PARVIDarkModel`
+* :py:class:`~hispecdrp.datamodels.dark.DarkModel`
+* :py:class:`~hispecdrp.datamodels.dark.HISPECDarkModel`
+* :py:class:`~hispecdrp.datamodels.dark.PARVIDarkModel`
 
 **Calibration type:** dark
 

@@ -5,8 +5,9 @@ HISPEC Level 2 (L2) data products are fully calibrated science-level data. These
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
-* :py:class:`~hispecdrp.datamodels.parvi.level2.PARVIL2Model`
+* :py:class:`~hispecdrp.datamodels.level2.L2Model`
+* :py:class:`~hispecdrp.datamodels.level2.HISPECL2Model`
+* :py:class:`~hispecdrp.datamodels.level2.PARVIL2Model`
 
 **File suffix:** spec
 

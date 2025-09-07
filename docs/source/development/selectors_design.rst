@@ -34,7 +34,7 @@ Selectors are Python classes that specify the logic to select a calibration file
             with db.session_manager() as session:
                 return session.query(db.orm_class).filter(
                     db.orm_class.cal_type == 'dark',
-                    db.orm_class.instera == input.meta.instrument.era,
-                    db.orm_class.spectrograph == input.meta.instrument.spectrograph,
-                    db.orm_class.master == True
-                ).order_by(func.abs(db.orm_class.mjd_start - input.meta.exposure.mjd_start)).all()
+                    db.orm_class.instrument_era == input.meta.instrument.era,
+                    db.orm_class.spectrograph == input.meta.spectrograph,
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - input.meta.mjd_start)).all()

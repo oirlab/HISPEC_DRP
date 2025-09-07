@@ -3,8 +3,9 @@ Level 1 (Uncalibrated Spectra)
 
 HISPEC level 1 (L1) data products consist of 1D spectra immediately following spectral extraction. These spectra include a wavelength solution derived from the most recent wavelength calibration available in the calibration database (likely from the LFC). However, they do not yet incorporate the simultaneous etalon data to account for any wavelength drift or any additional corrections.
 
-* :py:class:`~hispecdrp.datamodels.hispec.level1.HISPECL1Model`
-* :py:class:`~hispecdrp.datamodels.parvi.level1.PARVIL1Model`
+* :py:class:`~hispecdrp.datamodels.level1.L1Model`
+* :py:class:`~hispecdrp.datamodels.level1.HISPECL1Model`
+* :py:class:`~hispecdrp.datamodels.level1.PARVIL1Model`
 
 **File suffix:** specuncal
 
