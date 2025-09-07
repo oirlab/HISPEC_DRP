@@ -1,3 +1,4 @@
+from astropy.io import fits
 from pydantic import BaseModel, Field
 from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 from sqlalchemy import Column, Integer, String, Float, Boolean
@@ -79,6 +80,7 @@ class MetaModel(BaseModel):
             out = {}
             for k, v in meta_sections.items():
                 out.setdefault(v, []).append(k)
+            out = dict(reversed(out.items()))
             return out
 
     def pprint(self, show_none : bool = False):
@@ -154,6 +156,70 @@ class MetaModel(BaseModel):
         if not orm_field:
             return None
         return orm_field if isinstance(orm_field, str) else attr
+
+    def to_header(
+        self,
+        extname : str = 'PRIMARY',
+        add_missing_metadata : bool = False
+    ) -> fits.Header:
+        """
+        Create an Astropy FITS header dynamically from a schema dict.
+        Includes section headers as COMMENT cards.
+        
+        Args:
+            meta (MetaModel, optional): Dictionary containing data values.
+                Keys should match the schema's property paths.
+                If None, the header will be created with default values.
+            extname (str, optional): Name of the extension. Default is "PRIMARY".
+            add_missing (bool, optional): If True, missing entries will be added with None values. Default is False.
+
+        Returns:
+            astropy.io.fits.Header : FITS header populated according to the schema
+        """
+
+        # Init the header
+        header = fits.Header()
+        
+        def make_comment(field : Field) -> str:
+            comment = field.title
+            unit = field.json_schema_extra['unit']
+            if unit is not None:
+                if unit.lower() != 'none':
+                    comment += f" ({unit})"
+            return comment
+
+        meta_sections = self.group_meta_by_section(flat=False)
+
+        for section_name, section_attrs in meta_sections.items():
+
+            # Add section header as COMMENT
+            header.append(('COMMENT', '=' * 40), end=True)
+            header.append(('COMMENT', f' {section_name}'), end=True)
+            header.append(('COMMENT', '=' * 40), end=True)
+
+            for attr in section_attrs:
+
+                # Current value and field
+                value = getattr(self, attr)
+                field = self.__class__.model_fields[attr]
+
+                # Skip if no value and not adding empty entries
+                if value is None and not add_missing_metadata:
+                    continue
+
+                # FITS HDU
+                field_extname = field.json_schema_extra['fits_hdu']
+                if extname != field_extname:
+                    continue
+
+                # Info and value
+                keyword = field.json_schema_extra['fits_keyword']
+                comment = make_comment(field)
+
+                # Add to header
+                header.append((keyword, value, comment), end=True)
+
+        return header
 
 
 class _CoreMeta(MetaModel):
