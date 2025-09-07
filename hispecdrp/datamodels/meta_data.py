@@ -239,6 +239,16 @@ class InstrumentMeta(MetaModel):
         default="YJHK",
         orm_field=True,
     )
+    lfc_nu0: float | None = FitsField(
+        fits_keyword="LFCNU0",
+        title="LFC nu0",
+        unit="GHz",
+    )
+    lfc_delta_nu: float | None = FitsField(
+        fits_keyword="LFCDNU",
+        title="LFC delta nu",
+        unit="GHz",
+    )
 
 
 class ExposureMeta(MetaModel):
