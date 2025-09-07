@@ -1,5 +1,4 @@
 
-from hispecdrp.datamodels.hispec import dark
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...calibrations import DetectorFlatSelector
@@ -44,7 +43,7 @@ class DetectorFlatPrimitive(BasePrimitive):
         return dict(output=output_model, detflat=detflat)
 
 
-def detector_flat_correction(input_model : datamodels.DataModel, detflat_model : datamodels.DataModel) -> datamodels.DataModel:
+def detector_flat_correction(input_model : datamodels.L0Model, detflat_model : datamodels.DetectorFlatModel) -> datamodels.DataModel:
     """
     Correct the detector level flat field.
 
