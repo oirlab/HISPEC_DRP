@@ -102,6 +102,7 @@ class BasePrimitive(ProcessingComponent):
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self.on_skip()
+                self._output = dict(output=input)
             else:
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self._output = self._perform()
@@ -284,21 +285,21 @@ class BasePrimitive(ProcessingComponent):
             cal_id = cal_model.meta.cal_id
 
             # If no cal_id, return the model itself.
-            if cal_id is None:
-                self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
-                self._calibrations_used[cal_role] = cal_model
-                return cal_model, None  # No ORM available if not in DB
+            #if cal_id is None:
+            #self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
+            self._calibrations_used[cal_role] = cal_model
+            return cal_model, None  # Return the cal model as is. Ignore ORM.
 
             # Check if the calibration is in the DB.
-            with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
-                local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
-                if local_filepath is not None:
-                    self._calibrations_used[cal_role] = calibration_orm
-                    return cal_model, calibration_orm
-                else:
-                    self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
-                    self._calibrations_used[cal_role] = cal_model
-                    return cal_model, None
+            # with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
+            #     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+            #     if local_filepath is not None:
+            #         self._calibrations_used[cal_role] = calibration_orm
+            #         return cal_model, calibration_orm
+            #     else:
+            #         self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
+            #         self._calibrations_used[cal_role] = cal_model
+            #         return cal_model, None
 
         #######################################
         #### Case 3: CalibrationORM object ####
