@@ -102,6 +102,7 @@ class BasePrimitive(ProcessingComponent):
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self.on_skip()
+                self._output = dict(output=input)
             else:
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self._output = self._perform()
