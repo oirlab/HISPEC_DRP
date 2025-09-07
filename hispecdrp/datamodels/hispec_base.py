@@ -1,13 +1,13 @@
 from __future__ import annotations
 from .base_model import DataModel, CalibrationModel
-from .hispec_meta import HISPECCoreMeta, HISPECCalibrationMeta
+from .hispec_meta import HISPECMeta, HISPECCalibrationMeta
 from .dqflags import DQ_FLAGS
 
 __all__ = ['HISPECDataModel', 'HISPECCalibrationModel']
 
 class HISPECDataModel(DataModel):
 
-    META_MODEL = HISPECCoreMeta
+    META_MODEL = HISPECMeta
 
     META_DEFAULTS = {
         'instrument_name' : 'HISPEC',

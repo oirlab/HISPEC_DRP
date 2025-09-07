@@ -1,6 +1,6 @@
 from .meta_data import FitsField, TargetMeta, CoreMeta, CalibrationCoreMeta
 
-__all__ = ['HISPECCoreMeta', 'HISPECCalibrationMeta']
+__all__ = ['HISPECMeta', 'HISPECCalibrationMeta']
 
 class HISPECTargetMeta(TargetMeta):
     object_fiber1: str | None = FitsField(
@@ -16,17 +16,8 @@ class HISPECTargetMeta(TargetMeta):
         title="Object name in fiber 3"
     )
 
-class HISPECCoreMeta(HISPECTargetMeta, CoreMeta):
+class HISPECMeta(HISPECTargetMeta, CoreMeta):
     ORM_TABLE_NAME = 'HISPEC'
 
-    koa_id: str | None = FitsField(
-        fits_keyword="KOAID",
-        title="Keck Observatory Archive (KOA) ID"
-    )
-    koa_filepath: str | None = FitsField(
-        fits_keyword="KOAFPATH",
-        title="KOA file path"
-    )
-
-class HISPECCalibrationMeta(HISPECCoreMeta, CalibrationCoreMeta):
+class HISPECCalibrationMeta(HISPECMeta, CalibrationCoreMeta):
     pass

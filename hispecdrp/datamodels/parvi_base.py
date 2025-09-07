@@ -1,4 +1,4 @@
-from .parvi_meta import PARVICoreMeta, PARVICalibrationMeta
+from .parvi_meta import PARVIMeta, PARVICalibrationMeta
 from .base_model import DataModel, CalibrationModel
 from .dqflags import DQ_FLAGS
 
@@ -8,7 +8,7 @@ __all__ = ['PARVIDataModel', 'PARVICalibrationModel']
 
 class PARVIDataModel(DataModel):
 
-    META_MODEL = PARVICoreMeta
+    META_MODEL = PARVIMeta
 
     INSTRUMENT_ALIAS = 'PR'
 

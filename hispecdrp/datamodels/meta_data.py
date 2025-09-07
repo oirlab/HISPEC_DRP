@@ -72,7 +72,7 @@ class MetaModel(BaseModel):
             
             assert section_name is not None, f"No Meta section found for {attr}"
             meta_sections[attr] = section_name
-        
+
         if flat:
             return meta_sections
         else:
@@ -217,7 +217,7 @@ class _CoreMeta(MetaModel):
 
 
 class InstrumentMeta(MetaModel):
-    SECTION_NAME = 'Core'
+    SECTION_NAME = 'Instrument'
     instrument_name: str | None = FitsField(
         fits_keyword="INSTRUME",
         title="Name of the instrument used to acquire the data",
@@ -252,7 +252,7 @@ class InstrumentMeta(MetaModel):
 
 
 class ExposureMeta(MetaModel):
-    SECTION_NAME = 'Core'
+    SECTION_NAME = 'Exposure'
     exposure_type : str | None = FitsField(
         fits_keyword="IMTYPE",
         title="Type of exposure",
@@ -288,7 +288,7 @@ class ExposureMeta(MetaModel):
 
 
 class TargetMeta(MetaModel):
-    SECTION_NAME = 'Core'
+    SECTION_NAME = 'Target'
     target_name: str | None = FitsField(
         fits_keyword="OBJECT",
         title="Target or object name, internal or on-sky"
@@ -355,19 +355,31 @@ class TargetMeta(MetaModel):
 
 
 class ProgramMeta(MetaModel):
-    SECTION_NAME = 'Core'
+    SECTION_NAME = 'Program'
     program_name: str | None = FitsField(
         fits_keyword="PROGNAME",
         title="Program name"
     )
 
 
-class CoreMeta(_CoreMeta, InstrumentMeta, ExposureMeta, TargetMeta, ProgramMeta):
+class KOAMeta(MetaModel):
+    SECTION_NAME = 'KOA'
+    koa_id: str | None = FitsField(
+        fits_keyword="KOAID",
+        title="Keck Observatory Archive (KOA) ID"
+    )
+    koa_filepath: str | None = FitsField(
+        fits_keyword="KOAFPATH",
+        title="KOA file path"
+    )
+
+
+class CoreMeta(_CoreMeta, KOAMeta, InstrumentMeta, ExposureMeta, TargetMeta, ProgramMeta):
     pass
 
 
 class CalibrationCoreMeta(MetaModel):
-    SECTION_NAME = 'Core'
+    SECTION_NAME = 'Calibration'
     cal_id: str | None = FitsField(
         fits_keyword="CALID",
         title="Unique identifier",

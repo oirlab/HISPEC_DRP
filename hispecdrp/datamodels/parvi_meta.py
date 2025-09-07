@@ -1,6 +1,6 @@
 from .meta_data import FitsField, TargetMeta, CoreMeta, CalibrationCoreMeta
 
-__all__ = ['PARVICoreMeta', 'PARVICalibrationMeta']
+__all__ = ['PARVIMeta', 'PARVICalibrationMeta']
 
 
 class PARVITargetMeta(TargetMeta):
@@ -22,10 +22,10 @@ class PARVITargetMeta(TargetMeta):
     )
 
 
-class PARVICoreMeta(CoreMeta, PARVITargetMeta):
+class PARVIMeta(CoreMeta, PARVITargetMeta):
     ORM_TABLE_NAME = 'PARVI'
     pass
 
 
-class PARVICalibrationMeta(PARVICoreMeta, CalibrationCoreMeta):
+class PARVICalibrationMeta(PARVIMeta, CalibrationCoreMeta):
     pass
