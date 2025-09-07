@@ -359,10 +359,6 @@ class BasePrimitive(ProcessingComponent):
                 elif os.path.isfile(output_model): # If it's a file path, open the model from that file
                     out_model = datamodels.open(output_model)
                     return out_model
-                elif output_model in datamodels.MODEL_REGISTER: # Name of a model type
-                    model_class = datamodels.model_type_from_name(output_model)
-                    out_model = model_class.from_datamodel(input_model)
-                    return out_model
                 elif any(m.endswith(output_model) for m in datamodels.MODEL_REGISTER):
                     instrument = input_model.meta.instrument_name
                     model_class = datamodels.model_type_from_name(instrument.upper() + output_model)
