@@ -52,7 +52,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
 
             # Get the wavesol norm table for the fiber
-            wavesolnorm_table = getattr(output_model, f'wavesolnorm_fib{fiber}')
+            chebnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
 
             # Setup input vectors
             pixels = params_table['MU_PIX']
@@ -77,11 +77,11 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             fit_results.append(fit_result)
 
             # Set results in model
-            setattr(output_model, f'cc_coeff_fib{fiber}', fit_result['coeffs'])
+            setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
             nx = getattr(output_model, f'spec_fib{fiber}').shape[1]
             pixel_vec = np.arange(nx)
             order_vec = output_model.make_order_vec()
-            wavesolnorm_table.add_row({
+            chebnorm_table.add_row({
                 'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
                 'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],

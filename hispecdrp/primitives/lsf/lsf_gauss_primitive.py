@@ -46,7 +46,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
         for fiber in self.do_fibers:
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
-            lsfnorm_table = getattr(output_model, f'lsfnorm_fib{fiber}')
+            lsfnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
