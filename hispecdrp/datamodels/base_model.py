@@ -44,7 +44,7 @@ class DataModel:
         'meta', '_data', '_filepath', 'ALLOWED_ATTRIBUTES', 'META_DEFAULTS'
     ]
 
-    EXCLUDE_META_KEYS_COPY = ['id']
+    EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename']
 
     def __init__(
         self,
@@ -427,6 +427,9 @@ class DataModel:
         if copy:
             _data = deepcopy(_data)
         meta = deepcopy(model.meta.model_dump())
+        for key in cls.EXCLUDE_META_KEYS_COPY:
+            if key in meta:
+                meta[key] = None
         model_out = cls(data=_data, meta=meta)
         return model_out
     
