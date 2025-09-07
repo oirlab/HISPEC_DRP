@@ -3,43 +3,19 @@ import os
 import astropy.table
 from astropy.io import fits
 from copy import deepcopy
-from typing import TypeVar
-import datetime
+from datetime import datetime
 from .meta_data import MetaModel
 from hispecdrp import __version__
 import numpy as np
 import warnings
-from sqlalchemy.inspection import inspect
 from astropy.io.fits.verify import VerifyWarning
 import uuid
+from .utils import open as datamodel_open
+
+from .extensions import RECEIPT, CALIBRATIONS
 
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
-
-# Receipt columns
-_RECEIPT_COLS = {
-    'PROC_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
-    'DRP_VERSION' : str, # DRP semver
-    'CLASS' : str, # Primitive class
-    'FILENAME' : str, # Input base filename
-    'ARGUMENTS' : str, # JSON rep of args ?
-    'STATUS' : str, # COMPLETED, FAILED, SKIPPED
-}
-
-_CALIBRATION_COLS = {
-    'ID': str, # UUID
-    'FILENAME': str, # Base filename of the calibration
-    'CAL_TYPE': str, # Type of calibration
-    'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
-    'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
-    'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
-    'NOTE': str, # Note for calibration matching ORM
-    'LAST_UPDATED': str, # When calibration was last updated in the DB.
-    'TIME_APPLIED' : str # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
-}
-
-# So that dict[str, A] <: dict[str, B] when A <: B
-_VALID_HDU = TypeVar('T', bound=fits.hdu.base._ValidHDU, covariant=True)
 
 
 class DataModel:
@@ -54,17 +30,9 @@ class DataModel:
     """
 
     EXTENSIONS = {
-        'PRIMARY': {
-            'hdu_type' : fits.PrimaryHDU,
-        },
-        'RECEIPT': {
-            'hdu_type' : fits.BinTableHDU,
-            'columns' : _RECEIPT_COLS
-        },
-        'CALIBRATIONS': {
-            'hdu_type' : fits.BinTableHDU,
-            'columns' : _CALIBRATION_COLS
-        }
+        'PRIMARY' : {'hdu_type' : fits.PrimaryHDU, 'dtype' : None},
+        **RECEIPT,
+        **CALIBRATIONS
     }
 
     INHERIT_EXTENSIONS = True
@@ -280,7 +248,7 @@ class DataModel:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
         if self.meta.last_updated is None:
-            self.meta.last_updated = datetime.datetime.now().isoformat(timespec="milliseconds")
+            self.meta.last_updated = datetime.now().isoformat(timespec="milliseconds")
         self.meta.model_type = self.__class__.__name__
 
     def make_hdu(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = True) -> _VALID_HDU:
@@ -682,7 +650,46 @@ class DataModel:
             raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
         row_index = indices[0]
         return dict(self.calibrations[row_index])
+
+    def update_calibration_table(self, calibration : CalibrationModel | str, note : str | None = None):
+        cal_model = datamodel_open(calibration, meta_only=True)
+        cal_orm = cal_model.to_orm(note=note)
+        row = {}
+        for cal_column in self.calibrations.colnames:
+            if cal_column in cal_orm.__table__.columns:
+                val = getattr(cal_orm, cal_column)
+                if val is None:
+                    val = ''
+                row[cal_column] = val
+        self.calibrations.add_row(row)
     
+    @staticmethod
+    def _generate_filename(
+        instrument_alias : str,
+        date_time : str,
+        suffix : str | None = None
+    ) -> str:
+        """
+        Create a filename for a HISPEC data product.
+        Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}_{suffix}.fits
+
+        Args:
+            instrument_alias (str): The two letter instrument alias.
+            date_time (str): The properly formated datetime of the observation in .
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+
+        Returns:
+            str : The filename
+        """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        filename = f"{instrument_alias}.{date_time}.fits"
+        if suffix:
+            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
+        return filename
 
 
 class CalibrationModel(DataModel):
@@ -704,7 +711,70 @@ class CalibrationModel(DataModel):
         """
         filename = self.meta.filename or 'unknown'
         drp_version = self.meta.drp_version or 'unknown'
-        last_updated = self.meta.last_updated or datetime.datetime.now().isoformat(timespec="milliseconds")
+        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
         UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
         self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
         return self.meta.cal_id
+    
+    @staticmethod
+    def _generate_filename(
+        instrument_alias : str,
+        date_time : str,
+        cal_type : str,
+        master : bool = False,
+        suffix : str | None = None
+    ) -> str:
+        """
+        Create a filename for a PARVI calibration data product.
+
+        Format: {instrument_alias}_{date_time}_[master-]{cal_type}_{suffix}.fits
+            datetime : YYYYMMDDTHHMMSS.
+            cal_type : The type of calibration data.
+            master : Insert 'master-' before the cal_type if `master=True`.
+            suffix : optional suffix
+
+        Args:
+            date_time (str): The date and time of the observation.
+            cal_type (str): The type of calibration data.
+            master (bool, optional): If True, insert 'master-' before the cal_type. Defaults to False.
+            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+
+        Returns:
+            str : The filename
+        """
+        dt = astropy.time.Time(date_time, precision=3, format='isot')
+        dt = dt.datetime
+        midnight = datetime.combine(dt.date(), datetime.min.time())
+        seconds = (dt - midnight).total_seconds()
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        if master:
+            cal_type = f"master-{cal_type}"
+        filename = f"{instrument_alias}.{date_time}.{cal_type}.fits"
+        if suffix is not None:
+            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
+        return filename
+    
+    @classmethod
+    def get_orm_class(cls) -> type[CalibrationORM]:
+        """
+        Get the ORM class for the CalibrationModel metadata model.
+
+        Returns:
+            type[CalibrationORM]: The ORM class.
+        """
+        return cls.META_MODEL.get_orm_class()
+    
+    def to_orm(self, note : str | None = None) -> CalibrationORM:
+        """
+        Convert the CalibrationModel metadata to a CalibrationORM object.
+
+        Args:
+            note (str, optional): An optional note to add to the ORM object. Defaults to None.
+
+        Returns:
+            CalibrationORM: The CalibrationORM object.
+        """
+        cal_orm = self.meta.to_orm()
+        if note is not None:
+            cal_orm.note = note
+        return cal_orm
