@@ -3,7 +3,7 @@ from .base_model import DataModel
 from .hispec_base import HISPECDataModel
 from .parvi_base import PARVIDataModel
 
-from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_barycorr_extensions
+from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions
 
 __all__ = ['L1Model', 'HISPECL1Model', 'PARVIL1Model']
 
@@ -13,6 +13,7 @@ def _create_l1_extensions(num_fibers : int):
         ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC_UNCAL'))
         ext.update(create_specdq_extensions(fiber=fiber))
         ext.update(create_wave_extensions(fiber=fiber))
+        ext.update(create_midtime_extensions(fiber=fiber))
         ext.update(create_barycorr_extensions(fiber=fiber))
     return ext
 

@@ -81,6 +81,7 @@ def create_L0_extensions(name : str = 'DATA') -> dict[str, dict]:
         f'{name_}VAR_POISSON': IMAGE_FLOAT32_HDU,
     }
     ext.update(DQ_L0)
+    ext['MID_TIME'] = IMAGE_FLOAT64_HDU
     return ext
 
 
@@ -318,6 +319,9 @@ BARYCORR_HDU = {
         'BERVW' : np.float64,
     }
 }
+
+def create_midtime_extensions(fiber : str) -> dict[str, dict]:
+    return {f'MID_TIME_FIB{fiber}' : IMAGE_FLOAT64_HDU}
 
 def create_barycorr_extensions(fiber : str) -> dict[str, dict]:
     return {f'BARYCORR_FIB{fiber}' : BARYCORR_HDU}

@@ -3,7 +3,7 @@ from .base_model import DataModel
 from .hispec_base import HISPECDataModel
 from .parvi_base import PARVIDataModel
 
-from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_rv_extensions, create_drift_extensions, create_etalonfitparam_extensions
+from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_rv_extensions, create_drift_extensions, create_etalonfitparam_extensions
 
 __all__ = ['L2Model', 'HISPECL2Model', 'PARVIL2Model']
 
@@ -16,6 +16,7 @@ def create_l2_extensions(num_fibers : int):
         ext.update(create_specdq_extensions(fiber=fiber))
         ext.update(create_wave_extensions(fiber=fiber))
         ext.update(create_drift_extensions(fiber=fiber))
+        ext.update(create_midtime_extensions(fiber=fiber))
         ext.update(create_barycorr_extensions(fiber=fiber))
         ext.update(create_starmodel_extensions(fiber=fiber))
         ext.update(create_throughput_extensions(fiber=fiber))
@@ -31,7 +32,7 @@ class L2Model(DataModel):
 
     @property
     def data_level_suffix(self):
-        return 'specuncal'
+        return 'spec'
     
 
 class HISPECL2Model(HISPECDataModel, L2Model):
