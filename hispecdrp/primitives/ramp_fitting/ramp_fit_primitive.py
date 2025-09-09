@@ -15,6 +15,7 @@ class FitRampPrimitive(BasePrimitive):
         'method' : 'jwst_ols',
         'num_coadd' : 1,
         'max_cores' : 1,
+        'output_model' : 'L0Model',
     }
 
     def _perform(self):
@@ -53,17 +54,12 @@ class FitRampPrimitive(BasePrimitive):
         if dq_out is None:
             dq_out = np.zeros(slopes.shape, dtype=np.uint32)
 
-        # Create output model
-        model_result = datamodels.HISPECL0Model(
-            data=dict(
-                data=slopes,
-                err=slopes_err,
-                var_poisson=var_poisson,
-                var_rnoise=var_rnoise,
-                dq=dq_out
-            ),
-            meta=input_model.meta
-        )
+        output_model = self.get_output_model(input_model)
+        output_model.data = slopes
+        output_model.err = slopes_err
+        output_model.var_poisson = var_poisson
+        output_model.var_rnoise = var_rnoise
+        output_model.dq = dq_out
 
-        return dict(output=model_result, method=self.method)
+        return dict(output=output_model, method=self.method)
     
