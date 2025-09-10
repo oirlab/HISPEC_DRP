@@ -56,7 +56,10 @@ def detector_flat_correction(input_model : datamodels.L0Model, detflat_model : d
         DataModel: The model corrected in place.
     """
     z = input_model.data / detflat_model.data
-    input_model.err = z * np.sqrt((input_model.err / input_model.data)**2 + (detflat_model.err / detflat_model.data)**2)
-    input_model.dq |= detflat_model.dq
+    if hasattr(input_model, 'err'):
+        # approximate error propagation for division of random variables
+        input_model.err = z * np.sqrt((input_model.err / input_model.data)**2 + (detflat_model.err / detflat_model.data)**2)
+    if hasattr(input_model, 'dq'):
+        input_model.dq |= detflat_model.dq
     input_model.data = z
     return input_model

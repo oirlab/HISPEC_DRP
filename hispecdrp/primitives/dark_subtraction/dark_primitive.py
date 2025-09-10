@@ -42,7 +42,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         return dict(output=output_model, dark=dark)
 
 
-def dark_subtraction_rate(input_model, dark_model):
+def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodels.DarkModel) -> datamodels.L0Model:
     """
     Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
 

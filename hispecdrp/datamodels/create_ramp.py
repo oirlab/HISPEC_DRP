@@ -36,6 +36,8 @@ def create_ramp(
         Gain of the detector (e-/ADU).
     flat : np.ndarray or None, optional
         Flat field array (default: None).
+        We assume that flats have been corrected for gain variations already. In this function the gain is applied after
+         the flat, but in the data reduction pipeline the gain correction should be applied first.
     bias : np.ndarray or float, optional
         Bias level to add to the first read (default: 0).
     dark : np.ndarray or float, optional

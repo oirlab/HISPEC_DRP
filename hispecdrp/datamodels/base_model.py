@@ -17,6 +17,7 @@ from .extensions import RECEIPT, CALIBRATIONS
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
 
+from .meta_data import CalibrationCoreMeta,CoreMeta
 
 class DataModel:
     """
@@ -45,6 +46,8 @@ class DataModel:
     ]
 
     EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename']
+
+    META_MODEL = CoreMeta
 
     def __init__(
         self,
@@ -632,6 +635,8 @@ class DataModel:
 
 
 class CalibrationModel(DataModel):
+
+    META_MODEL = CalibrationCoreMeta
 
     CAL_TYPE = None # Type of calibration
 

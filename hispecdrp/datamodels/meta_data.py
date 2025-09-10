@@ -444,7 +444,7 @@ class CoreMeta(_CoreMeta, KOAMeta, InstrumentMeta, ExposureMeta, TargetMeta, Pro
     pass
 
 
-class CalibrationCoreMeta(MetaModel):
+class CalibrationCoreMeta(CoreMeta):
     SECTION_NAME = 'Calibration'
     cal_id: str | None = FitsField(
         fits_keyword="CALID",
