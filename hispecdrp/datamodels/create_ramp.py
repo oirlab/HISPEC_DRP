@@ -10,12 +10,16 @@ def create_ramp(
     readtime : float = 1.7, # seconds between reads
     n_reads : int = 10,
     gain : np.ndarray | float = 2.0, # e-/ADU
+    flat : np.ndarray | None = None,
     bias : np.ndarray | float = 1000, # e-
+    dark : np.ndarray | float = 0, # e-/s/pixel
     read_noise : float | None = 3, # e- standard deviation
     kTC_noise : float | None = 50, # e- standard deviation, None to skip
     nonlin_coeffs : np.ndarray | None = None,
     poisson_noise : bool = True,
     mjd_start : float = 60577.0, # MJD start time, not first read
+    convert_to_uint16 : bool = True,
+    clip_ramps: bool = True,
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -30,8 +34,14 @@ def create_ramp(
         Number of reads in the ramp sequence (default: 10).
     gain : float or np.ndarray
         Gain of the detector (e-/ADU).
+    flat : np.ndarray or None, optional
+        Flat field array (default: None).
     bias : np.ndarray or float, optional
         Bias level to add to the first read (default: 0).
+    dark : np.ndarray or float, optional
+        Dark current level to add to each read (e-/s/pixel) (default: 0)
+        The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
+        before the flat fielding step.
     read_noise : float or None, optional
         Standard deviation of read noise (e-) for each read (default: 3 e-).
     kTC_noise : float or None, optional
@@ -42,8 +52,10 @@ def create_ramp(
         If True, apply Poisson noise to the signal (default: True).
     mjd_start : float, optional
         Modified Julian Date for the start time (default: 60577.0).
-
-    Returns
+    convert_to_uint16 : bool, optional
+        If True, round and convert the output data to np.uint16 (default: True).
+    clip_ramps: bool, optional
+        If True, clip_ramps the output data to the range of np.uint16 (0 to 65535) (default: True).
     -------
     dict[str, np.ndarray]
         Dictionary containing:
@@ -64,7 +76,13 @@ def create_ramp(
     times.add_row((0, mjd_start, 0))
 
     data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
+    _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     dq = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.int16)
+
+    if not isinstance(dark, np.ndarray):
+        _dark = np.full(source.shape, dark, dtype=np.float32)
+    else:
+        _dark = dark.astype(np.float32)
 
     # First, compute photon counts only (no read noise or bias)
     for i in np.arange(1,n_reads):
@@ -72,11 +90,21 @@ def create_ramp(
 
         if poisson_noise:
             data[i, :, :] = data[i-1, :, :] + np.random.poisson(lam=source * readtime, size=source.shape)# Add new read
+            _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + np.random.poisson(lam=_dark * readtime, size=source.shape)
         else:
             data[i, :, :] = data[i-1, :, :] + source * readtime
+            _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + _dark * readtime
 
         mjd = mjd_start + t / 86400.0
         times.add_row((i, mjd, t))
+
+    if flat is not None:
+        data *= flat[None, :, :]
+
+    data += _dark_UTR
+
+    # Apply gain
+    data /= gain
 
     # apply non-linear behavior
     if nonlin_coeffs is not None:
@@ -84,16 +112,13 @@ def create_ramp(
 
     # Add read noise
     if read_noise is not None:
-        data += np.random.normal(loc=0, scale=read_noise, size=data.shape)
+        data += np.random.normal(loc=0, scale=read_noise/gain, size=data.shape)
 
     # Add bias (and kTC noise if desired)
-    data += bias
+    data += bias/gain
     if kTC_noise is not None:
-        data += np.random.normal(loc=0, scale=kTC_noise, size=source.shape)
+        data += np.random.normal(loc=0, scale=kTC_noise/gain, size=source.shape)[None, :, :]
 
-    # Apply gain
-    if gain:
-        data /= gain
 
     # Check for negative values before returning
     if np.any(data < 0):
@@ -101,10 +126,12 @@ def create_ramp(
                          "Data needs to be all positive to be converted to np.uint16."
                          "Suggestion: Raise bias value.")
 
-    # Clip data to maximum value of uint16
-    data = np.clip(data, 0, np.iinfo(np.uint16).max)
+    if clip_ramps:
+        # Clip data to maximum value of uint16
+        data = np.clip(data, 0, np.iinfo(np.uint16).max)
 
-    # Round and convert to uint16
-    data = np.round(data).astype(np.uint16)
+    if convert_to_uint16:
+        # Round and convert to uint16
+        data = np.round(data).astype(np.uint16)
 
     return dict(times=times, data=data, dq=dq)
