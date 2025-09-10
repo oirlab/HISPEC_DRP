@@ -1,7 +1,7 @@
 from hispecdrp import datamodels
 from ..base_pipeline import BasePipeline
-from ...primitives import (CheckSaturationPrimitive,NonlinearCorrectionPrimitive, FitRampPrimitive,
-                           DarkSubtractionPrimitive, BiasSubtractionPrimitive,
+from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearCorrectionPrimitive,
+                           FitRampPrimitive, DarkSubtractionPrimitive, BiasSubtractionPrimitive,
                            DetectorFlatPrimitive, DetectorGainPrimitive)
 
 __all__ = ['Stage0Pipeline']
@@ -10,6 +10,7 @@ __all__ = ['Stage0Pipeline']
 class Stage0Pipeline(BasePipeline):
 
     PRIMITIVES = {
+        'dq_init': DQInitPrimitive,
         'saturation': CheckSaturationPrimitive,
         'bias': BiasSubtractionPrimitive,
         'nonlin_corr': NonlinearCorrectionPrimitive,
@@ -21,7 +22,8 @@ class Stage0Pipeline(BasePipeline):
 
     def _perform(self):
         model_to_process = datamodels.open(self.input)
-        result = self.saturation.apply(model_to_process)
+        result = self.dq_init.apply(model_to_process)
+        result = self.saturation.apply(result)
         result = self.bias.apply(result)
         result = self.nonlin_corr.apply(result)
         result = self.ramp_fit.apply(result)
