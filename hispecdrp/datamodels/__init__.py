@@ -28,6 +28,7 @@ from .level2 import *
 
 # Calibration models
 from .instrument_params import *
+from .saturation import *
 from .dark import *
 from .bias import *
 from .detector_flat import *

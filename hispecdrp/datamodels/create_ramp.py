@@ -130,7 +130,7 @@ def create_ramp(
 
     if clip_ramps:
         # Clip data to maximum value of uint16
-        data = np.clip(data, 0, np.iinfo(np.uint16).max)
+        data = np.clip(data, 0, float(np.iinfo(np.uint16).max))
 
     if convert_to_uint16:
         # Round and convert to uint16

@@ -4,6 +4,7 @@ import numpy as np
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
+from ...datamodels.dqflags import DQ_FLAGS
 
 __all__ = ['FitRampPrimitive']
 
@@ -29,9 +30,11 @@ class FitRampPrimitive(BasePrimitive):
         if self.method.lower() == 'ols':
             result = fit_ramps_ols(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), b=0)
             slopes, slopes_err = result['slope'], result['slope_err']
+            dq_out = np.bitwise_or.reduce(input_model.dq & DQ_FLAGS["DO_NOT_USE"], axis=0)
         elif self.method.lower() in ('mcds', 'cds'):
             result = fit_ramps_mcds(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
+            dq_out = np.bitwise_or.reduce(input_model.dq & DQ_FLAGS["DO_NOT_USE"], axis=0)
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
             result = fit_ramps_jwst(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), max_cores=self.max_cores, algorithm=self.method.lower())
             slopes, slopes_err = result['slope'], result['slope_err']
