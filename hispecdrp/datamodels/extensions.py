@@ -63,7 +63,7 @@ READTIMES = {
 
 #### Raw
 
-DQ_RAW = {'DQ': IMAGE_FLOAT32_HDU}
+DQ_RAW = {'DQ_RAW': IMAGE_FLOAT32_HDU}
 
 #### L0 (rate maps)
 

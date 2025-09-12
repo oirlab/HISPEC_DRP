@@ -26,7 +26,7 @@ class CheckSaturationPrimitive(BasePrimitive):
         # Load the input model
         input_model = datamodels.open(self.input)
 
-        # Get the dark model
+        # Get the saturation threshold model
         sat, _ = self.get_calibration(input_model, 'saturation')
         saturation_model = datamodels.open(sat)
 
@@ -36,7 +36,7 @@ class CheckSaturationPrimitive(BasePrimitive):
         # Log
         self.log.info(f"Applying saturation check with {saturation_model} to {input_model}")
 
-        # Perform dark subtraction
+        # Perform saturation check
         output_model = check_saturation(result, saturation_model)
 
         # Output
@@ -55,9 +55,9 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
         RampModel: A new ramp model with saturated pixels flagged in the DQ array.
     """
     where_saturated = np.where(input_model.data >= saturation_model.data)
-    if hasattr(input_model, 'dq'):
-        input_model.dq[where_saturated] |= DQ_FLAGS["SATURATED"] | DQ_FLAGS["DO_NOT_USE"]
-        input_model.dq |= saturation_model.dq
+    if hasattr(input_model, 'DQ_RAW'):
+        input_model.dq_raw[where_saturated] |= DQ_FLAGS["SATURATED"] | DQ_FLAGS["DO_NOT_USE"]
+        input_model.dq_raw |= saturation_model.dq[None,:,:]
     else:
-        raise AttributeError("Input model has no DQ array to flag saturation.")
+        raise AttributeError("Input model has no DQ_RAW array to flag saturation.")
     return input_model

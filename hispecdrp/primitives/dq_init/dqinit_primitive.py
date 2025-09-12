@@ -35,8 +35,8 @@ class DQInitPrimitive(BasePrimitive):
         # Log
         self.log.info(f"Applying DQ initialization with {dq} to {input_model}")
 
-        if hasattr(input_model, 'dq'):
-            result.dq = input_model.dq | dq_model.dq
+        if hasattr(input_model, 'DQ_RAW'):
+            result.dq_raw = input_model.dq_raw | dq_model.dq[None,:,:]
 
         # Output
         return dict(output=result, bias=dq)

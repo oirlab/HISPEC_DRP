@@ -25,7 +25,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Load the input model
         input_model = datamodels.open(self.input)
 
-        # Get the dark model
+        # Get the bias model
         bias, _ = self.get_calibration(input_model, 'bias')
         bias_model = datamodels.open(bias)
 
@@ -35,7 +35,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Log
         self.log.info(f"Applying bias correction with {bias} to {input_model}")
 
-        # Perform dark subtraction
+        # Perform bias subtraction
         output_model = bias_subtraction(result, bias_model)
 
         # Output
@@ -51,9 +51,9 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
         bias_model: Bias calibration model.
     
     Returns:
-        RampModel: The dark-subtracted data.
+        RampModel: The bias-subtracted data.
     """
     input_model.data = input_model.data - bias_model.data[None, :, :]
-    if hasattr(input_model, 'dq'):
-        input_model.dq |= bias_model.dq
+    if hasattr(input_model, 'DQ_RAW'):
+        input_model.dq_raw |= bias_model.dq[None,:,:]
     return input_model

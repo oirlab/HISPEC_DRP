@@ -79,7 +79,7 @@ def create_ramp(
 
     data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-    dq = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.int16)
+    dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.int16)
 
     if not isinstance(dark, np.ndarray):
         _dark = np.full(source.shape, dark, dtype=np.float32)
@@ -136,4 +136,4 @@ def create_ramp(
         # Round and convert to uint16
         data = np.round(data).astype(np.uint16)
 
-    return dict(times=times, data=data, dq=dq)
+    return dict(times=times, data=data, dq_raw=dq_raw)
