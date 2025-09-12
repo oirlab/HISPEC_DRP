@@ -9,11 +9,6 @@ class BasePipeline(ProcessingComponent):
     Base pipeline class for managing a sequence of primitives.
     
     ARGUMENTS:
-        save_result (str | None):
-            - `None` : Let primitives control saving results.
-            - `'all'` : Save the result from each primitive. Passes output_dir to each primitive if not already set.
-            - `'final'` : Save only the final result of the pipeline. This sets save_result to False for all primitives, and the final is saved after returning from the last primitive.
-        
         output_dir (str | None): Directory to save results. Can be passed to primitives if save_result == 'all'
         suffix (str | None): Suffix to append to the output filename for the pipeline only.
         full_output (bool): If True, return the full output of all primitives.
@@ -92,19 +87,8 @@ class BasePipeline(ProcessingComponent):
             ) or getattr(self, 'full_output', False)
             self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
             self._output = self._perform()
-            if isinstance(self._output['output'], datamodels.DataModel):
-                if getattr(self, 'save_result', False) is True:
-                    self.save_model(self._output['output'])
-            elif isinstance(self._output['output'], list):
-                for result in self._output['output']:
-                    if isinstance(result, datamodels.DataModel):
-                        if getattr(self, 'save_result', False):
-                            self.save_model(result)
-            elif isinstance(self._output['output'], dict):
-                for key in self._output['output']:
-                    if isinstance(self._output['output'][key], datamodels.DataModel):
-                        if getattr(self, 'save_result', False):
-                            self.save_model(self._output['output'][key])
+            if self.save_result:
+                self.save_output()
         except Exception as e:
             self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
