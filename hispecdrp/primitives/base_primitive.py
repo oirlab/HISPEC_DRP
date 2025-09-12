@@ -110,7 +110,7 @@ class BasePrimitive(ProcessingComponent):
                     self._status = "COMPLETE"
                 self.finalize_output()
                 if self.save_result:
-                    self.save_output(self._output['output'])
+                    self.save_output()
         except Exception as e:
             self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
             self._output = dict(output=input)
