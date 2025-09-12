@@ -12,6 +12,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
         'suffix' : 'nonlin',
+        'ouput_model' : 'input',
     }
 
     CALIBRATIONS = {
@@ -25,7 +26,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         input_model = datamodels.open(self.input)
         nonlin, _ = self.get_calibration(input_model, 'nonlin')
         nonlin_model = datamodels.open(nonlin)
-        result = input_model.copy()
+        result = self.get_output_model(input_model)
         self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
         data = result.data.astype(np.float64)
         correct_nonlinearity(data, nonlin_model.coeffs)

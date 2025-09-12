@@ -5,8 +5,9 @@ The effective line spread function (LSF) is modeled with a Gaussian where the wi
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.gausslsf.HISPECGaussianLSFModel`
-* :py:class:`~hispecdrp.datamodels.parvi.gausslsf.PARVIGaussianLSFModel`
+* :py:class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel`
+* :py:class:`~hispecdrp.datamodels.gausslsf.HISPECGaussianLSFModel`
+* :py:class:`~hispecdrp.datamodels.gausslsf.PARVIGaussianLSFModel`
 
 **Calibration type:** lsf
 

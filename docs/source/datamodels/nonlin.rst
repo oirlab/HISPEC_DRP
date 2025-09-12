@@ -5,8 +5,9 @@ Specifies the nonlinearity of the detector readout response with a unique polyno
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.nonlin.HISPECNonlinearCorrectionModel`
-* :py:class:`~hispecdrp.datamodels.parvi.nonlin.PARVINonlinearCorrectionModel`
+* :py:class:`~hispecdrp.datamodels.nonlin.NonlinearCorrectionModel`
+* :py:class:`~hispecdrp.datamodels.nonlin.HISPECNonlinearCorrectionModel`
+* :py:class:`~hispecdrp.datamodels.nonlin.PARVINonlinearCorrectionModel`
 
 **Calibration type:** nonlin
 

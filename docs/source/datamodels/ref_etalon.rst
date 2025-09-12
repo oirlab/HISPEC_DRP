@@ -5,8 +5,9 @@ Contains the reference etalon and corresponding parameters for wavelength drift 
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.ref_etalon.HISPECReferenceEtalonModel`
-* :py:class:`~hispecdrp.datamodels.parvi.ref_etalon.PARVIReferenceEtalonModel`
+* :py:class:`~hispecdrp.datamodels.ref_etalon.ReferenceEtalonModel`
+* :py:class:`~hispecdrp.datamodels.ref_etalon.HISPECReferenceEtalonModel`
+* :py:class:`~hispecdrp.datamodels.ref_etalon.PARVIReferenceEtalonModel`
 
 **Calibration type:** ref_etalon
 

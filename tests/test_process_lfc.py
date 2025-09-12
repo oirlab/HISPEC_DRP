@@ -1,7 +1,7 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
-from hispecdrp.calibrations import PARVICalibrationORM
+#from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
 
 import numpy as np
@@ -19,8 +19,6 @@ def test_process_lfc_parvi(tmp_path, datadir):
         lfc_path,
         do_orders=do_orders,
         do_fibers=do_fibers,
-        lfc_nu0=datamodels.parvi.LFC_NU_0,
-        lfc_delta_nu=datamodels.parvi.LFC_DELTA_NU,
     )
     assert isinstance(line_fits_model, datamodels.PARVILFCFitParamsModel)
     assert line_fits_model.meta.cal_type == 'lfc_fitparams'
@@ -43,7 +41,7 @@ def test_process_lfc_parvi(tmp_path, datadir):
     fit_results = wavesol_result['fit_results']
     assert isinstance(wavesol_model, datamodels.PARVILFCWavesolModel)
     assert wavesol_model.meta.cal_type == 'lfc_wavesol'
-    assert wavesol_model.cc_coeff_fib3.shape == (deg_intra_order + 1, deg_inter_order + 1)
+    assert wavesol_model.cheb_coeffs_fib3.shape == (deg_intra_order + 1, deg_inter_order + 1)
     # Overall contribution from wavesol over bandpass is < 5 m/s (actual ~2 for parvi) # NOTE: REVISIT THIS TEST!
     assert np.std(fit_results[0]['residuals_vel'][fit_results[0]['good']]) / np.sqrt(len(fit_results[0]['good'])) < 5
     assert getattr(wavesol_model, f'wave_fib{do_fibers[0]}').shape == getattr(wavesol_model, f'spec_fib{do_fibers[0]}').shape
@@ -73,8 +71,6 @@ def test_process_lfc_parvi(tmp_path, datadir):
         'fit_lfc_lines' : {
             'do_orders': do_orders,
             'do_fibers': do_fibers,
-            'lfc_nu0': datamodels.parvi.LFC_NU_0,
-            'lfc_delta_nu': datamodels.parvi.LFC_DELTA_NU,
         },
         'lfc_wavesol' : {
             'fit_orders': do_orders,
@@ -95,8 +91,8 @@ def test_process_lfc_parvi(tmp_path, datadir):
     lsf_model = result['lsf']
 
     # Check that the calibration was saved to the cache
-    with CalibrationStore(orm_class=PARVICalibrationORM) as store:
+    with CalibrationStore(orm_class=lsf_model.meta.get_orm_class()) as store:
         results = store.local_db.query()
-        assert len(results) == 2 # lfc_wavesol and lsf
+        assert len(results) == 2, f"Found {len(results)} in DB, expected 2." # lfc_wavesol and lsf
         assert results[0].cal_type == 'lfc_wavesol'
         assert results[1].cal_type == 'lsf'

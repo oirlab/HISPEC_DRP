@@ -18,6 +18,7 @@ Calibration Models
 .. toctree::
    :maxdepth: 1
 
+   instrument_params
    nonlin
    dark
    detector_flat

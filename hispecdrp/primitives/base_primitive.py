@@ -20,6 +20,7 @@ class BasePrimitive(ProcessingComponent):
 
     ARGUMENTS = {
         'run': True,
+        'output_model' : 'input',
     }
 
     def __init__(
@@ -101,6 +102,7 @@ class BasePrimitive(ProcessingComponent):
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self.on_skip()
+                self._output = dict(output=input)
             else:
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self._output = self._perform()
@@ -254,7 +256,8 @@ class BasePrimitive(ProcessingComponent):
             except ValueError:
                 pass
             if is_uuid:
-                with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS, use_cached=use_cached) as store:
+                input_model = datamodels.open(name, meta_only=True)
+                with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class(), use_cached=use_cached) as store:
                     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
                     if local_filepath is not None:
                         self._calibrations_used[cal_role] = calibration_orm
@@ -282,21 +285,21 @@ class BasePrimitive(ProcessingComponent):
             cal_id = cal_model.meta.cal_id
 
             # If no cal_id, return the model itself.
-            if cal_id is None:
-                self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
-                self._calibrations_used[cal_role] = cal_model
-                return cal_model, None  # No ORM available if not in DB
+            #if cal_id is None:
+            #self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
+            self._calibrations_used[cal_role] = cal_model
+            return cal_model, None  # Return the cal model as is. Ignore ORM.
 
             # Check if the calibration is in the DB.
-            with CalibrationStore(orm_class=cal_model.CAL_ORM_CLASS, use_cached=True) as store:
-                local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
-                if local_filepath is not None:
-                    self._calibrations_used[cal_role] = calibration_orm
-                    return cal_model, calibration_orm
-                else:
-                    self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
-                    self._calibrations_used[cal_role] = cal_model
-                    return cal_model, None
+            # with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
+            #     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+            #     if local_filepath is not None:
+            #         self._calibrations_used[cal_role] = calibration_orm
+            #         return cal_model, calibration_orm
+            #     else:
+            #         self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
+            #         self._calibrations_used[cal_role] = cal_model
+            #         return cal_model, None
 
         #######################################
         #### Case 3: CalibrationORM object ####
@@ -318,8 +321,8 @@ class BasePrimitive(ProcessingComponent):
             selector_kwargs = calibration_config.get('selector_kwargs', {})
             selector = selector_class(**selector_kwargs)
             input_model = datamodels.open(name, meta_only=True)
-            with CalibrationStore(orm_class=input_model.CAL_ORM_CLASS) as store:
-                local_filepath, calibration_orm = store.get_calibration(input_model.meta.to_flat_dict(), selector=selector)
+            with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
+                local_filepath, calibration_orm = store.get_calibration(input_model.meta.model_dump(), selector=selector)
                 return local_filepath, calibration_orm
 
         # Else raise error
@@ -357,12 +360,8 @@ class BasePrimitive(ProcessingComponent):
                 elif os.path.isfile(output_model): # If it's a file path, open the model from that file
                     out_model = datamodels.open(output_model)
                     return out_model
-                elif output_model in datamodels.MODEL_REGISTER: # Name of a model type
-                    model_class = datamodels.model_type_from_name(output_model)
-                    out_model = model_class.from_datamodel(input_model)
-                    return out_model
                 elif any(m.endswith(output_model) for m in datamodels.MODEL_REGISTER):
-                    instrument = input_model.meta.instrument.name
+                    instrument = input_model.meta.instrument_name
                     model_class = datamodels.model_type_from_name(instrument.upper() + output_model)
                     out_model = model_class.from_datamodel(input_model)
                     return out_model
@@ -377,3 +376,15 @@ class BasePrimitive(ProcessingComponent):
         else:
             # Default
             return input_model
+        
+    @staticmethod
+    def get_do_traces(input_model : datamodels.DataModel, do_fibers : list[int] | None = None, do_orders : list[int] | None = None) -> tuple[list[str], list[int]]:
+        """
+        Helper to get the fibers and orders to process.
+        NOTE: This will need updated once we dynamically determine which fibers contain what data.
+        """
+        if do_fibers is None:
+            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
+        if do_orders is None:
+            do_orders = input_model.make_order_vec()
+        return do_fibers, do_orders

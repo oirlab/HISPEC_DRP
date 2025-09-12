@@ -10,9 +10,9 @@ Specification
 Extensions
 ++++++++++
 
-The ``EXTENSIONS`` class attribute specifies the different HDUs (Header Data Units) contained in the FITS files. It is a dictionary where the keys are the HDU names and the values are the HDU types. Data models do not need to specifiy entries specified in a parent class.
+The ``EXTENSIONS`` class attribute specifies the different HDUs (Header Data Units) contained in the FITS files. It is a dictionary where the keys are the HDU names and the values contain basic information like the HDU type and column names for tables. Data models do not need to specifiy entries specified in a parent class.
 
-For example, the default ``DataModel.EXTENSIONS`` attribute is specified as follows:
+For example, the default ``DataModel.EXTENSIONS`` attribute is specified as follows and is automatically inherited for each subtype.
 
 .. code-block:: python
 
@@ -34,23 +34,80 @@ For example, the default ``DataModel.EXTENSIONS`` attribute is specified as foll
     }
 
 
-Metadata
-++++++++
-
-Metadata is stored in the ``meta`` attribute and accessed with attribute-style access. Metadata is validated against a list of schema files specified by the class attribute ``HEADER_SCHEMAS``, which are also inherited by default by any subclass. See :doc:`Metadata schema <metadata_schema>`.
-
-The ``HEADER_SCHEMAS`` attribute for the base HISPEC data model :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` class is simply specified as follows:
+Specifying an image HDU:
 
 .. code-block:: python
 
-    HEADER_SCHEMAS = [
-        'hispec_core.yaml',
-    ]
+    EXTENSIONS = {
+        'MYDATA': {
+            'hdu_type' : fits.ImageHDU,
+        }
+    }
 
-**All schemas:**
+**In practice, there are many helpful methods for creating these extensions in :py:mod:`~hispecdrp.datamodels.extensions`.**
 
-* `HISPEC. <https://github.com/oirlab/HISPEC_DRP/tree/main/hispecdrp/datamodels/hispec/schemas>`_
-* `PARVI. <https://github.com/oirlab/HISPEC_DRP/tree/main/hispecdrp/datamodels/parvi/schemas>`_
+
+Metadata
+++++++++
+
+Metadata for each datamodel is specified with a `pydantic <https://docs.pydantic.dev/latest/>`_ model. Each entry in the FITS file header (e.g., each FITS header `Card`) corresponds to a pydantic `Field <https://docs.pydantic.dev/latest/concepts/fields/>`_. A special constructor is provided to create pydantic Fields tailored for FITS cards:
+
+.. automethod:: hispecdrp.datamodels.meta_data.FitsField
+   :noindex:
+
+A collection of like-fields are specified within a subtype of :py:class:`~hispecdrp.datamodels.meta_data.MetaModel`, which itself is a pydantic `Model <https://docs.pydantic.dev/latest/concepts/models/>`_. Each datamodel must specify the class attribute ``META_MODEL`` (if not specified by a parent type) which is the Python class specifying the final collection of fields for that datamodel. Fields from parent types are automatically adopted, and the final structure is always flat.
+
+The **live** metadata resides in the datamodel's ``meta`` attribute, which supports attribute-style access: ``model.meta.<attr>``. Trying to set an attribute to an invalid value will raise a `pydantic.ValidationError <https://docs.pydantic.dev/latest/usage/models/#model-validation>`_.
+
+.. code-block:: python
+    :caption: Example metadata attribute access
+
+    from hispecdrp import datamodels
+    file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
+    model = datamodels.open(file_path)
+    print(model.meta.datetime_obs) # -> '2024-09-24T00:00:00.000'
+
+    model.meta.datetime_obs = 1 # Raises ValidationError!
+
+    # How to get information on a field
+    print(model.meta.__class__.model_fields['datetime_obs']) # -> <Summary of FieldInfo...>
+
+
+Declare new MetaModel
+^^^^^^^^^^^^^^^^^^^^^
+
+Instrument agnostic MetaModels live in :py:mod:`~hispecdrp.datamodels.meta_data` and provide nearly all metadata fields. Below are the special models declared for HISPEC.
+
+.. code-block:: python
+
+    class HISPECTargetMeta(TargetMeta):
+        object_fiber1: str | None = FitsField(
+            fits_keyword="OBJFIB1",
+            title="Object name in fiber 1"
+        )
+        object_fiber2: str | None = FitsField(
+            fits_keyword="OBJFIB2",
+            title="Object name in fiber 2"
+        )
+        object_fiber3: str | None = FitsField(
+            fits_keyword="OBJFIB3",
+            title="Object name in fiber 3"
+        )
+
+    class HISPECCoreMeta(HISPECTargetMeta, CoreMeta):
+        ORM_TABLE_NAME = 'HISPEC'
+
+        koa_id: str | None = FitsField(
+            fits_keyword="KOAID",
+            title="Keck Observatory Archive (KOA) ID"
+        )
+        koa_filepath: str | None = FitsField(
+            fits_keyword="KOAFPATH",
+            title="KOA file path"
+        )
+
+    class HISPECCalibrationMeta(HISPECCoreMeta, CalibrationCoreMeta):
+        pass
 
 
 Data Handling
@@ -59,7 +116,7 @@ Data Handling
 Open Model
 ++++++++++
 
-The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and constructs the appropriate data model class for that file as specified by the header key `model_type`.
+The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and constructs the appropriate data model class for that data product as specified by the header key `DATAMODL`.
 
 
 .. code-block:: python
@@ -67,11 +124,11 @@ The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and const
     from hispecdrp import datamodels
     file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
     model = datamodels.open(file_path)
-    print(model.meta.exposure.datetime_obs) # -> '2024-09-24T00:00:00.000'
+    print(model.meta.datetime_obs) # -> '2024-09-24T00:00:00.000'
     print(model.meta.model_type) # -> 'HISPECL0Model'
-    print(model.meta.exposure.exposure_type) # -> 'SCI'
-    print(model.meta.instrument.spectrograph )# -> 'BSPEC'
-    print(model.meta.instrument.mode) # -> 'YJHK'
+    print(model.meta.exposure_type) # -> 'SCI'
+    print(model.meta.spectrograph) # -> 'BSPEC'
+    print(model.meta.instrument_mode) # -> 'YJHK'
     print(model.data.shape) # -> (4096, 4096)
 
 .. autofunction:: hispecdrp.datamodels.open
@@ -85,12 +142,8 @@ Alternatively, a file can be passed to the constructor for the appropriate datam
     from hispecdrp import datamodels
     file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
     model = datamodels.HISPECL0Model(file_path)
-    print(model.meta.exposure.datetime_obs) # -> '2024-09-24T00:00:00.000'
-    print(model.meta.model_type) # -> 'HISPECL0Model'
-    print(model.meta.exposure.exposure_type) # -> 'SCI'
-    print(model.meta.instrument.spectrograph )# -> 'BSPEC'
-    print(model.meta.instrument.mode) # -> 'YJHK'
-    print(model.data.shape) # -> (4096, 4096)
+    ...
+
 
 .. autofunction:: hispecdrp.datamodels.DataModel.__init__
 
@@ -98,7 +151,7 @@ Alternatively, a file can be passed to the constructor for the appropriate datam
 Save Model
 ++++++++++
 
-Saving a datamodel can be done with `DataModel.save`:
+Saving a datamodel is done with `DataModel.save`:
 
 
 .. code-block:: python
@@ -114,34 +167,28 @@ Saving a datamodel can be done with `DataModel.save`:
 Implement New Data Model
 ------------------------
 
-To implement a new data model, create a new class that inherits from the appropriate base type:
+1. To implement a new data model, create a new class that inherits from the appropriate base type:
 
-1. :py:class:`~hispecdrp.datamodels.base_model.DataModel` - Base class for all data models. Inherit from if implementing a new instrument.
+- :py:class:`~hispecdrp.datamodels.base_model.DataModel` - Base class for all data models. Inherit from if implementing a new instrument.
 
-2. :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` - Base class for HISPEC data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based HISPEC models or new abstract HISPEC models.
+- :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel` - Base class for all calibration data models. Inherit from if implementing a new calibration model.
 
-3. :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` - Base class for PARVI data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based PARVI models or new abstract PARVI models.
+- :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` - Base class for HISPEC data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based HISPEC models or new abstract HISPEC models.
 
-4. :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECCalibrationModel` - Base class for HISPEC calibration data models, subtype of :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel`.
+- :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` - Base class for PARVI data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based PARVI models or new abstract PARVI models.
 
-5. :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVICalibrationModel` - Base class for PARVI calibration data models, subtype of :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel`.
+- :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECCalibrationModel` - Base class for HISPEC calibration data models, subtype of :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` and :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel`.
+
+- :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVICalibrationModel` - Base class for PARVI calibration data models, subtype of :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` and :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel`.
 
 
-**Specify additional extensions** in ``EXTENSIONS`` and metadata in ``HEADER_SCHEMAS``.
+2. Specify the pydantic metadata model at the attribute ``META_MODEL`` if different from the parent datamodel's ``META_MODEL``.
 
-**Calibration models must also specify the** ``CAL_TYPE`` **attribute.**: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to weparate words if necessary.
+3. Calibration models must also specify the ``CAL_TYPE`` attribute: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to separate words if necessary (e.g. ``lfc_wavesol``).
 
-**Implement the ``data_level_suffix`` property**, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. See :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
+4. Define the ``data_level_suffix`` *property*, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. For example, see :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
 
 For example, the HISPEC LFC fit parameters model is defined as follows:
 
-.. literalinclude:: ../../../hispecdrp/datamodels/hispec/lfcfitparams.py
+.. literalinclude:: ../../../hispecdrp/datamodels/lfcfitparams.py
    :language: python
-
-
-Metadata
---------
-
-.. toctree::
-
-   metadata_schema
