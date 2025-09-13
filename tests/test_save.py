@@ -4,6 +4,7 @@ from hispecdrp.utils import download_gdrive_file
 
 import numpy as np
 import os
+import copy
 
 def test_save_result_primitive(tmp_path, datadir):
 
@@ -59,6 +60,7 @@ def test_save_result_primitive(tmp_path, datadir):
     assert line_fits_model._filepath == output_path
     assert os.path.isfile(output_path)
 
+
 def test_save_result_pipeline(tmp_path, datadir):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     do_fibers = ['3']
@@ -91,16 +93,19 @@ def test_save_result_pipeline(tmp_path, datadir):
     }
 
     # Test saving a particular primitive's result.
-    _prim_args = prim_args.copy()
+    _prim_args = copy.deepcopy(prim_args)
     _prim_args['lfc_wavesol']['save_result'] = True
     _prim_args['lfc_wavesol']['output_dir'] = tmp_path
+    _prim_args['fit_lfc_lines']['full_output'] = True 
     pipe = ProcessLFCPipeline()
     result = pipe.apply(lfc_path, prim_args=_prim_args)
-    wavesol_model = result['wavesol']
+    wavesol_model = result['output']['wavesol']
     assert os.path.isfile(wavesol_model._filepath)
 
     # Test pipeline level saving
-    _prim_args = prim_args.copy()
+    _prim_args = copy.deepcopy(prim_args)
+    _prim_args['fit_lfc_lines']['save_result'] = True
+    _prim_args['fit_lfc_lines']['output_dir'] = None # Make sure the pipeline sets this
     suffix = 'saved-from-pipeline'
     pipe = ProcessLFCPipeline()
     result = pipe.apply(lfc_path, prim_args=_prim_args, save_result=True, output_dir=tmp_path, suffix=suffix)
@@ -110,3 +115,7 @@ def test_save_result_pipeline(tmp_path, datadir):
     assert lsf_model._filepath == str(tmp_path / lsf_model.generate_filename(suffix=suffix))
     assert os.path.isfile(wavesol_model._filepath)
     assert os.path.isfile(lsf_model._filepath)
+
+    # Test line file is saved to output_dir as well
+    lfc_model = datamodels.open(lfc_path)
+    assert os.path.isfile(str(tmp_path / datamodels.PARVILFCFitParamsModel.from_datamodel(lfc_model).generate_filename()))
