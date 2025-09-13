@@ -9,7 +9,7 @@ class BasePipeline(ProcessingComponent):
     Base pipeline class for managing a sequence of primitives.
     
     ARGUMENTS:
-        output_dir (str | None): Directory to save results. Can be passed to primitives if save_result == 'all'
+        output_dir (str | None): Directory to save results.
         suffix (str | None): Suffix to append to the output filename for the pipeline only.
         full_output (bool): If True, return the full output of all primitives.
     """
@@ -43,9 +43,6 @@ class BasePipeline(ProcessingComponent):
         for key, value in kwargs.items():
             if key in self.ARGUMENTS:
                 setattr(self, key, value)
-            # NOTE: Ignore invalid keys?
-
-        return kwargs
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
@@ -64,6 +61,9 @@ class BasePipeline(ProcessingComponent):
                         prim_instance.set_args(**{arg_name: prim_args[prim_alias][arg_name]})
                     else:
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {list(prim_instance.ARGUMENTS.keys())}")
+
+                if self.output_dir is not None and prim_instance.output_dir is None and prim_instance.save_result:
+                    prim_instance.output_dir = self.output_dir
             else:
                 raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.PRIMITIVES.keys())}")
     
