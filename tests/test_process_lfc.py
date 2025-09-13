@@ -1,7 +1,6 @@
 from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, CalculateChebyshev2DWLSPrimitive, CalculateGaussianLSFPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
-#from hispecdrp.calibrations import PARVICalibrationORM
 from koa_middleware import CalibrationStore
 
 import numpy as np
@@ -28,17 +27,17 @@ def test_process_lfc_parvi(tmp_path, datadir):
     prim = CalculateChebyshev2DWLSPrimitive()
     deg_inter_order = 6
     deg_intra_order = 9
-    wavesol_result = prim.apply(
+    wavesol_model = prim.apply(
         line_fits_model,
         fit_orders=do_orders,
         opt_weights=True,
-        full_output=True,
         do_fibers=['3'],
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
     )
-    wavesol_model = wavesol_result['output']
-    fit_results = wavesol_result['fit_results']
+    #wavesol_model = wavesol_result['output']
+    #fit_results = wavesol_result['fit_results']
+    fit_results = prim.fit_results
     assert isinstance(wavesol_model, datamodels.PARVILFCWavesolModel)
     assert wavesol_model.meta.cal_type == 'lfc_wavesol'
     assert wavesol_model.cheb_coeffs_fib3.shape == (deg_intra_order + 1, deg_inter_order + 1)
@@ -51,15 +50,13 @@ def test_process_lfc_parvi(tmp_path, datadir):
     deg_inter_order = 3
     deg_intra_order = 3
     
-    result = prim.apply(
+    lsf_model = prim.apply(
         wavesol_model,
-        full_output=True,
         do_fibers=do_fibers,
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
         fit_orders=do_orders,
     )
-    lsf_model = result['output']
     assert isinstance(lsf_model, datamodels.PARVIGaussianLSFModel)
     assert lsf_model.meta.cal_type == 'lsf'
     assert getattr(lsf_model, f'lsf_params_fib{do_fibers[0]}').shape == getattr(lsf_model, f'spec_fib{do_fibers[0]}').shape
@@ -87,7 +84,6 @@ def test_process_lfc_parvi(tmp_path, datadir):
         },
     }
     result = pipe.apply(lfc_path, prim_args=prim_args)
-    wavesol_model = result['wavesol']
     lsf_model = result['lsf']
 
     # Check that the calibration was saved to the cache

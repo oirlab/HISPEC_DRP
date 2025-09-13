@@ -96,8 +96,8 @@ class BasePrimitive(ProcessingComponent):
         try:
             # This allows pipelines to directly pass the result from a primitive to the next primitive if full_output is True or False.
             # Pipelines can pass in a datamodel or a dict object, in which case the first arg is fetched.
-            if isinstance(input, dict) and 'output' in input:
-                input = input['output']
+            #if isinstance(input, dict) and 'output' in input:
+            #    input = input['output']
             self.set_args(input=input, **kwargs)
             if not self._pre_condition():
                 self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
@@ -120,10 +120,15 @@ class BasePrimitive(ProcessingComponent):
                 raise e
             return input
         
-        if self.full_output:
-            return self._output
+        # Get main output and store extra outputs
+        if self._output is not None:
+            output = self._output.get('output', None)
+            #self._extra_output.update({k: v for k, v in self._output.items() if k != 'output'})
         else:
-            return self._output['output']
+            output = None
+
+        # Return main output
+        return output
 
     def set_args(self, **kwargs) -> dict:
         """
@@ -385,3 +390,8 @@ class BasePrimitive(ProcessingComponent):
         if do_orders is None:
             do_orders = input_model.make_order_vec()
         return do_fibers, do_orders
+    
+    def __getattr__(self, attr):
+        if '_output' in self.__dict__ and attr in self._output:
+            return self._output[attr]
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")

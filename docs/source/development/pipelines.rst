@@ -45,27 +45,23 @@ Pipelines may also utilize configuration files. An example configuration for the
 Logging
 +++++++
 
-By default, pipelines will pass any logging-specific config to each primitive it uses.
+Pipelines will pass any logging-specific config to each primitive it uses.
 
 
 Saving Results
 ++++++++++++++
 
-The argument ``save_result`` can take on different values for a pipeline:
+The argument ``save_result`` behaves the same as in primitives and will save whatever output is returned from a pipeline's ``_perform`` method. This will typically be the output of the last primitive called (including a skipped primitive), but this is not enforced and a Pipeline can choose to return what is needs to just like primitives.
 
-- ``all``: Pipeline will save results of every primitive.
-- ``final``: Pipeline will only save the final result of the pipeline.
-- ``None``: Primitives will manage their own saving behavior.
-
-Primitives will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments.
+A primitive will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments and that primitive's ``save_result`` argument is ``True``.
 
 Pipeline Methods
 ----------------
 
 Below are most methods one can implement or override when creating custom pipelines. Note some are required for certain behavior. See the full API for full documentation of available methods.
 
-* _perform(self) -> Arguments
-    - Required. This method takes in no arguments. It contains the primary logic of the pipeline and returns an instance of ``Arguments`` where the attribute ``name`` contains the primary output model. Extra outputs may be stored in the output ``Arguments`` object. If ``full_output`` is ``True``, the entire ``Arguments`` object is returned, otherwise only the ``name`` attribute is returned. _perform will call each primitive's ``apply`` method in any order specified, but should reflect the ordering in ``PRIMITIVES``.
+* _perform(self) -> dict[str, Any]
+    - Required. This method takes in no arguments. _perform should call each primitive's ``apply`` method in the necessary manner to needed, but should reflect the ordering in ``PRIMITIVES`` for consistency (not enforced). It contains the primary logic of the pipeline and returns a ``dict`` where the key ``output`` contains the primary output model or models. Extra outputs may be stored in the output ``dict``.
 
 
 Implementing a Pipeline
