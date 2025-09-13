@@ -140,9 +140,6 @@ class BasePrimitive(ProcessingComponent):
                 setattr(self, key, value)
             elif hasattr(self, 'CALIBRATIONS') and key in self.CALIBRATIONS:
                 setattr(self, key, value)
-            # silently ignore invalid keys
-        
-        return kwargs
     
     def on_skip(self):
         """
