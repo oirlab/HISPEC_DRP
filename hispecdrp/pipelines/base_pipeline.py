@@ -1,6 +1,5 @@
 import os
 from .. import utils
-from .. import datamodels
 
 from ..primitives.base_primitive import ProcessingComponent
 
@@ -30,18 +29,6 @@ class BasePipeline(ProcessingComponent):
         self.init_config(config)
         self.set_args(**kwargs)
         self.init_primitives(prim_args)
-
-    def set_args(self, **kwargs) -> dict:
-        """
-        Set arguments directly as top-level attributes on the instance.
-        """
-        if not hasattr(self, '_args_initialized'):
-            self.init_args()
-            self._args_initialized = True
-        
-        for key, value in kwargs.items():
-            if key in self.ARGUMENTS:
-                setattr(self, key, value)
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
@@ -68,7 +55,7 @@ class BasePipeline(ProcessingComponent):
     
     def init_primitives(self, prim_args : dict | None = None):
         """
-        Initialize each primitive in the primitive table.
+        Initialize each primitive object in the primitive table passing the appropriate configuration.
         """
         for prim_alias, prim_class in self.PRIMITIVES.items():
             primitive = prim_class(config=self.config.get('primitives', {}).get(prim_alias, {}))
@@ -76,6 +63,17 @@ class BasePipeline(ProcessingComponent):
         self.set_prim_args(prim_args)
 
     def apply(self, input, prim_args : dict | None = None, **kwargs):
+        """
+        The main method a user calls to run a pipeline.
+
+        Args:
+            input: The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
+            prim_args (dict | None): A dictionary of primitive-specific arguments. Keys must match the PRIMITIVES dictionary keys.
+            **kwargs: Additional keyword arguments to set or override for this pipeline. These will override any arguments set during initialization.
+        
+        Returns:
+            dict: The main output of the pipeline (self._output['output']), which is typically a datamodel or a container of datamodels. This is typically the last primitive's output, but is up to the pipeline implementation.
+        """
         self.init_logger()
         self._output = None
         try:
@@ -84,7 +82,7 @@ class BasePipeline(ProcessingComponent):
             self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
             self._output = self._perform()
             if self.save_result:
-                self.save_output()
+                self.save_output() # Already finalized in the primitive's perform.
         except Exception as e:
             self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
@@ -102,7 +100,8 @@ class BasePipeline(ProcessingComponent):
     
     def init_config(self, config : dict | str | None = None) -> dict:
         """
-        Initialize the configuration for this primitive.
+        Initialize the configuration for the pipeline and all primitives.
+        Any sub-config files are also loaded.
 
         Args:
             config (dict | str | None): The configuration object or path to the configuration file.
