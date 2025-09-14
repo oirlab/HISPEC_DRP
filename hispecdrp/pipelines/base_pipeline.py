@@ -11,7 +11,6 @@ class BasePipeline(ProcessingComponent):
     ARGUMENTS:
         output_dir (str | None): Directory to save results.
         suffix (str | None): Suffix to append to the output filename for the pipeline only.
-        full_output (bool): If True, return the full output of all primitives.
     """
 
     PRIMITIVES = {}
@@ -82,9 +81,6 @@ class BasePipeline(ProcessingComponent):
         try:
             self.set_args(input=input, **kwargs)
             self.set_prim_args(prim_args)
-            self.full_output = any(
-                getattr(getattr(self, prim_alias), 'full_output', False) for prim_alias in self.PRIMITIVES
-            ) or getattr(self, 'full_output', False)
             self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
             self._output = self._perform()
             if self.save_result:
@@ -94,11 +90,15 @@ class BasePipeline(ProcessingComponent):
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
             return input
-        
-        if getattr(self, 'full_output', False):
-            return self._output
-        else:
-            return self._output['output']
+
+        # Get main output
+        output = self._output.get('output', None) if self._output is not None else None
+
+        # Reset input
+        self.input = None
+
+        # Return main output
+        return output
     
     def init_config(self, config : dict | str | None = None) -> dict:
         """
