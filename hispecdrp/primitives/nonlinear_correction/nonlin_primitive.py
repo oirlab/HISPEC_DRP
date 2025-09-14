@@ -11,7 +11,7 @@ __all__ = ['NonlinearCorrectionPrimitive']
 class NonlinearCorrectionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'nonlin',
+        'suffix' : 'nonlincorr',
         'ouput_model' : 'input',
     }
 
