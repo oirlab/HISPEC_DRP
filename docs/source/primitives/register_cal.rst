@@ -19,5 +19,7 @@ None.
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECCalibrationModel`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel`
     The input file or data model to register in the local calibration database.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: None).

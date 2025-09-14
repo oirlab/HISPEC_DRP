@@ -19,10 +19,12 @@ The appropriate master dark calibration is subtracted from the input data. The i
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level0.HISPECL0Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.level0.L0Model`
     The input file or data model to process. For now this is a level 0 (rate map) data product.
 - **suffix** : ``str`` | ``None``
     Suffix to append to the output filename (default: 'darksub').
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'input'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
 
 Calibrations
 ------------

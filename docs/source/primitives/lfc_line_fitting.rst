@@ -19,8 +19,12 @@ Each LFC line is first identified with `scipy.signal.find_peaks <https://docs.sc
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.level2.L2Model`
     The input file or data model to process. Should be a level 0 (rate map) data product.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: None).
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'LFCFitParamsModel'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
 - **fwhm_bounds** : ``tuple[float, float]``
     The bounds for the FWHM of the fit.
 - **mu_bounds** : ``tuple[float, float]``

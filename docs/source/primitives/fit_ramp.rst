@@ -19,17 +19,19 @@ Several methods are supported, see below.
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.ramp.RampModel`
     The raw (UTR) model to fit slopes to.
 - **suffix** : ``str`` | ``None``
     Suffix to append to the output filename (default: 'rampfit').
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'L0Model'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
 - **method** : ``str``
     The method to use to fit the ramps. Defaults to ``'jwst_ols'``.
     
     - **ols**: Ordinary Least Squares with numba. No weights.
     - **cds**: Correlated double sampling.
     - **mcds**: Multiple correlated double sampling (see argument num_coadd).
-    - **jwst_ols**: Ordinary least squares method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
+    - **jwst_gls**: Approximated generalized least squares method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
     - **jwst_likely**: Likelihood-based method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
 
 - **num_coadd** : ``int``
