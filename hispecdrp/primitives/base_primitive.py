@@ -106,6 +106,11 @@ class BasePrimitive(ProcessingComponent):
             else:
                 self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
                 self._output = self._perform()
+                if isinstance(self._output, dict):
+                    if 'output' not in self._output:
+                        self._output = dict(output=self._output)
+                else:
+                    self._output = dict(output=self._output)
                 if self._status is None:
                     self._status = "COMPLETE"
                 self.finalize_output()
@@ -120,12 +125,11 @@ class BasePrimitive(ProcessingComponent):
                 raise e
             return input
         
-        # Get main output and store extra outputs
-        if self._output is not None:
-            output = self._output.get('output', None)
-            #self._extra_output.update({k: v for k, v in self._output.items() if k != 'output'})
-        else:
-            output = None
+        # Get main output
+        output = self._output.get('output', None) if self._output is not None else None
+
+        # Reset input
+        self.input = None
 
         # Return main output
         return output
