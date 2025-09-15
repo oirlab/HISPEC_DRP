@@ -44,7 +44,8 @@ class DarkSubtractionPrimitive(BasePrimitive):
 
 def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodels.DarkModel) -> datamodels.L0Model:
     """
-    Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
+    Subtract the dark model from an input rate (level 0) model.
+    Dark rates are DN/s not e-/s. Dark should be corrected before gain correction.
 
     Args:
         input_model: Input level 0 model.

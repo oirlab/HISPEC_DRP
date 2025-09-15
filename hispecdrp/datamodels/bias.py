@@ -8,12 +8,10 @@ __all__ = ['BiasModel', 'HISPECBiasModel', 'PARVIBiasModel']
 
 
 class BiasModel(CalibrationModel):
-    name = "BIAS"
     EXTENSIONS = {
-        f'{name}': IMAGE_FLOAT32_HDU,
-        f'{name}_ERR': IMAGE_FLOAT32_HDU,
-        f'{name}_VAR_RNOISE': IMAGE_FLOAT32_HDU,
-        f'{name}_VAR_POISSON': IMAGE_FLOAT32_HDU,
+        f'BIAS': IMAGE_FLOAT32_HDU,
+        f'BIAS_ERR': IMAGE_FLOAT32_HDU,
+        f'kTC': IMAGE_FLOAT32_HDU,
         **DQ_L0
     }
     CAL_TYPE = 'bias'

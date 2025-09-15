@@ -49,11 +49,11 @@ CALIBRATIONS = {
 
 #### Raw
 
-DQ_RAW = {'DQ_RAW': IMAGE_FLOAT32_HDU}
+DQ_RAW = {'DQ_RAW': IMAGE_UINT32_HDU}
 
 #### L0 (rate maps)
 
-DQ_L0 = {'DQ': IMAGE_FLOAT32_HDU}
+DQ_L0 = {'DQ': IMAGE_UINT32_HDU}
 
 def create_L0_extensions(name : str = 'RATE') -> dict[str, dict]:
     ext = {

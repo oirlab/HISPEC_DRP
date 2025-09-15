@@ -8,7 +8,7 @@ __all__ = ['DarkModel', 'HISPECDarkModel', 'PARVIDarkModel']
 
 
 class DarkModel(CalibrationModel):
-    name = "RATE"
+    name = "RATE" # needs to be DN/s
     EXTENSIONS = {
         f'{name}': IMAGE_FLOAT32_HDU,
         f'{name}_ERR': IMAGE_FLOAT32_HDU,

@@ -9,7 +9,7 @@ def create_ramp(
     source : np.ndarray, # e- / s / pixel including all sources
     readtime : float = 1.7, # seconds between reads
     n_reads : int = 10,
-    gain : np.ndarray | float = 2.0, # e-/ADU
+    gain : np.ndarray | float = 1.0, # e-/ADU
     flat : np.ndarray | None = None,
     bias : np.ndarray | float = 1000, # e-
     dark : np.ndarray | float = 0, # e-/s/pixel
@@ -73,7 +73,7 @@ def create_ramp(
 
     data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-    dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.int16)
+    dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint32)
 
     if not isinstance(dark, np.ndarray):
         _dark = np.full(source.shape, dark, dtype=np.float32)

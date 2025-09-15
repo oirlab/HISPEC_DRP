@@ -13,6 +13,7 @@ import numpy as np
 
 from numba import njit
 import numpy as np
+from ...datamodels.dqflags import DQ_FLAGS
 
 __all__ = ['fit_ramps_ols', 'fit_ramps_mcds','fit_ramps_likely']
 
@@ -135,9 +136,33 @@ def fit_ramps_ols(times, ramps, b=None):
 ##############################
 
 
-@njit(nogil=True)
-def _fit_ramp_mcds(times, ramp, num_coadd=1):
+# @njit(nogil=True)
+def first_with_flag(dq: np.ndarray, flag: np.uint32) -> int:
+    """
+    Return the index of the first element whose DQ has `flag` set.
+    Returns dq.size if none found.
+    """
+    n = dq.size
+    for i in range(n):
+        if (dq[i] & flag) != 0:
+            return i
+    return n
+
+# @njit(nogil=True)
+def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
     n = len(times)
+    first_do_not_use = first_with_flag(dq,np.uint32(1))
+    # first_saturated = first_with_flag(dq,DQ_FLAGS["SATURATED"])
+    # if first_saturated <= first_do_not_use:
+    #     first_do_not_use = first_saturated
+
+    # if not enough reads for mcds, return 0 slope and 0 error
+    if first_do_not_use < 2*num_coadd:
+        return 0,-1,-1
+
+    times = times[:first_do_not_use]
+    ramp = ramp[:first_do_not_use]
+
     n1 = np.sum(ramp[:num_coadd])
     n2 = np.sum(ramp[-num_coadd:])
     d1 = np.sum(times[:num_coadd])
@@ -148,33 +173,72 @@ def _fit_ramp_mcds(times, ramp, num_coadd=1):
         d1 = d1 / num_coadd
         d2 = d2 / num_coadd
     slope = (n2 - n1) / (d2 - d1)
-    residuals = ramp - slope * times
-    slope_err = np.sqrt(np.sum(residuals**2) / (n - 1) / np.sum(times**2))
-    return slope, slope_err
+
+    var_rnoise = (2*num_coadd)*rdnoise**2/ (d2 - d1)**2
+    var_poisson = np.abs((slope+dark_current)*gain)/(d2 - d1)
+
+    return slope, var_rnoise,var_poisson
 
 
-@njit(nogil=True)
-def _fit_ramps_mcds(times, ramps, num_coadd=1):
+# @njit(nogil=True)
+def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current, num_coadd=1):
     _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
-    slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], slope_errors[i, j] = _fit_ramp_mcds(times, ramps[:, i, j], num_coadd=num_coadd)
-    return slope_image, slope_errors
+            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j]  = _fit_ramp_mcds(times, ramps[:, i, j],
+                                                                   dq[:,i,j], rdnoise[i,j], gain[i,j], dark_current[i,j],
+                                                                   num_coadd=num_coadd)
+    return slope_image, var_rnoise, var_poisson
 
 
-def fit_ramps_mcds(times, ramps, num_coadd=1):
+def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, num_coadd=1):
     """
     Fits ramps using the MCDS method.
 
     Args:
         times (np.ndarray): Read times.
         ramps (np.ndarray): 3D array of ramp data with shape (n_reads, ny, nx).
+        dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
+        rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
+        gain (np.ndarray): 2D array of gain across detector (ny, nx)
+        dark_current (np.ndarray): 2D array of dark current (DN/s) across detector (ny, nx).
+            Caution: Only use when the ramps have been already dark subtracted.
         num_coadd (int): Number of coadds.
 
     Returns:
-        dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.
+        dict[str,
+         np.ndarray]: Dictionary with keys matching L0 rate objects.
     """
-    result = _fit_ramps_mcds(times, ramps, num_coadd=num_coadd)
-    return dict(slope=result[0], slope_err=result[1])
+    n_reads,ny, nx = ramps.shape
+    # print(dq & np.uint32(1))
+    # exit()
+
+    # Create remaining dummy variables if input arrays are not provided
+    if dq is None:
+        dq = np.zeros((ny, nx)).astype(np.uint32)
+    if rdnoise is None:
+        rdnoise = np.zeros((ny, nx)).astype(np.float32)
+    if gain is None:
+        gain = np.ones((ny, nx)).astype(np.float32)
+    if dark_current is None:
+        dark_current = np.zeros((ny, nx)).astype(np.float32)
+
+    result = _fit_ramps_mcds(times, ramps,dq, rdnoise, gain, dark_current, num_coadd=num_coadd)
+
+    output = {}
+    output['rate'] = result[0]
+    output['rate_err'] = np.sqrt(result[1] + result[2])
+    output['rate_var_rnoise'] = result[1]
+    output['rate_var_poisson'] = result[2]
+    output['DQ'] = np.bitwise_or.reduce(dq, axis=0)
+
+    where_bad = np.where(result[1] == -1)
+    output['DQ'][where_bad] |= DQ_FLAGS["DO_NOT_USE"]
+    output['rate'][where_bad] = np.nan
+    output['rate_err'][where_bad] = np.nan
+    output['rate_var_rnoise'][where_bad] = np.nan
+    output['rate_var_poisson'][where_bad] = np.nan
+    return output
