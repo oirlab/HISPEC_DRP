@@ -54,7 +54,7 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
     Returns:
         RampModel: A new ramp model with saturated pixels flagged in the DQ array.
     """
-    where_saturated = np.where(input_model.data >= saturation_model.data)
+    where_saturated = np.where(input_model.data >= saturation_model.sat_thresh[None,:,:])
     if hasattr(input_model, 'DQ_RAW'):
         input_model.dq_raw[where_saturated] |= DQ_FLAGS["SATURATED"] | DQ_FLAGS["DO_NOT_USE"]
         input_model.dq_raw |= saturation_model.dq[None,:,:]

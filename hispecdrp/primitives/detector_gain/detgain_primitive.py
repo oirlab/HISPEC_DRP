@@ -55,9 +55,9 @@ def detector_gain_correction(input_model : datamodels.L0Model, detgain_model : d
     Returns:
         DataModel: The model corrected in place.
     """
-    input_model.data = input_model.data * detgain_model.data
+    input_model.rate = input_model.rate * detgain_model.gain
     if hasattr(input_model, 'err'):
-        input_model.err = np.sqrt(detgain_model.data) * input_model.err
+        input_model.err = np.sqrt(detgain_model.gain) * input_model.err
     if hasattr(input_model, 'dq'):
         input_model.dq |= detgain_model.dq
     return input_model

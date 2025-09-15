@@ -17,7 +17,7 @@ def create_ramp(
     kTC_noise : float | None = 50, # e- standard deviation, None to skip
     nonlin_coeffs : np.ndarray | None = None,
     poisson_noise : bool = True,
-    mjd_start : float = 60577.0, # MJD start time, not first read
+    mjd_start : float = 60577.0, # MJD start time of first read of first pixel
     convert_to_uint16 : bool = True,
     clip_ramps: bool = True,
 ) -> dict[str, np.ndarray]:
@@ -71,12 +71,6 @@ def create_ramp(
         If any value in the output 'data' array is negative.
     """
 
-    times = astropy.table.Table(
-        names=['READNUM', 'TIMES', 'EXPTIME'],
-        dtype=[np.int16, np.float64, np.float64]
-    )
-    times.add_row((0, mjd_start, 0))
-
     data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.int16)
@@ -88,8 +82,6 @@ def create_ramp(
 
     # First, compute photon counts only (no read noise or bias)
     for i in np.arange(1,n_reads):
-        t = i * readtime
-
         if poisson_noise:
             data[i, :, :] = data[i-1, :, :] + np.random.poisson(lam=source * readtime, size=source.shape)# Add new read
             _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + np.random.poisson(lam=_dark * readtime, size=source.shape)
@@ -97,8 +89,6 @@ def create_ramp(
             data[i, :, :] = data[i-1, :, :] + source * readtime
             _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + _dark * readtime
 
-        mjd = mjd_start + t / 86400.0
-        times.add_row((i, mjd, t))
 
     if flat is not None:
         data *= flat[None, :, :]
@@ -136,4 +126,7 @@ def create_ramp(
         # Round and convert to uint16
         data = np.round(data).astype(np.uint16)
 
-    return dict(times=times, data=data, dq_raw=dq_raw)
+    _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
+                 mjd_start=mjd_start)
+
+    return dict(data=data, dq_raw=dq_raw, meta=_meta)

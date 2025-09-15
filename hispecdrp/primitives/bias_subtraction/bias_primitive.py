@@ -53,7 +53,7 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
     Returns:
         RampModel: The bias-subtracted data.
     """
-    input_model.data = input_model.data - bias_model.data[None, :, :]
+    input_model.data = input_model.data - bias_model.bias[None, :, :]
     if hasattr(input_model, 'DQ_RAW'):
         input_model.dq_raw |= bias_model.dq[None,:,:]
     return input_model

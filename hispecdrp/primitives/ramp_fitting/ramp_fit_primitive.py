@@ -25,18 +25,20 @@ class FitRampPrimitive(BasePrimitive):
 
         var_poisson = None
         var_rnoise = None
-        dq_out = None
+
+        delta_readtimes = input_model.get_delta_readtimes()
+        first_read_mjd = input_model.get_first_read_mjd()
 
         if self.method.lower() == 'ols':
-            result = fit_ramps_ols(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), b=0)
+            result = fit_ramps_ols(delta_readtimes, input_model.data.astype(np.float32), b=0)
             slopes, slopes_err = result['slope'], result['slope_err']
-            dq_out = np.bitwise_or.reduce(input_model.dq_raw & DQ_FLAGS["DO_NOT_USE"], axis=0)
+            dq_out = np.bitwise_or.reduce(input_model.dq_raw, axis=0)
         elif self.method.lower() in ('mcds', 'cds'):
-            result = fit_ramps_mcds(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), num_coadd=self.num_coadd)
+            result = fit_ramps_mcds(delta_readtimes, input_model.data.astype(np.float32), num_coadd=self.num_coadd)
             slopes, slopes_err = result['slope'], result['slope_err']
-            dq_out = np.bitwise_or.reduce(input_model.dq_raw & DQ_FLAGS["DO_NOT_USE"], axis=0)
+            dq_out = np.bitwise_or.reduce(input_model.dq_raw, axis=0)
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
-            result = fit_ramps_jwst(input_model.times['EXPTIME'].astype(np.float32), input_model.data.astype(np.float32), max_cores=self.max_cores, algorithm=self.method.lower())
+            result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32), max_cores=self.max_cores, algorithm=self.method.lower())
             slopes, slopes_err = result['slope'], result['slope_err']
             # Pass Poisson, read noise, dq arrays out
             var_poisson = result['var_poisson']
@@ -52,17 +54,13 @@ class FitRampPrimitive(BasePrimitive):
         if var_rnoise is None:
             var_rnoise = np.zeros(slopes.shape, dtype=np.float32) # TODO: Calculate effective read noise from fit (?)
 
-        # For now, create a simple DQ model for the L0 model
-        # Updated to 32-bit to follow data model - CDK
-        if dq_out is None:
-            dq_out = np.zeros(slopes.shape, dtype=np.uint32)
-
         output_model = self.get_output_model(input_model)
-        output_model.data = slopes
-        output_model.err = slopes_err
-        output_model.var_poisson = var_poisson
-        output_model.var_rnoise = var_rnoise
+        output_model.rate = slopes
+        output_model.rate_err = slopes_err
+        output_model.rate_var_poisson = var_poisson
+        output_model.rate_var_rnoise = var_rnoise
         output_model.dq = dq_out
+        output_model.mid_time = first_read_mjd
 
         return dict(output=output_model, method=self.method)
     

@@ -47,20 +47,6 @@ CALIBRATIONS = {
 }
 
 
-#### Read times
-
-READTIMES = {
-    'TIMES': {
-        'hdu_type' : fits.BinTableHDU,
-        'columns' : {
-            'READNUM' : np.uint16,
-            'TIMESTART' : np.float64,
-            'EXPTIME' : np.float64,
-        }
-    }
-}
-
-
 #### Raw
 
 DQ_RAW = {'DQ_RAW': IMAGE_FLOAT32_HDU}
@@ -69,16 +55,12 @@ DQ_RAW = {'DQ_RAW': IMAGE_FLOAT32_HDU}
 
 DQ_L0 = {'DQ': IMAGE_FLOAT32_HDU}
 
-def create_L0_extensions(name : str = 'DATA') -> dict[str, dict]:
-    if name == 'DATA':
-        name_ = ''
-    else:
-        name_ = f'{name}_'
+def create_L0_extensions(name : str = 'RATE') -> dict[str, dict]:
     ext = {
         f'{name}': IMAGE_FLOAT32_HDU,
-        f'{name_}ERR': IMAGE_FLOAT32_HDU,
-        f'{name_}VAR_RNOISE': IMAGE_FLOAT32_HDU,
-        f'{name_}VAR_POISSON': IMAGE_FLOAT32_HDU,
+        f'{name}_ERR': IMAGE_FLOAT32_HDU,
+        f'{name}_VAR_RNOISE': IMAGE_FLOAT32_HDU,
+        f'{name}_VAR_POISSON': IMAGE_FLOAT32_HDU,
     }
     ext.update(DQ_L0)
     ext['MID_TIME'] = IMAGE_FLOAT64_HDU

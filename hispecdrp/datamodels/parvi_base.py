@@ -18,7 +18,8 @@ class PARVIDataModel(DataModel):
         'order_start' : 125,
         'order_end' : 85,
         'lfc_nu0' : scipy.constants.c / (1559.91370 * 1E-9),
-        'lfc_delta_nu' : 10.000000174E9
+        'lfc_delta_nu' : 10.000000174E9,
+        'clock_rate' : 88802.1680217,  # in Hz. Computed from assuming 2048^2 pixels, 32 channels, 1.476 s per full-frame read.
     }
 
     DQ_FLAGS = DQ_FLAGS

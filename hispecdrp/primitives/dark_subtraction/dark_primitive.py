@@ -53,7 +53,7 @@ def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodel
     Returns:
         HISPECL0Model: The dark-subtracted data.
     """
-    input_model.data = input_model.data - dark_model.data
+    input_model.rate = input_model.rate - dark_model.rate
     if hasattr(input_model, 'err'):
         input_model.err = np.sqrt(input_model.err**2 + dark_model.err**2)
     if hasattr(input_model, 'DQ_RAW'):
