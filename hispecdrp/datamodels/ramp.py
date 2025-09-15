@@ -37,7 +37,7 @@ class RampModel(DataModel):
         Note: This implementation does not model any specific instrument and is meant for testing only.
         """
         n_reads, ny, nx = self.data.shape
-        first_read_mjd = np.arange(ny*nx, dtype = np.float32).reshape(ny, nx)/self.meta.clock_rate
+        first_read_mjd = self.meta.mjd_start+np.arange(ny*nx, dtype = np.float32).reshape(ny, nx)/self.meta.clock_rate
         return first_read_mjd
 
 class HISPECRampModel(HISPECDataModel, RampModel):
