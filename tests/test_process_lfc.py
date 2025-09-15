@@ -35,8 +35,6 @@ def test_process_lfc_parvi(tmp_path, datadir):
         deg_inter_order=deg_inter_order,
         deg_intra_order=deg_intra_order,
     )
-    #wavesol_model = wavesol_result['output']
-    #fit_results = wavesol_result['fit_results']
     fit_results = prim.fit_results
     assert isinstance(wavesol_model, datamodels.PARVILFCWavesolModel)
     assert wavesol_model.meta.cal_type == 'lfc_wavesol'

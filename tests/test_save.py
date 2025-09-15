@@ -2,7 +2,6 @@ from hispecdrp import datamodels
 from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
 
-import numpy as np
 import os
 import copy
 
@@ -99,7 +98,7 @@ def test_save_result_pipeline(tmp_path, datadir):
     _prim_args['fit_lfc_lines']['full_output'] = True 
     pipe = ProcessLFCPipeline()
     result = pipe.apply(lfc_path, prim_args=_prim_args)
-    wavesol_model = result['output']['wavesol']
+    wavesol_model = result['wavesol']
     assert os.path.isfile(wavesol_model._filepath)
 
     # Test pipeline level saving
