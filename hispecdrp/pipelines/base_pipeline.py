@@ -1,6 +1,5 @@
 import os
 from .. import utils
-from .. import datamodels
 
 from ..primitives.base_primitive import ProcessingComponent
 
@@ -9,14 +8,8 @@ class BasePipeline(ProcessingComponent):
     Base pipeline class for managing a sequence of primitives.
     
     ARGUMENTS:
-        save_result (str | None):
-            - `None` : Let primitives control saving results.
-            - `'all'` : Save the result from each primitive. Passes output_dir to each primitive if not already set.
-            - `'final'` : Save only the final result of the pipeline. This sets save_result to False for all primitives, and the final is saved after returning from the last primitive.
-        
-        output_dir (str | None): Directory to save results. Can be passed to primitives if save_result == 'all'
+        output_dir (str | None): Directory to save results.
         suffix (str | None): Suffix to append to the output filename for the pipeline only.
-        full_output (bool): If True, return the full output of all primitives.
     """
 
     PRIMITIVES = {}
@@ -36,21 +29,6 @@ class BasePipeline(ProcessingComponent):
         self.init_config(config)
         self.set_args(**kwargs)
         self.init_primitives(prim_args)
-
-    def set_args(self, **kwargs) -> dict:
-        """
-        Set arguments directly as top-level attributes on the instance.
-        """
-        if not hasattr(self, '_args_initialized'):
-            self.init_args()
-            self._args_initialized = True
-        
-        for key, value in kwargs.items():
-            if key in self.ARGUMENTS:
-                setattr(self, key, value)
-            # NOTE: Ignore invalid keys?
-
-        return kwargs
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
@@ -69,12 +47,15 @@ class BasePipeline(ProcessingComponent):
                         prim_instance.set_args(**{arg_name: prim_args[prim_alias][arg_name]})
                     else:
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {list(prim_instance.ARGUMENTS.keys())}")
+
+                if self.output_dir is not None and prim_instance.output_dir is None and prim_instance.save_result:
+                    prim_instance.output_dir = self.output_dir
             else:
                 raise ValueError(f"Invalid primitive argument '{prim_alias}' for {self.__class__.__name__}. Valid arguments are: {list(self.PRIMITIVES.keys())}")
     
     def init_primitives(self, prim_args : dict | None = None):
         """
-        Initialize each primitive in the primitive table.
+        Initialize each primitive object in the primitive table passing the appropriate configuration.
         """
         for prim_alias, prim_class in self.PRIMITIVES.items():
             primitive = prim_class(config=self.config.get('primitives', {}).get(prim_alias, {}))
@@ -82,43 +63,45 @@ class BasePipeline(ProcessingComponent):
         self.set_prim_args(prim_args)
 
     def apply(self, input, prim_args : dict | None = None, **kwargs):
+        """
+        The main method a user calls to run a pipeline.
+
+        Args:
+            input: The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
+            prim_args (dict | None): A dictionary of primitive-specific arguments. Keys must match the PRIMITIVES dictionary keys.
+            **kwargs: Additional keyword arguments to set or override for this pipeline. These will override any arguments set during initialization.
+        
+        Returns:
+            dict: The main output of the pipeline (self._output['output']), which is typically a datamodel or a container of datamodels. This is typically the last primitive's output, but is up to the pipeline implementation.
+        """
         self.init_logger()
         self._output = None
         try:
             self.set_args(input=input, **kwargs)
             self.set_prim_args(prim_args)
-            self.full_output = any(
-                getattr(getattr(self, prim_alias), 'full_output', False) for prim_alias in self.PRIMITIVES
-            ) or getattr(self, 'full_output', False)
             self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
             self._output = self._perform()
-            if isinstance(self._output['output'], datamodels.DataModel):
-                if getattr(self, 'save_result', False) is True:
-                    self.save_model(self._output['output'])
-            elif isinstance(self._output['output'], list):
-                for result in self._output['output']:
-                    if isinstance(result, datamodels.DataModel):
-                        if getattr(self, 'save_result', False):
-                            self.save_model(result)
-            elif isinstance(self._output['output'], dict):
-                for key in self._output['output']:
-                    if isinstance(self._output['output'][key], datamodels.DataModel):
-                        if getattr(self, 'save_result', False):
-                            self.save_model(self._output['output'][key])
+            if self.save_result:
+                self.save_output() # Already finalized in the primitive's perform.
         except Exception as e:
             self.log.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
             if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
                 raise e
             return input
-        
-        if getattr(self, 'full_output', False):
-            return self._output
-        else:
-            return self._output['output']
+
+        # Get main output
+        output = self._output.get('output', None) if self._output is not None else None
+
+        # Reset input
+        self.input = None
+
+        # Return main output
+        return output
     
     def init_config(self, config : dict | str | None = None) -> dict:
         """
-        Initialize the configuration for this primitive.
+        Initialize the configuration for the pipeline and all primitives.
+        Any sub-config files are also loaded.
 
         Args:
             config (dict | str | None): The configuration object or path to the configuration file.

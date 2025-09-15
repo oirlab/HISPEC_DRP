@@ -15,7 +15,6 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'do_fibers' : None,
         'do_orders' : None,
-        'output_model' : None,
     }
 
     CALIBRATIONS = {

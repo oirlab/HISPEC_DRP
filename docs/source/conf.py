@@ -38,6 +38,7 @@ napoleon_custom_sections = [('Returns', 'params_style')]
 autosummary_generate = True  # Generate autosummary stubs automatically
 autodoc_default_options = {
     'members': True,          # Include all class members
+    'private-members': True, # Include private members
     'undoc-members': False,    # Include undocumented members
     'show-inheritance': True, # Show class inheritance
 }

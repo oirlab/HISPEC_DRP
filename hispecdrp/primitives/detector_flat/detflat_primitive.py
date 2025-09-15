@@ -11,7 +11,7 @@ __all__ = ['DetectorFlatPrimitive']
 class DetectorFlatPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detflat',
+        'suffix' : 'detflatcorr',
         'output_model' : 'input'
     }
 

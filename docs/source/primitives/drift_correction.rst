@@ -25,8 +25,12 @@ Algorithm
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.level2.L2Model`
     The input file or data model to process. Should be a level 2 data product.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'drift').
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'input'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
 
 Calibrations
 ------------
@@ -40,5 +44,9 @@ Calibrations
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.level2.L2Model`
     The input file or data model to process. Should be a level 2 data product.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: 'driftcorr').
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'input'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
