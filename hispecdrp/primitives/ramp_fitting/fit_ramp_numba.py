@@ -1,5 +1,9 @@
 from numba import njit, prange
 import numpy as np
+from ...datamodels.dqflags import DQ_FLAGS
+
+saturation_flag = DQ_FLAGS["SATURATED"]
+do_not_use_flag = DQ_FLAGS["DO_NOT_USE"]
 
 # TODO: Implement jump detection, look into more sophisticated methods
 # https://iopscience.iop.org/article/10.1088/1538-3873/ad38d9/pdf
@@ -149,12 +153,12 @@ def first_with_flag(dq: np.ndarray, flag: np.uint32) -> int:
     return n
 
 # @njit(nogil=True)
-def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
-    n = len(times)
-    first_do_not_use = first_with_flag(dq,np.uint32(1))
-    # first_saturated = first_with_flag(dq,DQ_FLAGS["SATURATED"])
-    # if first_saturated <= first_do_not_use:
-    #     first_do_not_use = first_saturated
+def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current,start_time, num_coadd=1):
+
+    first_do_not_use = first_with_flag(dq,do_not_use_flag)
+    first_saturated = first_with_flag(dq,saturation_flag)
+    if first_saturated <= first_do_not_use:
+        first_do_not_use = first_saturated
 
     # if not enough reads for mcds, return 0 slope and 0 error
     if first_do_not_use < 2*num_coadd:
@@ -177,24 +181,28 @@ def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
     var_rnoise = (2*num_coadd)*rdnoise**2/ (d2 - d1)**2
     var_poisson = np.abs((slope+dark_current)*gain)/(d2 - d1)
 
-    return slope, var_rnoise,var_poisson
+    mid_time = start_time + (d2 + d1) / 2.0 / 86400.0  # Convert seconds to days for MJD
+
+    return slope, var_rnoise,var_poisson,mid_time
 
 
 # @njit(nogil=True)
-def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current, num_coadd=1):
+def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current, start_times,num_coadd=1):
     _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
+    mid_times = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j]  = _fit_ramp_mcds(times, ramps[:, i, j],
-                                                                   dq[:,i,j], rdnoise[i,j], gain[i,j], dark_current[i,j],
-                                                                   num_coadd=num_coadd)
-    return slope_image, var_rnoise, var_poisson
+            out  = _fit_ramp_mcds(times,
+                                  ramps[:, i, j], dq[:,i,j], rdnoise[i,j], gain[i,j], dark_current[i,j], start_times[i,j],
+                                  num_coadd=num_coadd)
+            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j], mid_times[i, j] = out
+    return slope_image, var_rnoise, var_poisson, mid_times
 
 
-def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, num_coadd=1):
+def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, start_times=None,num_coadd=1):
     """
     Fits ramps using the MCDS method.
 
@@ -206,6 +214,7 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
         dark_current (np.ndarray): 2D array of dark current (DN/s) across detector (ny, nx).
             Caution: Only use when the ramps have been already dark subtracted.
+        start_times (np.ndarray): 2D array of MJD times of the first read across detector (ny, nx).
         num_coadd (int): Number of coadds.
 
     Returns:
@@ -213,8 +222,6 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
          np.ndarray]: Dictionary with keys matching L0 rate objects.
     """
     n_reads,ny, nx = ramps.shape
-    # print(dq & np.uint32(1))
-    # exit()
 
     # Create remaining dummy variables if input arrays are not provided
     if dq is None:
@@ -225,15 +232,21 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
         gain = np.ones((ny, nx)).astype(np.float32)
     if dark_current is None:
         dark_current = np.zeros((ny, nx)).astype(np.float32)
+    if start_times is None:
+        start_times = np.zeros((ny, nx)).astype(np.float32)
 
-    result = _fit_ramps_mcds(times, ramps,dq, rdnoise, gain, dark_current, num_coadd=num_coadd)
+    result = _fit_ramps_mcds(times, ramps,dq, rdnoise, gain, dark_current,start_times, num_coadd=num_coadd)
 
     output = {}
     output['rate'] = result[0]
     output['rate_err'] = np.sqrt(result[1] + result[2])
     output['rate_var_rnoise'] = result[1]
     output['rate_var_poisson'] = result[2]
-    output['DQ'] = np.bitwise_or.reduce(dq, axis=0)
+    output['mid_time'] = result[3]
+    # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
+    _if_all_reads_bad = np.bitwise_and.reduce(dq & DQ_FLAGS["DO_NOT_USE"], axis=0)
+    _dq = dq-dq & DQ_FLAGS["DO_NOT_USE"]
+    output['DQ'] = np.bitwise_or.reduce(_dq, axis=0)+_if_all_reads_bad
 
     where_bad = np.where(result[1] == -1)
     output['DQ'][where_bad] |= DQ_FLAGS["DO_NOT_USE"]

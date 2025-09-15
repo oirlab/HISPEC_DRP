@@ -65,6 +65,7 @@ class FitRampPrimitive(BasePrimitive):
                                     dq=input_model.dq_raw,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
+                                    start_times=first_read_mjd,
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                                     num_coadd=1)
         elif self.method.lower() in ('mcds'):
@@ -88,7 +89,7 @@ class FitRampPrimitive(BasePrimitive):
         output_model.rate_var_poisson = result['rate_var_poisson']
         output_model.rate_var_rnoise = result['rate_var_rnoise']
         output_model.dq = result['DQ']
-        output_model.mid_time = first_read_mjd
+        output_model.mid_time = result['mid_time']
 
         return dict(output=output_model, method=self.method)
     
