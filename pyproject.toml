@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
 version_file = "hispecdrp/_version.py"
 version_scheme = "post-release"
-local_scheme = "no-local"
+local_scheme = "no-local-version"
 
 
 [project]
@@ -50,14 +50,15 @@ dependencies = [
   "scipy",
   "matplotlib",
   "astropy",
-  "pandas",
   "gitpython",
   "numba",
   "sqlalchemy>2.0",
   "tqdm",
   "stcal",
-  #"keckdrpframework @ git+https://github.com/Keck-DataReductionPipelines/KeckDRPFramework#develop"
-  "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing"
+  "gdown",
+  "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
+  "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing",
+  "pydantic>=2.11"
 ]
 
 
@@ -78,10 +79,8 @@ include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-hispecdrp = ["datamodels/schemas/*.yaml", "configs/*.yaml"]
-
-# [tool.pytest.ini_options]
-# pythonpath = ["."]
+hispecdrp = ["datamodels/hispec/schemas/*.yaml", "datamodels/parvi/schemas/*.yaml", "configs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--rootdir=."

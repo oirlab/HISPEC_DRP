@@ -1,67 +1,67 @@
-from .base_model import DataModel
+from __future__ import annotations
+from .base_model import DataModel, CalibrationModel
+from .hispec_meta import HISPECMeta, HISPECCalibrationMeta
+from .dqflags import DQ_FLAGS
 
-#### HERE: NOTE: Look through remaining level properties to use for generating koa filename
+__all__ = ['HISPECDataModel', 'HISPECCalibrationModel']
 
 class HISPECDataModel(DataModel):
 
-    HEADER_SCHEMAS = [
-        'core.yaml',
-        'instrument.yaml',
-        'exposure.yaml',
-        'target.yaml',
-        'drp_steps.yaml',
-        'calibration_files.yaml',
-        'keck_program.yaml',
-    ]
+    META_MODEL = HISPECMeta
 
-    def on_init(self):
-        super().on_init()
-        if self.meta.data_level is None and self.level is not None:
-            self.meta.data_level = self.level
+    META_DEFAULTS = {
+        'instrument_name' : 'HISPEC',
+        'telescope' : 'Keck-II',
+        'order_start' : 125,
+        'order_end' : 85,
+    }
 
-    @staticmethod
-    def _generate_filename(
-        spectrograph : str,
-        date_time : str,
-        level : str | int,
-        suffix : str | None = None
-    ) -> str:
-        """
-        Create a filename for a HISPEC data product.
+    INSTRUMENT_ALIASES = {'BSPEC': 'HB', 'RSPEC': 'HR'}
 
-        Format: HS_{spectrograph}_{date}_LVL{level}_{suffix}.fits
-            datetime : YYYYMMDDTHHMMSS
-            level : data level
-            suffix : optional suffix
+    DQ_FLAGS = DQ_FLAGS
 
-        Args:
-            spectrograph (str): The spectrograph name.
-            date_time (str): The date and time of the observation.
-            level (str | int): The data level.
-            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
-
-        Returns:
-            str : The filename
-        """
-        level = '' if level is None else f"_LVL{level}"
-        filename = f"HS_{spectrograph.upper()}_{date_time}{level}.fits"
-        if suffix:
-            filename = "".join([filename[0:-5], "_", suffix, ".fits"])
-        return filename
+    NUM_FIBERS = 3
     
     def generate_filename(self, suffix : str | None = None) -> str:
         """
         See _generate_filename for details.
         """
-        spectrograph = self.meta.instrument.spectrograph
-        date_time = self.meta.date_obs \
-                    + 'T' \
-                    + self.meta.utc.replace(':', '')[0:6] # HHMMSS, remove colons and decimal seconds
-        level = self.meta.data_level or self.level
+        date_time = self.meta.datetime_obs
+        spectrograph = self.meta.spectrograph.upper()
+        if spectrograph in self.INSTRUMENT_ALIASES:
+            instrument_alias = self.INSTRUMENT_ALIASES[spectrograph]
+        else:
+            raise ValueError(f"Spectrograph must be BSPEC or RSPEC, got {spectrograph}")
+        if suffix is None:
+            if self.data_level_suffix is not None:
+                suffix = self.data_level_suffix
+        else:
+            if self.data_level_suffix is not None:
+                suffix = f"{self.data_level_suffix}-{suffix}"
         return self._generate_filename(
-            spectrograph=spectrograph,
+            instrument_alias=instrument_alias,
             date_time=date_time,
-            level=level,
             suffix=suffix
         )
     
+
+class HISPECCalibrationModel(CalibrationModel, HISPECDataModel):
+
+    META_MODEL = HISPECCalibrationMeta
+    
+    def generate_filename(self, suffix : str | None = None) -> str:
+        """
+        See _generate_filename for additional arguments.
+        """
+        spectrograph = self.meta.spectrograph.upper()
+        if spectrograph in self.INSTRUMENT_ALIASES:
+            instrument_alias = self.INSTRUMENT_ALIASES[spectrograph]
+        else:
+            raise ValueError(f"Spectrograph must be BSPEC or RSPEC, got {spectrograph}")
+        return self._generate_filename(
+            instrument_alias=instrument_alias,
+            date_time=self.meta.datetime_obs,
+            cal_type=self.CAL_TYPE,
+            master=self.meta.master_cal,
+            suffix=suffix
+        )

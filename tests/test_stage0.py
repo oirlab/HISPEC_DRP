@@ -1,54 +1,35 @@
 from hispecdrp import Stage0Pipeline
-from tests.utils import download_github_lfs_file
-import textwrap
 from hispecdrp import datamodels
 import numpy as np
-
-def make_nonlin_coeffs():
-    nonlin_coeffs = np.array([0, 1], dtype=np.float32)
-    coeffs = np.broadcast_to(nonlin_coeffs, (4096, 4096, len(nonlin_coeffs)))
-    thresh = np.zeros(shape=(4096, 4096), dtype=np.uint16)
-    max = np.zeros(shape=(4096, 4096), dtype=np.uint16)
-    nonlin_model = datamodels.HISPECNonlinearCoeffModel(data=dict(coeffs=coeffs, thresh=thresh, max=max))
-    return nonlin_model
+import os
 
 
 def test_stage0(tmp_path):
+
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
     
-    # Get science file
-    git_file_path_sci = 'HISPEC/Raw/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, use_cached=True)
-
-    # Create nonlin coeffs
-    nonlin_model = make_nonlin_coeffs()
-
-    # Config file
-    config_raw = """
-    %YAML 1.2
-    ---
-
-    logging:
-      enable: True
-      level: info
-      verbose: True
-      log_path: None
+    coeffs = np.broadcast_to(np.array([[[0]], [[1]]], dtype=np.float32), (2, 4096, 4096))
+    thresh = np.zeros(shape=(4096, 4096), dtype=np.uint16)
+    max = np.zeros(shape=(4096, 4096), dtype=np.uint16)
+    nonlin_model = datamodels.HISPECNonlinearCorrectionModel(data=dict(coeffs=coeffs, thresh=thresh, max=max))
+    nonlin_model.meta.spectrograph = 'BSPEC'
+    datamodels.set_default_meta(nonlin_model)
     
-    arguments:
-      save_results: False
-      suffix: 'dark-sub'
-    """
-    config_file = str(tmp_path / 'stage0_config.yaml')
-    with open(config_file, 'w') as f:
-        f.write(textwrap.dedent(config_raw))
+    slope = 10
+    source = np.full((4096, 4096), slope, dtype=np.float32)
+    ramp_data = datamodels.create_ramp(source, readtime=1.0, n_reads=10, bias=0, read_noise=0, poisson_noise=False, nonlin_coeffs=None)
+    ramp_model = datamodels.HISPECRampModel(data=dict(data=ramp_data['data'], dq=ramp_data['dq'], times=ramp_data['times']))
+    ramp_model.meta.spectrograph = 'BSPEC'
+    datamodels.set_default_meta(ramp_model)
 
     # Setup and call the stage 0 pipeline
-    stage0_pipe = Stage0Pipeline(config_file=config_file)
+    stage0_pipe = Stage0Pipeline()
 
     # Set any primitive args
-    stage0_pipe.nonlin_corr.args.coeffs = nonlin_model
+    stage0_pipe.nonlin_corr.nonlin = nonlin_model
 
     # Run pipeline
-    result = stage0_pipe.apply(sci_path, output_dir=tmp_path)
+    model_result = stage0_pipe.apply(ramp_model, output_dir=tmp_path)
     
     # Test against manual correction? (True for now)
-    assert result is not None
+    np.testing.assert_array_equal(model_result.data, slope)

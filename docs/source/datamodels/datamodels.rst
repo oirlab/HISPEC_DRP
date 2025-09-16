@@ -1,13 +1,15 @@
 Data Models
 ===========
 
+Below are the available datamodels within the HISPEC DRP. Most models are available for PARVI and HISPEC with appropriate extensions and metadata fields.
+
 .. toctree::
    :maxdepth: 1
    
-   hispec_ramp
-   hispec_level0
-   hispec_level1
-   hispec_level2
+   ramp
+   level0
+   level1
+   level2
 
 
 Calibration Models
@@ -16,5 +18,11 @@ Calibration Models
 .. toctree::
    :maxdepth: 1
 
-   hispec_dark
-   hispec_flat
+   instrument_params
+   nonlin
+   dark
+   detector_flat
+   lfcfitparams
+   lfcwavesol
+   gausslsf
+   ref_etalon

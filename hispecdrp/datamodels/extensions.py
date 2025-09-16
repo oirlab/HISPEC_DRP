@@ -1,0 +1,330 @@
+from astropy.io import fits
+import numpy as np
+
+# _HDU = no key specified
+# No _HDU = key already specified
+
+
+# Common Image HDUs
+
+IMAGE_UINT16_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint16}
+IMAGE_UINT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint32}
+IMAGE_FLOAT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.float32}
+IMAGE_FLOAT64_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.float64}
+
+
+# Only specified in DataModel
+
+RECEIPT = {
+    'RECEIPT': {
+        'hdu_type' : fits.BinTableHDU,
+        'columns' : {
+            'PROC_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
+            'DRP_VERSION' : str, # DRP semver
+            'CLASS' : str, # Primitive class
+            'FILENAME' : str, # Input base filename
+            'ARGUMENTS' : str, # JSON rep of args ?
+            'STATUS' : str, # COMPLETED, FAILED, SKIPPED
+        }
+    }
+}
+
+CALIBRATIONS = {
+    'CALIBRATIONS': {
+        'hdu_type': fits.BinTableHDU,
+        'columns': {
+            'ID': str, # UUID
+            'FILENAME': str, # Base filename of the calibration
+            'CAL_TYPE': str, # Type of calibration
+            'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
+            'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
+            'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
+            'NOTE': str, # Note for calibration matching ORM
+            'LAST_UPDATED': str, # When calibration was last updated in the DB.
+            'TIME_APPLIED' : str # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+        }
+    }
+}
+
+
+#### Read times
+
+READTIMES = {
+    'TIMES': {
+        'hdu_type' : fits.BinTableHDU,
+        'columns' : {
+            'READNUM' : np.uint16,
+            'TIMESTART' : np.float64,
+            'EXPTIME' : np.float64,
+        }
+    }
+}
+
+
+#### Raw
+
+DQ_RAW = {'DQ': IMAGE_FLOAT32_HDU}
+
+#### L0 (rate maps)
+
+DQ_L0 = {'DQ': IMAGE_FLOAT32_HDU}
+
+def create_L0_extensions(name : str = 'DATA') -> dict[str, dict]:
+    if name == 'DATA':
+        name_ = ''
+    else:
+        name_ = f'{name}_'
+    ext = {
+        f'{name}': IMAGE_FLOAT32_HDU,
+        f'{name_}ERR': IMAGE_FLOAT32_HDU,
+        f'{name_}VAR_RNOISE': IMAGE_FLOAT32_HDU,
+        f'{name_}VAR_POISSON': IMAGE_FLOAT32_HDU,
+    }
+    ext.update(DQ_L0)
+    ext['MID_TIME'] = IMAGE_FLOAT64_HDU
+    return ext
+
+
+#### Spectral level extensions (per-fiber)
+
+def create_dataspec_extensions(fiber : str, prefix : str = 'SPEC') -> dict[str, dict]:
+    return {
+        f'{prefix}_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'{prefix}_ERR_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'{prefix}_VAR_POISSON_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'{prefix}_VAR_RNOISE_FIB{fiber}': IMAGE_FLOAT32_HDU,
+    }
+
+def create_specdq_extensions(fiber : str) -> dict[str, dict]:
+    return {f'SPEC_DQ_FIB{fiber}' : IMAGE_UINT32_HDU}
+
+def create_sky_extensions(fiber : str) -> dict[str, dict]:
+    return {
+        f'SKY_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'SKY_ERR_FIB{fiber}': IMAGE_FLOAT32_HDU,
+    }
+
+def create_trans_extensions(fiber : str) -> dict[str, dict]:
+    return {
+        f'TRANS_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'TRANS_ERR_FIB{fiber}': IMAGE_FLOAT32_HDU,
+    }
+
+def create_throughput_extensions(fiber : str) -> dict[str, dict]:
+    return {f'THROUGHPUT_FIB{fiber}': IMAGE_FLOAT32_HDU}
+
+def create_wave_extensions(fiber : str) -> dict[str, dict]:
+    return {f'WAVE_FIB{fiber}': IMAGE_FLOAT64_HDU}
+
+CHEBYSHEV_NORM_HDU = {
+    'hdu_type': fits.BinTableHDU,
+    'columns': {
+        'FIBER': str,
+        'PIXEL_NORM_MIN': np.float64,
+        'PIXEL_NORM_MAX': np.float64,
+        'ORDER_NORM_MIN': np.int16,
+        'ORDER_NORM_MAX': np.int16,
+    }
+}
+
+def create_chebyshev_extensions(fiber : str) -> dict[str, dict]:
+    return {
+        f'CHEB_COEFFS_FIB{fiber}': IMAGE_FLOAT64_HDU,
+        f'CHEB_NORM_FIB{fiber}': CHEBYSHEV_NORM_HDU
+    }
+
+#### Wavelength solution drifts
+
+DRIFT_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'PIXEL' : np.float64,
+        'ORDER' : np.uint16,
+        'WAVE' : np.float64,
+        'DRIFT_PIX' : np.float64,
+        'DRIFT_ERR_PIX' : np.float64,
+        'DRIFT_WAVE' : np.float64,
+        'DRIFT_ERR_WAVE' : np.float64,
+        'DRIFT_VEL' : np.float64,
+        'DRIFT_ERR_VEL' : np.float64,
+    }
+}
+
+def create_drift_extensions(fiber : str) -> dict[str, dict]:
+    return {f'DRIFT_FIB{fiber}': DRIFT_HDU}
+
+
+#### Etalon fit parameters
+
+ETALONFITPARAMS_HDU = {
+    'hdu_type': fits.BinTableHDU,
+    'columns': {
+        'AMPLITUDE': np.float64,
+        'AMPLITUDE_ERR': np.float64,
+        'MU_PIX': np.float64,
+        'MU_ERR_PIX': np.float64,
+        'MU_ERR_WAVE': np.float64,
+        'FWHM_PIX': np.float64,
+        'FWHM_ERR_PIX': np.float64,
+        'FWHM_WAVE': np.float64,
+        'FWHM_ERR_WAVE': np.float64,
+        'B': np.float64,
+        'B_ERR': np.float64,
+        'MODE_NUM': np.int16,
+        'WAVE': np.float64,
+        'ORDER': np.uint16,
+    }
+}
+
+def create_etalonfitparam_extensions(fiber : str) -> dict[str, dict]:
+    return {f'ETALON_FITPARAMS_FIB{fiber}': ETALONFITPARAMS_HDU}
+
+
+#### LFC Fit parameters
+
+LFCFITPARAMS_HDU = {
+    'hdu_type': fits.BinTableHDU,
+    'columns': {
+        'AMPLITUDE': np.float64,
+        'AMPLITUDE_ERR': np.float64,
+        'MU_PIX': np.float64,
+        'MU_ERR_PIX': np.float64,
+        'MU_ERR_WAVE': np.float64,
+        'FWHM_PIX': np.float64,
+        'FWHM_ERR_PIX': np.float64,
+        'FWHM_WAVE': np.float64,
+        'FWHM_ERR_WAVE': np.float64,
+        'B': np.float64,
+        'B_ERR': np.float64,
+        'MODE_NUM': np.int16,
+        'WAVE': np.float64,
+        'ORDER': np.uint16,
+    }
+}
+
+def create_lfcfitparam_extensions(fiber : str) -> dict[str, dict]:
+    return {f'LFC_FITPARAMS_FIB{fiber}': LFCFITPARAMS_HDU}
+
+
+#### RVs
+
+RVCCF_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'BIS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+    }
+}
+
+RVCCFAVG_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+    }
+}
+
+RVFWM_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+        'AIRMASS_FIT' : np.float64,
+        'AIRMASS_ERR_FIT' : np.float64,
+        'PWV_FIT' : np.float64,
+        'PWV_ERR_FIT' : np.float64,
+        'TELLURIC_VEL_FIT' : np.float64,
+        'TELLURIC_VEL_ERR_FIT' : np.float64,
+    }
+}
+
+RVFWMAVG_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'BIS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+    }
+}
+
+def create_rv_extensions(fiber : str) -> dict[str, dict]:
+    return {
+        f'RVCCF_FIB{fiber}': RVCCF_HDU,
+        f'RVCCFAVG_FIB{fiber}': RVCCFAVG_HDU,
+        f'RVFWM_FIB{fiber}': RVFWM_HDU,
+        f'RVFWMAVG_FIB{fiber}': RVFWMAVG_HDU
+    }
+
+
+#### Telluric models
+
+def create_telluric_extensions(fiber : str) -> dict[str, dict]:
+    return {
+        f'TEL_FIB{fiber}': IMAGE_FLOAT32_HDU,
+        f'TEL_ERR_FIB{fiber}': IMAGE_FLOAT32_HDU
+    }
+
+
+#### Stellar models
+
+def create_starmodel_extensions(fiber : str) -> dict[str, dict]:
+    return {f'STAR_MOD_FIB{fiber}' : IMAGE_FLOAT32_HDU}
+
+
+#### Throughput
+
+def create_throughput_extensions(fiber : str) -> dict[str, dict]:
+    return {f'THROUGHPUT_FIB{fiber}' : IMAGE_FLOAT32_HDU}
+
+
+#### Barycentric correction
+
+BARYCORR_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MJDUTC' : np.float64,
+        'MJDUTCW' : np.float64,
+        'MBJD' : np.float64,
+        'MBJDW' : np.float64,
+        'BERV' : np.float64,
+        'BERVW' : np.float64,
+    }
+}
+
+def create_midtime_extensions(fiber : str) -> dict[str, dict]:
+    return {f'MID_TIME_FIB{fiber}' : IMAGE_FLOAT64_HDU}
+
+def create_barycorr_extensions(fiber : str) -> dict[str, dict]:
+    return {f'BARYCORR_FIB{fiber}' : BARYCORR_HDU}
+
+
+

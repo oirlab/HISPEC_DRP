@@ -1,134 +1,104 @@
-from .. import datamodels
-from .metadata_db import Calibration, CalibrationDB
+from koa_middleware import CalibrationDB, CalibrationORM
 from sqlalchemy import func
 
+from koa_middleware.selector_base import CalibrationSelector
 
-__all__ = ['CalibrationSelector', 'DarkSelector', 'FlatFieldSelector']
-
-
-class CalibrationSelector:
-    """
-    Base class for calibration selectors. Can be used to select one or a group (e.g. bracketing etalon exposures) of calibrations.
-    """
-    def select(self, input : str | datamodels.HISPECDataModel, db : CalibrationDB, **kwargs):
-        """
-        Select the best calibration for the given input. This method should not be overriden by subclasses in most cases.
-
-        Args:
-            input (str | datamodels.HISPECDataModel): Input data file or model.
-            db (CalibrationDB): Database session for querying.
-            kwargs: Additional filtering parameters specific for the selector.
-
-        Returns:
-            Any: Selected calibration file or model.
-        """
-        input = datamodels.open(input, copy=False, meta_only=True)
-        result = self._select(input, db, **kwargs)
-        if result is None:
-            result = self.select_fallback(input, db, **kwargs) # TODO: Implement fallback selection
-        return result
-
-
-    def _select(self, input : str | datamodels.HISPECDataModel, db : CalibrationDB, **kwargs):
-        """
-        Internal method to select the best calibration. Can be overridden by all subclasses. By default, it calls get_candidates followed by select_best.
-        
-        Args:
-            input: Input science frame or its metadata.
-            db: Database session for querying.
-            kwargs: Additional filtering parameters
-        
-        Returns:
-            Selected calibration file(s).
-        """
-        candidates = self.get_candidates(input, db, **kwargs)
-        result = self.select_best(input, candidates, **kwargs)
-        return result
-
-
-    def get_candidates(self, input, db : CalibrationDB, **kwargs):
-        """
-        Get initial candidates.
-        
-        Args:
-            input: Input data product.
-            candidates: Initial query of candidates.
-            kwargs: Additional filtering parameters.
-        
-        Returns:
-            Candidate calibrations.
-        """
-        raise NotImplementedError(f"Class {self.__class__.__name__} must implement method get_candidates.")
-    
-
-    def select_best(self, input, candidates, **kwargs):
-        """
-        Select the best calibration(s) based on the candidates. By default, it returns the first candidate. This should be overriden by most subclasses.
-        
-        Args:
-            input: Input data product.
-            candidates: Candidate calibrations returned from self.get_candidates().
-            kwargs: Additional filtering parameters.
-        
-        Returns:
-            Selected calibration file(s).
-        """
-        return candidates[0] if candidates else None
-    
-
-    def select_fallback(self, input : str | datamodels.HISPECDataModel, db : CalibrationDB, **kwargs):
-        """
-        Select a fallback calibration if no suitable candidates are found. By default, it returns None. This should be overriden by most subclasses.
-        
-        Args:
-            input: Input data product.
-            db: Database session for querying.
-            kwargs: Additional filtering parameters.
-        
-        Returns:
-            Fallback calibration file(s).
-        """
-        return None
-
-
-
-# Classes for different calibration types below
+__all__ = [
+    'DarkSelector',
+    'NonlinearCorrectionSelector',
+    'DetectorFlatSelector',
+    'WavelengthSolutionSelector',
+    'ReferenceEtalonSelector',
+]
 
 class DarkSelector(CalibrationSelector):
-    """
-    Dark calibration selector. Rules:
-        - Calibration type == 'dark'
-        - Matching instrument era
-        - Matching spectrograph
-        - Master calibration
-        - Closest in time to the input data
-    """
 
-    def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
+    def get_candidates(self, meta : dict, db : CalibrationDB):
         with db.session_manager() as session:
-            return session.query(Calibration).filter(
-                Calibration.cal_type == 'dark',
-                Calibration.instera == input.meta.instrument.era,
-                Calibration.spectrograph == input.meta.instrument.spectrograph,
-                Calibration.master == True
-            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'dark',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'dark',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
 
-class FlatFieldSelector(CalibrationSelector):
-    """
-    Flat calibration selector. Rules:
-        - Calibration type == 'flat'
-        - Matching instrument era
-        - Matching spectrograph
-        - Master calibration
-        - Closest in time to the input data
-    """
+class NonlinearCorrectionSelector(CalibrationSelector):
 
-    def get_candidates(self, input : datamodels.HISPECDataModel, db : CalibrationDB):
+    def get_candidates(self, meta : dict, db : CalibrationDB):
         with db.session_manager() as session:
-            return session.query(Calibration).filter(
-                Calibration.cal_type == 'flat',
-                Calibration.instera == input.meta.instrument.era,
-                Calibration.spectrograph == input.meta.instrument.spectrograph,
-                Calibration.master == True
-            ).order_by(func.abs(Calibration.jd_start - input.meta.exposure.jd_start)).all()
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'nonlin',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'nonlin',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+
+
+class DetectorFlatSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'detflat',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'detflat',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.master_cal == True
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+        
+
+class WavelengthSolutionSelector(CalibrationSelector):
+
+    def __init__(self, cal_type : str = 'lfc_wavesol'):
+        super().__init__()
+        self.cal_type = cal_type
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == self.cal_type,
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == self.cal_type,
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+
+class ReferenceEtalonSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'ref_etalon',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'ref_etalon',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()

@@ -2,46 +2,111 @@
 Running a Pipeline
 ==================
 
+The following examples demonstrate how to run a pipeline, which is a chain of primitives. Files are retrieved from the shared HISPEC Google Drive folder.
+
+Process LFC Pipeline
+--------------------
+
+This pipeline takes as input level 2 laser frequency comb (LFC) data, and does the following:
+1. Fit the 1D LFC modes with a Gaussian to determine the location of LFC lines in detector pixels.
+2. Fit the resulting locations with a 2D Chebyshev polynomial to determine the wavelength solution of every pixel.
+3. Fit the resulting Gaussian sigmas with a 2D Chebyshev polynomial to determine the effective Gaussin line spread function at every pixel as a function of wavelength.
+4. Save the wavelength solution and LSF calibrations to the calibration cache and register each in the local database.
 
 .. code-block:: python
 
-    # Imports
-    from hispecdrp import DarkSubtractionPrimitive
-    from tests.utils import download_github_lfs_file
-    import astropy.utils.data
+    from hispecdrp import ProcessLFCPipeline
+    from hispecdrp.utils import download_gdrive_file
+
     import textwrap
-    from hispecdrp import datamodels
-    import numpy as np
 
-    # Input paths to science and cals (from GitHub or local)
-    cache_dir = astropy.utils.data._get_download_cache_loc() + '/'
-    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
+    # Input files
+    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits')
 
-    # Config YAML file can also be manually created beforehand.
-    config_raw = """
+    # Specify which fibers and orders to fit
+    do_fibers = ['3']
+    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
+
+    # Init pipeline object
+    pipe = ProcessLFCPipeline()
+
+    # Specify the primitive arguments here
+    prim_args = {
+        'fit_lfc_lines' : {
+            'do_orders': do_orders,
+            'do_fibers': do_fibers,
+            'fwhm_bounds': (0.1, 2.5),
+            'mu_bounds': (-1, 1),
+        },
+        'lfc_wavesol' : {
+            'fit_orders': do_orders,
+            'opt_weights': True,
+            'do_fibers': do_fibers,
+            'deg_inter_order': 6,
+            'deg_intra_order': 9,
+        },
+        'lsf' : {
+            'do_fibers': do_fibers,
+            'deg_inter_order': 3,
+            'deg_intra_order': 3,
+            'fit_orders': do_orders,
+        },
+        'register_wave_cal' : {
+            'run': False,
+        },
+        'register_lsf_cal' : {
+            'run': False,
+        },
+    }
+    # Alternatively, one can also set an argument with:
+    #   pipe.fit_lfc_lines.do_orders = do_orders
+
+    # Call the pipeline with these arguments.
+    model_result = pipe.apply(lfc_path, prim_args=prim_args)
+
+    # Lastly, one can also configure the pipeline and primitives with a YAML file.
+    config_raw = f"""
     %YAML 1.2
     ---
 
     logging:
-      # Logging args here
-    
+      level: info
+      log_path: None
+
     arguments:
-      # Other pipeline arguments here (see defaults in primitive.ARGUMENTS)
-      # run: True
-      # save_results: False
-      # suffix: customsuffix
+      run: True
+      save_result: False
 
     primitives:
-      # Specify any primitive args here
+      fit_lfc_lines:
+        arguments:
+          do_orders: {do_orders}
+          do_fibers: {do_fibers}
+          fwhm_bounds: [0.1, 2.5]
+          mu_bounds: [-1, 1]
+      lfc_wavesol:
+        arguments:
+          fit_orders: {do_orders}
+          opt_weights: True
+          do_fibers: {do_fibers}
+          deg_inter_order: 6
+          deg_intra_order: 9
+      lsf:
+        arguments:
+          do_fibers: {do_fibers}
+          deg_inter_order: 3
+          deg_intra_order: 3
+          fit_orders: {do_orders}
+      register_wave_cal:
+        arguments:
+          run: False
+      register_lsf_cal:
+        arguments:
+          run: False
     """
-    config_file = cache_dir + 'dark_config.yaml'
-    with open(dark_config_file, 'w') as f:
+
+    config_file = 'test_config.yaml'
+    with open(config_file, 'w') as f:
         f.write(textwrap.dedent(config_raw))
-
-    # Setup and call the pipeline with custom coeff model
-    stage0_pipe = Stage0Pipeline(config_file=config_file)
-    stage0_pipe.nonlin_corr.args.coeffs = nonlin_model
-    result = stage0_pipe.apply(sci_path, output_dir=tmp_path)
-
+    pipe = ProcessLFCPipeline(config=config_file)
+    result = pipe.apply(lfc_path)

@@ -1,378 +1,471 @@
 
-import traceback
-from typing import Self
-from collections.abc import Sequence
 import datetime
-import git
 import os
-import functools
-
-from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePrimitive
-from keckdrpframework.models.arguments import Arguments
-
-#from keckdrpframework.models.action import Action as _Action
-#from keckdrpframework.models.event import Event as _Event
-#from keckdrpframework.models.processing_context import ProcessingContext as _ProcessingContext
-#from keckdrpframework.config.framework_config import ConfigClass as _ConfigClass
+import uuid
 
 import hispecdrp
-from ..calibrations import get_calibration_store, CalibrationSelector
+from koa_middleware import CalibrationStore
 from .. import datamodels
-from ..datamodels import DataModel
-from .. import utils as utils
-from ..utils.config import Config
-from ..utils.logging import get_logger
-from ..utils.utils import prepr_args
+from .. import utils
+
+from koa_middleware import CalibrationORM
+
+from ..processing_component import ProcessingComponent
 
 
 __all__ = ['BasePrimitive']
 
 
-class BasePrimitive(_BasePrimitive):
+class BasePrimitive(ProcessingComponent):
 
-    class_alias = None
-    
     ARGUMENTS = {
-        'run' : True,
-        'save_results' : False,
-        'output_dir' : None,
-        'suffix' : ''
-    }
-
-    LOGGING = {
-        'enable' : True,
-        'level' : 'info',
-        'log_path' : None,
-        'verbose' : True, # NOTE: not used yet, look at logger.py
+        'run': True,
+        'output_model' : 'input',
     }
 
     def __init__(
-            self,
-            config_file : str | None = None,
-            config : Config | None = None,
-            **kwargs
-        ):
+        self,
+        config : dict | str | None = None,
+        **kwargs
+    ):
         """
         Args:
-            config (str | Config | None): The configuration file or Config to further specify parameters.
-            **kwargs: Any additional keyword arguments to set or override in `self.args` for this primitive only.
+            config (dict | str | None): A configuration dictionary, or the path to to a configuration file.
+            **kwargs: Any additional keyword arguments to set or override (including ``config``) for this primitive.
         """
 
         # Load the configuration file or Config object
-        self.init_config(config=config, config_file=config_file)
+        self.init_config(config)
 
         # Set any kwargs passed to init
-        # NOTE HERE: Finalize how args are set
         self.set_args(**kwargs)
 
-        # Init the output and status
-        self.output = None
-        self.status = None
+        # Init the output, status, and calibrations used
+        self._output = None
+        self._status = None
+        self._calibrations_used = {}
 
+    def init_config(self, config : dict | str | None = None, validate_class : bool = False) -> dict:
+        """
+        Initialize the configuration for this primitive.
 
-    @classmethod
-    def _get_config(cls, config : Config | None = None, config_file : str | None = None) -> Config:
+        Args:
+            config (dict | str | None): A configuration dictionary, or the path to to a configuration file.
+            validate_class (bool): If True, validates that the class name in the configuration matches the class name of this primitive. *This may get removed in the future.*
         """
-        Load a config file for this primitive or pipeline, or construct one from scratch.
-        """
-        if config_file is None:
-            _config = Config(data={'class': cls.__module__ + '.' + cls.__name__, 'arguments': Config(), 'logging': cls.LOGGING.copy()})
+        class_name = self.__class__.__module__ + '.' + self.__class__.__name__
+        if config is None:
+            self.config = {
+                'class': self.__class__.__module__ + '.' + self.__class__.__name__,
+                'arguments': {},
+                'logging': self.LOGGING.copy()
+            }
+        elif isinstance(config, dict):
+            self.config = config
+            if validate_class:
+                if 'class' not in self.config:
+                    raise KeyError(f"'class' not found in config.")
+                else:
+                    assert class_name == config['class'], f"Config has class {self.config['class']} but expected {class_name}."
+        elif isinstance(config, str):
+            config_filepath = utils.find_config_path(config)
+            self.config = utils.read_config_file(config_filepath)
         else:
-            _config = Config(config_file=config_file)
-            if 'logging' not in _config:
-                _config['logging'] = cls.LOGGING.copy()
-            else:
-                _config['logging'] = cls.LOGGING | _config['logging']
-            if 'arguments' not in _config:
-                _config['arguments'] = {}
-        if config is not None:
-            _config.update(**config)
-
-        return _config
-    
-
-    def init_config(self, config : Config | None = None, config_file : str | None = None) -> Config:
-        """
-        Load the config_file for this primitive or pipeline and any sub config_files.
-        """
-        self.config_file = config_file
-        self.config = self._get_config(config=config, config_file=config_file)
+            raise TypeError(f"Invalid config type: {type(config)}. Expected dict or str.")
+        if 'arguments' not in self.config:
+            self.config['arguments'] = {}
         return self.config
-
-
-    def _perform(self):
-        raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
-
-
-    def apply(self, name : DataModel, **kwargs):
-        self.init_logger()
-        self.output = None
-        try:
-            self.set_args(name, **kwargs)
-            if not self._pre_condition():
-                self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{prepr_args(self.args)}")
-                self.on_skip()
-            else:
-                self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{prepr_args(self.args)}")
-                output = self._perform()
-                if self._post_condition():
-                    self.finalize_model(output)
-                    self.output = output
-                    if self.args.save_results:
-                        if isinstance(self.output, Sequence):
-                            for out in self.output:
-                                self.save_model(out)
-                        else:
-                            self.save_model(self.output)
-        except Exception as e:
-            self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}\n{traceback.format_exc()}")
-            raise e
-        return self.output
     
-
-    def init_logger(self):
-        """
-        Initialize the logger for this primitive. If logging is disabled, `self.logger` will be None.
-        """
-        self.logger = get_logger(self.__class__.__name__, self.config)
-        return self.logger
-
-
-    @property
-    def log(self):
-        if (hasattr(self, 'logger') and self.logger is None) \
-            or not self.config.get('logging', self.LOGGING).get('enable', True):
-            return self._fallback_log
-        return self.logger
-
-
-    @property
-    def _fallback_log(self):
-        # Use a lambda to dynamically handle log methods
-        return type(
-            "_FallbackLog",  # Anonymous type name
-            (),  # No base class
-            {
-                method: functools.partial(lambda message: print(f"[{method.upper()} LOGGING DISABLED] {message}"))
-                for method in ["warn", "info", "error", "debug"] # Log methods to handle
-            },
-        )()
-        
-        
-    def set_args(self, name : str | DataModel | None = None, **kwargs) -> dict:
-        """
-        Coalesces the user input into a single `Arguments` obejct with the following priorities:
-            4. `self.ARGUMENTS`
-            3. `self.config['arguments']`
-            2. `self.args`
-            1. `kwargs`
-        
-        And is stored in `self.args`.
-
-        If `self.args` already exists, this updates `self.args` with the contents of `**kwargs`.
-        `self.args.name` should be the name of the primary datamodel or filename to be processed.
-        """
-        if not hasattr(self, "args"):
-            self.init_args()
-        if name is not None:
-            self.args.name = name
-        #self.args.update(**self.config['arguments'])
-        for key in kwargs: # Only want to pass valid kwargs to self.args, don't call dict update()
-            if key in self.ARGUMENTS:
-                self.args[key] = kwargs[key]
-        return self.args
-
-
-    def init_args(self) -> dict:
-        """
-        Coalesces the user input into a single `Arguments` object from scratch with the following priorities:
-            3. `self.ARGUMENTS`
-            2. `self.config`
-            1. `self.args`
-
-        And is stored in `self.args`.
-
-        Keyword Args:
-            Any valid arguments for the primitive.
-        """
-        self.args = Arguments(name=None)
-        self.args.update(**self.ARGUMENTS)
-        if 'arguments' in self.config:
-            self.args.update(**self.config['arguments'])
-        return self.args
-    
-
-    def __call__(self, name : DataModel, **kwargs):
-        """
-        Wrapper for `self.apply`. Any valid arguments can be passed through `kwargs`.
-        """
-        return self.apply(name, **kwargs)
-    
-
     def _pre_condition(self):
-        return super()._pre_condition() and self.args.run
-    
+        """
+        Checks if all preconditions are met in order to run this primitive.
+        The base class checks if ``self.run`` is ``True``. If not met, the primitive will be skipped.
+        This can be overridden to implement custom pre-condition checks.
 
-    def _post_condition(self):
-        if super()._post_condition():
-            self.status = "COMPLETE"
-        return True
-    
+        Returns:
+            bool: The precondition status.
+        """
+        return self.run
 
+    def apply(self, input, **kwargs):
+        """
+        The main method a user calls to run a primitive.
+
+        Args:
+            input: The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
+            **kwargs: Additional keyword arguments to set or override for this primitive. These will override any arguments set during initialization.
+        
+        Returns:
+            dict: The main output of the primitive (self._output['output']), which is typically a datamodel or a container of datamodels.
+        """
+        
+        # CURRENT PROCESSING TIME, USED FOR CONSISTENT LOGGING OF PROCESSING AT DIFFERENT PLACES.
+        # NOTE: TBD IF THIS IS THE RIGHT APPROACH
+        self._date_time = datetime.datetime.now().isoformat()
+
+        # Init logger for this primitive
+        self.init_logger()
+
+        # Reset output, status, and calibrations used
+        self._output = None
+        self._status = None
+        self._calibrations_used = {}
+
+        try:
+            # This allows pipelines to directly pass the result from a primitive to the next primitive if full_output is True or False.
+            # Pipelines can pass in a datamodel or a dict object, in which case the first arg is fetched.
+            #if isinstance(input, dict) and 'output' in input:
+            #    input = input['output']
+            self.set_args(input=input, **kwargs)
+            if not self._pre_condition():
+                self.log.info(f"Skipping {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
+                self.on_skip()
+                self._output = dict(output=input)
+            else:
+                self.log.info(f"Applying {self.__class__.__name__} with arguments:\n{self.prepr_args()}")
+                self._output = self._perform()
+                if isinstance(self._output, dict):
+                    if 'output' not in self._output:
+                        self._output = dict(output=self._output)
+                else:
+                    self._output = dict(output=self._output)
+                if self._status is None:
+                    self._status = "COMPLETE"
+                self.finalize_output()
+                if self.save_result:
+                    self.save_output()
+        except Exception as e:
+            self.log.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
+            self._output = dict(output=input)
+            self.on_exception(e)
+            self.finalize_output()
+            if os.environ.get('HISPECDRP_DEBUG', '1') != '0':
+                raise e
+            return input
+        
+        # Get main output
+        output = self._output.get('output', None) if self._output is not None else None
+
+        # Reset input
+        self.input = None
+
+        # Return main output
+        return output
+    
     def on_skip(self):
-        self.status = "SKIPPED"
-    
+        """
+        Hook called when the component is skipped. By default, it sets the status (`self._status`) to "SKIPPED".
+        """
+        self._status = "SKIPPED"
+
+    def on_exception(self, exc : Exception):
+        """
+        Hook called when an exception occurs during processing. By default, it sets the status (`self._status`) to "FAILED".
+        """
+        self._status = "FAILED"
 
     def __repr__(self):
-        if hasattr(self, "args"):
-            s = self.__class__.__name__
-            for key in self.args.iter_kw():
-                s += f"\n  {key}: {self.args[key]}"
-            return s
-        else:
-            return self.__class__.__name__
-
-
-    def hasarg(self, key: str):
-        return hasattr(self.args, key)
+        s = self.__class__.__name__
+        for key in self.ARGUMENTS:
+            if hasattr(self, key):
+                s += f"\n  {key}: {getattr(self, key)}"
+        if hasattr(self, 'CALIBRATIONS'):
+            for key in self.CALIBRATIONS:
+                if hasattr(self, key):
+                    s += f"\n  {key}: {getattr(self, key)}"
+        return s
     
-
-    def __init_subclass__(cls):
-        ARGUMENTS = {}
-        for _cls in cls.mro()[::-1]:
-            if issubclass(_cls, BasePrimitive):
-                ARGUMENTS.update(_cls.ARGUMENTS)
-        cls.ARGUMENTS = ARGUMENTS
-
-
-    def add_receipt_entry(self, model : DataModel):
+    def add_receipt_entry(self, model : datamodels.DataModel, date_time : str | None = None):
         """
-        Taken from KPF DRP and modified:
-            https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/kpfpipe/models/base_model.py
+        Add an entry to the receipt table of the model summarizing the processing.
+
+        Args:
+            model (DataModel): The data model to add the receipt entry to.
+            date_time (str, optional): The date and time of processing in ISO format.
         """
-
-        # TODO: Get accurate GitHub info
-        #repo = git.Repo(search_parent_directories=True)
-        #git_commit_hash = repo.head.object.hexsha
-        #git_branch = repo.active_branch.name
-        #git_tag = str(repo.tags[-1])
-        git_commit_hash = 'None'
-        git_branch = 'None'
-        git_tag = 'None'
-
-        # add the row to the bottom of the table
+        date_time = self._date_time or date_time
         row = {
-            'Time' : datetime.datetime.now().isoformat(),
-            'Code_Release': git_tag,
-            'Branch_Name': git_branch,
-            'Commit_Hash': git_commit_hash,
-            'Class': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'Filename' : model.meta.filename or 'None',
-            'Arguments': repr(self.args),
-            'Status' : self.status
+            'PROC_TIME' : date_time,
+            'DRP_VERSION': hispecdrp.__version__,
+            'CLASS': f"{self.__class__.__module__}.{self.__class__.__name__}",
+            'FILENAME' : model.meta.filename or 'None',
+            'ARGUMENTS': self._get_args_repr(),
+            'STATUS' : self._status
         }
-        model.receipt.loc[len(model.receipt)] = row
-
+        model.receipt.add_row(row)
     
-    def make_output_path(self, model : DataModel, suffix : str = None):
-        """
-        Args:
-            model (DataModel): The model to generate the output path for.
-            suffix (str): The suffix to append to the output file. Defaults to `self.args.suffix`.
-        """
-        if suffix is None:
-            suffix = self.args.suffix
-        return os.path.join(self.args.output_dir, model.generate_filename(suffix=suffix))
-    
+    def _get_args_repr(self):
+        """Helper to get a string representation of current arguments."""
+        args_dict = {'input': getattr(self, 'input', None)}
+        for key in self.ARGUMENTS:
+            if hasattr(self, key):
+                args_dict[key] = getattr(self, key)
+        if hasattr(self, 'CALIBRATIONS'):
+            for key in self.CALIBRATIONS:
+                if hasattr(self, key):
+                    args_dict[key] = getattr(self, key)
+        return str(args_dict)
 
-    def save_model(
-            self,
-            model: DataModel,
-            filename: str | None = None,
-            output_path: str | None = None,
-            suffix: str = None,
-            output_dir: str | None = None,
-            update_receipt: bool = True
-        ):
+    def finalize_output(self):
         """
-        Save a model to a file. The output_path is determined as follows:
-        1. If output_path is input to this method, use that.
-        2. If self.output_path is provided, use that.
-        3. If output_dir is provided, use that for the directory.
-        4. If self.output_dir is provided, use that for the directory.
-        5. If filename is provided, use that for the filename.
-        6. Generate filename from model.filename and either self.suffix or suffix passed in.
-
-        Args:
-            model (DataModel): The model to save.
-            filename (str, optional): The filename to save the model to.
-            output_path (str, optional): The full path where the model should be saved.
-            suffix (str, optional): The suffix to append to the output file. Defaults to self.args.suffix.
-            output_dir (str, optional): The directory to save the file in.
-            update_receipt (bool, optional): Whether to update the receipt. Defaults to True.
+        Hook called at the end of ``primitive.apply`` to finalize the output.
+        See ``finalize_model`` for details.
         """
-        # Check output_path priority
-        if output_path is not None:
-            final_path = output_path
+        assert self._output is not None and 'output' in self._output, 'No output to finalize.'
+        output = self._output['output']
+        if isinstance(output, (str, datamodels.DataModel)):
+            self.finalize_model(output)
+        elif isinstance(output, dict):
+            for model in output.values():
+                self.finalize_model(model)
+        elif isinstance(output, list):
+            for model in output:
+                self.finalize_model(model)
         else:
-            # Check instance output_path
-            instance_output_path = getattr(self.args, 'output_path', None)
-            if instance_output_path is not None:
-                final_path = instance_output_path
-            else:
-                # Determine the directory
-                if output_dir is None:
-                    output_dir = getattr(self, 'output_dir', None)
-                
-                # Determine the filename
-                if filename is not None:
-                    final_filename = filename
-                else:
-                    # Use provided suffix or fall back to self.args.suffix
-                    current_suffix = suffix or getattr(self.args, 'suffix', None)
-                    final_filename = self.make_output_path(model, suffix=current_suffix)
-                
-                # Combine directory and filename if directory exists
-                if output_dir is not None:
-                    final_path = os.path.join(output_dir, os.path.basename(final_filename))
-                else:
-                    final_path = final_filename
-
-        # Update the receipt
-        if update_receipt:
-            self.add_receipt_entry(model)
+            self.log.error("Unsupported output type.")
+            raise TypeError("Unsupported output type.")
         
-        # Save the model
-        model.save(filename=final_path)
-
-    
-    def finalize_model(self, model_result : DataModel):
+    def finalize_model(self, model : datamodels.DataModel):
         """
-        Hook called at the end of `pipeline.apply` to finalize the model.
+        Finalize a single datamodel by adding receipt entries, used calibrations, and updating metadata.
+        """
+        model = datamodels.open(model)
+        model.meta.drp_version = hispecdrp.__version__ # Always override the current DRP version.
+        if self.run:
+            model.meta.last_updated = self._date_time
+        self.add_receipt_entry(model, date_time=self._date_time)
+        for cal_role, calibration in self._calibrations_used.items():
+            model.add_calibration(calibration, cal_role, date_time=self._date_time)
+
+    def get_calibration(
+        self,
+        input : str | datamodels.DataModel,
+        cal_role : str,
+        use_cached : bool | None = None,
+        **kwargs
+    ) -> tuple[str | datamodels.DataModel, CalibrationORM | None]:
+        """
+        Primary method for a primitive to call in order to get a calibration file.
 
         Args:
-            model_result (DataModel): The model to finalize.
+            input (str | datamodels.DataModel): The filepath or datamodel to get a calibration for.
+            cal_role (str): The type of calibration to get, which should match a key in `self.CALIBRATIONS`. This should be the same string as ORM.cal_type but is not enforced if multiple calibrations of a single type are needed (e.g., using multiple calibrations and interpolating).
+            use_cached (bool | None): If True, use cached calibrations if available. If None, use the default setting from the configuration.
+            **kwargs: Additional keyword arguments to pass to the selector.
+
+        Returns:
+            tuple[str | datamodels.DataModel, CalibrationORM | None]: A tuple of (calibration_file_or_model, calibration_orm).
+                The ORM will be None if the calibration is not in the database.
         """
-        try:
-            setattr(model_result.meta.drp_step, self.class_alias, str(self.status)) # NOTE: May drop this in favor of receipt
-        except:
-            pass
-        model_result.meta.drp_version = hispecdrp.__version__
-        return model_result
+
+        # User provided value
+        cal_value = getattr(self, cal_role, None)
+
+        ####################
+        #### Case 1: ID ####
+        ####################
+        if isinstance(cal_value, str):
+            is_uuid = False
+            try:
+                _ = uuid.UUID(cal_value)  # Check if it's a valid UUID
+                is_uuid = True
+            except ValueError:
+                pass
+            if is_uuid:
+                input_model = datamodels.open(input, meta_only=True)
+                with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class(), use_cached=use_cached) as store:
+                    local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+                    if local_filepath is not None:
+                        self._calibrations_used[cal_role] = calibration_orm
+                        return input_model, calibration_orm
+                    else:
+                        # Msg probably not necessary, but useful for debugging.
+                        self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
+                        return None, None
+
+        ###############################################################
+        #### Case 2: filepath string or datamodel (uuid ruled out) ####
+        ###############################################################
+        if isinstance(cal_value, (str, datamodels.DataModel)):
+
+            # Open to get cal id (open in full mode to return for processing)
+            cal_model = datamodels.open(cal_value)
+            assert isinstance(
+                cal_model,
+                (
+                    datamodels.HISPECCalibrationModel,
+                    datamodels.PARVICalibrationModel,
+                )
+            ), "Input must be a valid CalibrationDataModel."
+
+            cal_id = cal_model.meta.cal_id
+
+            # If no cal_id, return the model itself.
+            #if cal_id is None:
+            #self.log.warning(f"No calibration ID found for selected calibration: {cal_model}.")
+            self._calibrations_used[cal_role] = cal_model
+            return cal_model, None  # Return the cal model as is. Ignore ORM.
+
+            # Check if the calibration is in the DB.
+            # with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
+            #     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
+            #     if local_filepath is not None:
+            #         self._calibrations_used[cal_role] = calibration_orm
+            #         return cal_model, calibration_orm
+            #     else:
+            #         self.log.warning(f"No calibration found in the store for the given cal_id: {cal_id}.")
+            #         self._calibrations_used[cal_role] = cal_model
+            #         return cal_model, None
+
+        #######################################
+        #### Case 3: CalibrationORM object ####
+        #######################################
+        if isinstance(cal_value, CalibrationORM):
+            self._calibrations_used[cal_role] = cal_value
+            local_filepath = None  # Get local filepath with store
+            return local_filepath, cal_value
+
+        ################################################################
+        ##### Case 4: None - use default selector from CALIBRATIONS ####
+        ################################################################
+        if cal_value is None:
+            if not hasattr(self, 'CALIBRATIONS') or cal_role not in self.CALIBRATIONS:
+                raise ValueError(f"No calibration configuration found for '{cal_role}' in CALIBRATIONS")
+
+            calibration_config = self.CALIBRATIONS[cal_role]
+            selector_class = calibration_config['selector']
+            selector_kwargs = calibration_config.get('selector_kwargs', {})
+            selector = selector_class(**selector_kwargs)
+            input_model = datamodels.open(input, meta_only=True)
+            with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
+                local_filepath, calibration_orm = store.get_calibration(input_model.meta.model_dump(), selector=selector)
+                return local_filepath, calibration_orm
+
+        # Else raise error
+        msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
+        self.log.error(msg)
+        raise ValueError(msg)
+
+    def get_output_model(
+        self,
+        input_model : datamodels.DataModel | None = None,
+        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
+    ) -> datamodels.DataModel:
+        """
+        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
+        """
+        if output_model is None:
+            output_model = getattr(self, 'output_model', None)
+        return self._get_output_model(input_model, output_model)
     
+    @staticmethod
+    def _get_output_model(
+        input_model : datamodels.DataModel | None = None,
+        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
+        ) -> datamodels.DataModel:
+        """
+        Get the output model based on the input model and the specified output model type.
+        
+        Args:
+            input_model (datamodels.DataModel, optional): The input data model to base the output on.
+            output_model (str | datamodels.DataModel | type[datamodels.DataModel], optional): The desired output model type or specification. It can take on several values:
+                - DataModel instance (datamodels.DataModel): Returns `output_model` as is.
+                - 'input' (str): Returns `input_model` as is.
+                - 'input_copy' (str): Returns a copy of `input_model`.
+                - Valid filepath (str): Opens and returns the model from the specified file.
+                - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
+                - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
+                - None (default value): Raises an error.
 
-    def get_calibration(self, name, selector : CalibrationSelector, use_cached : bool = True, **kwargs):
-        cal_store = get_calibration_store()
-        return cal_store.get_calibration(name, selector, use_cached=use_cached, **kwargs)
+        Returns:
+            datamodels.DataModel: The instantiated output DataModel class.
+        """
 
+        ###################################
+        #### Return output model as is ####
+        ###################################
+        if isinstance(output_model, datamodels.DataModel):
+            return output_model
 
-    # @classmethod
-    # def from_keck_pipeline(cls, keck_pipeline):
-    #     """
-    #     Create a new instance of this primitive from an action and context.
-    #     """
-    #     name = action.args.name
-    #     self = cls(config=context.config, )
-    #     self._action = action
-    #     self._context = context
-    #     return self
+        ##################################
+        #### Return input model as is ####
+        ##################################
+        if isinstance(output_model, str) and output_model.lower() == 'input':
+            assert isinstance(
+                input_model, datamodels.DataModel
+            ), "Input model must be provided if output_model is 'input'."
+            return input_model
+                
+        ####################################
+        #### Return copy of input model ####
+        ####################################
+        if isinstance(output_model, str) and output_model.lower() == 'input':
+            assert isinstance(
+                input_model, datamodels.DataModel
+            ), "Input model must be provided if output_model is 'input_copy'."
+            out_model = input_model.copy()
+            out_model._filepath = None # NOTE: Revisit if we want to keep the filepath.
+            out_model.meta.filename = None
+            return out_model
+
+        ##################
+        #### Filepath ####
+        ##################
+        if isinstance(output_model, str) and os.path.isfile(output_model):
+            out_model = datamodels.open(output_model)
+            return out_model
+
+        #####################################
+        #### DataModel class name (str) #####
+        #####################################
+        if isinstance(output_model, str):
+            instrument_name = input_model.meta.instrument_name.upper()
+            if instrument_name is not None:
+                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model)
+            else:
+                model_class = datamodels.model_type_from_name(output_model)
+            return model_class.from_datamodel(input_model)
+        
+        #################################
+        #### DataModel class (type) #####
+        #################################
+        if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
+            assert isinstance(
+                input_model, datamodels.DataModel
+            ), "Input model must be provided if output_model is a DataModel class."
+            instrument_name = input_model.meta.instrument_name.upper()
+            if instrument_name is not None:
+                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model.__class__.__name__)
+            else:
+                model_class = output_model
+            return output_model.from_datamodel(input_model)
+
+        #####################################
+        #### Everything else is an error ####
+        #####################################        
+        raise ValueError(f"Invalid output_model argument {output_model=}.")
+
+    @staticmethod
+    def get_do_traces(input_model : datamodels.DataModel, do_fibers : list[str] | None = None, do_orders : list[int] | None = None) -> tuple[list[str], list[int]]:
+        """
+        Helper to get the default fibers and orders to process. By default, all fibers and orders in the input model are processed if not provided.
+        This method may get updated depending on where the DRP determines which fibers to process.
+
+        Args:
+            input_model (datamodels.DataModel): The input data model.
+            do_fibers (list[str], optional): List of fiber numbers to process. If None, process all fibers.
+            do_orders (list[int], optional): List of order numbers to process. If None, process all orders.
+
+        Returns:
+            tuple[list[str], list[int]]: A tuple of (do_fibers, do_orders).
+        """
+        if do_fibers is None:
+            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
+        if do_orders is None:
+            do_orders = input_model.make_order_vec()
+        return do_fibers, do_orders
+    
+    def __getattr__(self, attr):
+        if '_output' in self.__dict__ and attr in self._output:
+            return self._output[attr]
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")

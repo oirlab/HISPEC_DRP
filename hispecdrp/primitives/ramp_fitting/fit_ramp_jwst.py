@@ -14,9 +14,9 @@ def _fit_ramps_jwst_row(indata):
     Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit methods.
 
     Args:
-        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]: 
+        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]: 
             Tuple containing the row index, and the following data arrays for a single row:
-                ramps, read times, ramp data, readnoise, gain, data quality, dark current, algorithm
+                ramp row index, read times, ramp data, readnoise, gain, data quality, dark current, algorithm
     Returns:
         i (int): index of input row from the ramps, same as input.
         slope (np.ndarray): slope image (1, nx).
@@ -42,7 +42,7 @@ def _fit_ramps_jwst_row(indata):
     # Initialize ramp data model
     ramp_data = RampData()
 
-    flags = datamodels.hispec_dqflags.DQ_FLAGS
+    flags = datamodels.DQ_FLAGS
     # Explicitly set flags required by JWST pipeline
     ramp_data.flags_do_not_use = flags['DO_NOT_USE']
     ramp_data.flags_jump_det = flags['JUMP_DET']
@@ -112,7 +112,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.  The output also contains 'dq' for output data quality, 'var_poisson' for variance in Poisson noise, and 'var_rnoise' for variance in read noise.
     """
 
-    ny, nx, n_reads = ramps.shape
+    n_reads, ny, nx = ramps.shape
 
     if algorithm.lower() in ('jwst_likely', 'jwst_like', 'jwst_likelihood'):
         algorithm = 'LIKELY'
@@ -120,9 +120,6 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         algorithm = 'OLS_C'
     else:
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
-
-    # JWST assumes that ramps are in first index, so transpose to n_reads x ny x nx
-    ramps = ramps.transpose(2, 0, 1)
 
     # Create remaining dummy variables if input arrays are not provided
     if dq is None:

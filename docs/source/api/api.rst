@@ -7,7 +7,9 @@ API Reference
    :toctree: generated/
    :recursive:
 
-   datamodels
+   processing_component
    primitives
    pipelines
+   datamodels
    calibrations
+   utils

@@ -1,41 +1,22 @@
 from hispecdrp import DarkSubtractionPrimitive
-from tests.utils import download_github_lfs_file
-import astropy.utils.data
-import textwrap
+from hispecdrp.utils import download_gdrive_file
 from hispecdrp import datamodels
 import numpy as np
+import os
 
 
-def test_dark_level0(tmp_path):
-    
-    # Science file (just tellurics)
-    git_file_path_sci = 'HISPEC/L0/HS_BSPEC_20240924T000000_LVL0_RATE-TELLURICS-FIB1.fits'
-    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, use_cached=True)
-    dark_path = download_github_lfs_file(git_file_path_dark, use_cached=True)
+def test_dark_level0(tmp_path, datadir):
 
-    # Config file
-    dark_config_file = str(tmp_path / 'dark_config.yaml')
-    dark_config_raw = """
-    %YAML 1.2
-    ---
+    # Files
+    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
 
-    logging:
-      enable: True
-      level: info
-      verbose: True
-      log_path: None
-    
-    arguments:
-      save_results: False
-      suffix: 'dark-sub'
-    """
-    with open(dark_config_file, 'w') as f:
-        f.write(textwrap.dedent(dark_config_raw))
+    # Calibration cache
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # Setup and call the dark primitive
-    dark_prim = DarkSubtractionPrimitive(config_file=dark_config_file, dark=dark_path)
-    model_result = dark_prim.apply(sci_path, output_dir=tmp_path)
+    dark_prim = DarkSubtractionPrimitive()
+    model_result = dark_prim.apply(sci_path, output_dir=tmp_path, dark=dark_path)
 
     # Open models
     input_model = datamodels.open(sci_path)
@@ -48,47 +29,16 @@ def test_dark_level0(tmp_path):
     np.testing.assert_array_equal(model_result.var_rnoise, input_model.var_rnoise + dark_model.var_rnoise)
     np.testing.assert_array_equal(model_result.dq,  input_model.dq | dark_model.dq)
 
+    # Check the calibrations used
+    index = np.where(model_result.calibrations['CAL_TYPE'] == 'dark')[0]
+    assert len(index) == 1, "Expected one dark calibration to be used."
+    index = index[0]
+    assert model_result.calibrations[index]['FILENAME'] == os.path.basename(dark_path), "Dark calibration path does not match expected value."
 
-def test_dark_ramp(tmp_path):
-    
-    # Grab files
-    cache_dir = astropy.utils.data._get_download_cache_loc()
-    git_file_path_sci = 'HISPEC/Raw/HS_BSPEC_20240924T000000_RAW-DETFLAT.fits'
-    git_file_path_dark = 'HISPEC/Cals/HS_BSPEC_20240924T000000_master-dark.fits'
-    sci_path = download_github_lfs_file(git_file_path_sci, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
-    dark_path = download_github_lfs_file(git_file_path_dark, output_dir=cache_dir, preserve_github_path=True, use_cached=True)
+    # Setup and call the dark primitive again to ensure the calibrations table works as expected.
+    dark_prim = DarkSubtractionPrimitive()
+    model_result = dark_prim.apply(input_model, output_dir=tmp_path, dark=dark_path)
 
-    # Config file
-    dark_config_file = str(tmp_path / 'dark_config.yaml')
-    dark_config_raw = """
-    %YAML 1.2
-    ---
-
-    logging:
-      enable: True
-      level: info
-      verbose: True
-      log_path: None
-    
-    arguments:
-      save_results: False
-      suffix: 'dark-sub'
-    """
-    with open(dark_config_file, 'w') as f:
-        f.write(textwrap.dedent(dark_config_raw))
-
-    # Setup and call the dark primitive
-    dark_prim = DarkSubtractionPrimitive(config_file=dark_config_file, dark=dark_path)
-    model_result = dark_prim.apply(sci_path, output_dir=tmp_path)
-
-    # Manual subtraction
-    input_model = datamodels.open(sci_path)
-    dark_model = datamodels.HISPECDarkModel(dark_path)
-    
-    # Test
-    np.testing.assert_array_equal(model_result.data, input_model.data - dark_model.data[:, :, None])
-    
-    # TODO: Sort this out. Currently ramp data has no error or DQ arrays.
-    # np.testing.assert_array_equal(model_result.err_all, np.sqrt(input_model.err**2 + dark_model.err**2))
-    # np.testing.assert_array_equal(model_result.err_floor, np.sqrt(input_model.err**2 + dark_model.err**2))
-    # np.testing.assert_array_equal(model_result.dq,  input_model.dq | dark_model.dq)
+    # Check the calibrations used
+    dark_cal_row = model_result.get_calibration_from_role('dark')
+    assert dark_cal_row['FILENAME'] == os.path.basename(dark_path), "Dark calibration path does not match expected value."
