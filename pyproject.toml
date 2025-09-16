@@ -56,6 +56,7 @@ dependencies = [
   "tqdm",
   "stcal",
   "gdown",
+  "memory_profiler",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing",
   "pydantic>=2.11"
