@@ -56,9 +56,13 @@ class FitRampPrimitive(BasePrimitive):
         first_read_mjd = input_model.get_first_read_mjd()
 
         if self.method.lower() == 'ols':
-            result = fit_ramps_ols(delta_readtimes, input_model.data.astype(np.float32), b=0)
-            slopes, slopes_err = result['slope'], result['slope_err']
-            dq_out = np.bitwise_or.reduce(input_model.dq_raw, axis=0)
+            result = fit_ramps_ols(delta_readtimes,
+                                    input_model.data.astype(np.float32),
+                                    dq=input_model.dq_raw,
+                                    rdnoise=rn_model.rn,
+                                    gain=detgain_model.gain,
+                                    start_times=first_read_mjd,
+                                    dark_current=None) # Not used because we assume dark subtraction is done in rate maps.
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data.astype(np.float32),
@@ -69,9 +73,14 @@ class FitRampPrimitive(BasePrimitive):
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                                     num_coadd=1)
         elif self.method.lower() in ('mcds'):
-            result = fit_ramps_mcds(delta_readtimes, input_model.data.astype(np.float32), num_coadd=_mcds_num_coadd)
-            slopes, slopes_err = result['slope'], result['slope_err']
-            dq_out = np.bitwise_or.reduce(input_model.dq_raw, axis=0)
+            result = fit_ramps_mcds(delta_readtimes,
+                                    input_model.data.astype(np.float32),
+                                    dq=input_model.dq_raw,
+                                    rdnoise=rn_model.rn,
+                                    gain=detgain_model.gain,
+                                    start_times=first_read_mjd,
+                                    dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
+                                    num_coadd=_mcds_num_coadd)
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
             result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32), max_cores=self.max_cores, algorithm=self.method.lower())
             slopes, slopes_err = result['slope'], result['slope_err']

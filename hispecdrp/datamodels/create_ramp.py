@@ -39,7 +39,7 @@ def create_ramp(
         We assume that flats have been corrected for gain variations already. In this function the gain is applied after
          the flat, but in the data reduction pipeline the gain correction should be applied first.
     bias : np.ndarray or float, optional
-        Bias level to add to the first read (default: 0).
+        Bias level to add to the first read (default: 1000 e-).
     dark : np.ndarray or float, optional
         Dark current level to add to each read (e-/s/pixel) (default: 0)
         The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
@@ -112,19 +112,21 @@ def create_ramp(
         data += np.random.normal(loc=0, scale=kTC_noise/gain, size=source.shape)[None, :, :]
 
 
-    # Check for negative values before returning
-    if np.any(data < 0):
-        raise ValueError("Negative value found in 'data' array before returning from create_ramp. "
-                         "Data needs to be all positive to be converted to np.uint16."
-                         "Suggestion: Raise bias value.")
 
     if clip_ramps:
         # Clip data to maximum value of uint16
         data = np.clip(data, 0, float(np.iinfo(np.uint16).max))
 
     if convert_to_uint16:
+        # Check for negative values before returning
+        if np.any(data < 0):
+            raise ValueError("Negative value found in 'data' array before returning from create_ramp. "
+                             "Data needs to be all positive to be converted to np.uint16."
+                             "Suggestion: Raise bias value.")
+
         # Round and convert to uint16
         data = np.round(data).astype(np.uint16)
+
 
     _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
                  mjd_start=mjd_start)
