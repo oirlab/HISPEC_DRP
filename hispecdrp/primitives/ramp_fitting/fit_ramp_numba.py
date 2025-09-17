@@ -112,7 +112,6 @@ def _fit_ramp_slope_pedestal(times, ramp, dq, rdnoise, gain, dark_current):
     for k in range(len(first_indices)):
         if first_indices[k] == last_indices[k]:
             continue
-        n_chunk+=1
         _times = times[first_indices[k]: last_indices[k]+1]
         _ramp = ramp[first_indices[k]: last_indices[k]+1]
 
@@ -130,12 +129,14 @@ def _fit_ramp_slope_pedestal(times, ramp, dq, rdnoise, gain, dark_current):
         var_poisson = np.abs((slope + dark_current) * gain) / (_times[-1] - _times[0])
         b_var = times2_tot/deno
 
-        slope_num_sum += slope/(var_rnoise+var_poisson)
-        slope_denom_sum += 1/(var_rnoise+var_poisson)
-        rnoise_denom_sum += 1/var_rnoise
-        poisson_denom_sum += 1/var_poisson
-        b_num_sum += b/b_var
-        b_denom_sum += 1/b_var
+        if var_rnoise > 0 and var_poisson > 0 and b_var > 0:
+            n_chunk+=1
+            slope_num_sum += slope/(var_rnoise+var_poisson)
+            slope_denom_sum += 1/(var_rnoise+var_poisson)
+            rnoise_denom_sum += 1/var_rnoise
+            poisson_denom_sum += 1/var_poisson
+            b_num_sum += b/b_var
+            b_denom_sum += 1/b_var
         # slope_num_sum = slope/(var_rnoise+var_poisson)
         # slope_denom_sum = 1/(var_rnoise+var_poisson)
         # rnoise_denom_sum = 1/var_rnoise
@@ -235,7 +236,7 @@ def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=N
 
 
 
-# @njit(nogil=True)
+@njit(nogil=True)
 def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
     first_indices,last_indices = get_ramp_chunks(dq)
 
@@ -286,7 +287,7 @@ def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
     return slope, slope_err, var_rnoise, var_poisson
 
 
-# @njit(nogil=True)
+@njit(nogil=True)
 def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current,num_coadd=1):
     _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
@@ -374,34 +375,74 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
     print("max_cores",max_cores)
     if max_cores > 1:
         print("coucou parallel")
-        # Prepare input for each row
-        indata = []
-        for i in range(ny):
-            indata.append((
+        if 0:
+            # Prepare input for each row
+            indata = []
+            for i in range(ny):
+                indata.append((
+                    times,
+                    ramps[:, i, :][:, np.newaxis, :],  # shape (n_reads,1, nx)
+                    dq[:, i, :][:, np.newaxis, :],
+                    rdnoise[i, :][np.newaxis, :],
+                    gain[i, :][np.newaxis, :],
+                    dark_current[i, :][np.newaxis, :],
+                    num_coadd
+                ))
+            with mp.Pool(max_cores) as pool:
+                results = pool.map(_fit_ramps_mcds_worker, indata)
+
+            # # Build arrays first, then create pool:
+            # # print("start method:", mp.get_start_method())
+            # with mp.Pool(processes=max_cores, initializer=_init_globals,
+            #              initargs=(times, ramps, dq, rdnoise, gain, dark_current, num_coadd)) as pool:
+            #     # print("workers:", pool._processes)
+            #     results = list(pool.imap(_fit_ramps_mcds_worker, range(ny), chunksize=8))
+
+            # Unpack results into arrays
+            for i, (slope_row, slope_err_row, var_r_row, var_p_row) in enumerate(results):
+                slope_image[i, :] = slope_row[0, :]
+                slope_err[i, :] = slope_err_row[0, :]
+                var_rnoise[i, :] = var_r_row[0, :]
+                var_poisson[i, :] = var_p_row[0, :]
+
+
+        # Choose a block size so we submit ~max_cores tasks (or a few more),
+        # not ny tasks. This heavily reduces IPC/pickling overhead.
+        block_rows = int(np.ceil(ny / max_cores))
+        block_rows = max(1, block_rows)
+
+        tasks = []
+        row_starts = []
+        for row_start in range(0, ny, block_rows):
+            row_end = min(ny, row_start + block_rows)
+            nblock = row_end - row_start
+
+            # Slice a contiguous block of rows
+            ramps_block        = ramps[:, row_start:row_end, :]               # (n_reads, nblock, nx)
+            dq_block           = dq[:, row_start:row_end, :]                  # (n_reads, nblock, nx)
+            rdnoise_block      = rdnoise[row_start:row_end, :]                # (nblock, nx)
+            gain_block         = gain[row_start:row_end, :]                   # (nblock, nx)
+            dark_current_block = dark_current[row_start:row_end, :]           # (nblock, nx)
+
+            tasks.append((
                 times,
-                ramps[:, i, :][:, np.newaxis, :],  # shape (n_reads,1, nx)
-                dq[:, i, :][:, np.newaxis, :],
-                rdnoise[i, :][np.newaxis, :],
-                gain[i, :][np.newaxis, :],
-                dark_current[i, :][np.newaxis, :],
+                ramps_block,
+                dq_block,
+                rdnoise_block,
+                gain_block,
+                dark_current_block,
                 num_coadd
             ))
-        with mp.Pool(max_cores) as pool:
-            results = pool.map(_fit_ramps_mcds_worker, indata)
+            row_starts.append(row_start)
 
-        # # Build arrays first, then create pool:
-        # # print("start method:", mp.get_start_method())
-        # with mp.Pool(processes=max_cores, initializer=_init_globals,
-        #              initargs=(times, ramps, dq, rdnoise, gain, dark_current, num_coadd)) as pool:
-        #     # print("workers:", pool._processes)
-        #     results = list(pool.imap(_fit_ramps_mcds_worker, range(ny), chunksize=8))
-
-        # Unpack results into arrays
-        for i, (slope_row, slope_err_row, var_r_row, var_p_row) in enumerate(results):
-            slope_image[i, :] = slope_row[0, :]
-            slope_err[i, :] = slope_err_row[0, :]
-            var_rnoise[i, :] = var_r_row[0, :]
-            var_poisson[i, :] = var_p_row[0, :]
+        with mp.Pool(processes=max_cores) as pool:
+            # Map over blocks (each task handles many rows)
+            for row_start, (s, se, vr, vp) in zip(row_starts,pool.map(_fit_ramps_mcds_worker, tasks)):
+                row_end = row_start + s.shape[0]  # s is (nblock, nx)
+                slope_image[row_start:row_end, :] = s
+                slope_err[row_start:row_end, :]   = se
+                var_rnoise[row_start:row_end, :]  = vr
+                var_poisson[row_start:row_end, :] = vp
     else:
         slope_image, slope_err, var_rnoise, var_poisson = _fit_ramps_mcds(
             times, ramps, dq, rdnoise, gain, dark_current,num_coadd=num_coadd)
