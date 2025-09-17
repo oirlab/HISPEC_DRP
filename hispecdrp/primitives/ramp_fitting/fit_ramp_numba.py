@@ -1,8 +1,11 @@
 from numba import njit, prange
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
+from .utils import get_mid_delta_times
+import multiprocessing as mp
 
 saturation_flag = DQ_FLAGS["SATURATED"]
+jump_det_flag = DQ_FLAGS["JUMP_DET"]
 do_not_use_flag = DQ_FLAGS["DO_NOT_USE"]
 
 # TODO: Implement jump detection, look into more sophisticated methods
@@ -21,135 +24,154 @@ from ...datamodels.dqflags import DQ_FLAGS
 
 __all__ = ['fit_ramps_ols', 'fit_ramps_mcds']
 
+
 @njit(nogil=True)
-def first_with_flag(dq: np.ndarray, flag: np.uint32) -> int:
+def get_ramp_chunks(dq: np.ndarray):
     """
-    Return the index of the first element whose DQ has `flag` set.
-    Returns dq.size if none found.
+    Numba-compatible core. Returns (starts, ends) arrays of dtype int64.
+    Drops everything at and after the first SATURATED index.
+    Keeps the JUMP_DET read but splits before it (i.e., previous chunk ends at i-1,
+    next chunk starts at i).
+    Excludes DO_NOT_USE reads entirely (may split).
+    NOTE: does NOT filter out single-read chunks; wrapper does that.
     """
     n = dq.size
-    for i in range(n):
-        if (dq[i] & flag) != 0:
-            return i
-    return n
 
-# @njit(nogil=True)
-def _fit_ramp_slope_pedestal(times, ramp, dq, rdnoise, gain, dark_current,start_time):
+    # Find first saturated index; exclude it and everything after.
+    n_use = n
+    for i in range(n):
+        if (dq[i] & saturation_flag) != 0:
+            n_use = i
+            break
+
+    # Preallocate worst-case space (each valid run -> separate chunk)
+    starts = np.empty(n, dtype=np.int64)
+    ends   = np.empty(n, dtype=np.int64)
+    count = 0
+
+    if n_use == 0:
+        return starts[:0], ends[:0]
+
+    in_chunk = False
+    start = 0
+
+    for i in range(n_use):
+        dqv = dq[i]
+
+        # DO_NOT_USE ? close before this read and skip it
+        if (dqv & do_not_use_flag) != 0:
+            if in_chunk:
+                end = i - 1
+                if end >= start:
+                    starts[count] = start
+                    ends[count]   = end
+                    count += 1
+                in_chunk = False
+            continue
+
+        # Open chunk if needed
+        if not in_chunk:
+            start = i
+            in_chunk = True
+
+        # JUMP_DET ? close chunk up to i-1, start new at i (keeping i)
+        if (dqv & jump_det_flag) != 0:
+            end = i - 1
+            if end >= start:
+                starts[count] = start
+                ends[count]   = end
+                count += 1
+            start = i  # keep the jump read in the next chunk
+            in_chunk = True
+
+    # Flush trailing chunk
+    if in_chunk:
+        end = n_use - 1
+        if end >= start:
+            starts[count] = start
+            ends[count]   = end
+            count += 1
+
+    return starts[:count], ends[:count]
+
+@njit(nogil=True)
+def _fit_ramp_slope_pedestal(times, ramp, dq, rdnoise, gain, dark_current):
     """
     Fits a line to the given data (times, ramp) with a free y-intercept.
     """
+    first_indices,last_indices = get_ramp_chunks(dq)
 
-    first_do_not_use = first_with_flag(dq,do_not_use_flag)
-    first_saturated = first_with_flag(dq,saturation_flag)
-    if first_saturated <= first_do_not_use:
-        first_do_not_use = first_saturated
+    slope_num_sum = 0
+    slope_denom_sum = 0
+    rnoise_denom_sum = 0
+    poisson_denom_sum = 0
+    b_num_sum = 0
+    b_denom_sum = 0
 
-    # if not enough reads for mcds, return 0 slope and 0 error
-    if first_do_not_use < 2:
-        return 0.0, -1.0, -1.0, 0.0, 0.0, -1.0
+    n_chunk = 0
+    for k in range(len(first_indices)):
+        if first_indices[k] == last_indices[k]:
+            continue
+        n_chunk+=1
+        _times = times[first_indices[k]: last_indices[k]+1]
+        _ramp = ramp[first_indices[k]: last_indices[k]+1]
 
-    times = times[:first_do_not_use]
-    ramp = ramp[:first_do_not_use]
+        n = len(_times)/rdnoise**2
+        times_tot = np.sum(_times)/rdnoise**2
+        times2_tot = np.sum(_times**2)/rdnoise**2
+        ramp_tot = np.sum(_ramp)/rdnoise**2
+        timesramp_tot = np.sum(_times * _ramp)/rdnoise**2
+        deno = (n * times2_tot - times_tot**2)
 
-    n = len(times)/rdnoise**2
-    times_tot = np.sum(times)/rdnoise**2
-    times2_tot = np.sum(times**2)/rdnoise**2
-    ramp_tot = np.sum(ramp)/rdnoise**2
-    timesramp_tot = np.sum(times * ramp)/rdnoise**2
-    deno = (n * times2_tot - times_tot**2)
+        slope = (n * timesramp_tot - times_tot * ramp_tot) / deno
+        b = (times2_tot * ramp_tot - times_tot * timesramp_tot)/ deno
 
-    slope = (n * timesramp_tot - times_tot * ramp_tot) / deno
-    b = (times2_tot * ramp_tot - times_tot * timesramp_tot)/ deno
+        var_rnoise = n / deno
+        var_poisson = np.abs((slope + dark_current) * gain) / (_times[-1] - _times[0])
+        b_var = times2_tot/deno
 
-    var_rnoise = n / deno
-    var_poisson = np.abs((slope + dark_current) * gain) / (times[-1] - times[0])
-    b_err = np.sqrt(times2_tot/deno)
+        slope_num_sum += slope/(var_rnoise+var_poisson)
+        slope_denom_sum += 1/(var_rnoise+var_poisson)
+        rnoise_denom_sum += 1/var_rnoise
+        poisson_denom_sum += 1/var_poisson
+        b_num_sum += b/b_var
+        b_denom_sum += 1/b_var
+        # slope_num_sum = slope/(var_rnoise+var_poisson)
+        # slope_denom_sum = 1/(var_rnoise+var_poisson)
+        # rnoise_denom_sum = 1/var_rnoise
+        # poisson_denom_sum = 1/var_poisson
+        # b_num_sum = b/b_var
+        # b_denom_sum = 1/b_var
 
-    mid_time = start_time + np.sum(times) / n / 86400.0  # Convert seconds to days for MJD
+    if n_chunk == 0:
+        slope, slope_err,var_rnoise, var_poisson, b, b_err = 0.0, -1.0, -1.0, -1.0, 0.0, -1.0
+    else:
+        slope = slope_num_sum/slope_denom_sum
+        slope_err = np.sqrt(1/slope_denom_sum)
+        var_rnoise = 1/rnoise_denom_sum
+        var_poisson = 1/poisson_denom_sum
+        b= b_num_sum/b_denom_sum
+        b_err = np.sqrt(1/b_denom_sum)
+    return slope, slope_err, var_rnoise, var_poisson, b, b_err
 
-    return slope, var_rnoise, var_poisson, mid_time, b, b_err
-
-
-# @njit(nogil=True)
-def _fit_ramp_slope_fixed_pedestal(times, ramp, dq, rdnoise, gain, dark_current,start_time,  b):
-    """
-    Fits a line to the given data (times, ramp) with a fixed y-intercept.
-    """
-
-    first_do_not_use = first_with_flag(dq,do_not_use_flag)
-    first_saturated = first_with_flag(dq,saturation_flag)
-    if first_saturated <= first_do_not_use:
-        first_do_not_use = first_saturated
-
-    # if not enough reads for mcds, return 0 slope and 0 error
-    if first_do_not_use < 2:
-        return 0.0, -1.0, -1.0, 0.0
-
-    times = times[:first_do_not_use]
-    ramp = ramp[:first_do_not_use]
-
-    n = len(times)
-    times2_tot = np.sum((times/rdnoise)**2)
-    slope = np.sum(times * (ramp - b)/rdnoise**2) / times2_tot
-
-    var_rnoise = 1/times2_tot
-    var_poisson = np.abs((slope+dark_current)*gain)/(times[-1] - times[0])
-
-    mid_time = start_time + np.sum(times)/n / 86400.0  # Convert seconds to days for MJD
-
-    return slope, var_rnoise,var_poisson,mid_time
-
-
-# @njit(nogil=True)
-def _fit_ramps_slope_pedestal(times, ramps, dq, rdnoise, gain, dark_current,start_times):
+@njit(nogil=True)
+def _fit_ramps_slope_pedestal(times, ramps, dq, rdnoise, gain, dark_current):
     _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
+    slope_err = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
     b = np.zeros(shape=(ny, nx), dtype=np.float32)
     b_err = np.zeros(shape=(ny, nx), dtype=np.float32)
-    mid_times = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
-            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j], mid_times[i, j],b[i,j],b_err[i,j] = _fit_ramp_slope_pedestal(
+            slope_image[i, j], slope_err[i,j], var_rnoise[i, j], var_poisson[i, j],b[i,j],b_err[i,j] = _fit_ramp_slope_pedestal(
                                                 times, ramps[:, i, j], dq[:, i, j],
-                                                rdnoise[i, j], gain[i, j], dark_current[i, j],start_times[i, j])
-    return slope_image, var_rnoise, var_poisson, mid_times,b,b_err
+                                                rdnoise[i, j], gain[i, j], dark_current[i, j])
+    return slope_image, slope_err, var_rnoise, var_poisson,b,b_err
 
 
-# @njit(nogil=True)
-def _fit_ramps_slope_fixed_pedestal_array(times, ramps, dq, rdnoise, gain, dark_current,start_times, b):
-    _, ny, nx = ramps.shape
-    slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
-    var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
-    var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
-    mid_times = np.zeros(shape=(ny, nx), dtype=np.float32)
-    for i in range(ny):
-        for j in range(nx):
-            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j], mid_times[i, j] = _fit_ramp_slope_fixed_pedestal(
-                                                times, ramps[:, i, j], dq[:, i, j],
-                                                rdnoise[i, j], gain[i, j], dark_current[i, j],start_times[i, j],
-                                                b[i, j])
-    return slope_image, var_rnoise, var_poisson, mid_times
-
-
-# @njit(nogil=True)
-def _fit_ramps_slope_fixed_pedestal_float(times, ramps, dq, rdnoise, gain, dark_current,start_times, b):
-    _, ny, nx = ramps.shape
-    slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
-    var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
-    var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
-    mid_times = np.zeros(shape=(ny, nx), dtype=np.float32)
-    for i in range(ny):
-        for j in range(nx):
-            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j], mid_times[i, j]  = _fit_ramp_slope_fixed_pedestal(
-                                                times, ramps[:, i, j], dq[:, i, j],
-                                                rdnoise[i, j], gain[i, j], dark_current[i, j],start_times[i, j],
-                                                b)
-    return slope_image, var_rnoise, var_poisson, mid_times
-
-
-def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, start_times=None, b=None):
+def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, start_times=None,max_cores=1):
     """
     Top-level function for fitting ramps with or without a fixed y-intercept with no correlated noise.
     Dispatches to the appropriate specialized function based on whether b is provided.
@@ -163,7 +185,7 @@ def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=N
         dark_current (np.ndarray, optional): 2D array of dark current (DN/s) across detector (ny, nx).
             Caution: Only use when the ramps have been already dark subtracted.
         start_times (np.ndarray, optional): 2D array of MJD times of the first read across detector (ny, nx).
-        b (float | np.ndarray, optional): Fixed y-intercept value. If None, y-intercept will be fit.
+        max_cores (int): Number of cores for parallelization.
 
     Returns:
         dict[str, np.ndarray]: Dictionary with keys matching L0 rate objects.
@@ -181,20 +203,14 @@ def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=N
     if start_times is None:
         start_times = np.zeros((ny, nx)).astype(np.float32)
 
-    if b is None:
-        result = _fit_ramps_slope_pedestal(times, ramps,dq, rdnoise, gain, dark_current,start_times)
-    elif isinstance(b, np.ndarray):
-        result = _fit_ramps_slope_fixed_pedestal_array(times, ramps, dq, rdnoise, gain, dark_current,start_times, b)
-    else:
-        result = _fit_ramps_slope_fixed_pedestal_float(times, ramps, dq, rdnoise, gain, dark_current,start_times, b)
-
+    result = _fit_ramps_slope_pedestal(times, ramps,dq, rdnoise, gain, dark_current)
 
     output = {}
     output['rate'] = result[0]
-    output['rate_err'] = np.sqrt(result[1] + result[2])
-    output['rate_var_rnoise'] = result[1]
-    output['rate_var_poisson'] = result[2]
-    output['mid_time'] = result[3]
+    output['rate_err'] = result[1]
+    output['rate_var_rnoise'] = result[2]
+    output['rate_var_poisson'] = result[3]
+    output['mid_time'] = start_times + get_mid_delta_times(times, dq)
     if len(result) >4:
         output['bias'] = result[4]
         output['bias_err'] = result[5]
@@ -219,57 +235,104 @@ def fit_ramps_ols(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=N
 
 
 
-@njit(nogil=True)
-def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current,start_time, num_coadd=1):
+# @njit(nogil=True)
+def _fit_ramp_mcds(times, ramp, dq, rdnoise, gain, dark_current, num_coadd=1):
+    first_indices,last_indices = get_ramp_chunks(dq)
 
-    first_do_not_use = first_with_flag(dq,do_not_use_flag)
-    first_saturated = first_with_flag(dq,saturation_flag)
-    if first_saturated <= first_do_not_use:
-        first_do_not_use = first_saturated
+    slope_num_sum = 0
+    slope_denom_sum = 0
+    rnoise_denom_sum = 0
+    poisson_denom_sum = 0
 
-    # if not enough reads for mcds, return 0 slope and 0 error
-    if first_do_not_use < 2*num_coadd:
-        return 0.,-1.,-1.,0.
+    n_chunk = 0
+    for k in range(len(first_indices)):
+        if first_indices[k] == last_indices[k]:
+            continue
+        _times = times[first_indices[k]: last_indices[k]+1]
+        _ramp = ramp[first_indices[k]: last_indices[k]+1]
 
-    times = times[:first_do_not_use]
-    ramp = ramp[:first_do_not_use]
+        n1 = np.sum(_ramp[:num_coadd])
+        n2 = np.sum(_ramp[-num_coadd:])
+        d1 = np.sum(_times[:num_coadd])
+        d2 = np.sum(_times[-num_coadd:])
+        if num_coadd > 1:
+            n1 = n1 / num_coadd
+            n2 = n2 / num_coadd
+            d1 = d1 / num_coadd
+            d2 = d2 / num_coadd
+        slope = (n2 - n1) / (d2 - d1)
 
-    n1 = np.sum(ramp[:num_coadd])
-    n2 = np.sum(ramp[-num_coadd:])
-    d1 = np.sum(times[:num_coadd])
-    d2 = np.sum(times[-num_coadd:])
-    if num_coadd > 1:
-        n1 = n1 / num_coadd
-        n2 = n2 / num_coadd
-        d1 = d1 / num_coadd
-        d2 = d2 / num_coadd
-    slope = (n2 - n1) / (d2 - d1)
+        var_rnoise = (2*num_coadd)*rdnoise**2/ (d2 - d1)**2
+        var_poisson = np.abs((slope+dark_current)*gain)/(d2 - d1)
 
-    var_rnoise = (2*num_coadd)*rdnoise**2/ (d2 - d1)**2
-    var_poisson = np.abs((slope+dark_current)*gain)/(d2 - d1)
+        if var_rnoise > 0 and var_poisson > 0:
+            n_chunk+=1
+            slope_num_sum += slope/(var_rnoise+var_poisson)
+            slope_denom_sum += 1/(var_rnoise+var_poisson)
+            rnoise_denom_sum += 1/var_rnoise
+            poisson_denom_sum += 1/var_poisson
+        # slope_num_sum = slope/(var_rnoise+var_poisson)
+        # slope_denom_sum = 1/(var_rnoise+var_poisson)
+        # rnoise_denom_sum = 1/var_rnoise
+        # poisson_denom_sum = 1/var_poisson
 
-    mid_time = start_time + (d2 + d1) / 2.0 / 86400.0  # Convert seconds to days for MJD
+    if n_chunk == 0:
+        slope, slope_err,var_rnoise, var_poisson = 0.0, -1.0, -1.0, -1.0
+    else:
+        slope = slope_num_sum/slope_denom_sum
+        slope_err = np.sqrt(1/slope_denom_sum)
+        var_rnoise = 1/rnoise_denom_sum
+        var_poisson = 1/poisson_denom_sum
+    return slope, slope_err, var_rnoise, var_poisson
 
-    return slope, var_rnoise,var_poisson,mid_time
 
-
-@njit(nogil=True)
-def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current, start_times,num_coadd=1):
+# @njit(nogil=True)
+def _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current,num_coadd=1):
     _, ny, nx = ramps.shape
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
+    slope_err = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
     var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
-    mid_times = np.zeros(shape=(ny, nx), dtype=np.float32)
     for i in range(ny):
         for j in range(nx):
             out  = _fit_ramp_mcds(times,
-                                  ramps[:, i, j], dq[:,i,j], rdnoise[i,j], gain[i,j], dark_current[i,j], start_times[i,j],
+                                  ramps[:, i, j], dq[:,i,j], rdnoise[i,j], gain[i,j], dark_current[i,j],
                                   num_coadd=num_coadd)
-            slope_image[i, j], var_rnoise[i, j], var_poisson[i, j], mid_times[i, j] = out
-    return slope_image, var_rnoise, var_poisson, mid_times
+            slope_image[i, j],slope_err[i,j], var_rnoise[i, j], var_poisson[i, j] = out
+    return slope_image, slope_err, var_rnoise, var_poisson
 
+def _fit_ramps_mcds_worker(args):
+    """
+    Worker function for multiprocessing. Wraps _fit_ramps_mcds to accept a single argument (tuple/list).
+    Args:
+        args (tuple): Contains (times, ramps, dq, rdnoise, gain, dark_current, num_coadd)
+    Returns:
+        tuple: Output from _fit_ramps_mcds
+    """
+    # G = _G
+    # use views to avoid per-task copies
+    # return _fit_ramps_mcds(
+    #     G['times'],
+    #     G['ramps'][:, i:i+1, :],
+    #     G['dq'][:, i:i+1, :],
+    #     G['rdnoise'][i:i+1, :],
+    #     G['gain'][i:i+1, :],
+    #     G['dark_current'][i:i+1, :],
+    #     G['num_coadd'])
+    times, ramps, dq, rdnoise, gain, dark_current, num_coadd = args
+    return _fit_ramps_mcds(times, ramps, dq, rdnoise, gain, dark_current, num_coadd)
 
-def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, start_times=None,num_coadd=1):
+# _G = {}
+# def _init_globals(times, ramps, dq, rdnoise, gain, dark_current, num_coadd):
+#     _G['times'] = times
+#     _G['ramps'] = ramps
+#     _G['dq'] = dq
+#     _G['rdnoise'] = rdnoise
+#     _G['gain'] = gain
+#     _G['dark_current'] = dark_current
+#     _G['num_coadd'] = num_coadd
+
+def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=None, start_times=None,num_coadd=1, max_cores=1):
     """
     Fits ramps using the MCDS method.
 
@@ -283,6 +346,7 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
             Caution: Only use when the ramps have been already dark subtracted.
         start_times (np.ndarray): 2D array of MJD times of the first read across detector (ny, nx).
         num_coadd (int): Number of coadds.
+        max_cores (int): Number of cores for parallelization.
 
     Returns:
         dict[str,
@@ -302,23 +366,61 @@ def fit_ramps_mcds(times, ramps, dq=None, rdnoise=None, gain=None, dark_current=
     if start_times is None:
         start_times = np.zeros((ny, nx)).astype(np.float32)
 
-    result = _fit_ramps_mcds(times, ramps,dq, rdnoise, gain, dark_current,start_times, num_coadd=num_coadd)
+    slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
+    slope_err = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_rnoise = np.zeros(shape=(ny, nx), dtype=np.float32)
+    var_poisson = np.zeros(shape=(ny, nx), dtype=np.float32)
+
+    print("max_cores",max_cores)
+    if max_cores > 1:
+        print("coucou parallel")
+        # Prepare input for each row
+        indata = []
+        for i in range(ny):
+            indata.append((
+                times,
+                ramps[:, i, :][:, np.newaxis, :],  # shape (n_reads,1, nx)
+                dq[:, i, :][:, np.newaxis, :],
+                rdnoise[i, :][np.newaxis, :],
+                gain[i, :][np.newaxis, :],
+                dark_current[i, :][np.newaxis, :],
+                num_coadd
+            ))
+        with mp.Pool(max_cores) as pool:
+            results = pool.map(_fit_ramps_mcds_worker, indata)
+
+        # # Build arrays first, then create pool:
+        # # print("start method:", mp.get_start_method())
+        # with mp.Pool(processes=max_cores, initializer=_init_globals,
+        #              initargs=(times, ramps, dq, rdnoise, gain, dark_current, num_coadd)) as pool:
+        #     # print("workers:", pool._processes)
+        #     results = list(pool.imap(_fit_ramps_mcds_worker, range(ny), chunksize=8))
+
+        # Unpack results into arrays
+        for i, (slope_row, slope_err_row, var_r_row, var_p_row) in enumerate(results):
+            slope_image[i, :] = slope_row[0, :]
+            slope_err[i, :] = slope_err_row[0, :]
+            var_rnoise[i, :] = var_r_row[0, :]
+            var_poisson[i, :] = var_p_row[0, :]
+    else:
+        slope_image, slope_err, var_rnoise, var_poisson = _fit_ramps_mcds(
+            times, ramps, dq, rdnoise, gain, dark_current,num_coadd=num_coadd)
+
+    slope_err[np.where(slope_err < 0)] = np.nan
+    var_rnoise[np.where(var_rnoise < 0)] = np.nan
+    var_poisson[np.where(var_poisson < 0)] = np.nan
 
     output = {}
-    output['rate'] = result[0]
-    output['rate_err'] = np.sqrt(result[1] + result[2])
-    output['rate_var_rnoise'] = result[1]
-    output['rate_var_poisson'] = result[2]
-    output['mid_time'] = result[3]
+    output['rate'] = slope_image
+    output['rate_err'] = slope_err
+    output['rate_var_rnoise'] = var_rnoise
+    output['rate_var_poisson'] = var_poisson
+    output['mid_time'] = start_times + get_mid_delta_times(times, dq)
     # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
     _if_all_reads_bad = np.bitwise_and.reduce(dq & DQ_FLAGS["DO_NOT_USE"], axis=0)
     _dq = dq-dq & DQ_FLAGS["DO_NOT_USE"]
     output['DQ'] = np.bitwise_or.reduce(_dq, axis=0)+_if_all_reads_bad
 
-    where_bad = np.where(result[1] == -1)
+    where_bad = np.where(np.isnan(slope_err))
     output['DQ'][where_bad] |= DQ_FLAGS["DO_NOT_USE"]
-    output['rate'][where_bad] = np.nan
-    output['rate_err'][where_bad] = np.nan
-    output['rate_var_rnoise'][where_bad] = np.nan
-    output['rate_var_poisson'][where_bad] = np.nan
     return output

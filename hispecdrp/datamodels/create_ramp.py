@@ -88,7 +88,19 @@ def create_ramp(
         else:
             data[i, :, :] = data[i-1, :, :] + source * readtime
             _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + _dark * readtime
-
+    # if poisson_noise:
+    #     # Vectorized: shape (n_reads-1, ny, nx)
+    #     signal_poisson = np.random.poisson(lam=source * readtime, size=(n_reads - 1, *source.shape)).astype(np.float32)
+    #     dark_poisson = np.random.poisson(lam=_dark * readtime, size=(n_reads - 1, *source.shape)).astype(np.float32)
+    #     # Cumulative sum along reads, prepend zeros for first read
+    #     data = np.concatenate([np.zeros((1, *source.shape), dtype=np.float32), np.cumsum(signal_poisson, axis=0)],
+    #                           axis=0)
+    #     _dark_UTR = np.concatenate([np.zeros((1, *source.shape), dtype=np.float32), np.cumsum(dark_poisson, axis=0)],
+    #                                axis=0)
+    # else:
+    #     # Vectorized: just multiply and broadcast
+    #     data = (np.arange(n_reads,dtype=np.float32)[:, None, None]* readtime) * source.astype(np.float32)[None, :, :]
+    #     _dark_UTR = (np.arange(n_reads,dtype=np.float32)[:, None, None]* readtime) * _dark.astype(np.float32)[None, :, :]
 
     if flat is not None:
         data *= flat[None, :, :]

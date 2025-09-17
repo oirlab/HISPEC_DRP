@@ -505,7 +505,7 @@ class DataModel:
         remove_row_index = None
         if cal_role in self.calibrations['CAL_ROLE']:
             if replace_existing:
-                remove_row_index = self.calibrations['CAL_ROLE'].index(cal_role)
+                remove_row_index = np.where(self.calibrations['CAL_ROLE']==cal_role)[0][0]
             else:
                 warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
                 return

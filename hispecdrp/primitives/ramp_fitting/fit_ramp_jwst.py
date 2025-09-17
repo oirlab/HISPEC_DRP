@@ -7,6 +7,9 @@ from stcal.ramp_fitting.ramp_fit_class import RampData
 
 import multiprocessing as mp
 
+from ...datamodels.dqflags import DQ_FLAGS
+from .utils import get_mid_delta_times
+
 __all__ = ['fit_ramps_jwst']
 
 def _fit_ramps_jwst_row(indata):
@@ -26,7 +29,11 @@ def _fit_ramps_jwst_row(indata):
         err (np.ndarray): output error in slope image (1, nx).
     """
 
-    i, times, data_3d, readnoise_2d, gain_2d, pixeldq_2d, dark_current_2d, algorithm = indata
+    i, times, data_3d, readnoise_2d, gain_2d, dq_3d, dark_current_2d, algorithm = indata
+
+    groupdq = dq_3d.astype(np.uint8)
+    mask = dq_3d & DQ_FLAGS["DO_NOT_USE"]
+    pixeldq_2d = np.bitwise_or.reduce(dq_3d-mask, axis=1)
 
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
@@ -35,9 +42,6 @@ def _fit_ramps_jwst_row(indata):
     save_opt=False # Save optional output
     weighting="optimal"
     suppress_one_group=False # Suppress saturated ramps with good 0th group
-
-    # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
-    groupdq = np.zeros(data_3d.shape).astype(np.uint8)
 
     # Initialize ramp data model
     ramp_data = RampData()
@@ -78,12 +82,16 @@ def _fit_ramps_jwst_row(indata):
     # Times information is set as read_pattern parameter of RampData
     ramp_data.read_pattern = list(times)
 
+    #todo: we are disabling the jump detection for now, because we cannot get the group DQ flags to return from the function.
+    # and we might need it to estimate the mid_time correctly.
+    ramp_data.rejection_threshold = np.inf
+
     # Run ramp fitting
     if algorithm=='LIKELY':
         if nframes < ramp_fit.likely_fit.LIKELY_MIN_NGROUPS:
             raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY method requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
         # Call directly to likely ramp fit code
-        image_info, _, _ = ramp_fit.likely_fit.likely_ramp_fit(
+        image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
             ramp_data, readnoise_2d, gain_2d
         )
     elif algorithm=='OLS_C':
@@ -96,20 +104,23 @@ def _fit_ramps_jwst_row(indata):
 
     return(i, outdata, dq, var_poisson, var_rnoise, err)
 
-def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, rdnoise=None, gain=None, dark_current=None):
+def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=None, rdnoise=None, gain=None,
+                   dark_current=None,start_times=None):
     """
     Top-level function for fitting ramps with methods in stcal.ramp_fitting.
 
     Args:
         times (np.ndarray): Read times.
-        ramps (np.ndarray): 3D array of ramp data with shape (ny, nx, n_reads).
+        ramps (np.ndarray): 3D array of ramp data with shape (n_reads,ny, nx).
         max_cores (int): Number of cores for parallelization.
-        dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
+        algorithm (str): Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'.
+        dq_raw (np.ndarray): 3D array of data quality flags across detector (n_reads, ny, nx)
         rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
         dark_current (np.ndarray): 2D array of dark current across detector (ny, nx)
+        start_times (float): MJD time of the start of the first read.
     Returns:
-        dict[str, np.ndarray]: Dictionary with keys 'slope' and 'slope_err' containing the fitted slopes and errors.  The output also contains 'dq' for output data quality, 'var_poisson' for variance in Poisson noise, and 'var_rnoise' for variance in read noise.
+        dict[str, np.ndarray]:
     """
 
     n_reads, ny, nx = ramps.shape
@@ -122,8 +133,8 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
 
     # Create remaining dummy variables if input arrays are not provided
-    if dq is None:
-        dq = np.zeros((ny, nx)).astype(np.uint32)
+    if dq_raw is None:
+        dq_raw = np.zeros((n_reads,ny, nx)).astype(np.uint32)
     if rdnoise is None:
         # TODO - optimize read noise when array is not passed
         rdnoise = np.ones((ny, nx)).astype(np.float32)
@@ -132,14 +143,18 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         gain = np.ones((ny, nx)).astype(np.float32)
     if dark_current is None:
         dark_current = np.zeros((ny, nx)).astype(np.float32)
+    if start_times is None:
+        start_times = np.zeros((ny, nx)).astype(np.float32)
 
     with mp.Pool(max_cores) as pool:
         # TODO - parallelize with memory sharing instead of this way
         data = []
         for row in np.arange(ny):
             ramps_3d = ramps[:,[row],:]
+            dq_3d = dq_raw[:,[row],:]
             # Reshape to add the nints axis that JWST pipeline requires
             ramps_3d = ramps_3d[np.newaxis,:]
+            dq_3d = dq_3d[np.newaxis,:]
 
             data.append((row,
                         times,
@@ -147,7 +162,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
                         # Make sure to add a new axis to each array to maintain number of dimensions
                         rdnoise[[row], :],
                         gain[[row], :],
-                        dq[[row], :],
+                        dq_3d,
                         dark_current[[row], :],
                         algorithm))
 
@@ -169,9 +184,13 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq=None, 
         var_poisson_image[row, :] = var_poisson 
         var_rnoise_image[row, :] = var_rnoise
 
-    return(dict(slope=slope_image, 
-                slope_err=slope_errors, 
-                dq=dq_image, 
-                var_poisson=var_poisson_image, 
-                var_rnoise=var_rnoise_image))
+    output = {}
+    output['rate'] = slope_image
+    output['rate_err'] = slope_errors
+    output['rate_var_rnoise'] = var_rnoise_image
+    output['rate_var_poisson'] = var_poisson_image
+    output['mid_time'] = start_times + get_mid_delta_times(times, dq_raw)
+    output['DQ'] = dq_image
+
+    return output
 

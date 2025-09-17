@@ -62,7 +62,8 @@ class FitRampPrimitive(BasePrimitive):
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
-                                    dark_current=None) # Not used because we assume dark subtraction is done in rate maps.
+                                    dark_current=None,
+                                    max_cores=self.max_cores) # Not used because we assume dark subtraction is done in rate maps.
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data.astype(np.float32),
@@ -71,7 +72,8 @@ class FitRampPrimitive(BasePrimitive):
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=1)
+                                    num_coadd=1,
+                                    max_cores=self.max_cores)
         elif self.method.lower() in ('mcds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data.astype(np.float32),
@@ -80,14 +82,16 @@ class FitRampPrimitive(BasePrimitive):
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=_mcds_num_coadd)
+                                    num_coadd=_mcds_num_coadd,
+                                    max_cores=self.max_cores)
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
-            result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32), max_cores=self.max_cores, algorithm=self.method.lower())
-            slopes, slopes_err = result['slope'], result['slope_err']
-            # Pass Poisson, read noise, dq arrays out
-            var_poisson = result['var_poisson']
-            var_rnoise = result['var_rnoise']
-            dq_out = result['dq']
+            result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32),
+                                    dq_raw=input_model.dq_raw,
+                                    rdnoise=rn_model.rn,
+                                    gain=detgain_model.gain,
+                                    start_times=first_read_mjd,
+                                    dark_current=None,
+                                    max_cores=self.max_cores, algorithm=self.method.lower())
         else:
             self.log.error(f"Invalid ramp fit method {self.method.lower()}")
             raise ValueError(f"Invalid ramp fit method {self.method.lower()}")
