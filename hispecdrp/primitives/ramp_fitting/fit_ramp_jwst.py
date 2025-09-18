@@ -33,7 +33,7 @@ def _fit_ramps_jwst_row(indata):
 
     groupdq = dq_3d.astype(np.uint8)
     mask = dq_3d & DQ_FLAGS["DO_NOT_USE"]
-    pixeldq_2d = np.bitwise_or.reduce(dq_3d-mask, axis=1)
+    pixeldq_2d = np.bitwise_or.reduce(dq_3d-mask, axis=(0,1))
 
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
@@ -146,9 +146,30 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
     if start_times is None:
         start_times = np.zeros((ny, nx)).astype(np.float32)
 
-    with mp.Pool(max_cores) as pool:
-        # TODO - parallelize with memory sharing instead of this way
-        data = []
+    if max_cores > 1:
+        with mp.Pool(max_cores) as pool:
+            # TODO - parallelize with memory sharing instead of this way
+            data = []
+            for row in np.arange(ny):
+                ramps_3d = ramps[:,[row],:]
+                dq_3d = dq_raw[:,[row],:]
+                # Reshape to add the nints axis that JWST pipeline requires
+                ramps_3d = ramps_3d[np.newaxis,:]
+                dq_3d = dq_3d[np.newaxis,:]
+
+                data.append((row,
+                            times,
+                            ramps_3d,
+                            # Make sure to add a new axis to each array to maintain number of dimensions
+                            rdnoise[[row], :],
+                            gain[[row], :],
+                            dq_3d,
+                            dark_current[[row], :],
+                            algorithm))
+
+            results = pool.map(_fit_ramps_jwst_row, data)
+    else:
+        results = []
         for row in np.arange(ny):
             ramps_3d = ramps[:,[row],:]
             dq_3d = dq_raw[:,[row],:]
@@ -156,18 +177,17 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
             ramps_3d = ramps_3d[np.newaxis,:]
             dq_3d = dq_3d[np.newaxis,:]
 
-            data.append((row,
-                        times,
-                        ramps_3d,
-                        # Make sure to add a new axis to each array to maintain number of dimensions
-                        rdnoise[[row], :],
-                        gain[[row], :],
-                        dq_3d,
-                        dark_current[[row], :],
-                        algorithm))
+            args = (row,
+                    times,
+                    ramps_3d,
+                    # Make sure to add a new axis to each array to maintain number of dimensions
+                    rdnoise[[row], :],
+                    gain[[row], :],
+                    dq_3d,
+                    dark_current[[row], :],
+                    algorithm)
 
-        results = pool.map(_fit_ramps_jwst_row, data)
-
+            results.append(_fit_ramps_jwst_row(args))
     # Parse process results into output images
     slope_image = np.zeros(shape=(ny, nx), dtype=np.float32)
     slope_errors = np.zeros(shape=(ny, nx), dtype=np.float32)
