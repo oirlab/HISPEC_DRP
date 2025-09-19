@@ -5,8 +5,9 @@ The LFC wavelength solution.
 
 **Classes:**
 
-* :py:class:`~hispecdrp.datamodels.hispec.lfcwavesol.HISPECLFCWavesolModel`
-* :py:class:`~hispecdrp.datamodels.parvi.lfcwavesol.PARVILFCWavesolModel`
+* :py:class:`~hispecdrp.datamodels.lfcwavesol.LFCChebyshevWavesolModel`
+* :py:class:`~hispecdrp.datamodels.lfcwavesol.HISPECLFCWavesolModel`
+* :py:class:`~hispecdrp.datamodels.lfcwavesol.PARVILFCWavesolModel`
 
 **Calibration type:** lfc_wavesol
 

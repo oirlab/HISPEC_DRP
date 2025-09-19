@@ -18,23 +18,27 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
         'max_iters' : 100,
         'sigma_cut' : 4.0,
         'output_model' : None,
+        'output_model': 'GaussianLSFModel',
     }
 
     def _perform(self):
 
         input_model = datamodels.open(self.input)
 
+        # Get fibers and orders to fit
+        do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
+
         # Default inter order deg
         if self.deg_inter_order == 'auto':
-            if len(self.fit_orders) == 1:
+            if len(fit_orders) == 1:
                 deg_inter_order = 0
-            elif len(self.fit_orders) == 2:
+            elif len(fit_orders) == 2:
                 deg_inter_order = 1
             else:
                 anchor_degree = 4
                 anchor_orders = 10
                 max_degree = 6
-                deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(self.fit_orders)) / np.log(anchor_orders)), max_degree))
+                deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
             self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
@@ -42,17 +46,17 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
         fit_results = []
 
         # Get the target output model
-        output_model = self.get_output_model(input_model, output_model='GaussianLSFModel')
+        output_model = self.get_output_model(input_model)
 
-        for fiber in self.do_fibers:
+        for fiber in do_fibers:
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
-            lsfnorm_table = getattr(output_model, f'lsfnorm_fib{fiber}')
+            lsfnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
             fwhms = params_table['FWHM_WAVE']
             fwhm_errs = params_table['FWHM_ERR_WAVE']
-            mask = np.nonzero(np.isin(orders, self.fit_orders))[0]
+            mask = np.nonzero(np.isin(orders, fit_orders))[0]
             pixels = pixels[mask].copy()
             orders = orders[mask].copy()
             waves = waves[mask].copy()

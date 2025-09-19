@@ -15,7 +15,6 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'do_fibers' : None,
         'do_orders' : None,
-        'output_model' : None,
     }
 
     CALIBRATIONS = {
@@ -31,9 +30,12 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
         ref_model, _ = self.get_calibration(input_model, 'ref_etalon')
         output_model = self.get_output_model(input_model)
 
-        drift_results = {fiber : [] for fiber in self.do_fibers}
+        # Get fibers and orders
+        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
 
-        for fiber in self.do_fibers:
+        drift_results = {fiber : [] for fiber in do_fibers}
+
+        for fiber in do_fibers:
 
             wave = getattr(input_model, f'wave_fib{fiber}')
             xarr = np.arange(wave.shape[1])
@@ -48,7 +50,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
 
             drift_table = getattr(output_model, f'drift_fib{fiber}')
 
-            for order in self.do_orders:
+            for order in do_orders:
 
                 order_mask = params_table['ORDER'] == order
                 order_mask_ref = params_table_ref['ORDER'] == order
@@ -146,9 +148,11 @@ class ApplyDriftCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
         input_model = datamodels.open(self.input)
+        # Get fibers and orders
+        _, do_orders = self.get_do_traces(input_model, None, self.do_orders)
         for fiber, ref_fiber in self.fiber_reference_map.items():
             wave = getattr(input_model, f'wave_fib{fiber}')
-            for order in self.do_orders:
+            for order in do_orders:
                 drift_table = getattr(input_model, f'drift_fib{ref_fiber}')
                 k = np.where(drift_table['ORDER'] == order)[0]
                 if len(k) == 0:
