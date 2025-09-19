@@ -6,9 +6,6 @@ import matplotlib.pyplot as plt
 
 from memory_profiler import memory_usage
 
-from utils import add_default_metadata
-
-
 def create_ramp_model(slope, size=4096, n_reads=8, gain=2.28, rdnoise=12.0,
     seed=None):
 
