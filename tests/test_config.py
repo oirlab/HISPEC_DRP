@@ -1,4 +1,5 @@
 from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
+from hispecdrp.utils import initialize_from_config
 
 import os
 import textwrap
@@ -26,6 +27,7 @@ def test_primitive_config(tmp_path):
     config_string = f"""
     %YAML 1.2
     ---
+    class: FitLFCLinesPrimitive
     arguments:
       do_orders: {do_orders}
       do_fibers: {do_fibers}
@@ -45,6 +47,14 @@ def test_primitive_config(tmp_path):
     do_orders = [90, 91, 92, 93, 94, 96]
     prim = FitLFCLinesPrimitive(config=config_path, do_orders=do_orders)
     assert prim.do_orders == do_orders
+
+    # Get primitive from class attr
+    new_fwhm_bounds = [0.5, 1.123]
+    prim = initialize_from_config(config_path, fwhm_bounds=new_fwhm_bounds)
+    assert isinstance(prim, FitLFCLinesPrimitive)
+    assert prim.lfc_nu0 == lfc_nu0
+    assert prim.lfc_delta_nu == lfc_delta_nu
+    assert prim.fwhm_bounds == new_fwhm_bounds
 
 
 def test_pipeline_config(tmp_path):
@@ -88,6 +98,7 @@ def test_pipeline_config(tmp_path):
     config_string = f"""
     %YAML 1.2
     ---
+    class: ProcessLFCPipeline
     primitives:
       fit_lfc_lines:
         arguments:
@@ -124,19 +135,16 @@ def test_pipeline_config(tmp_path):
       lfc_nu0: {lfc_nu0}
       lfc_delta_nu: {lfc_delta_nu}
     """
-    new_fwhm_bounds = [0.5, 1.0]
+    new_fwhm_bounds = [0.5, 1.123]
     pipe_config_string = f"""
     %YAML 1.2
     ---
+    class: ProcessLFCPipeline
     primitives:
       fit_lfc_lines:
         config_file: {prim_config_path}
         arguments:
-          do_orders: {do_orders}
-          do_fibers: {do_fibers}
           fwhm_bounds: {new_fwhm_bounds}
-          lfc_nu0: {lfc_nu0}
-          lfc_delta_nu: {lfc_delta_nu}
     """
     save_config_string(prim_config_string, prim_config_path)
     save_config_string(pipe_config_string, pipe_config_path)
@@ -147,6 +155,13 @@ def test_pipeline_config(tmp_path):
     assert pipe.fit_lfc_lines.fwhm_bounds == new_fwhm_bounds
 
     # Override config file argument with a different value
-    do_orders = [90, 91]
+    do_orders = [90, 91, 99]
     prim = FitLFCLinesPrimitive(config=pipe_config_path, do_orders=do_orders)
     assert prim.do_orders == do_orders
+
+    # Get primitive from class attr
+    pipe = initialize_from_config(pipe_config_path)
+    assert isinstance(pipe, ProcessLFCPipeline)
+    assert pipe.fit_lfc_lines.lfc_nu0 == lfc_nu0
+    assert pipe.fit_lfc_lines.lfc_delta_nu == lfc_delta_nu
+    assert pipe.fit_lfc_lines.fwhm_bounds == new_fwhm_bounds
