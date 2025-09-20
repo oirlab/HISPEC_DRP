@@ -91,10 +91,22 @@ Primitive Configuration Files
 
 Primitives can also be configured with config files, but only serializable arguments can be set here. An example configuration for the dark primitive is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
 
-#### NOTE!!!! Add method for constructing pipeline and primitive from class name in config file.
+Configuration files can optionally specify the primitive class to run with the ``class`` key. ``class`` can be a:
+
+1. Module + class path name:
+
+    - ``hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive``
+    - ``hispecdrp.primitives.DarkSubtractionPrimitive``
+
+2. Class name (e.g. ``DarkSubtractionPrimitive``), in which case it will try to resolve the class using the top level module (``hispecdrp``).
+
+3. Not provided: If the class name is not provided, the desired object must be explicitly constructed with that class's `__init__`.
+
+The utility method :py:meth:`~hispecdrp.utils.config.initialize_from_config` can be used to create an instance of the desired primitive.
 
 
 .. code-block:: yaml
+    :caption: Example primitive configuration file
     
     %YAML 1.2
     ---
@@ -120,8 +132,8 @@ The dark subtraction primitive represents a typical approach for implementing a 
 
 .. literalinclude:: ../../../hispecdrp/primitives/dark_subtraction/dark_primitive.py
 
-Supporting Calibration
-^^^^^^^^^^^^^^^^^^^^^^
+Supporting Calibration(s)
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If the primitive needs to use a new type of calibration model (as input or output), a new DataModel class should be implemented inside the module :py:mod:`~hispecdrp.datamodels` and added to the model register. See :doc:`Data Models Development <datamodels>`.
 
