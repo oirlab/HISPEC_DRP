@@ -7,3 +7,4 @@ from .line_fitting import *
 from .wavesol import *
 from .lsf import *
 from .register_calibration import *
+from .jump_detection import *
