@@ -1,11 +1,10 @@
 import importlib
 import yaml
 
-__all__ = ['resolve_primitive_class', 'find_config_path', 'read_config_file']
+__all__ = ['resolve_primitive_class', 'find_config_path', 'read_config_file', 'initialize_from_config']
 
 import os
 
-@staticmethod
 def read_config_file(filepath : str) -> dict:
     """
     Load a config file.
@@ -66,3 +65,19 @@ def resolve_primitive_class(name: str):
     
     # Class not found
     return None
+
+def initialize_from_config(config : dict | str, **kwargs):
+    """
+    Create an instance of a primitive from a configuration dictionary or file.
+
+    Args:
+        config (dict | str | None): A configuration dictionary, or the path to to a configuration file.
+        **kwargs: Any additional keyword arguments to set or override for the primitive or pipeline.
+
+    Returns:
+        ProcessingComponent: An instance of the correct primitive.
+    """
+    if isinstance(config, str):
+        config = read_config_file(config)
+    _class = resolve_primitive_class(config['class'])
+    return _class(config=config, **kwargs) 
