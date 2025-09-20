@@ -43,6 +43,11 @@ Primitives are configured with arguments that control their behavior. These argu
 3. **Keyword Arguments**: ``kwargs``
    - Keyword arguments passed directly to Primitive's constructor or ``apply`` method have the **highest priority.**
 
+Default Arguments
+^^^^^^^^^^^^^^^^^
+
+The base class :py:class:`~hispecdrp.processing_component.ProcessingComponent` defines default arguments in the class attribute ``ARGUMENTS`` along with default values. :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` defines a few additional arguments specific to only primitives.
+
 
 Primitive Methods
 -----------------
@@ -55,12 +60,6 @@ Every primitive must implement the following method:
 
 
 Several additional methods are defined in :py:class:`~hispecdrp.processing_component.ProcessingComponent` and :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` that can be optionally overridden by subclasses to customize behavior. All have default implementations, and should be overriden with care.
-
-
-Default Arguments
-^^^^^^^^^^^^^^^^^
-
-The base class :py:class:`~hispecdrp.processing_component.ProcessingComponent` defines default arguments in the class attribute ``ARGUMENTS`` along with default values. :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` defines a few additional arguments specific to only primitives.
 
 
 Primitive Calibrations
