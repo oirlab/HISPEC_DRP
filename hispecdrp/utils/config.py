@@ -43,26 +43,23 @@ def resolve_primitive_class(name: str):
             return getattr(module, class_name, None)
         except (ImportError, AttributeError):
             return None
-    
+
     # Check if name contains a module path
     if '.' in name:
         module_path, class_name = name.rsplit('.', 1)
-        
-        # Try the class name as is, and with 'Primitive' and 'Pipeline' suffixes
-        for suffix in ('', 'Primitive', 'Pipeline'):
-            resolved_class = try_import(module_path, class_name + suffix)
-            if resolved_class:
-                return resolved_class
+        resolved_class = try_import(module_path, class_name)
+        if resolved_class:
+            return resolved_class
     else:
         # If no module path, get the top-level module
+        print(f"{__name__=}")
         top_level_module = __name__.split('.')[0]
-        
+
         # Try resolving the class in the top-level module with suffixes
-        for suffix in ('', 'Primitive', 'Pipeline'):
-            resolved_class = try_import(top_level_module, name + suffix)
-            if resolved_class:
-                return resolved_class
-    
+        resolved_class = try_import(top_level_module, name)
+        if resolved_class:
+            return resolved_class
+
     # Class not found
     return None
 
