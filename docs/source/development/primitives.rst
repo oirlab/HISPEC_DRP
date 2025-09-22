@@ -120,6 +120,24 @@ The dark subtraction primitive represents a typical approach for implementing a 
 
 .. literalinclude:: ../../../hispecdrp/primitives/dark_subtraction/dark_primitive.py
 
+Note the contents of two other files have been modified to include this primitive in the code base.  First, `primitives/__init__.py <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/primitives/__init__.py>`_ includes the line
+
+.. code-block:: python
+
+    from .dark_subtraction import *
+
+and second the file `dark_subtraction/__init__.py <https://github.com/oirlab/HISPEC_DRP/blob/main/hispecdrp/primitives/dark_subtraction/__init__.py>`_ includes the basic import statements and definitions
+
+.. code-block:: python
+
+    from .dark_primitive import DarkSubtractionPrimitive
+
+    __all__ = ['DarkSubtractionPrimitive']
+
+The documentation for the dark subtraction primitive can be updated under :doc:`Dark Subtraction Documentation <../primitives/dark_subtraction>`.
+
+When implementing a primitive, please also consider creating a corresponding unit test in the testing suite `tests <https://github.com/oirlab/HISPEC_DRP/blob/main/tests>`_.
+
 Supporting Calibration
 ^^^^^^^^^^^^^^^^^^^^^^
 

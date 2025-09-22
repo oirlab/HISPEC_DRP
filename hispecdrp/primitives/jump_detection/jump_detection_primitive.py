@@ -27,10 +27,10 @@ class JumpDetectionPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Input UTR data
-        data = result.data.astype(np.float64)
+        data = result.data.astype(np.float32)
     
         # Input DQ flags from previous stages
-        dq = result.dq.astype(np.uint32)
+        dq = result.dq_raw.astype(np.uint32)
 
         # Perform jump detection - this only modifies the DQ mask
         if self.method.lower()=='jwst':

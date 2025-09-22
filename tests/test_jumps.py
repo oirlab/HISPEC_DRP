@@ -13,6 +13,10 @@ def test_jumps(tmp_path):
     ramp_model.meta.spectrograph = 'BSPEC'
     datamodels.set_default_meta(ramp_model)
 
+    print(dir(ramp_model))
+    print(ramp_model.ALLOWED_ATTRIBUTES)
+    sys.exit()
+
     # Modify rows to insert a jump of 100 on specified reads in pixel at specified column
     # Also, create a comparison array with JUMP_DET flag set
     jump_val = 100
@@ -29,3 +33,6 @@ def test_jumps(tmp_path):
 
     dq_out = jump_detection_difference(ramp_model.data, ramp_model.dq)
     np.testing.assert_equal(dq_out, dq_comp)
+
+if __name__=="__main__":
+    test_jumps('.')

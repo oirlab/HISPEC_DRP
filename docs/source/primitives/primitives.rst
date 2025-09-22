@@ -6,6 +6,7 @@ Primitives
    :glob:
    
    nonlinear_correction
+   jump_detection
    fit_ramp
    dark_subtraction
    detector_flat
