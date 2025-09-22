@@ -26,7 +26,12 @@ This example subtracts a dark frame from an input frame at level L0 (rate map). 
     model_result = dark_prim.apply(sci_path, dark=dark_model) # dark can be dark_path or dark_model
 
 
-**The associated dark calibration can be found with:** ``model_result.get_calibration_from_role('dark')``.
+The associated dark calibration can be found with:
+
+.. code-block:: python
+
+    # Returns dictionary with calibration information
+    dark_info = model_result.get_calibration_from_role('dark')
 
 
 Fit 1D LFC Modes

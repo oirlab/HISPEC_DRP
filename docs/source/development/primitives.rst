@@ -43,6 +43,11 @@ Primitives are configured with arguments that control their behavior. These argu
 3. **Keyword Arguments**: ``kwargs``
    - Keyword arguments passed directly to Primitive's constructor or ``apply`` method have the **highest priority.**
 
+Default Arguments
+^^^^^^^^^^^^^^^^^
+
+The base class :py:class:`~hispecdrp.processing_component.ProcessingComponent` defines default arguments in the class attribute ``ARGUMENTS`` along with default values. :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` defines a few additional arguments specific to only primitives.
+
 
 Primitive Methods
 -----------------
@@ -55,12 +60,6 @@ Every primitive must implement the following method:
 
 
 Several additional methods are defined in :py:class:`~hispecdrp.processing_component.ProcessingComponent` and :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` that can be optionally overridden by subclasses to customize behavior. All have default implementations, and should be overriden with care.
-
-
-Default Arguments
-^^^^^^^^^^^^^^^^^
-
-The base class :py:class:`~hispecdrp.processing_component.ProcessingComponent` defines default arguments in the class attribute ``ARGUMENTS`` along with default values. :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive` defines a few additional arguments specific to only primitives.
 
 
 Primitive Calibrations
@@ -91,10 +90,22 @@ Primitive Configuration Files
 
 Primitives can also be configured with config files, but only serializable arguments can be set here. An example configuration for the dark primitive is below. Some values are redundant with the default ARGUMENTS, but are included here to be explicit.
 
-#### NOTE!!!! Add method for constructing pipeline and primitive from class name in config file.
+Configuration files can optionally specify the primitive class to run with the ``class`` key. ``class`` can be a:
+
+1. Module + class path name:
+
+    - ``hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive``
+    - ``hispecdrp.primitives.DarkSubtractionPrimitive``
+
+2. Class name (e.g. ``DarkSubtractionPrimitive``), in which case it will try to resolve the class using the top level module (``hispecdrp``).
+
+3. Not provided: If the class name is not provided, the desired object must be explicitly constructed with that class's `__init__`.
+
+The utility method :py:meth:`~hispecdrp.utils.config.initialize_from_config` can be used to create an instance of the desired primitive.
 
 
 .. code-block:: yaml
+    :caption: Example primitive configuration file
     
     %YAML 1.2
     ---
@@ -138,8 +149,8 @@ The documentation for the dark subtraction primitive can be updated under :doc:`
 
 When implementing a primitive, please also consider creating a corresponding unit test in the testing suite `tests <https://github.com/oirlab/HISPEC_DRP/blob/main/tests>`_.
 
-Supporting Calibration
-^^^^^^^^^^^^^^^^^^^^^^
+Supporting Calibration(s)
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If the primitive needs to use a new type of calibration model (as input or output), a new DataModel class should be implemented inside the module :py:mod:`~hispecdrp.datamodels` and added to the model register. See :doc:`Data Models Development <datamodels>`.
 
