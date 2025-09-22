@@ -9,6 +9,7 @@ Stage 0 (Detector Processing)
    :maxdepth: 1
 
    nonlinear_correction
+   jump_detection
    fit_ramp
    dark_subtraction
    detector_flat
