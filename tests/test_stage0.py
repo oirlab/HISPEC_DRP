@@ -3,11 +3,77 @@ from hispecdrp import datamodels
 import numpy as np
 import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
+from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
 
 
 def test_stage0(tmp_path):
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+
+    # --- Test get_mid_delta_times_ramp function with various DQ flags ---
+    n_reads = 4
+    times = np.arange(n_reads)
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    mid_time = get_mid_delta_times_ramp(times, dq_raw)
+    np.testing.assert_array_equal(mid_time, 1.5, err_msg='Error in mid_time calculation with no DQ flags')
+
+    n_reads = 6
+    times = np.arange(n_reads)
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    dq_raw[[0, 3]] |= DQ_FLAGS['DO_NOT_USE']
+    dq_raw[[5]] |= DQ_FLAGS['SATURATED']
+    print(dq_raw[:])
+    mid_time = get_mid_delta_times_ramp(times, dq_raw)
+    np.testing.assert_array_equal(mid_time, 1.5, err_msg='Error in mid_time calculation with DO_NOT_USE flags')
+
+    n_reads = 5
+    times = np.arange(n_reads)
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    dq_raw[[2]] |= DQ_FLAGS['JUMP_DET']
+    print(dq_raw[:])
+    mid_time = get_mid_delta_times_ramp(times, dq_raw)
+    np.testing.assert_array_equal(mid_time, (0.5 + 2.5 + 3.5) / 3.0,
+                                  err_msg='Error in mid_time calculation with JUMP_DET flag')
+
+
+    # --- Test get_ramp_chunks function with various DQ flags ---
+
+    # test all saturated return empty
+    n_reads = 4
+    dq_raw = np.ones((n_reads), dtype=np.uint32)
+    chunks = get_ramp_chunks(dq_raw)
+    np.testing.assert_array_equal(len(chunks[0]), 0, err_msg='Error: chunks should be all empty when all bad')
+    np.testing.assert_array_equal(len(chunks[1]), 0, err_msg='Error: chunks should be all empty when all bad')
+
+    # test all good
+    n_reads = 4
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    chunks = get_ramp_chunks(dq_raw)
+    np.testing.assert_array_equal(chunks[0], [0], err_msg='Error when all reads are good')
+    np.testing.assert_array_equal(chunks[1], [4], err_msg='Error when all reads are good')
+
+    # test all good
+    n_reads = 4
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    dq_raw[[3]] |= DQ_FLAGS['SATURATED']
+    chunks = get_ramp_chunks(dq_raw)
+    np.testing.assert_array_equal(chunks[0], [0], err_msg='Error when saturation')
+    np.testing.assert_array_equal(chunks[1], [3], err_msg='Error when saturation')
+
+    # test maximum jumps
+    n_reads = 6
+    dq_raw = np.zeros((n_reads), dtype=np.uint32)
+    dq_raw[[2, 4]] |= DQ_FLAGS['JUMP_DET']
+    chunks = get_ramp_chunks(dq_raw)
+    np.testing.assert_array_equal(chunks[0], [0, 2, 4], err_msg='Error when maximum number of jumps')
+    np.testing.assert_array_equal(chunks[1], [2, 4, 6], err_msg='Error when maximum number of jumps')
+    dq_raw[[2, 4]] |= DQ_FLAGS['JUMP_DET']
+    dq_raw[[3]] |= DQ_FLAGS['DO_NOT_USE']
+    chunks = get_ramp_chunks(dq_raw)
+    np.testing.assert_array_equal(chunks[0], [0, 4], err_msg='Error when maximum number of jumps')
+    np.testing.assert_array_equal(chunks[1], [2, 6], err_msg='Error when maximum number of jumps')
+
+    # --- Define parameters for the simulated ramp ---
 
     max_slope = 50000  # e-/s
     readtime = 1.7  # seconds

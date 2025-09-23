@@ -57,7 +57,7 @@ class FitRampPrimitive(BasePrimitive):
 
         if self.method.lower() == 'ols':
             result = fit_ramps_ols(delta_readtimes,
-                                    input_model.data.astype(np.float32),
+                                    input_model.data,
                                     dq=input_model.dq_raw,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
@@ -66,7 +66,7 @@ class FitRampPrimitive(BasePrimitive):
                                     max_cores=self.max_cores) # Not used because we assume dark subtraction is done in rate maps.
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(delta_readtimes,
-                                    input_model.data.astype(np.float32),
+                                    input_model.data,
                                     dq=input_model.dq_raw,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
@@ -76,7 +76,7 @@ class FitRampPrimitive(BasePrimitive):
                                     max_cores=self.max_cores)
         elif self.method.lower() in ('mcds'):
             result = fit_ramps_mcds(delta_readtimes,
-                                    input_model.data.astype(np.float32),
+                                    input_model.data,
                                     dq=input_model.dq_raw,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,

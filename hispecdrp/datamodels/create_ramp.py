@@ -1,11 +1,12 @@
 import numpy as np
 import astropy.table
+import multiprocessing as mp
 
 __all__ = ['create_ramp']
 
 # NOTE: Find a new home for this function
 
-def create_ramp(
+def _create_ramp(
     source : np.ndarray, # e- / s / pixel including all sources
     readtime : float = 1.7, # seconds between reads
     n_reads : int = 10,
@@ -13,63 +14,14 @@ def create_ramp(
     flat : np.ndarray | None = None,
     bias : np.ndarray | float = 1000, # e-
     dark : np.ndarray | float = 0, # e-/s/pixel
-    read_noise : float | None = 3, # e- standard deviation
-    kTC_noise : float | None = 50, # e- standard deviation, None to skip
+    read_noise : np.ndarray | float | None = 3, # e- standard deviation
+    kTC_noise : np.ndarray | float | None = 50, # e- standard deviation, None to skip
     nonlin_coeffs : np.ndarray | None = None,
     poisson_noise : bool = True,
     mjd_start : float = 60577.0, # MJD start time of first read of first pixel
     convert_to_uint16 : bool = True,
     clip_ramps: bool = True,
 ) -> dict[str, np.ndarray]:
-    """
-    Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
-
-    Parameters
-    ----------
-    source : np.ndarray
-        2D array of source signal (e-/s/pixel) including all sources.
-    readtime : float
-        Time between reads (seconds).
-    n_reads : int
-        Number of reads in the ramp sequence (default: 10).
-    gain : float or np.ndarray
-        Gain of the detector (e-/ADU).
-    flat : np.ndarray or None, optional
-        Flat field array (default: None).
-        We assume that flats have been corrected for gain variations already. In this function the gain is applied after
-         the flat, but in the data reduction pipeline the gain correction should be applied first.
-    bias : np.ndarray or float, optional
-        Bias level to add to the first read (default: 1000 e-).
-    dark : np.ndarray or float, optional
-        Dark current level to add to each read (e-/s/pixel) (default: 0)
-        The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
-        before the flat fielding step.
-    read_noise : float or None, optional
-        Standard deviation of read noise (e-) for each read (default: 3 e-).
-    kTC_noise : float or None, optional
-        kTC noise parameter (e-) to add to the first read (default: 50 e-).
-    nonlin_coeffs : np.ndarray or None, optional
-        Nonlinearity correction coefficients (default: None). Applies as data = np.polyval(nonlin_coeffs, data).
-    poisson_noise : bool, optional
-        If True, apply Poisson noise to the signal (default: True).
-    mjd_start : float, optional
-        Modified Julian Date for the start time (default: 60577.0).
-    convert_to_uint16 : bool, optional
-        If True, round and convert the output data to np.uint16 (default: True).
-    clip_ramps: bool, optional
-        If True, clip_ramps the output data to the range of np.uint16 (0 to 65535) (default: True).
-    -------
-    dict[str, np.ndarray]
-        Dictionary containing:
-            'times': astropy.table.Table of read numbers, times, and exptimes
-            'data': 3D array (n_reads, ny, nx) of ramp data
-            'dq': 3D array (n_reads, ny, nx) of data quality flags
-
-    Raises
-    ------
-    ValueError
-        If any value in the output 'data' array is negative.
-    """
 
     data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
@@ -140,7 +92,132 @@ def create_ramp(
         data = np.round(data).astype(np.uint16)
 
 
+
+    return dict(data=data, dq_raw=dq_raw)
+
+def _create_ramp_worker(args):
+    """
+    Worker function for multiprocessing. Runs create_ramp on a block of rows.
+    Args:
+        args (tuple): (source_block, readtime, n_reads, gain_block, flat_block, bias_block, dark_block, read_noise, kTC_noise, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps)
+    Returns:
+        dict[str, np.ndarray]: Output from create_ramp for the block
+    """
+    return _create_ramp(*args)
+
+
+def create_ramp(
+    source : np.ndarray,
+    readtime : float = 1.7,
+    n_reads : int = 10,
+    gain : np.ndarray | float = 1.0,
+    flat : np.ndarray | None = None,
+    bias : np.ndarray | float = 1000,
+    dark : np.ndarray | float = 0,
+    read_noise : float | None = 3,
+    kTC_noise : float | None = 50,
+    nonlin_coeffs : np.ndarray | None = None,
+    poisson_noise : bool = True,
+    mjd_start : float = 60577.0,
+    convert_to_uint16 : bool = True,
+    clip_ramps: bool = True,
+    max_cores: int = 1,
+    block_size: int | None = None,
+) -> dict[str, np.ndarray]:
+    """
+    Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
+
+    Parameters
+    ----------
+    source : np.ndarray
+        2D array of source signal (e-/s/pixel) including all sources.
+    readtime : float
+        Time between reads (seconds).
+    n_reads : int
+        Number of reads in the ramp sequence (default: 10).
+    gain : float or np.ndarray
+        Gain of the detector (e-/ADU).
+    flat : np.ndarray or None, optional
+        Flat field array (default: None).
+        We assume that flats have been corrected for gain variations already. In this function the gain is applied after
+         the flat, but in the data reduction pipeline the gain correction should be applied first.
+    bias : np.ndarray or float, optional
+        Bias level to add to the first read (default: 1000 e-).
+    dark : np.ndarray or float, optional
+        Dark current level to add to each read (e-/s/pixel) (default: 0)
+        The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
+        before the flat fielding step.
+    read_noise : np.ndarray or float or None, optional
+        Standard deviation of read noise (e-) for each read (default: 3 e-).
+    kTC_noise : np.ndarray or float or None, optional
+        kTC noise parameter (e-) to add to the first read (default: 50 e-).
+    nonlin_coeffs : np.ndarray or None, optional
+        Nonlinearity correction coefficients (default: None). Applies as data = np.polyval(nonlin_coeffs, data).
+    poisson_noise : bool, optional
+        If True, apply Poisson noise to the signal (default: True).
+    mjd_start : float, optional
+        Modified Julian Date for the start time (default: 60577.0).
+    convert_to_uint16 : bool, optional
+        If True, round and convert the output data to np.uint16 (default: True).
+    clip_ramps: bool, optional
+        If True, clip_ramps the output data to the range of np.uint16 (0 to 65535) (default: True).
+    -------
+    dict[str, np.ndarray]
+        Dictionary containing:
+            'times': astropy.table.Table of read numbers, times, and exptimes
+            'data': 3D array (n_reads, ny, nx) of ramp data
+            'dq': 3D array (n_reads, ny, nx) of data quality flags
+
+    Raises
+    ------
+    ValueError
+        If any value in the output 'data' array is negative.
+    """
+    ny, nx = source.shape
+    if block_size is None:
+        block_size = max(1, ny // (3*max_cores)) if max_cores > 1 else ny
+    # Prepare blocks
+    blocks = []
+    for block_start in range(0, ny, block_size):
+        block_end = min(block_start + block_size, ny)
+        # print(f"Creating ramps for rows {block_start} to {block_end} out of {ny}")
+        # Slice all array inputs for this block
+        source_block = source[block_start:block_end, :]
+        gain_block = gain[block_start:block_end, :] if isinstance(gain, np.ndarray) else gain
+        flat_block = flat[block_start:block_end, :] if flat is not None and isinstance(flat, np.ndarray) else flat
+        bias_block = bias[block_start:block_end, :] if isinstance(bias, np.ndarray) else bias
+        dark_block = dark[block_start:block_end, :] if isinstance(dark, np.ndarray) else dark
+        read_noise_block = read_noise[block_start:block_end, :] if read_noise is not None and isinstance(read_noise, np.ndarray) else read_noise
+        kTC_noise_block = read_noise[block_start:block_end, :] if kTC_noise is not None and isinstance(kTC_noise, np.ndarray) else kTC_noise
+        args = (
+            source_block,
+            readtime,
+            n_reads,
+            gain_block,
+            flat_block,
+            bias_block,
+            dark_block,
+            read_noise_block,
+            kTC_noise_block,
+            nonlin_coeffs,
+            poisson_noise,
+            mjd_start,
+            convert_to_uint16,
+            clip_ramps
+        )
+        blocks.append(args)
+    # Run in parallel
+    if max_cores > 1:
+        with mp.Pool(max_cores) as pool:
+            results = pool.map(_create_ramp_worker, blocks)
+    else:
+        results = [_create_ramp_worker(args) for args in blocks]
+    # Concatenate results
+    data_list = [r['data'] for r in results]
+    dq_raw_list = [r['dq_raw'] for r in results]
+    data = np.concatenate(data_list, axis=1)
+    dq_raw = np.concatenate(dq_raw_list, axis=1)
+
     _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
                  mjd_start=mjd_start)
-
     return dict(data=data, dq_raw=dq_raw, meta=_meta)
