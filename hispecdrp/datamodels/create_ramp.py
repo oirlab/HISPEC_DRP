@@ -209,101 +209,103 @@ def create_ramp(
     """
     ny, nx = source.shape
 
-    if convert_to_uint16:
-        mp_data_type = ctypes.c_ushort
-    else:
-        mp_data_type =  ctypes.c_float
-    mp_float_type = ctypes.c_float
-    mp_dq_type = ctypes.c_uint
-
-    types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
-
-    data_mp = mp.Array(mp_data_type, nx*ny*n_reads)
-    data_shape = (n_reads, ny, nx)
-    data_np = _arraytonumpy(data_mp, data_shape,dtype=mp_data_type)
-
-    dq_raw_mp = mp.Array(mp_dq_type, nx*ny*n_reads)
-    dq_raw_shape = (n_reads, ny, nx)
-    dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape,dtype=mp_dq_type)
-
-    source_mp = mp.Array(mp_float_type, nx*ny)
-    source_shape = (ny, nx)
-    source_np = _arraytonumpy(source_mp, source_shape,dtype=mp_float_type)
-    source_np[:] = source
-
-    if not isinstance(gain, np.ndarray):
-        gain = np.full(source.shape, gain, dtype=np.float32)
-    gain_mp = mp.Array(mp_float_type, nx*ny)
-    gain_shape = (ny, nx)
-    gain_np = _arraytonumpy(gain_mp, gain_shape,dtype=mp_float_type)
-    gain_np[:] = gain
-
-    if flat is not None:
-        if not isinstance(flat, np.ndarray):
-            flat = np.full(source.shape, flat, dtype=np.float32)
-    else:
-        flat = np.ones(source.shape, dtype=np.float32)
-    flat_mp = mp.Array(mp_float_type, nx*ny)
-    flat_shape = (ny, nx)
-    flat_np = _arraytonumpy(flat_mp, flat_shape,dtype=mp_float_type)
-    flat_np[:] = flat
-
-    if not isinstance(bias, np.ndarray):
-        bias = np.full(source.shape, bias, dtype=np.float32)
-    bias_mp = mp.Array(mp_float_type, nx*ny)
-    bias_shape = (ny, nx)
-    bias_np = _arraytonumpy(bias_mp, bias_shape,dtype=mp_float_type)
-    bias_np[:] = bias
-
-    if not isinstance(dark, np.ndarray):
-        dark = np.full(source.shape, dark, dtype=np.float32)
-    dark_mp = mp.Array(mp_float_type, nx*ny)
-    dark_shape = (ny, nx)
-    dark_np = _arraytonumpy(dark_mp, dark_shape,dtype=mp_float_type)
-    dark_np[:] = dark
-
-    if read_noise is not None:
-        if not isinstance(read_noise, np.ndarray):
-            read_noise = np.full(source.shape, read_noise, dtype=np.float32)
-    else:
-        read_noise = np.zeros(source.shape, dtype=np.float32)
-    read_noise_mp = mp.Array(mp_float_type, nx*ny)
-    read_noise_shape = (ny, nx)
-    read_noise_np = _arraytonumpy(read_noise_mp, read_noise_shape,dtype=mp_float_type)
-    read_noise_np[:] = read_noise
-
-    if kTC_noise is not None:
-        if not isinstance(kTC_noise, np.ndarray):
-            kTC_noise = np.full(source.shape, kTC_noise, dtype=np.float32)
-    else:
-        kTC_noise = np.zeros(source.shape, dtype=np.float32)
-    kTC_noise_mp = mp.Array(mp_float_type, nx*ny)
-    kTC_noise_shape = (ny, nx)
-    kTC_noise_np = _arraytonumpy(kTC_noise_mp, kTC_noise_shape,dtype=mp_float_type)
-    kTC_noise_np[:] = kTC_noise
-
-    if block_size is None:
-        block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
-
-    # Prepare blocks
-    args_list = []
-    for block_start in range(0, ny, block_size):
-        block_end = min(block_start + block_size, ny)
-
-        args = (block_start,block_end,
-            readtime,
-            n_reads,
-            nonlin_coeffs,
-            poisson_noise,
-            mjd_start,
-            convert_to_uint16,
-            clip_ramps,
-            types_tuple
-        )
-        args_list.append(args)
 
     # Run in parallel
     if max_cores > 1:
+
+        if convert_to_uint16:
+            mp_data_type = ctypes.c_ushort
+        else:
+            mp_data_type = ctypes.c_float
+        mp_float_type = ctypes.c_float
+        mp_dq_type = ctypes.c_uint
+
+        types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
+
+        data_mp = mp.Array(mp_data_type, nx * ny * n_reads)
+        data_shape = (n_reads, ny, nx)
+        data_np = _arraytonumpy(data_mp, data_shape, dtype=mp_data_type)
+
+        dq_raw_mp = mp.Array(mp_dq_type, nx * ny * n_reads)
+        dq_raw_shape = (n_reads, ny, nx)
+        dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_type)
+
+        source_mp = mp.Array(mp_float_type, nx * ny)
+        source_shape = (ny, nx)
+        source_np = _arraytonumpy(source_mp, source_shape, dtype=mp_float_type)
+        source_np[:] = source
+
+        if not isinstance(gain, np.ndarray):
+            gain = np.full(source.shape, gain, dtype=np.float32)
+        gain_mp = mp.Array(mp_float_type, nx * ny)
+        gain_shape = (ny, nx)
+        gain_np = _arraytonumpy(gain_mp, gain_shape, dtype=mp_float_type)
+        gain_np[:] = gain
+
+        if flat is not None:
+            if not isinstance(flat, np.ndarray):
+                flat = np.full(source.shape, flat, dtype=np.float32)
+        else:
+            flat = np.ones(source.shape, dtype=np.float32)
+        flat_mp = mp.Array(mp_float_type, nx * ny)
+        flat_shape = (ny, nx)
+        flat_np = _arraytonumpy(flat_mp, flat_shape, dtype=mp_float_type)
+        flat_np[:] = flat
+
+        if not isinstance(bias, np.ndarray):
+            bias = np.full(source.shape, bias, dtype=np.float32)
+        bias_mp = mp.Array(mp_float_type, nx * ny)
+        bias_shape = (ny, nx)
+        bias_np = _arraytonumpy(bias_mp, bias_shape, dtype=mp_float_type)
+        bias_np[:] = bias
+
+        if not isinstance(dark, np.ndarray):
+            dark = np.full(source.shape, dark, dtype=np.float32)
+        dark_mp = mp.Array(mp_float_type, nx * ny)
+        dark_shape = (ny, nx)
+        dark_np = _arraytonumpy(dark_mp, dark_shape, dtype=mp_float_type)
+        dark_np[:] = dark
+
+        if read_noise is not None:
+            if not isinstance(read_noise, np.ndarray):
+                read_noise = np.full(source.shape, read_noise, dtype=np.float32)
+        else:
+            read_noise = np.zeros(source.shape, dtype=np.float32)
+        read_noise_mp = mp.Array(mp_float_type, nx * ny)
+        read_noise_shape = (ny, nx)
+        read_noise_np = _arraytonumpy(read_noise_mp, read_noise_shape, dtype=mp_float_type)
+        read_noise_np[:] = read_noise
+
+        if kTC_noise is not None:
+            if not isinstance(kTC_noise, np.ndarray):
+                kTC_noise = np.full(source.shape, kTC_noise, dtype=np.float32)
+        else:
+            kTC_noise = np.zeros(source.shape, dtype=np.float32)
+        kTC_noise_mp = mp.Array(mp_float_type, nx * ny)
+        kTC_noise_shape = (ny, nx)
+        kTC_noise_np = _arraytonumpy(kTC_noise_mp, kTC_noise_shape, dtype=mp_float_type)
+        kTC_noise_np[:] = kTC_noise
+
+        if block_size is None:
+            block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
+
+        # Prepare blocks
+        args_list = []
+        for block_start in range(0, ny, block_size):
+            block_end = min(block_start + block_size, ny)
+
+            args = (block_start, block_end,
+                    readtime,
+                    n_reads,
+                    nonlin_coeffs,
+                    poisson_noise,
+                    mjd_start,
+                    convert_to_uint16,
+                    clip_ramps,
+                    types_tuple
+                    )
+            args_list.append(args)
+
         _init_args = (data_mp, data_shape,
                 dq_raw_mp, dq_raw_shape,
                 source_mp, source_shape,
@@ -318,22 +320,39 @@ def create_ramp(
                         initargs=_init_args, maxtasksperchild=50)
         tasks = [tpool.apply_async(_create_ramp_worker, args=(_args,))
                  for _args in args_list]
+
+        # save it to shared memory
+        for task_index, task in enumerate(tasks):
+            print("Waiting for task {0}/{1}".format(task_index + 1, len(tasks)))
+            task.wait()
+
+        print("Closing threadpool")
+        tpool.close()
+        tpool.join()
+
+        _outputs = dict(data=data_np, dq_raw=dq_raw_np)
     else:
-        raise NotImplementedError("Single core not implemented yet.")
-        # results = [_create_ramp_worker(args) for args in blocks]
-
-    #save it to shared memory
-    for task_index, task in enumerate(tasks):
-        print("Waiting for task {0}/{1}".format(task_index+1,len(tasks)))
-        task.wait()
-
-    print("Closing threadpool")
-    tpool.close()
-    tpool.join()
+        _outputs = _create_ramp(
+            source=source,
+            readtime=readtime,
+            n_reads=n_reads,
+            gain=gain,
+            flat=flat,
+            bias=bias,
+            dark=dark,
+            read_noise=read_noise,
+            kTC_noise=kTC_noise,
+            nonlin_coeffs=nonlin_coeffs,
+            poisson_noise=poisson_noise,
+            mjd_start=mjd_start,
+            convert_to_uint16=convert_to_uint16,
+            clip_ramps=clip_ramps
+        )
 
     _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
                  mjd_start=mjd_start)
-    return dict(data=data_np, dq_raw=dq_raw_np, meta=_meta)
+    _outputs['meta'] = _meta
+    return _outputs
 
 def _arraytonumpy(shared_array, shape=None, dtype=None):
     """
