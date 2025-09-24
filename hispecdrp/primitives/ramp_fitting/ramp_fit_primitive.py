@@ -7,6 +7,8 @@ from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
 from ...datamodels.dqflags import DQ_FLAGS
 
+from numba import get_num_threads, set_num_threads
+
 __all__ = ['FitRampPrimitive']
 
 
@@ -35,6 +37,8 @@ class FitRampPrimitive(BasePrimitive):
         }
     }
     def _perform(self):
+        set_num_threads(self.max_cores)
+
         input_model = datamodels.open(self.input, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 

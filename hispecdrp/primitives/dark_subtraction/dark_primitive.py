@@ -2,6 +2,8 @@ from ..base_primitive import BasePrimitive
 from ...calibrations import DarkSelector
 from ... import datamodels
 import numpy as np
+from numba import njit, prange
+from numba import get_num_threads, set_num_threads
 
 __all__ = ['DarkSubtractionPrimitive']
 
@@ -10,7 +12,8 @@ class DarkSubtractionPrimitive(BasePrimitive):
     
     ARGUMENTS = {
         'suffix' : 'darksub',
-        'output_model' : 'input'
+        'output_model' : 'input',
+        'max_cores' : 1,
     }
 
     CALIBRATIONS = {
@@ -21,6 +24,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
+        set_num_threads(self.max_cores)
 
         # Load the input model
         input_model = datamodels.open(self.input)
@@ -54,9 +58,52 @@ def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodel
     Returns:
         HISPECL0Model: The dark-subtracted data.
     """
-    input_model.rate = input_model.rate - dark_model.rate
-    if hasattr(input_model, 'err'):
-        input_model.err = np.sqrt(input_model.err**2 + dark_model.err**2)
-    if hasattr(input_model, 'DQ_RAW'):
-        input_model.dq_raw |= dark_model.dq_raw
+    if not hasattr(input_model, 'RATE'):
+        raise Exception("RATE extension not found in input model for dark subtraction.")
+    if not hasattr(input_model, 'RATE_ERR'):
+        raise Exception("RATE_ERR extension not found in input model for dark subtraction.")
+    if not hasattr(input_model, 'DQ'):
+        raise Exception("DQ extension not found in input model for dark subtraction.")
+    if not hasattr(dark_model, 'RATE'):
+        raise Exception("RATE extension not found in dark model for dark subtraction.")
+    if not hasattr(dark_model, 'RATE_ERR'):
+        raise Exception("RATE_ERR extension not found in dark model for dark subtraction.")
+    if not hasattr(dark_model, 'DQ'):
+        raise Exception("DQ extension not found in dark model for dark subtraction.")
+
+    out=_dark_subtraction_rate_numba(input_model.rate, input_model.rate_err, input_model.dq, dark_model.rate, dark_model.rate_err, dark_model.dq)
+
+    input_model.rate, input_model.rate_err, input_model.dq = out
+
     return input_model
+
+
+@njit(nogil=True, parallel=True, cache=True)
+def _dark_subtraction_rate_numba(rate, err, dq, dark_rate, dark_err, dark_dq):
+    """
+    Subtract dark current from 2D rate image, propagate errors and DQ.
+
+    Args:
+        rate:       (ny, nx) float32/float64 input rate data
+        err:        (ny, nx) float32/float64 input error map
+        dq:     (ny, nx) uint32 input DQ map (modified in place)
+        dark_rate:  (ny, nx) float32 dark calibration
+        dark_err:   (ny, nx) float32 dark error map
+        dark_dq:    (ny, nx) uint32 dark DQ map
+
+    Returns:
+        rate (in place), err (in place or None), dq_raw (in place or None)
+    """
+    ny, nx = rate.shape
+    for j in prange(ny):
+        for i in range(nx):
+            # Subtract dark rate
+            rate[j, i] = rate[j, i] - dark_rate[j, i]
+
+            # Propagate error
+            err[j, i] = np.sqrt(err[j, i] * err[j, i] + dark_err[j, i] * dark_err[j, i])
+
+            # Propagate DQ
+            dq[j, i] |= dark_dq[j, i]
+
+    return rate, err, dq

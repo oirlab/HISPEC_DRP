@@ -1,9 +1,10 @@
-from numba import njit
+from numba import njit, prange
 from ...utils.math import polyval1d
+import numpy as np
 
 __all__ = ['correct_nonlinearity']
 
-@njit(nogil=True)
+@njit(nogil=True,parallel=True,cache=True)
 def correct_nonlinearity(ramps, coeffs):
     """
     Apply non-linearity correction to up-the-ramps.
@@ -20,7 +21,9 @@ def correct_nonlinearity(ramps, coeffs):
 
     """
     _, ny, nx = ramps.shape
-    for i in range(ny):
+    for i in prange(ny):
         for j in range(nx):
-            ramps[:, i, j] = ramps[0, i, j]+polyval1d(coeffs[:, i, j], ramps[:, i, j]-ramps[0, i, j])
+            nl_corr_ramp = ramps[0, i, j] + polyval1d(coeffs[:, i, j].astype(np.float64),
+                                       (ramps[:, i, j] - ramps[0, i, j]).astype(np.float64))
+            ramps[:, i, j] = nl_corr_ramp.astype(ramps.dtype)
     return ramps

@@ -1,6 +1,8 @@
 from ..base_primitive import BasePrimitive
 from ...calibrations import BiasSelector
 from ... import datamodels
+from numba import njit, prange
+from numba import get_num_threads, set_num_threads
 import numpy as np
 
 __all__ = ['BiasSubtractionPrimitive']
@@ -10,7 +12,8 @@ class BiasSubtractionPrimitive(BasePrimitive):
     
     ARGUMENTS = {
         'suffix' : 'biassub',
-        'output_model' : 'input'
+        'output_model' : 'input',
+        'max_cores' : 1
     }
 
     CALIBRATIONS = {
@@ -21,6 +24,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
+        set_num_threads(self.max_cores)
 
         # Load the input model
         input_model = datamodels.open(self.input)
@@ -53,7 +57,39 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
     Returns:
         RampModel: The bias-subtracted data.
     """
-    input_model.data = input_model.data - bias_model.bias[None, :, :]
-    if hasattr(input_model, 'DQ_RAW'):
-        input_model.dq_raw |= bias_model.dq[None,:,:]
+    if not hasattr(input_model, 'DATA'):
+        raise Exception("DATA extension not found in input model for bias subtraction.")
+    if not hasattr(input_model, 'DQ_RAW'):
+        raise Exception("DQ_RAW extension not found in input model for bias subtraction.")
+
+    input_model.data, input_model.dq_raw = _bias_subtraction_numba(
+        input_model.data,
+        input_model.dq_raw,
+        bias_model.bias,
+        bias_model.dq,
+    )
     return input_model
+
+
+@njit(nogil=True, parallel=True, cache=True)
+def _bias_subtraction_numba(data, dq_raw, bias, bias_dq):
+    """
+    Subtract bias and propagate DQ flags.
+
+    Args:
+        data:    (n_read, ny, nx) float32/float64 ramp data
+        dq_raw:  (n_read, ny, nx) uint32 DQ array (modified in place)
+        bias:    (ny, nx) float32 bias calibration image
+        bias_dq: (ny, nx) uint32 DQ map for bias model
+
+    Returns:
+        data (in place), dq_raw (in place)
+    """
+    n_read, ny, nx = data.shape
+    for j in prange(ny):  # parallelize across spatial rows
+        for i in range(nx):
+            b = bias[j, i]
+            dq_val = bias_dq[j, i]
+            data[:, j, i] = data[:, j, i] - b
+            dq_raw[:, j, i] |= dq_val
+    return data, dq_raw

@@ -175,7 +175,7 @@ def create_ramp(
     """
     ny, nx = source.shape
     if block_size is None:
-        block_size = max(1, ny // (3*max_cores)) if max_cores > 1 else ny
+        block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
     # Prepare blocks
     blocks = []
     for block_start in range(0, ny, block_size):

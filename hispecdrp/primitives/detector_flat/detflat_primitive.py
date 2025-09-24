@@ -2,8 +2,9 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...calibrations import DetectorFlatSelector
-
 import numpy as np
+from numba import njit, prange
+from numba import get_num_threads, set_num_threads
 
 __all__ = ['DetectorFlatPrimitive']
 
@@ -11,8 +12,9 @@ __all__ = ['DetectorFlatPrimitive']
 class DetectorFlatPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detflatcorr',
-        'output_model' : 'input'
+        'suffix' : 'detflat',
+        'output_model' : 'input',
+        'max_cores' : 1,
     }
 
     CALIBRATIONS = {
@@ -23,6 +25,7 @@ class DetectorFlatPrimitive(BasePrimitive):
     }
 
     def _perform(self):
+        set_num_threads(self.max_cores)
 
         # Load the input model
         input_model = datamodels.open(self.input)
@@ -55,11 +58,66 @@ def detector_flat_correction(input_model : datamodels.L0Model, detflat_model : d
     Returns:
         DataModel: The model corrected in place.
     """
-    z = input_model.rate / detflat_model.flat
-    if hasattr(input_model, 'err'):
-        # approximate error propagation for division of random variables
-        input_model.err = z * np.sqrt((input_model.err / input_model.data)**2 + (detflat_model.err / detflat_model.flat)**2)
-    if hasattr(input_model, 'dq'):
-        input_model.dq |= detflat_model.dq
-    input_model.rate = z
+    if not hasattr(input_model, 'RATE'):
+        raise Exception("RATE extension not found in input model for detector flat correction.")
+    if not hasattr(input_model, 'RATE_ERR'):
+        raise Exception("RATE_ERR extension not found in input model for detector flat correction.")
+    if not hasattr(input_model, 'DQ'):
+        raise Exception("DQ extension not found in input model for detector flat correction.")
+    if not hasattr(detflat_model, 'FLAT'):
+        raise Exception("FLAT extension not found in flat model for dark subtraction.")
+    if not hasattr(detflat_model, 'FLAT_ERR'):
+        raise Exception("FLAT_ERR extension not found in flat model for dark subtraction.")
+    if not hasattr(detflat_model, 'DQ'):
+        raise Exception("DQ extension not found in flat model for dark subtraction.")
+
+    # Run Numba kernel
+    input_model.rate, input_model.rate_err, input_model.dq = _detector_flat_correction_numba(
+        input_model.rate,
+        input_model.rate_err,
+        input_model.dq,
+        detflat_model.flat,
+        detflat_model.flat_err,
+        detflat_model.dq,
+    )
+
     return input_model
+
+
+@njit(nogil=True, parallel=True, cache=True)
+def _detector_flat_correction_numba(rate, err, dq, flat, flat_err, flat_dq):
+    """
+    Apply detector flat correction to 2D rate image.
+
+    Args:
+        rate:     (ny, nx) float32/float64 input rate data
+        err:      (ny, nx) float32/float64 input error map
+        dq:       (ny, nx) uint32 input DQ map (modified in place)
+        flat:     (ny, nx) float32 detector flat map
+        flat_err: (ny, nx) float32 flat error map
+        flat_dq:  (ny, nx) uint32 flat DQ map
+
+    Returns:
+        rate (in place), err (in place or None), dq (in place or None)
+    """
+    ny, nx = rate.shape
+    for j in prange(ny):
+        for i in range(nx):
+            f = flat[j, i]
+            r = rate[j, i]
+            rate[j, i] = r / f
+            if rate[j, i] > 0:
+                z = rate[j, i]
+            else:
+                z = -rate[j, i]
+
+            e_in   = err[j, i]
+            fe_in  = flat_err[j, i]
+
+            # approximate error propagation for division of random variables
+            # https://en.wikipedia.org/wiki/Propagation_of_uncertainty
+            err[j, i] = z * np.sqrt((e_in / r) ** 2 + (fe_in / f) ** 2)
+
+            dq[j, i] |= flat_dq[j, i]
+
+    return rate, err, dq
