@@ -1,6 +1,7 @@
 import numpy as np
 import astropy.table
 import multiprocessing as mp
+import ctypes
 
 __all__ = ['create_ramp']
 
@@ -103,7 +104,40 @@ def _create_ramp_worker(args):
     Returns:
         dict[str, np.ndarray]: Output from create_ramp for the block
     """
-    return _create_ramp(*args)
+    block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple = args
+    mp_data_type, mp_float_type, mp_dq_type = types_tuple
+
+    data_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
+    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_type)
+    source_np = _arraytonumpy(shared_source, shared_source_shape, dtype=mp_float_type)
+    gain_np = _arraytonumpy(shared_gain, shared_gain_shape, dtype=mp_float_type)
+    flat_np = _arraytonumpy(shared_flat, shared_flat_shape, dtype=mp_float_type)
+    bias_np = _arraytonumpy(shared_bias, shared_bias_shape, dtype=mp_float_type)
+    dark_np = _arraytonumpy(shared_dark, shared_dark_shape, dtype=mp_float_type)
+    read_noise_np = _arraytonumpy(shared_read_noise, shared_read_noise_shape, dtype=mp_float_type)
+    kTC_noise_np = _arraytonumpy(shared_kTC_noise, shared_kTC_noise_shape, dtype=mp_float_type)
+
+    outputs = _create_ramp(
+        source=source_np[block_start:block_end, :],
+        readtime=readtime,
+        n_reads=n_reads,
+        gain=gain_np[block_start:block_end, :],
+        flat=flat_np[block_start:block_end, :],
+        bias = bias_np[block_start:block_end, :],
+        dark = dark_np[block_start:block_end, :],
+        read_noise = read_noise_np[block_start:block_end, :],
+        kTC_noise = kTC_noise_np[block_start:block_end, :],
+        nonlin_coeffs = nonlin_coeffs,
+        poisson_noise = poisson_noise,
+        mjd_start = mjd_start,
+        convert_to_uint16 = convert_to_uint16,
+        clip_ramps = clip_ramps
+    )
+
+    data_np[:,block_start:block_end, :] = outputs['data']
+    dq_raw_np[:,block_start:block_end, :] = outputs['dq_raw']
+
+    return (block_start, block_end)
 
 
 def create_ramp(
@@ -174,50 +208,206 @@ def create_ramp(
         If any value in the output 'data' array is negative.
     """
     ny, nx = source.shape
+
+    if convert_to_uint16:
+        mp_data_type = ctypes.c_ushort
+    else:
+        mp_data_type =  ctypes.c_float
+    mp_float_type = ctypes.c_float
+    mp_dq_type = ctypes.c_uint
+
+    types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
+
+    data_mp = mp.Array(mp_data_type, nx*ny*n_reads)
+    data_shape = (n_reads, ny, nx)
+    data_np = _arraytonumpy(data_mp, data_shape,dtype=mp_data_type)
+
+    dq_raw_mp = mp.Array(mp_dq_type, nx*ny*n_reads)
+    dq_raw_shape = (n_reads, ny, nx)
+    dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape,dtype=mp_dq_type)
+
+    source_mp = mp.Array(mp_float_type, nx*ny)
+    source_shape = (ny, nx)
+    source_np = _arraytonumpy(source_mp, source_shape,dtype=mp_float_type)
+    source_np[:] = source
+
+    if not isinstance(gain, np.ndarray):
+        gain = np.full(source.shape, gain, dtype=np.float32)
+    gain_mp = mp.Array(mp_float_type, nx*ny)
+    gain_shape = (ny, nx)
+    gain_np = _arraytonumpy(gain_mp, gain_shape,dtype=mp_float_type)
+    gain_np[:] = gain
+
+    if flat is not None:
+        if not isinstance(flat, np.ndarray):
+            flat = np.full(source.shape, flat, dtype=np.float32)
+    else:
+        flat = np.ones(source.shape, dtype=np.float32)
+    flat_mp = mp.Array(mp_float_type, nx*ny)
+    flat_shape = (ny, nx)
+    flat_np = _arraytonumpy(flat_mp, flat_shape,dtype=mp_float_type)
+    flat_np[:] = flat
+
+    if not isinstance(bias, np.ndarray):
+        bias = np.full(source.shape, bias, dtype=np.float32)
+    bias_mp = mp.Array(mp_float_type, nx*ny)
+    bias_shape = (ny, nx)
+    bias_np = _arraytonumpy(bias_mp, bias_shape,dtype=mp_float_type)
+    bias_np[:] = bias
+
+    if not isinstance(dark, np.ndarray):
+        dark = np.full(source.shape, dark, dtype=np.float32)
+    dark_mp = mp.Array(mp_float_type, nx*ny)
+    dark_shape = (ny, nx)
+    dark_np = _arraytonumpy(dark_mp, dark_shape,dtype=mp_float_type)
+    dark_np[:] = dark
+
+    if read_noise is not None:
+        if not isinstance(read_noise, np.ndarray):
+            read_noise = np.full(source.shape, read_noise, dtype=np.float32)
+    else:
+        read_noise = np.zeros(source.shape, dtype=np.float32)
+    read_noise_mp = mp.Array(mp_float_type, nx*ny)
+    read_noise_shape = (ny, nx)
+    read_noise_np = _arraytonumpy(read_noise_mp, read_noise_shape,dtype=mp_float_type)
+    read_noise_np[:] = read_noise
+
+    if kTC_noise is not None:
+        if not isinstance(kTC_noise, np.ndarray):
+            kTC_noise = np.full(source.shape, kTC_noise, dtype=np.float32)
+    else:
+        kTC_noise = np.zeros(source.shape, dtype=np.float32)
+    kTC_noise_mp = mp.Array(mp_float_type, nx*ny)
+    kTC_noise_shape = (ny, nx)
+    kTC_noise_np = _arraytonumpy(kTC_noise_mp, kTC_noise_shape,dtype=mp_float_type)
+    kTC_noise_np[:] = kTC_noise
+
     if block_size is None:
         block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
+
     # Prepare blocks
-    blocks = []
+    args_list = []
     for block_start in range(0, ny, block_size):
         block_end = min(block_start + block_size, ny)
-        # print(f"Creating ramps for rows {block_start} to {block_end} out of {ny}")
-        # Slice all array inputs for this block
-        source_block = source[block_start:block_end, :]
-        gain_block = gain[block_start:block_end, :] if isinstance(gain, np.ndarray) else gain
-        flat_block = flat[block_start:block_end, :] if flat is not None and isinstance(flat, np.ndarray) else flat
-        bias_block = bias[block_start:block_end, :] if isinstance(bias, np.ndarray) else bias
-        dark_block = dark[block_start:block_end, :] if isinstance(dark, np.ndarray) else dark
-        read_noise_block = read_noise[block_start:block_end, :] if read_noise is not None and isinstance(read_noise, np.ndarray) else read_noise
-        kTC_noise_block = read_noise[block_start:block_end, :] if kTC_noise is not None and isinstance(kTC_noise, np.ndarray) else kTC_noise
-        args = (
-            source_block,
+
+        args = (block_start,block_end,
             readtime,
             n_reads,
-            gain_block,
-            flat_block,
-            bias_block,
-            dark_block,
-            read_noise_block,
-            kTC_noise_block,
             nonlin_coeffs,
             poisson_noise,
             mjd_start,
             convert_to_uint16,
-            clip_ramps
+            clip_ramps,
+            types_tuple
         )
-        blocks.append(args)
+        args_list.append(args)
+
     # Run in parallel
     if max_cores > 1:
-        with mp.Pool(max_cores) as pool:
-            results = pool.map(_create_ramp_worker, blocks)
+        _init_args = (data_mp, data_shape,
+                dq_raw_mp, dq_raw_shape,
+                source_mp, source_shape,
+                gain_mp, gain_shape,
+                flat_mp, flat_shape,
+                bias_mp, bias_shape,
+                dark_mp, dark_shape,
+                read_noise_mp, read_noise_shape,
+                kTC_noise_mp, kTC_noise_shape
+                      )
+        tpool = mp.Pool(processes=max_cores, initializer=_tpool_init,
+                        initargs=_init_args, maxtasksperchild=50)
+        tasks = [tpool.apply_async(_create_ramp_worker, args=(_args,))
+                 for _args in args_list]
     else:
-        results = [_create_ramp_worker(args) for args in blocks]
-    # Concatenate results
-    data_list = [r['data'] for r in results]
-    dq_raw_list = [r['dq_raw'] for r in results]
-    data = np.concatenate(data_list, axis=1)
-    dq_raw = np.concatenate(dq_raw_list, axis=1)
+        raise NotImplementedError("Single core not implemented yet.")
+        # results = [_create_ramp_worker(args) for args in blocks]
+
+    #save it to shared memory
+    for task_index, task in enumerate(tasks):
+        print("Waiting for task {0}/{1}".format(task_index+1,len(tasks)))
+        task.wait()
+
+    print("Closing threadpool")
+    tpool.close()
+    tpool.join()
 
     _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
                  mjd_start=mjd_start)
-    return dict(data=data, dq_raw=dq_raw, meta=_meta)
+    return dict(data=data_np, dq_raw=dq_raw_np, meta=_meta)
+
+def _arraytonumpy(shared_array, shape=None, dtype=None):
+    """
+    Covert a shared array to a numpy array
+    Args:
+        shared_array: a multiprocessing.Array array
+        shape: a shape for the numpy array. otherwise, will assume a 1d array
+        dtype: data type of the arrays. Should be either ctypes.c_float(default) or ctypes.c_double
+
+    Returns:
+        numpy_array: numpy array for vectorized operation. still points to the same memory!
+                     returns None is shared_array is None
+    """
+    if dtype is None:
+        dtype = ctypes.c_float
+
+    # if you passed in nothing you get nothing
+    if shared_array is None:
+        return None
+
+    numpy_array = np.frombuffer(shared_array.get_obj(), dtype=dtype)
+    if shape is not None:
+        numpy_array.shape = shape
+
+    return numpy_array
+
+
+def _tpool_init(data, data_shape,
+                dq_raw, dq_raw_shape,
+                source, source_shape,
+                gain, gain_shape,
+                flat, flat_shape,
+                bias, bias_shape,
+                dark, dark_shape,
+                read_noise, read_noise_shape,
+                kTC_noise, kTC_noise_shape
+                ):
+    """
+    Initializer function for the thread pool that initializes various shared variables. Main things to note that all
+    except the shapes are shared arrays (mp.Array).
+    """
+    global shared_data, shared_data_shape, \
+        shared_dq_raw, shared_dq_raw_shape, \
+        shared_source, shared_source_shape, \
+        shared_gain, shared_gain_shape, \
+        shared_flat, shared_flat_shape, \
+        shared_bias, shared_bias_shape, \
+        shared_dark, shared_dark_shape, \
+        shared_read_noise, shared_read_noise_shape, \
+        shared_kTC_noise, shared_kTC_noise_shape
+
+    shared_data = data
+    shared_data_shape = data_shape
+
+    shared_dq_raw = dq_raw
+    shared_dq_raw_shape = dq_raw_shape
+
+    shared_source = source
+    shared_source_shape = source_shape
+
+    shared_gain = gain
+    shared_gain_shape = gain_shape
+
+    shared_flat = flat
+    shared_flat_shape = flat_shape
+
+    shared_bias = bias
+    shared_bias_shape = bias_shape
+
+    shared_dark = dark
+    shared_dark_shape = dark_shape
+
+    shared_read_noise = read_noise
+    shared_read_noise_shape = read_noise_shape
+
+    shared_kTC_noise = kTC_noise
+    shared_kTC_noise_shape = kTC_noise_shape
