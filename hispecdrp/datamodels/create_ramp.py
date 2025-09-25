@@ -1,18 +1,20 @@
 import numpy as np
-import astropy.table
 import multiprocessing as mp
 import ctypes
+
+from ..utils.parallelization_utils import _arraytonumpy
 
 __all__ = ['create_ramp']
 
 # NOTE: Find a new home for this function
 
 def _create_ramp(
+        data,dq_raw,
     source : np.ndarray, # e- / s / pixel including all sources
     readtime : float = 1.7, # seconds between reads
     n_reads : int = 10,
     gain : np.ndarray | float = 1.0, # e-/ADU
-    flat : np.ndarray | None = None,
+    flat : np.ndarray | float = 1.0,
     bias : np.ndarray | float = 1000, # e-
     dark : np.ndarray | float = 0, # e-/s/pixel
     read_noise : np.ndarray | float | None = 3, # e- standard deviation
@@ -24,77 +26,51 @@ def _create_ramp(
     clip_ramps: bool = True,
 ) -> dict[str, np.ndarray]:
 
-    data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-    _dark_UTR = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-    dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint32)
-
-    if not isinstance(dark, np.ndarray):
-        _dark = np.full(source.shape, dark, dtype=np.float32)
+    if convert_to_uint16:
+        _data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
     else:
-        _dark = dark.astype(np.float32)
+        _data = data
 
     # First, compute photon counts only (no read noise or bias)
     for i in np.arange(1,n_reads):
         if poisson_noise:
-            data[i, :, :] = data[i-1, :, :] + np.random.poisson(lam=source * readtime, size=source.shape)# Add new read
-            _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + np.random.poisson(lam=_dark * readtime, size=source.shape)
+            _data[i, :, :] = _data[i-1, :, :] + \
+                            (np.random.poisson(lam=source * readtime, size=source.shape)*flat[None, :, :] +\
+                            np.random.poisson(lam=dark * readtime, size=source.shape)) / gain
         else:
-            data[i, :, :] = data[i-1, :, :] + source * readtime
-            _dark_UTR[i, :, :] = _dark_UTR[i-1, :, :] + _dark * readtime
-    # if poisson_noise:
-    #     # Vectorized: shape (n_reads-1, ny, nx)
-    #     signal_poisson = np.random.poisson(lam=source * readtime, size=(n_reads - 1, *source.shape)).astype(np.float32)
-    #     dark_poisson = np.random.poisson(lam=_dark * readtime, size=(n_reads - 1, *source.shape)).astype(np.float32)
-    #     # Cumulative sum along reads, prepend zeros for first read
-    #     data = np.concatenate([np.zeros((1, *source.shape), dtype=np.float32), np.cumsum(signal_poisson, axis=0)],
-    #                           axis=0)
-    #     _dark_UTR = np.concatenate([np.zeros((1, *source.shape), dtype=np.float32), np.cumsum(dark_poisson, axis=0)],
-    #                                axis=0)
-    # else:
-    #     # Vectorized: just multiply and broadcast
-    #     data = (np.arange(n_reads,dtype=np.float32)[:, None, None]* readtime) * source.astype(np.float32)[None, :, :]
-    #     _dark_UTR = (np.arange(n_reads,dtype=np.float32)[:, None, None]* readtime) * _dark.astype(np.float32)[None, :, :]
-
-    if flat is not None:
-        data *= flat[None, :, :]
-
-    data += _dark_UTR
-
-    # Apply gain
-    data /= gain
+            _data[i, :, :] = _data[i-1, :, :] + (source * readtime *flat[None, :, :] + dark * readtime) / gain
 
     # apply non-linear behavior
     if nonlin_coeffs is not None:
-        data = np.polyval(nonlin_coeffs, data)
+        _data[:] = np.polyval(nonlin_coeffs, _data)
 
     # Add read noise
     if read_noise is not None:
-        data += np.random.normal(loc=0, scale=read_noise/gain, size=data.shape)
+        _data += np.random.normal(loc=0, scale=read_noise/gain, size=_data.shape)
 
     # Add bias (and kTC noise if desired)
-    data += bias/gain
+    _data += bias/gain
     if kTC_noise is not None:
-        data += np.random.normal(loc=0, scale=kTC_noise/gain, size=source.shape)[None, :, :]
+        _data += np.random.normal(loc=0, scale=kTC_noise/gain, size=source.shape)[None, :, :]
 
 
 
     if clip_ramps:
-        # Clip data to maximum value of uint16
-        data = np.clip(data, 0, float(np.iinfo(np.uint16).max))
+        # Clip _data to maximum value of uint16
+        _data[:] = np.clip(_data, 0, float(np.iinfo(np.uint16).max))
 
     if convert_to_uint16:
         # Check for negative values before returning
-        if np.any(data < 0):
+        if np.any(_data < 0):
             raise ValueError("Negative value found in 'data' array before returning from create_ramp. "
                              "Data needs to be all positive to be converted to np.uint16."
                              "Suggestion: Raise bias value.")
 
         # Round and convert to uint16
-        data = np.round(data).astype(np.uint16)
+        # todo fix this
+        data[:] = np.round(_data).astype(np.uint16)
 
-
-
-    return dict(data=data, dq_raw=dq_raw)
+    return
 
 def _create_ramp_worker(args):
     """
@@ -118,6 +94,8 @@ def _create_ramp_worker(args):
     kTC_noise_np = _arraytonumpy(shared_kTC_noise, shared_kTC_noise_shape, dtype=mp_float_type)
 
     outputs = _create_ramp(
+        data_np[:,block_start:block_end, :],
+        dq_raw_np[:,block_start:block_end, :],
         source=source_np[block_start:block_end, :],
         readtime=readtime,
         n_reads=n_reads,
@@ -133,9 +111,6 @@ def _create_ramp_worker(args):
         convert_to_uint16 = convert_to_uint16,
         clip_ramps = clip_ramps
     )
-
-    data_np[:,block_start:block_end, :] = outputs['data']
-    dq_raw_np[:,block_start:block_end, :] = outputs['dq_raw']
 
     return (block_start, block_end)
 
@@ -235,56 +210,64 @@ def create_ramp(
         source_np = _arraytonumpy(source_mp, source_shape, dtype=mp_float_type)
         source_np[:] = source
 
-        if not isinstance(gain, np.ndarray):
-            gain = np.full(source.shape, gain, dtype=np.float32)
         gain_mp = mp.Array(mp_float_type, nx * ny)
         gain_shape = (ny, nx)
         gain_np = _arraytonumpy(gain_mp, gain_shape, dtype=mp_float_type)
-        gain_np[:] = gain
-
-        if flat is not None:
-            if not isinstance(flat, np.ndarray):
-                flat = np.full(source.shape, flat, dtype=np.float32)
+        if not isinstance(gain, np.ndarray):
+            gain_np[:]  = np.full(source.shape, gain, dtype=np.float32)
         else:
-            flat = np.ones(source.shape, dtype=np.float32)
+            gain_np[:] = gain.astype(np.float32)
+
         flat_mp = mp.Array(mp_float_type, nx * ny)
         flat_shape = (ny, nx)
         flat_np = _arraytonumpy(flat_mp, flat_shape, dtype=mp_float_type)
-        flat_np[:] = flat
+        if flat is not None:
+            if not isinstance(flat, np.ndarray):
+                flat_np[:] = np.full(source.shape, flat, dtype=np.float32)
+            else:
+                flat_np[:] = flat
+        else:
+            flat_np[:] = np.ones(source.shape, dtype=np.float32)
 
-        if not isinstance(bias, np.ndarray):
-            bias = np.full(source.shape, bias, dtype=np.float32)
+
         bias_mp = mp.Array(mp_float_type, nx * ny)
         bias_shape = (ny, nx)
         bias_np = _arraytonumpy(bias_mp, bias_shape, dtype=mp_float_type)
-        bias_np[:] = bias
+        if not isinstance(bias, np.ndarray):
+            bias_np[:] = np.full(source.shape, bias, dtype=np.float32)
+        else:
+            bias_np[:] = bias
 
-        if not isinstance(dark, np.ndarray):
-            dark = np.full(source.shape, dark, dtype=np.float32)
         dark_mp = mp.Array(mp_float_type, nx * ny)
         dark_shape = (ny, nx)
         dark_np = _arraytonumpy(dark_mp, dark_shape, dtype=mp_float_type)
-        dark_np[:] = dark
-
-        if read_noise is not None:
-            if not isinstance(read_noise, np.ndarray):
-                read_noise = np.full(source.shape, read_noise, dtype=np.float32)
+        if not isinstance(dark, np.ndarray):
+            dark_np[:] = np.full(source.shape, dark, dtype=np.float32)
         else:
-            read_noise = np.zeros(source.shape, dtype=np.float32)
+            dark_np[:] = dark
+
         read_noise_mp = mp.Array(mp_float_type, nx * ny)
         read_noise_shape = (ny, nx)
         read_noise_np = _arraytonumpy(read_noise_mp, read_noise_shape, dtype=mp_float_type)
-        read_noise_np[:] = read_noise
-
-        if kTC_noise is not None:
-            if not isinstance(kTC_noise, np.ndarray):
-                kTC_noise = np.full(source.shape, kTC_noise, dtype=np.float32)
+        if read_noise is not None:
+            if not isinstance(read_noise, np.ndarray):
+                read_noise_np[:] = np.full(source.shape, read_noise, dtype=np.float32)
+            else:
+                read_noise_np[:] = read_noise
         else:
-            kTC_noise = np.zeros(source.shape, dtype=np.float32)
+            read_noise_np[:] = np.zeros(source.shape, dtype=np.float32)
+
+
         kTC_noise_mp = mp.Array(mp_float_type, nx * ny)
         kTC_noise_shape = (ny, nx)
         kTC_noise_np = _arraytonumpy(kTC_noise_mp, kTC_noise_shape, dtype=mp_float_type)
-        kTC_noise_np[:] = kTC_noise
+        if kTC_noise is not None:
+            if not isinstance(kTC_noise, np.ndarray):
+                kTC_noise_np[:] = np.full(source.shape, kTC_noise, dtype=np.float32)
+            else:
+                kTC_noise_np[:] = kTC_noise
+        else:
+            kTC_noise_np[:] = np.zeros(source.shape, dtype=np.float32)
 
         if block_size is None:
             block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
@@ -332,7 +315,10 @@ def create_ramp(
 
         _outputs = dict(data=data_np, dq_raw=dq_raw_np)
     else:
+        data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
+        dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint32)
         _outputs = _create_ramp(
+            data, dq_raw,
             source=source,
             readtime=readtime,
             n_reads=n_reads,
@@ -348,36 +334,13 @@ def create_ramp(
             convert_to_uint16=convert_to_uint16,
             clip_ramps=clip_ramps
         )
+        _outputs = dict(data=data, dq_raw=dq_raw)
 
     _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
                  mjd_start=mjd_start)
     _outputs['meta'] = _meta
     return _outputs
 
-def _arraytonumpy(shared_array, shape=None, dtype=None):
-    """
-    Covert a shared array to a numpy array
-    Args:
-        shared_array: a multiprocessing.Array array
-        shape: a shape for the numpy array. otherwise, will assume a 1d array
-        dtype: data type of the arrays. Should be either ctypes.c_float(default) or ctypes.c_double
-
-    Returns:
-        numpy_array: numpy array for vectorized operation. still points to the same memory!
-                     returns None is shared_array is None
-    """
-    if dtype is None:
-        dtype = ctypes.c_float
-
-    # if you passed in nothing you get nothing
-    if shared_array is None:
-        return None
-
-    numpy_array = np.frombuffer(shared_array.get_obj(), dtype=dtype)
-    if shape is not None:
-        numpy_array.shape = shape
-
-    return numpy_array
 
 
 def _tpool_init(data, data_shape,
