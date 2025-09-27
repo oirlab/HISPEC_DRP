@@ -36,8 +36,11 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
         self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
 
-        data = result.data.astype(np.float64)
-        correct_nonlinearity(data, nonlin_model.coeffs)
-        result.data = data.astype(np.float32)
+        if result.data.dtype != np.float32:
+            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            result.data = result.data.astype(np.float32)
+        self.log.info(f"Polynomial coefficients are {nonlin_model.coeffs.dtype}.")
+
+        correct_nonlinearity(result.data, nonlin_model.coeffs)
 
         return dict(output=result, nonlin=nonlin)

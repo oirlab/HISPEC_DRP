@@ -43,10 +43,10 @@ class CheckSaturationPrimitive(BasePrimitive):
         self.log.info(f"Applying saturation check with {saturation_model} to {input_model}")
 
         # Perform saturation check
-        output_model = check_saturation(result, saturation_model)
+        check_saturation(result, saturation_model)
 
         # Output
-        return dict(output=output_model, saturation=sat)
+        return dict(output=result, saturation=sat)
 
 
 def check_saturation(input_model: datamodels.RampModel, saturation_model: datamodels.SaturationModel) -> datamodels.RampModel:
@@ -63,7 +63,7 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
     if not hasattr(input_model, "DQ_RAW"):
         raise AttributeError("Input model has no DQ_RAW array to flag saturation.")
 
-    input_model.dq_raw = _check_saturation_numba(
+    _check_saturation_numba(
         input_model.data,
         input_model.dq_raw,
         saturation_model.sat_thresh,
@@ -93,4 +93,4 @@ def _check_saturation_numba(data, dq_raw, sat_thresh, sat_dq):
                 if data[r, j, i] >= thresh:
                     dq_raw[r, j, i] |= (SATURATED_FLAG | DO_NOT_USE_FLAG)
                 dq_raw[r, j, i] |= dq_val
-    return dq_raw
+    return

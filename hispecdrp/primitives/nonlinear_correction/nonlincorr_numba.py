@@ -23,7 +23,7 @@ def correct_nonlinearity(ramps, coeffs):
     _, ny, nx = ramps.shape
     for i in prange(ny):
         for j in range(nx):
-            nl_corr_ramp = ramps[0, i, j] + polyval1d(coeffs[:, i, j].astype(np.float64),
-                                       (ramps[:, i, j] - ramps[0, i, j]).astype(np.float64))
+            nl_corr_ramp = ramps[0, i, j] + polyval1d(coeffs[:, i, j],
+                                       (ramps[:, i, j] - ramps[0, i, j]).astype(coeffs.dtype))
             ramps[:, i, j] = nl_corr_ramp.astype(ramps.dtype)
     return ramps

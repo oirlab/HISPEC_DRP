@@ -38,6 +38,7 @@ class DQInitPrimitive(BasePrimitive):
 
         # Log
         self.log.info(f"Applying DQ initialization with {dq} to {input_model}")
+        self.log.info(f"Note: UTR data type is {result.data.dtype}")
 
         if hasattr(input_model, 'DQ_RAW'):
             result.dq_raw = apply_dq_mask(input_model.dq_raw, dq_model.dq)

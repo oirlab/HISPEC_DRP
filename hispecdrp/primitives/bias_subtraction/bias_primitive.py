@@ -39,11 +39,15 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Log
         self.log.info(f"Applying bias correction with {bias} to {input_model}")
 
+        if result.data.dtype != np.float32:
+            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            result.data = result.data.astype(np.float32)
+
         # Perform bias subtraction
-        output_model = bias_subtraction(result, bias_model)
+        bias_subtraction(result, bias_model)
 
         # Output
-        return dict(output=output_model, bias=bias)
+        return dict(output=result, bias=bias)
 
 
 def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.BiasModel) -> datamodels.RampModel:
@@ -62,13 +66,13 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
     if not hasattr(input_model, 'DQ_RAW'):
         raise Exception("DQ_RAW extension not found in input model for bias subtraction.")
 
-    input_model.data, input_model.dq_raw = _bias_subtraction_numba(
+    _bias_subtraction_numba(
         input_model.data,
         input_model.dq_raw,
         bias_model.bias,
         bias_model.dq,
     )
-    return input_model
+    return
 
 
 @njit(nogil=True, parallel=True, cache=True)
@@ -92,4 +96,4 @@ def _bias_subtraction_numba(data, dq_raw, bias, bias_dq):
             dq_val = bias_dq[j, i]
             data[:, j, i] = data[:, j, i] - b
             dq_raw[:, j, i] |= dq_val
-    return data, dq_raw
+    return
