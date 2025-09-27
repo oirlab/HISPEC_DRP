@@ -2,9 +2,24 @@ import multiprocessing as mp
 import ctypes
 import numpy as np
 
+_CTYPES_TO_NP = {
+    ctypes.c_float:   np.float32,
+    ctypes.c_double:  np.float64,
+    ctypes.c_int32:   np.int32,
+    ctypes.c_uint32:  np.uint32,
+    ctypes.c_int16:   np.int16,
+    ctypes.c_uint16:  np.uint16,
+    ctypes.c_int8:    np.int8,
+    ctypes.c_uint8:   np.uint8,
+}
+
 def _arraytonumpy(shared_array, shape=None, dtype=None):
     """
     Covert a shared array to a numpy array
+
+    Originally from pyklip Wang, J. J., Ruffio, J.-B., De Rosa, R. J., et al. 2015, ASCL, ascl:1506.001
+    https://bitbucket.org/pyKLIP/pyklip/src/main/pyklip/parallelized.py
+
     Args:
         shared_array: a multiprocessing.Array array
         shape: a shape for the numpy array. otherwise, will assume a 1d array
@@ -16,12 +31,15 @@ def _arraytonumpy(shared_array, shape=None, dtype=None):
     """
     if dtype is None:
         dtype = ctypes.c_float
+    np_dtype = _CTYPES_TO_NP.get(dtype)
 
     # if you passed in nothing you get nothing
     if shared_array is None:
         return None
 
-    numpy_array = np.frombuffer(shared_array.get_obj(), dtype=dtype)
+    buf = shared_array.get_obj() if hasattr(shared_array, "get_obj") else shared_array
+    numpy_array = np.frombuffer(buf, dtype=np_dtype)
+    # numpy_array = np.frombuffer(shared_array.get_obj(), dtype=dtype)
     if shape is not None:
         numpy_array.shape = shape
 
