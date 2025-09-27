@@ -1,8 +1,10 @@
 import numpy as np
 import multiprocessing as mp
 import ctypes
+from tqdm import tqdm
 
 from ..utils.parallelization_utils import _arraytonumpy
+from multiprocessing.sharedctypes import RawArray
 
 __all__ = ['create_ramp']
 
@@ -17,8 +19,8 @@ def _create_ramp(
     flat : np.ndarray | float = 1.0,
     bias : np.ndarray | float = 1000, # e-
     dark : np.ndarray | float = 0, # e-/s/pixel
-    read_noise : np.ndarray | float | None = 3, # e- standard deviation
-    kTC_noise : np.ndarray | float | None = 50, # e- standard deviation, None to skip
+    read_noise : np.ndarray | float = 3, # e- standard deviation
+    kTC_noise : np.ndarray | float = 50, # e- standard deviation, None to skip
     nonlin_coeffs : np.ndarray | None = None,
     poisson_noise : bool = True,
     mjd_start : float = 60577.0, # MJD start time of first read of first pixel
@@ -35,10 +37,10 @@ def _create_ramp(
     for i in np.arange(1,n_reads):
         if poisson_noise:
             _data[i, :, :] = _data[i-1, :, :] + \
-                            (np.random.poisson(lam=source * readtime, size=source.shape)*flat[None, :, :] +\
+                            (np.random.poisson(lam=source * readtime, size=source.shape)*flat +\
                             np.random.poisson(lam=dark * readtime, size=source.shape)) / gain
         else:
-            _data[i, :, :] = _data[i-1, :, :] + (source * readtime *flat[None, :, :] + dark * readtime) / gain
+            _data[i, :, :] = _data[i-1, :, :] + (source * readtime *flat + dark * readtime) / gain
 
     # apply non-linear behavior
     if nonlin_coeffs is not None:
@@ -67,7 +69,6 @@ def _create_ramp(
                              "Suggestion: Raise bias value.")
 
         # Round and convert to uint16
-        # todo fix this
         data[:] = np.round(_data).astype(np.uint16)
 
     return
@@ -144,21 +145,21 @@ def create_ramp(
         Time between reads (seconds).
     n_reads : int
         Number of reads in the ramp sequence (default: 10).
-    gain : float or np.ndarray
+    gain : None or float or np.ndarray
         Gain of the detector (e-/ADU).
-    flat : np.ndarray or None, optional
+    flat : None or float or np.ndarray, optional
         Flat field array (default: None).
         We assume that flats have been corrected for gain variations already. In this function the gain is applied after
          the flat, but in the data reduction pipeline the gain correction should be applied first.
-    bias : np.ndarray or float, optional
+    bias : None or float or np.ndarray, optional
         Bias level to add to the first read (default: 1000 e-).
-    dark : np.ndarray or float, optional
+    dark : None or flat or np.ndarray, optional
         Dark current level to add to each read (e-/s/pixel) (default: 0)
         The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
         before the flat fielding step.
-    read_noise : np.ndarray or float or None, optional
+    read_noise : None or float or np.ndarray, optional
         Standard deviation of read noise (e-) for each read (default: 3 e-).
-    kTC_noise : np.ndarray or float or None, optional
+    kTC_noise : None or float or np.ndarray, optional
         kTC noise parameter (e-) to add to the first read (default: 50 e-).
     nonlin_coeffs : np.ndarray or None, optional
         Nonlinearity correction coefficients (default: None). Applies as data = np.polyval(nonlin_coeffs, data).
@@ -184,6 +185,19 @@ def create_ramp(
     """
     ny, nx = source.shape
 
+    if gain is None:
+        gain = 1.0
+    if flat is None:
+        flat = 1.0
+    if bias is None:
+        bias = 1000
+    if dark is None:
+        dark = 0
+    if read_noise is None:
+        read_noise = 0
+    if kTC_noise is None:
+        kTC_noise = 0
+
 
     # Run in parallel
     if max_cores > 1:
@@ -197,20 +211,20 @@ def create_ramp(
 
         types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
 
-        data_mp = mp.Array(mp_data_type, nx * ny * n_reads)
+        data_mp = RawArray(mp_data_type, nx * ny * n_reads)
         data_shape = (n_reads, ny, nx)
         data_np = _arraytonumpy(data_mp, data_shape, dtype=mp_data_type)
 
-        dq_raw_mp = mp.Array(mp_dq_type, nx * ny * n_reads)
+        dq_raw_mp = RawArray(mp_dq_type, nx * ny * n_reads)
         dq_raw_shape = (n_reads, ny, nx)
         dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_type)
 
-        source_mp = mp.Array(mp_float_type, nx * ny)
+        source_mp = RawArray(mp_float_type, nx * ny)
         source_shape = (ny, nx)
         source_np = _arraytonumpy(source_mp, source_shape, dtype=mp_float_type)
         source_np[:] = source
 
-        gain_mp = mp.Array(mp_float_type, nx * ny)
+        gain_mp = RawArray(mp_float_type, nx * ny)
         gain_shape = (ny, nx)
         gain_np = _arraytonumpy(gain_mp, gain_shape, dtype=mp_float_type)
         if not isinstance(gain, np.ndarray):
@@ -218,19 +232,16 @@ def create_ramp(
         else:
             gain_np[:] = gain.astype(np.float32)
 
-        flat_mp = mp.Array(mp_float_type, nx * ny)
+        flat_mp = RawArray(mp_float_type, nx * ny)
         flat_shape = (ny, nx)
         flat_np = _arraytonumpy(flat_mp, flat_shape, dtype=mp_float_type)
-        if flat is not None:
-            if not isinstance(flat, np.ndarray):
-                flat_np[:] = np.full(source.shape, flat, dtype=np.float32)
-            else:
-                flat_np[:] = flat
+        if not isinstance(flat, np.ndarray):
+            flat_np[:] = np.full(source.shape, flat, dtype=np.float32)
         else:
-            flat_np[:] = np.ones(source.shape, dtype=np.float32)
+            flat_np[:] = flat
 
 
-        bias_mp = mp.Array(mp_float_type, nx * ny)
+        bias_mp = RawArray(mp_float_type, nx * ny)
         bias_shape = (ny, nx)
         bias_np = _arraytonumpy(bias_mp, bias_shape, dtype=mp_float_type)
         if not isinstance(bias, np.ndarray):
@@ -238,7 +249,7 @@ def create_ramp(
         else:
             bias_np[:] = bias
 
-        dark_mp = mp.Array(mp_float_type, nx * ny)
+        dark_mp = RawArray(mp_float_type, nx * ny)
         dark_shape = (ny, nx)
         dark_np = _arraytonumpy(dark_mp, dark_shape, dtype=mp_float_type)
         if not isinstance(dark, np.ndarray):
@@ -246,31 +257,25 @@ def create_ramp(
         else:
             dark_np[:] = dark
 
-        read_noise_mp = mp.Array(mp_float_type, nx * ny)
+        read_noise_mp = RawArray(mp_float_type, nx * ny)
         read_noise_shape = (ny, nx)
         read_noise_np = _arraytonumpy(read_noise_mp, read_noise_shape, dtype=mp_float_type)
-        if read_noise is not None:
-            if not isinstance(read_noise, np.ndarray):
-                read_noise_np[:] = np.full(source.shape, read_noise, dtype=np.float32)
-            else:
-                read_noise_np[:] = read_noise
+        if not isinstance(read_noise, np.ndarray):
+            read_noise_np[:] = np.full(source.shape, read_noise, dtype=np.float32)
         else:
-            read_noise_np[:] = np.zeros(source.shape, dtype=np.float32)
+            read_noise_np[:] = read_noise
 
 
-        kTC_noise_mp = mp.Array(mp_float_type, nx * ny)
+        kTC_noise_mp = RawArray(mp_float_type, nx * ny)
         kTC_noise_shape = (ny, nx)
         kTC_noise_np = _arraytonumpy(kTC_noise_mp, kTC_noise_shape, dtype=mp_float_type)
-        if kTC_noise is not None:
-            if not isinstance(kTC_noise, np.ndarray):
-                kTC_noise_np[:] = np.full(source.shape, kTC_noise, dtype=np.float32)
-            else:
-                kTC_noise_np[:] = kTC_noise
+        if not isinstance(kTC_noise, np.ndarray):
+            kTC_noise_np[:] = np.full(source.shape, kTC_noise, dtype=np.float32)
         else:
-            kTC_noise_np[:] = np.zeros(source.shape, dtype=np.float32)
+            kTC_noise_np[:] = kTC_noise
 
         if block_size is None:
-            block_size = max(1, ny // (max_cores)) if max_cores > 1 else ny
+            block_size = max(1, ny // (4*max_cores)) if max_cores > 1 else ny
 
         # Prepare blocks
         args_list = []
@@ -304,10 +309,8 @@ def create_ramp(
         tasks = [tpool.apply_async(_create_ramp_worker, args=(_args,))
                  for _args in args_list]
 
-        # save it to shared memory
-        for task_index, task in enumerate(tasks):
-            print("Waiting for task {0}/{1}".format(task_index + 1, len(tasks)))
-            task.wait()
+        for t in tqdm(tasks, desc="Processing blocks"):
+            t.wait()
 
         print("Closing threadpool")
         tpool.close()
