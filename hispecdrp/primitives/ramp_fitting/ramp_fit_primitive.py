@@ -62,7 +62,8 @@ class FitRampPrimitive(BasePrimitive):
         if self.method.lower() == 'ols':
             result = fit_ramps_ols(delta_readtimes,
                                     input_model.data,
-                                    dq=input_model.dq_raw,
+                                    dq_raw=input_model.dq_raw,
+                                    dq=input_model.dq,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
@@ -71,7 +72,8 @@ class FitRampPrimitive(BasePrimitive):
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data,
-                                    dq=input_model.dq_raw,
+                                    dq_raw=input_model.dq_raw,
+                                    dq=input_model.dq,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
@@ -81,7 +83,8 @@ class FitRampPrimitive(BasePrimitive):
         elif self.method.lower() in ('mcds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data,
-                                    dq=input_model.dq_raw,
+                                    dq_raw=input_model.dq_raw,
+                                    dq=input_model.dq,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
@@ -91,6 +94,7 @@ class FitRampPrimitive(BasePrimitive):
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
             result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32),
                                     dq_raw=input_model.dq_raw,
+                                    dq=input_model.dq,
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,

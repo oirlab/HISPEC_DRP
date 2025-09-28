@@ -40,8 +40,14 @@ class DQInitPrimitive(BasePrimitive):
         self.log.info(f"Applying DQ initialization with {dq} to {input_model}")
         self.log.info(f"Note: UTR data type is {result.data.dtype}")
 
-        if hasattr(input_model, 'DQ_RAW'):
-            result.dq_raw = apply_dq_mask(input_model.dq_raw, dq_model.dq)
+        if not hasattr(input_model, 'DQ_RAW') or  input_model.dq_raw is None:
+            result.dq_raw = np.zeros_like(result.data, dtype=np.uint8)
+        # if hasattr(input_model, 'DQ_RAW'):
+            # result.dq_raw = apply_dq_mask(input_model.dq_raw, dq_model.dq)
+        if hasattr(input_model, 'DQ') and input_model.dq is not None:
+            result.dq |= dq_model.dq
+        else:
+            result.dq = dq_model.dq
 
         # Output
         return dict(output=result, dq=dq)

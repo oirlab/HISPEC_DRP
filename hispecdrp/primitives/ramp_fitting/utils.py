@@ -2,9 +2,9 @@ import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
 from numba import njit, prange
 
-saturation_flag = DQ_FLAGS["SATURATED"]
-jump_det_flag = DQ_FLAGS["JUMP_DET"]
-do_not_use_flag = DQ_FLAGS["DO_NOT_USE"]
+SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
+JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 @njit(inline="always")
 def mean_numba_if_not_zero(arr):
@@ -28,7 +28,7 @@ def get_mid_delta_times_ramp(times, dq_raw):
     ----------
     times : np.ndarray
         1D array of read times (length n_reads).
-    dq_raw : np.ndarray uint32
+    dq_raw : np.ndarray uint8
         1D array of data quality flags (length n_reads).
 
     Returns
@@ -39,8 +39,8 @@ def get_mid_delta_times_ramp(times, dq_raw):
     n_reads = len(times)
     avg_bin_times = (times[0:n_reads - 1] + times[1::]) / 2
 
-    mask = ((dq_raw & do_not_use_flag) | (dq_raw & saturation_flag)).astype(np.bool)
-    mask2 = (dq_raw & jump_det_flag).astype(np.bool)
+    mask = ((dq_raw & DO_NOT_USE_FLAG_uint8) | (dq_raw & SATURATED_FLAG_uint8)).astype(np.bool)
+    mask2 = (dq_raw & JUMP_DET_FLAG_uint8).astype(np.bool)
     avg_bin_times = avg_bin_times * ~(mask[1:n_reads] | mask[0:n_reads - 1] | mask2[1:n_reads])
 
     mid_delta_time = mean_numba_if_not_zero(avg_bin_times)
@@ -48,7 +48,7 @@ def get_mid_delta_times_ramp(times, dq_raw):
 
 
 @njit()#inline="always",nogil=True,
-def get_ramp_chunks(dq: np.ndarray):
+def get_ramp_chunks(dq_raw: np.ndarray):
     """
     Numba-compatible core. Returns (starts, ends) arrays of indices of dtype int64.
     Drops everything at and after the first SATURATED index.
@@ -57,33 +57,33 @@ def get_ramp_chunks(dq: np.ndarray):
     Excludes DO_NOT_USE reads entirely (may split).
     NOTE: does NOT filter out single-read chunks; wrapper does that.
     """
-    n = dq.size
+    n = dq_raw.size
 
     # Find first saturated index; exclude it and everything after.
     n_use = 1
     for i in range(n):
         # checking backward for saturation to speed up processing since saturation will be at the end of the ramp
-        if (dq[n-i-1] & (saturation_flag | do_not_use_flag)) == 0:
+        if (dq_raw[n-i-1] & (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)) == 0:
             n_use = n-i
             break
     #If all bad, n_use will be 1, and we return empty arrays below
     #If no trailing bad reads, then n_use == n
     if n_use == 1:
-        return np.empty(0, dtype=np.int64),np.empty(0, dtype=np.int64)
+        return np.empty(0, dtype=np.int32),np.empty(0, dtype=np.int32)
 
     # Preallocate worst-case space (each valid run -> separate chunk)
-    starts = np.empty(n_use//2+1, dtype=np.int64)
-    ends   = np.empty(n_use//2+1, dtype=np.int64)
+    starts = np.empty(n_use//2+1, dtype=np.int32)
+    ends   = np.empty(n_use//2+1, dtype=np.int32)
     count = 0
 
     in_chunk = False
     start = 0
 
     for i in range(n_use):
-        dqv = dq[i]
+        dqv = dq_raw[i]
 
         # If bad, close chunk and move to next read
-        if (dqv & do_not_use_flag) != 0:
+        if (dqv & DO_NOT_USE_FLAG_uint8) != 0:
             if in_chunk: # then close chunk
                 end = i
                 if end - start >= 2:
@@ -94,7 +94,7 @@ def get_ramp_chunks(dq: np.ndarray):
             continue
 
         # If jump, close chunk and start new one
-        if (dqv & jump_det_flag) != 0:
+        if (dqv & JUMP_DET_FLAG_uint8) != 0:
             if in_chunk: # then close chunk
                 end = i
                 if end - start >= 2:
@@ -121,7 +121,7 @@ def get_ramp_chunks(dq: np.ndarray):
     return  starts[:count], ends[:count]
 
 @njit(nogil=True,parallel=True,cache=True)
-def get_mid_delta_times(times, dq_cube):
+def get_mid_delta_times(times, dq_raw):
     """
     Parallelized wrapper for get_mid_delta_times to apply on a 3D DQ array.
     Loops over the 2nd and 3rd dimensions (y, x) and applies get_mid_delta_times to each pixel.
@@ -130,19 +130,19 @@ def get_mid_delta_times(times, dq_cube):
     ----------
     times : np.ndarray
         1D array of read times (length n_reads).
-    dq_cube : np.ndarray
-        3D array of DQ flags with shape (n_reads, ny, nx).
+    dq_raw : np.ndarray
+        3D array of DQ flags uint8 with shape (n_reads, ny, nx).
 
     Returns
     -------
     mid_time_map : np.ndarray
         2D array (ny, nx) of mid times for each pixel.
     """
-    n_reads, ny, nx = dq_cube.shape
-    mid_time_map = np.empty((ny, nx), dtype=np.float64)
+    n_reads, ny, nx = dq_raw.shape
+    mid_time_map = np.empty((ny, nx), dtype=np.float32)
     for j in prange(ny):
         for k in range(nx):
-            mid_time_map[j, k] = get_mid_delta_times_ramp(times, dq_cube[:, j, k])
+            mid_time_map[j, k] = get_mid_delta_times_ramp(times, dq_raw[:, j, k])
     return mid_time_map
 
 @njit(inline="always")

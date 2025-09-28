@@ -40,7 +40,11 @@ def test_stage0(tmp_path):
     coeffs = np.broadcast_to(nonlin_correction_coefs[::-1, None, None], (np.size(nonlin_correction_coefs), ny, nx))
     thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
     max = np.zeros(shape=(ny, nx), dtype=np.uint16)
-    nonlin_model = datamodels.NonlinearCorrectionModel(data=dict(coeffs=coeffs, nonlin_thresh=thresh, nonlin_max=max))
+    nonlin_dq = np.zeros(shape=(ny,nx), dtype=np.uint32)
+    nonlin_model = datamodels.NonlinearCorrectionModel(data=dict(coeffs=coeffs,
+                                                                 nonlin_thresh=thresh,
+                                                                 nonlin_max=max,
+                                                                 dq=nonlin_dq))
     datamodels.set_default_meta(nonlin_model)
 
     step_time = time.time();

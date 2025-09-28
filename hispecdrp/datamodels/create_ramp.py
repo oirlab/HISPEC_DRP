@@ -82,10 +82,10 @@ def _create_ramp_worker(args):
         dict[str, np.ndarray]: Output from create_ramp for the block
     """
     block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple = args
-    mp_data_type, mp_float_type, mp_dq_type = types_tuple
+    mp_data_type, mp_float_type, mp_dq_raw_type = types_tuple
 
     data_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
-    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_type)
+    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_raw_type)
     source_np = _arraytonumpy(shared_source, shared_source_shape, dtype=mp_float_type)
     gain_np = _arraytonumpy(shared_gain, shared_gain_shape, dtype=mp_float_type)
     flat_np = _arraytonumpy(shared_flat, shared_flat_shape, dtype=mp_float_type)
@@ -207,17 +207,17 @@ def create_ramp(
         else:
             mp_data_type = ctypes.c_float
         mp_float_type = ctypes.c_float
-        mp_dq_type = ctypes.c_uint
+        mp_dq_raw_type = ctypes.c_uint8
 
-        types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
+        types_tuple = (mp_data_type, mp_float_type, mp_dq_raw_type)
 
         data_mp = RawArray(mp_data_type, nx * ny * n_reads)
         data_shape = (n_reads, ny, nx)
         data_np = _arraytonumpy(data_mp, data_shape, dtype=mp_data_type)
 
-        dq_raw_mp = RawArray(mp_dq_type, nx * ny * n_reads)
+        dq_raw_mp = RawArray(mp_dq_raw_type, nx * ny * n_reads)
         dq_raw_shape = (n_reads, ny, nx)
-        dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_type)
+        dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_raw_type)
 
         source_mp = RawArray(mp_float_type, nx * ny)
         source_shape = (ny, nx)
@@ -319,7 +319,7 @@ def create_ramp(
         _outputs = dict(data=data_np, dq_raw=dq_raw_np)
     else:
         data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-        dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint32)
+        dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint8)
         _outputs = _create_ramp(
             data, dq_raw,
             source=source,

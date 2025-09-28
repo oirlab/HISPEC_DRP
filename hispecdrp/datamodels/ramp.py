@@ -1,14 +1,14 @@
 from .base_model import DataModel
 from .hispec_base import HISPECDataModel
 from .parvi_base import PARVIDataModel
-from .extensions import IMAGE_UINT16_HDU, DQ_RAW
+from .extensions import IMAGE_UINT16_HDU, DQ_RAW, DQ_L0
 import numpy as np
 
 __all__ = ['RampModel', 'HISPECRampModel', 'PARVIRampModel']
 
 
 class RampModel(DataModel):
-    EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW}
+    EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW, **DQ_L0}
 
 
 

@@ -63,12 +63,12 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
     """
     if not hasattr(input_model, 'DATA'):
         raise Exception("DATA extension not found in input model for bias subtraction.")
-    if not hasattr(input_model, 'DQ_RAW'):
-        raise Exception("DQ_RAW extension not found in input model for bias subtraction.")
+    if not hasattr(input_model, 'DQ'):
+        raise Exception("DQ extension not found in input model for bias subtraction.")
 
     _bias_subtraction_numba(
         input_model.data,
-        input_model.dq_raw,
+        input_model.dq,
         bias_model.bias,
         bias_model.dq,
     )
@@ -76,13 +76,13 @@ def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.B
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def _bias_subtraction_numba(data, dq_raw, bias, bias_dq):
+def _bias_subtraction_numba(data, dq, bias, bias_dq):
     """
     Subtract bias and propagate DQ flags.
 
     Args:
         data:    (n_read, ny, nx) float32/float64 ramp data
-        dq_raw:  (n_read, ny, nx) uint32 DQ array (modified in place)
+        dq:      (ny, nx) uint32 DQ array (modified in place)
         bias:    (ny, nx) float32 bias calibration image
         bias_dq: (ny, nx) uint32 DQ map for bias model
 
@@ -92,8 +92,6 @@ def _bias_subtraction_numba(data, dq_raw, bias, bias_dq):
     n_read, ny, nx = data.shape
     for j in prange(ny):  # parallelize across spatial rows
         for i in range(nx):
-            b = bias[j, i]
-            dq_val = bias_dq[j, i]
-            data[:, j, i] = data[:, j, i] - b
-            dq_raw[:, j, i] |= dq_val
+            data[:, j, i] = data[:, j, i] - bias[j, i]
+            dq[j, i] |= bias_dq[j, i]
     return

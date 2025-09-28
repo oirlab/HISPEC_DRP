@@ -41,6 +41,11 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
             result.data = result.data.astype(np.float32)
         self.log.info(f"Polynomial coefficients are {nonlin_model.coeffs.dtype}.")
 
-        correct_nonlinearity(result.data, nonlin_model.coeffs)
+        correct_nonlinearity(result.data,
+                             result.dq_raw,
+                             result.dq,
+                             nonlin_model.coeffs,
+                             nonlin_model.nonlin_max,
+                             nonlin_model.dq)
 
         return dict(output=result, nonlin=nonlin)

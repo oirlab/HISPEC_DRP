@@ -22,9 +22,9 @@ def _fit_ramps_jwst_row(indata):
     Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit methods.
 
     Args:
-        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]: 
+        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,np.ndarray, str]:
             Tuple containing the row index, and the following data arrays for a single row:
-                ramp row index, read times, ramp data, readnoise, gain, data quality, dark current, algorithm
+                ramp row index, read times, ramp data, readnoise, gain, DQ cube, DQ image, dark current, algorithm
     Returns:
         i (int): index of input row from the ramps, same as input.
         slope (np.ndarray): slope image (1, nx).
@@ -34,11 +34,7 @@ def _fit_ramps_jwst_row(indata):
         err (np.ndarray): output error in slope image (1, nx).
     """
 
-    i, times, data_3d, readnoise_2d, gain_2d, dq_3d, dark_current_2d, algorithm = indata
-
-    groupdq = dq_3d.astype(np.uint8)
-    mask = dq_3d & DQ_FLAGS["DO_NOT_USE"]
-    pixeldq_2d = np.bitwise_or.reduce(dq_3d-mask, axis=(0,1))
+    i, times, data_3d, readnoise_2d, gain_2d, groupdq, pixeldq_2d, dark_current_2d, algorithm = indata
 
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
@@ -118,10 +114,11 @@ def _fit_ramps_worker(args):
         tuple: (block_start, block_end, results)
     """
     block_start, block_end, times, algorithm, types_tuple = args
-    mp_data_type, mp_float_type, mp_dq_type = types_tuple
+    mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type = types_tuple
 
     ramps_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
-    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_type)
+    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_raw_type)
+    dq_image_np = _arraytonumpy(shared_dq_image, shared_dq_image_shape, dtype=mp_dq_type)
     gain_np = _arraytonumpy(shared_gain, shared_gain_shape, dtype=mp_float_type)
     dark_np = _arraytonumpy(shared_dark, shared_dark_shape, dtype=mp_float_type)
     rdnoise_np = _arraytonumpy(shared_read_noise, shared_read_noise_shape, dtype=mp_float_type)
@@ -131,7 +128,6 @@ def _fit_ramps_worker(args):
     slope_errors_np = _arraytonumpy(shared_slope_errors, shared_slope_errors_shape, dtype=mp_float_type)
     var_poisson_image_np = _arraytonumpy(shared_var_poisson_image, shared_var_poisson_image_shape, dtype=mp_float_type)
     var_rnoise_image_np = _arraytonumpy(shared_var_rnoise_image, shared_var_rnoise_image_shape, dtype=mp_float_type)
-    dq_image_np = _arraytonumpy(shared_dq_image, shared_dq_image_shape, dtype=mp_dq_type)
     mid_times_np = _arraytonumpy(shared_mid_times, shared_mid_times_shape, dtype=mp_float_type)
 
     results = []
@@ -148,6 +144,7 @@ def _fit_ramps_worker(args):
             rdnoise_np[[row], :],
             gain_np[[row], :],
             dq_3d,
+            dq_image_np[[row], :],
             dark_np[[row], :],
             algorithm
         )
@@ -158,7 +155,7 @@ def _fit_ramps_worker(args):
 
         slope_image_np[row, :] = outdata
         slope_errors_np[row, :] = err
-        dq_image_np[row, :] = dq
+        dq_image_np[row, :] |= dq
         var_poisson_image_np[row, :] = var_poisson
         var_rnoise_image_np[row, :] = var_rnoise
 
@@ -167,7 +164,7 @@ def _fit_ramps_worker(args):
 
     return (block_start, block_end)
 
-def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=None, rdnoise=None, gain=None,
+def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=None, dq=None,rdnoise=None, gain=None,
                    dark_current=None,start_times=None):
     """
     Top-level function for fitting ramps with methods in stcal.ramp_fitting.
@@ -178,6 +175,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
         max_cores (int): Number of cores for parallelization.
         algorithm (str): Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'.
         dq_raw (np.ndarray): 3D array of data quality flags across detector (n_reads, ny, nx)
+        dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
         rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
         dark_current (np.ndarray): 2D array of dark current across detector (ny, nx)
@@ -202,8 +200,9 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
     else:
         mp_data_type = ctypes.c_float
     mp_float_type = ctypes.c_float
+    mp_dq_raw_type = ctypes.c_uint8
     mp_dq_type = ctypes.c_uint
-    types_tuple = (mp_data_type, mp_float_type, mp_dq_type)
+    types_tuple = (mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type)
 
     slope_image_mp = RawArray(mp_float_type, nx * ny)
     slope_image_shape = (ny, nx)
@@ -228,7 +227,10 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
     dq_image_mp = RawArray(mp_dq_type, nx * ny)
     dq_image_shape = (ny, nx)
     dq_image_np = _arraytonumpy(dq_image_mp, dq_image_shape, dtype=mp_dq_type)
-    dq_image_np[:] = np.zeros((ny, nx), dtype=np.uint32)
+    if dq is None:
+        dq_image_np[:] = np.zeros((ny, nx), dtype=np.uint32)
+    else:
+        dq_image_np[:] = dq
 
     start_times_mp = RawArray(mp_float_type, nx * ny)
     start_times_shape = (ny, nx)
@@ -278,11 +280,11 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
         ramps_np[:] = ramps  # copy original array into shared array
         ramps = ramps_np  # free the original array from memory to avoid duplicates
 
-        dq_raw_mp = RawArray(mp_dq_type, nx * ny * n_reads)
+        dq_raw_mp = RawArray(mp_dq_raw_type, nx * ny * n_reads)
         dq_raw_shape = (n_reads, ny, nx)
-        dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_type)
+        dq_raw_np = _arraytonumpy(dq_raw_mp, dq_raw_shape, dtype=mp_dq_raw_type)
         if dq_raw is None:
-            dq_raw_np[:] = np.zeros((n_reads, ny, nx), dtype=np.uint32)
+            dq_raw_np[:] = np.zeros((n_reads, ny, nx), dtype=np.uint8)
         else:
             dq_raw_np[:] = dq_raw  # copy original array into shared array
             dq_raw = dq_raw_np  # free the original array from memory to avoid duplicates
@@ -350,6 +352,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
                     rdnoise_np[[row], :],
                     gain_np[[row], :],
                     dq_3d,
+                    dq_image_np[[row], :],
                     dark_np[[row], :],
                     algorithm)
 
@@ -360,7 +363,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
 
             slope_image_np[row,:] = outdata
             slope_errors_np[row,:] = err
-            dq_image_np[row, :] = dq
+            dq_image_np[row, :] |= dq
             var_poisson_image_np[row, :] = var_poisson
             var_rnoise_image_np[row, :] = var_rnoise
 

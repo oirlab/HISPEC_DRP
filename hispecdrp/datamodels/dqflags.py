@@ -11,7 +11,8 @@ DQ_FLAGS = {
     'PERSISTENCE':      np.uint32(2**5),   # High persistence
     'RESERVED_1':       np.uint32(2**6),   # RESERVED_1/TBD
     'RESERVED_2':       np.uint32(2**7),   # RESERVED_2/TBD
-    'UNRELIABLE_ERROR': np.uint32(2**8),   # Uncertainty exceeds quoted error
+    'NON_LINEAR': np.uint32(2**8),   # Non linear. None linearity correction might be worse than 1%.
+    # 'UNRELIABLE_ERROR': np.uint32(2**8),   # Uncertainty exceeds quoted error
     'NON_SCIENCE':      np.uint32(2**9),   # Pixel not on science portion of detector
     'DEAD':             np.uint32(2**10),  # Dead pixel
     'HOT':              np.uint32(2**11),  # Hot pixel
@@ -19,7 +20,8 @@ DQ_FLAGS = {
     'LOW_QE':           np.uint32(2**13),  # Low quantum efficiency
     'RESERVED_3':       np.uint32(2**14),  # RESERVED_3/TBD
     'TELEGRAPH':        np.uint32(2**15),  # Telegraph pixel
-    'NONLINEAR':        np.uint32(2**16),  # Pixel highly nonlinear
+    # 'NONLINEAR':        np.uint32(2**16),  # Pixel highly nonlinear
+    'RESERVED_6':        np.uint32(2**16),  #
     'BAD_REF_PIXEL':    np.uint32(2**17),  # Reference pixel cannot be used
     'CROSS_BAD':        np.uint32(2**18),  # Center of cross-shaped bad pixel
     'CROSS_BAD_NEIGH':  np.uint32(2**19),  # Neighbor of cross-shaped bad pixel

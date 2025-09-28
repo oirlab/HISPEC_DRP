@@ -10,6 +10,8 @@ __all__ = ['CheckSaturationPrimitive']
 
 SATURATED_FLAG =  DQ_FLAGS["SATURATED"]
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
+SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 
 class CheckSaturationPrimitive(BasePrimitive):
     
@@ -66,6 +68,7 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
     _check_saturation_numba(
         input_model.data,
         input_model.dq_raw,
+        input_model.dq,
         saturation_model.sat_thresh,
         saturation_model.dq,
     )
@@ -74,13 +77,14 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def _check_saturation_numba(data, dq_raw, sat_thresh, sat_dq):
+def _check_saturation_numba(data, dq_raw, dq, sat_thresh, sat_dq):
     """
     Core saturation flagging routine (Numba-friendly).
 
     Args:
         data:        (n_read, ny, nx) float32/float64 ramp data
-        dq_raw:      (n_read, ny, nx) uint32 DQ array (modified in place)
+        dq_raw:      (n_read, ny, nx) uint8 DQ array (modified in place)
+        dq:          (ny, nx) uint32 DQ array (modified in place)
         sat_thresh:  (ny, nx) float32 saturation threshold map
         sat_dq:      (ny, nx) uint32 DQ map from saturation model
     """
@@ -88,9 +92,8 @@ def _check_saturation_numba(data, dq_raw, sat_thresh, sat_dq):
     for j in prange(ny):  # parallelize over spatial rows
         for i in range(nx):
             thresh = sat_thresh[j, i]
-            dq_val = sat_dq[j, i]
+            dq[j, i] |= sat_dq[j, i]
             for r in range(n_read):
                 if data[r, j, i] >= thresh:
-                    dq_raw[r, j, i] |= (SATURATED_FLAG | DO_NOT_USE_FLAG)
-                dq_raw[r, j, i] |= dq_val
+                    dq_raw[r, j, i] |= (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)
     return

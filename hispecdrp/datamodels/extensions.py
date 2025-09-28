@@ -7,6 +7,7 @@ import numpy as np
 
 # Common Image HDUs
 
+IMAGE_UINT8_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint8}
 IMAGE_UINT16_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint16}
 IMAGE_UINT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint32}
 IMAGE_FLOAT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.float32}
@@ -49,7 +50,7 @@ CALIBRATIONS = {
 
 #### Raw
 
-DQ_RAW = {'DQ_RAW': IMAGE_UINT32_HDU}
+DQ_RAW = {'DQ_RAW': IMAGE_UINT8_HDU}
 
 #### L0 (rate maps)
 
