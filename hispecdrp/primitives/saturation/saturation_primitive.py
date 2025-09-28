@@ -95,5 +95,6 @@ def _check_saturation_numba(data, dq_raw, dq, sat_thresh, sat_dq):
             dq[j, i] |= sat_dq[j, i]
             for r in range(n_read):
                 if data[r, j, i] >= thresh:
-                    dq_raw[r, j, i] |= (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)
+                    dq_raw[r::, j, i] |= (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)
+                    break
     return

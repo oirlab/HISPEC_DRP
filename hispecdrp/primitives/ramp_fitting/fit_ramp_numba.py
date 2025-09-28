@@ -104,7 +104,7 @@ def _fit_ramps_slope_pedestal(times, ramps, dq_raw, dq, rdnoise, gain, dark_curr
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)
-            _dq_raw = dq_raw[:,i, j] - dq_raw[:,i, j] & DO_NOT_USE_FLAG_uint8
+            _dq_raw = dq_raw[:,i, j] - (dq_raw[:,i, j] & DO_NOT_USE_FLAG_uint8)
             new_dq[i, j] = new_dq[i, j] | bitwise_or_reduce(_dq_raw) #+ _if_all_reads_bad
             if slope_err[i,j] < 0 or var_rnoise[i,j] < 0 or var_poisson[i,j] < 0:
                 new_dq[i, j] = new_dq[i, j] | DO_NOT_USE_FLAG
@@ -243,7 +243,7 @@ def _fit_ramps_mcds(times, ramps, dq_raw, dq, rdnoise, gain, dark_current, start
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)
-            _dq_raw = dq_raw[:,i, j] - dq_raw[:,i, j] & DO_NOT_USE_FLAG_uint8
+            _dq_raw = dq_raw[:,i, j] - (dq_raw[:,i, j] & DO_NOT_USE_FLAG_uint8)
             new_dq[i, j] = new_dq[i, j] | bitwise_or_reduce(_dq_raw) #+ _if_all_reads_bad
             if slope_err[i,j] < 0 or var_rnoise[i,j] < 0 or var_poisson[i,j] < 0:
                 new_dq[i, j] = new_dq[i, j] | DO_NOT_USE_FLAG

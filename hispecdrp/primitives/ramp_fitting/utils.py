@@ -147,7 +147,7 @@ def get_mid_delta_times(times, dq_raw):
 
 @njit(inline="always")
 def bitwise_or_reduce(arr):
-    result = np.uint32(0)
+    result = np.uint8(0)
     for k in range(arr.shape[0]):
         result |= arr[k]
     return result

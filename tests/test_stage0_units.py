@@ -97,7 +97,46 @@ def test_stage0_units(tmp_path):
                 err_msg="Bias DQ propagation failed"
             )
 
-            # exit()
+    if 1: # Test jump detection on a simple synthetic ramp with a known jump
+        def make_linear_ramp(n_reads=10, ny=1, nx=1, slope=1.0, dtype=np.float32):
+            r = np.arange(n_reads, dtype=dtype).reshape(n_reads, 1, 1) * slope
+            return r.repeat(ny, axis=1).repeat(nx, axis=2)
+        n_reads, ny, nx = 10, 1, 1
+        ramp = make_linear_ramp(n_reads, ny, nx, slope=1.0)
+
+        # Inject a single positive jump between read 4 and 5
+        # i.e., diffs[4] is large -> dq_raw[5] should be flagged
+        ramp[5:, 0, 0] += 20.0
+        ramp[2:, 0, 0] += 3*0.1 # checking that a small jump elow readnoise is not detectable
+
+        dq_raw = np.zeros((n_reads, ny, nx), dtype=np.uint8)
+        dq_2d  = np.zeros((ny, nx), dtype=np.uint8)
+        rdnoise = np.full((ny, nx), 0.1, dtype=np.float32)   # small read noise
+        gain    = np.ones((ny, nx), dtype=np.float32)        # unit gain
+
+        # Run jump detection (in-place modification of dq_raw is expected)
+        jump_detection_difference(
+            ramp_data=ramp,
+            dq_raw=dq_raw,
+            dq=dq_2d,
+            rdnoise=rdnoise,
+            gain=gain,
+            rejection_threshold=5.0,
+        )
+
+        # Only the read AFTER the large diff (index 5) should be flagged
+        flagged = (dq_raw[:, 0, 0] & JUMP_DET_FLAG_uint8) != 0
+        print("Jump flags:", flagged)
+        print(flagged[5])
+
+        # Expect exactly one True at index 5
+        assert flagged.sum() == 1, f"Expected exactly one jump flag, got {flagged}"
+        assert flagged[5]
+        # Sanity checks
+        for i in range(n_reads):
+            if i != 5:
+                assert not flagged[i], f"Unexpected flag at read {i}"
+
     if 1:
         # Fake 2D rate image
         rate = np.array([[10.0, 20.0],

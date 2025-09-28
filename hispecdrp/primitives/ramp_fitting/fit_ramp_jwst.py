@@ -155,12 +155,15 @@ def _fit_ramps_worker(args):
 
         slope_image_np[row, :] = outdata
         slope_errors_np[row, :] = err
-        dq_image_np[row, :] |= dq
+        dq_image_np[row, :] = dq_image_np[row, :] | dq[0]
         var_poisson_image_np[row, :] = var_poisson
         var_rnoise_image_np[row, :] = var_rnoise
 
     mid_times_np[block_start:block_end, :] = start_times_np[block_start:block_end, :] +\
                                              get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :])
+
+    _dq_raw = dq_raw[:, block_start:block_end, :] - (dq_raw[:, block_start:block_end, :] & DO_NOT_USE_FLAG_uint8)
+    dq_image_np[block_start:block_end, :] |= np.bitwise_or.reduce(_dq_raw)
 
     return (block_start, block_end)
 
@@ -363,7 +366,7 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
 
             slope_image_np[row,:] = outdata
             slope_errors_np[row,:] = err
-            dq_image_np[row, :] |= dq
+            dq_image_np[row, :] = dq_image_np[row, :] | dq[0]
             var_poisson_image_np[row, :] = var_poisson
             var_rnoise_image_np[row, :] = var_rnoise
 
