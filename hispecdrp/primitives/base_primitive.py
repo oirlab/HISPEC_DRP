@@ -420,9 +420,8 @@ class BasePrimitive(ProcessingComponent):
         #### DataModel class name (str) #####
         #####################################
         if isinstance(output_model, str):
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model)
+            if input_model.meta.instrument_name is not None:
+                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model)
             else:
                 model_class = datamodels.model_type_from_name(output_model)
             return model_class.from_datamodel(input_model)
@@ -434,9 +433,8 @@ class BasePrimitive(ProcessingComponent):
             assert isinstance(
                 input_model, datamodels.DataModel
             ), "Input model must be provided if output_model is a DataModel class."
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model.__class__.__name__)
+            if input_model.meta.instrument_name is not None:
+                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model.__class__.__name__)
             else:
                 model_class = output_model
             return output_model.from_datamodel(input_model)
