@@ -64,6 +64,8 @@ def check_saturation(input_model: datamodels.RampModel, saturation_model: datamo
     """
     if not hasattr(input_model, "DQ_RAW"):
         raise AttributeError("Input model has no DQ_RAW array to flag saturation.")
+    if not hasattr(input_model, "DQ") or input_model.dq is None:
+        input_model.dq = np.zeros(input_model.data.shape[1:], dtype=np.uint32)
 
     _check_saturation_numba(
         input_model.data,

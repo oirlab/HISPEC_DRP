@@ -6,7 +6,9 @@ from ...datamodels.dqflags import DQ_FLAGS
 __all__ = ['jump_detection_difference']
 
 
-JUMP_DET_FLAG_uint8 = np.uint8(datamodels.DQ_FLAGS['JUMP_DET'])
+SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
+JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 @njit(nogil=True,cache=True,inline='always')
 def get_diffs(ramp_row):
@@ -42,9 +44,17 @@ def median_axis0_3d(ramp):
 def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,rejection_threshold):
     n_reads, ny, nx = ramp_data.shape
 
+    # Find first saturated index; exclude it and everything after.
+    n_use = 1
+    for i in range(n_reads):
+        # checking backward for saturation to speed up processing since saturation will be at the end of the ramp
+        if (dq_raw[n_reads-i-1] & (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)) == 0:
+            n_use = n_reads-i
+            break
+
     for i in prange(ny):
         # Calculate differences between successive reads
-        diffs = get_diffs(ramp_data[:,i,:])  # np.diff(ramp_data, axis=0)
+        diffs = get_diffs(ramp_data[0:n_use,i,:])  # np.diff(ramp_data, axis=0)
 
         # Estimate the typical value of differences and the noise in the differences
         median_diff = median_axis0_3d(diffs[:,None,:])[0,:] * gain[i,:]  # np.median(diffs, axis=0) * gain
@@ -56,7 +66,7 @@ def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,reject
         jumps = (np.abs(diffs-median_diff) > (rejection_threshold * sigma_diff)).astype(np.uint8) * JUMP_DET_FLAG_uint8
 
         # Modify dq_out to flag where jumps occurred
-        dq_raw[1::, i, :] |= jumps
+        dq_raw[1:n_use, i, :] |= jumps
 
     return
 

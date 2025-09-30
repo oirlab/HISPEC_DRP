@@ -299,7 +299,7 @@ def fit_ramps_mcds(times, ramps, dq_raw=None, dq=None, rdnoise=None, gain=None, 
         mid_times = result[5]
     else:
         slope_image, slope_err, var_rnoise, var_poisson,new_dq,mid_times = _fit_ramps_mcds(
-            times, ramps, dq, rdnoise, gain, dark_current,start_times,num_coadd=num_coadd)
+            times, ramps,  dq_raw, dq, rdnoise, gain, dark_current,start_times,num_coadd=num_coadd)
 
     output = {}
     output['rate'] = slope_image
