@@ -148,6 +148,10 @@ def test_stage0(tmp_path):
                                        poisson_noise=False, read_noise=0,  # in e-/s
                                        convert_to_uint16=False, clip_ramps=True,
                                        max_cores=max_cores)
+
+    #adding a jump
+    ramp_data['data'][4::,:,0:nx//2] += 1000
+
     step_time = time.time();
     print(f"Step: creating ramp (new), elapsed: {step_time - start_time:.2f}s")
     start_time = time.time()
@@ -185,10 +189,20 @@ def test_stage0(tmp_path):
             'suffix': 'nonlin',
             'max_cores': pipe_max_cores,
         },
-        'ramp_fit': {
-            'suffix': 'rampfit',
-            'method': 'ols',  # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
+        'jump_detec' : {
+            'run': False,
+            'suffix' : 'jumpdetec',
+            'ouput_model' : 'input',
+            'method': 'tpd',
             'max_cores': pipe_max_cores,
+            'rejection_threshold': 4.0,
+        },
+        'ramp_fit' : {
+            'suffix': 'rampfit',
+            'method': 'jwst_ols', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
+            'max_cores': pipe_max_cores,
+            'jwst_jump_detection': True,
+            'jwst_jump_rejection_threshold': 4.0,
         },
         'dark': {
             'suffix': 'dark',

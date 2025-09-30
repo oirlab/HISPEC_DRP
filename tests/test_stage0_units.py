@@ -11,6 +11,11 @@ from hispecdrp.primitives.bias_subtraction.bias_primitive import _bias_subtracti
 from hispecdrp.primitives.dark_subtraction.dark_primitive import _dark_subtraction_rate_numba
 from hispecdrp.primitives.detector_gain.detgain_primitive import _detector_gain_correction_numba
 from hispecdrp.primitives.detector_flat.detflat_primitive import _detector_flat_correction_numba
+from hispecdrp.primitives.jump_detection.jump_detection_difference import jump_detection_difference
+
+SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
+JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 def test_stage0_units(tmp_path):
 
