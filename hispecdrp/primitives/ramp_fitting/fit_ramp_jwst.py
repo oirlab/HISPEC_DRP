@@ -14,7 +14,7 @@ from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 
-import psutil, os
+import os
 from tqdm import tqdm
 
 __all__ = ['fit_ramps_jwst']
