@@ -12,6 +12,8 @@ from multiprocessing.sharedctypes import RawArray
 
 from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times
+from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
+
 import psutil, os
 from tqdm import tqdm
 
@@ -132,18 +134,13 @@ def _fit_ramps_worker(args):
 
     results = []
     for row in range(block_start, block_end):
-        ramps_3d = ramps_np[:, [row], :]
-        dq_3d = dq_raw_np[:, [row], :]
-        ramps_3d = ramps_3d[np.newaxis, :]
-        dq_3d = dq_3d[np.newaxis, :]
-
         args_row = (
             row,
             times,
-            ramps_3d,
+            ramps_np[np.newaxis,:, [row], :],
             rdnoise_np[[row], :],
             gain_np[[row], :],
-            dq_3d,
+            dq_raw_np[np.newaxis,:, [row], :],
             dq_image_np[[row], :],
             dark_np[[row], :],
             algorithm
@@ -167,8 +164,46 @@ def _fit_ramps_worker(args):
 
     return (block_start, block_end)
 
+
+def _jump_detection_worker(args):
+    """
+    Worker function for multiprocessing. Runs _jump_detection_worker on a block of rows using shared arrays.
+    Args:
+        args (tuple): (block_start, block_end, times, algorithm, types_tuple)
+    Returns:
+        tuple: (block_start, block_end, results)
+    """
+    block_start, block_end, times, rejection_threshold, types_tuple = args
+    mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type = types_tuple
+
+    ramps_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
+    dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_raw_type)
+    dq_image_np = _arraytonumpy(shared_dq_image, shared_dq_image_shape, dtype=mp_dq_type)
+    gain_np = _arraytonumpy(shared_gain, shared_gain_shape, dtype=mp_float_type)
+    rdnoise_np = _arraytonumpy(shared_read_noise, shared_read_noise_shape, dtype=mp_float_type)
+
+    results = []
+    for row in range(block_start, block_end):
+        args_row = (row,
+                     rejection_threshold,
+                     ramps_np[np.newaxis,:, [row], :],
+                     # Make sure to add a new axis to each array to maintain number of dimensions
+                     rdnoise_np[[row], :],
+                     gain_np[[row], :],
+                     dq_raw_np[np.newaxis,:, [row], :],
+                     dq_image_np[[row], :],)
+
+        results.append(_jump_detection_jwst_row(args_row))
+
+    for row_element in results:
+        _row, _dq = row_element
+
+        dq_raw_np[:,[_row], :] = _dq
+
+    return (block_start, block_end)
+
 def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=None, dq=None,rdnoise=None, gain=None,
-                   dark_current=None,start_times=None):
+                   dark_current=None,start_times=None,jump_detection=False,jump_rejection_threshold=4.0):
     """
     Top-level function for fitting ramps with methods in stcal.ramp_fitting.
 
@@ -183,6 +218,8 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
         gain (np.ndarray): 2D array of gain across detector (ny, nx)
         dark_current (np.ndarray): 2D array of dark current across detector (ny, nx)
         start_times (float): MJD time of the start of the first read.
+        jump_detection (bool): Whether to perform jump detection before ramp fitting.
+        jump_rejection_threshold (float): Sigma threshold for jump detection.
     Returns:
         dict[str, np.ndarray]:
     """
@@ -195,8 +232,6 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
         algorithm = 'OLS_C'
     else:
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
-
-
 
     if ramps.dtype is np.uint16:
         mp_data_type = ctypes.c_ushort
@@ -295,13 +330,6 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
 
         # Prepare blocks
         block_size = max(1, ny // (4*max_cores)) if max_cores > 1 else ny
-        args_list = []
-        for block_start in range(0, ny, block_size):
-            block_end = min(block_start + block_size, ny)
-
-            # block_start, block_end, times, algorithm, types_tuple = args
-            args = (block_start, block_end, times, algorithm, types_tuple)
-            args_list.append(args)
 
         _init_args = (
             ramps_mp, ramps_shape,
@@ -325,10 +353,32 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
             initargs=_init_args,
             maxtasksperchild=50
         )
-        # tpool = mp.Pool(processes=max_cores,
-        #                 initializer=_tpool_init_jwst_ramp,
-        #                 initargs=_init_args,
-        #                 maxtasksperchild=50)
+
+        if jump_detection:
+            args_list = []
+            for block_start in range(0, ny, block_size):
+                block_end = min(block_start + block_size, ny)
+
+                # block_start, block_end, times, algorithm, types_tuple = args
+                args = (block_start, block_end, times, jump_rejection_threshold, types_tuple)
+                args_list.append(args)
+            # try:
+            tasks = [tpool.apply_async(_jump_detection_worker, args=(args_tuple,))
+                     for args_tuple in args_list]
+
+            for t in tqdm(tasks, desc="Processing blocks"):
+                t.wait()
+            # except:
+            #     pass
+
+        args_list = []
+        for block_start in range(0, ny, block_size):
+            block_end = min(block_start + block_size, ny)
+
+            # block_start, block_end, times, algorithm, types_tuple = args
+            args = (block_start, block_end, times, algorithm, types_tuple)
+            args_list.append(args)
+
         try:
             tasks = [tpool.apply_async(_fit_ramps_worker, args=(args_tuple,))
                      for args_tuple in args_list]
@@ -339,22 +389,32 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
             tpool.close()
             tpool.join()
     else:
+        # If not parallelizing, ie max_cores=1, just run directly without shared memory
         results = []
         for row in np.arange(ny):
             print(f"Processing row {row+1} of {ny}.")
-            ramps_3d = ramps[:,[row],:]
-            dq_3d = dq_raw[:,[row],:]
-            # Reshape to add the nints axis that JWST pipeline requires
-            ramps_3d = ramps_3d[np.newaxis,:]
-            dq_3d = dq_3d[np.newaxis,:]
+
+            if jump_detection:
+                args_row = (row,
+                             jump_rejection_threshold,
+                             ramps[np.newaxis,:, [row], :],
+                             # Make sure to add a new axis to each array to maintain number of dimensions
+                             rdnoise_np[[row], :],
+                             gain_np[[row], :],
+                             dq_raw[np.newaxis,:, [row], :],
+                             dq_image_np[[row], :],)
+
+                _row, _dq  = _jump_detection_jwst_row(args_row)
+                dq_raw[:,[_row], :] = _dq
 
             args = (row,
                     times,
-                    ramps_3d,
+                    # Reshape to add the nints axis that JWST pipeline requires
+                    ramps[np.newaxis,:,[row],:],
                     # Make sure to add a new axis to each array to maintain number of dimensions
                     rdnoise_np[[row], :],
                     gain_np[[row], :],
-                    dq_3d,
+                    dq_raw[np.newaxis,:,[row],:],
                     dq_image_np[[row], :],
                     dark_np[[row], :],
                     algorithm)

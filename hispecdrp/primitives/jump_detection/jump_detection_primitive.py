@@ -44,9 +44,14 @@ class JumpDetectionPrimitive(BasePrimitive):
 
         # Perform jump detection - this only modifies the DQ mask
         if self.method.lower()=='jwst':
-            raise NotImplementedError("JWST jump detection method should not be run here, but from within the ramp-"
-                                      "fitting primitive because of shared memory parallelization needs.")
-            jump_detection_jwst(result.data, result.dq_raw, max_cores=self.max_cores, rejection_threshold=self.rejection_threshold)
+            self.log.info("JWST jump detection is not optimized with shared memory here. For a shared memory execution, "
+                          "set the flag jwst_jump_detection=True in the ramp fitting primitive and run jump detection from there."
+                          "Although shared memory only works with JWST ramp fitting methods.")
+            jump_detection_jwst(result.data,
+                                result.dq_raw,
+                                result.dq,
+                                max_cores=self.max_cores,
+                                rejection_threshold=self.rejection_threshold)
         elif self.method.lower()=='tpd':
             jump_detection_difference(result.data,
                                       result.dq_raw,

@@ -20,6 +20,8 @@ class FitRampPrimitive(BasePrimitive):
         'mcds_num_coadd' : None,
         'max_cores' : 1,
         'output_model' : 'L0Model',
+        'jwst_jump_detection': False,
+        'jwst_jump_rejection_threshold': 4.0,
     }
 
     CALIBRATIONS = {
@@ -38,6 +40,10 @@ class FitRampPrimitive(BasePrimitive):
     }
     def _perform(self):
         set_num_threads(self.max_cores)
+
+        if self.jwst_jump_detection and self.method.lower() not in ('jwst_likely', 'jwst_ols'):
+            raise ValueError("JWST jump detection is only for shared memory optimization in combination with JWST ramp fitting methods. "
+                             "Please set jwst_jump_detection to False or change ramp fitting algorithm.")
 
         input_model = datamodels.open(self.input, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
@@ -99,7 +105,10 @@ class FitRampPrimitive(BasePrimitive):
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
                                     dark_current=None,
-                                    max_cores=self.max_cores, algorithm=self.method.lower())
+                                    max_cores=self.max_cores,
+                                    algorithm=self.method.lower(),
+                                    jump_detection = self.jwst_jump_detection,
+                                    jump_rejection_threshold = self.jwst_jump_rejection_threshold)
         else:
             self.log.error(f"Invalid ramp fit method {self.method.lower()}")
             raise ValueError(f"Invalid ramp fit method {self.method.lower()}")

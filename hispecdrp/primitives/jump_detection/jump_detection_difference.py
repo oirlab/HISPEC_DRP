@@ -44,29 +44,29 @@ def median_axis0_3d(ramp):
 def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,rejection_threshold):
     n_reads, ny, nx = ramp_data.shape
 
-    # Find first saturated index; exclude it and everything after.
-    n_use = 1
-    for i in range(n_reads):
-        # checking backward for saturation to speed up processing since saturation will be at the end of the ramp
-        if (dq_raw[n_reads-i-1] & (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)) == 0:
-            n_use = n_reads-i
-            break
-
     for i in prange(ny):
-        # Calculate differences between successive reads
-        diffs = get_diffs(ramp_data[0:n_use,i,:])  # np.diff(ramp_data, axis=0)
+        for j in range(nx):
+            # Find first saturated index; exclude it and everything after.
+            n_use = 1
+            for k in range(n_reads):
+                # checking backward for saturation to speed up processing since saturation will be at the end of the ramp
+                if (dq_raw[n_reads-k-1,i,j] & (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)) == 0:
+                    n_use = n_reads-k
+                    break
 
-        # Estimate the typical value of differences and the noise in the differences
-        median_diff = median_axis0_3d(diffs[:,None,:])[0,:] * gain[i,:]  # np.median(diffs, axis=0) * gain
-        photon_noise_squared = np.abs(median_diff)  # Assuming Poisson
-        total_DN_noise_squared = (rdnoise[i,:] ** 2) * 2 + (photon_noise_squared / (gain[i,:]**2))  # Factor of 2 for diffs
-        sigma_diff = np.sqrt(total_DN_noise_squared)   # Convert back to ADU
+            # Calculate differences between successive reads
+            diffs = get_diffs(ramp_data[0:n_use,i,j:j+1])  # np.diff(ramp_data, axis=0)
 
-        # Identify jumps
-        jumps = (np.abs(diffs-median_diff) > (rejection_threshold * sigma_diff)).astype(np.uint8) * JUMP_DET_FLAG_uint8
+            # Estimate the typical value of differences and the noise in the differences
+            median_diff = median_axis0_3d(diffs[:,None,:])[0,0] * gain[i,j]  # np.median(diffs, axis=0) * gain
+            photon_noise_squared = np.abs(median_diff)  # Assuming Poisson
+            total_DN_noise_squared = (rdnoise[i,j] ** 2) * 2 + (photon_noise_squared / (gain[i,j]**2))  # Factor of 2 for diffs
+            sigma_diff = np.sqrt(total_DN_noise_squared)   # Convert back to ADU
 
-        # Modify dq_out to flag where jumps occurred
-        dq_raw[1:n_use, i, :] |= jumps
+            # Identify jumps
+            jumps = (np.abs(diffs[:,0]-median_diff) > (rejection_threshold * sigma_diff)).astype(np.uint8) * JUMP_DET_FLAG_uint8
+            # Modify dq_out to flag where jumps occurred
+            dq_raw[1:n_use, i, j] |= jumps
 
     return
 
