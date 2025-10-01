@@ -71,7 +71,7 @@ def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodel
     if not hasattr(dark_model, 'DQ'):
         raise Exception("DQ extension not found in dark model for dark subtraction.")
 
-    out=_dark_subtraction_rate_numba(input_model.rate, input_model.rate_err, input_model.dq, dark_model.rate, dark_model.rate_err, dark_model.dq)
+    out=_dark_subtraction_rate_numba(input_model.rate.astype(np.float32), input_model.rate_err.astype(np.float32), input_model.dq.astype(np.uint32), dark_model.rate.astype(np.float32), dark_model.rate_err.astype(np.float32), dark_model.dq.astype(np.uint32))
 
     input_model.rate, input_model.rate_err, input_model.dq = out
 

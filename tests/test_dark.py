@@ -8,8 +8,10 @@ import os
 def test_dark_level0(tmp_path, datadir):
 
     # Files
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
-    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
+    #sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    #dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True, output_dir=datadir)
+    sci_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits'
+    dark_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/Cals/HB.20240924.0000.00.master-dark.fits'
 
     # Calibration cache
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
@@ -23,10 +25,10 @@ def test_dark_level0(tmp_path, datadir):
     dark_model = datamodels.HISPECDarkModel(dark_path)
     
     # Test against manual correction
-    np.testing.assert_array_equal(model_result.data, input_model.data - dark_model.data)
-    np.testing.assert_array_equal(model_result.err, np.sqrt(input_model.err**2 + dark_model.err**2))
-    np.testing.assert_array_equal(model_result.var_poisson, input_model.var_poisson + dark_model.var_poisson)
-    np.testing.assert_array_equal(model_result.var_rnoise, input_model.var_rnoise + dark_model.var_rnoise)
+    np.testing.assert_array_equal(model_result.rate, input_model.rate - dark_model.rate)
+    np.testing.assert_array_equal(model_result.rate_err, np.sqrt(input_model.rate_err**2 + dark_model.rate_err**2))
+    np.testing.assert_array_equal(model_result.rate_var_poisson, input_model.rate_var_poisson + dark_model.rate_var_poisson)
+    np.testing.assert_array_equal(model_result.rate_var_rnoise, input_model.rate_var_rnoise + dark_model.rate_var_rnoise)
     np.testing.assert_array_equal(model_result.dq,  input_model.dq | dark_model.dq)
 
     # Check the calibrations used
