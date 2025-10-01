@@ -24,7 +24,6 @@ def test_jumps(tmp_path):
         dq_comp[read, row, col] = np.uint8(datamodels.DQ_FLAGS['JUMP_DET'])
 
     dq_pixel = np.zeros((4096, 4096), dtype=np.uint32)
-    dq_raw_orig = ramp_model.dq_raw
 
     jump_detection_jwst(ramp_model.data, ramp_model.dq_raw, dq_pixel)
     np.testing.assert_equal(dq_comp, ramp_model.dq_raw)

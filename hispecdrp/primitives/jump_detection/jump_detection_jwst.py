@@ -94,7 +94,7 @@ def _jump_detection_jwst_row(indata):
     jump_data.fl_dnu = datamodels.DQ_FLAGS['DO_NOT_USE']
     jump_data.fl_ref = datamodels.DQ_FLAGS['REFERENCE_PIXEL']
 
-    gdq, pdq, total_primary_crs, number_extended_events, stddev = detect_jumps_data(jump_data)
+    gdq, pdq, total_primary_crs, number_extended_events = detect_jumps_data(jump_data)
 
     # Ignore first axis since we have nints=1
     gdq = gdq[0, :].astype(np.uint32)
