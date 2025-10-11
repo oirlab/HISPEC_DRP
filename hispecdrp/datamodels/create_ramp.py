@@ -149,14 +149,12 @@ def create_ramp(
         Gain of the detector (e-/ADU).
     flat : None or float or np.ndarray, optional
         Flat field array (default: None).
-        We assume that flats have been corrected for gain variations already. In this function the gain is applied after
-         the flat, but in the data reduction pipeline the gain correction should be applied first.
+        We assume that flats have been corrected for gain variations already. In this function the gain is applied after the flat, but in the data reduction pipeline the gain correction should be applied first.
     bias : None or float or np.ndarray, optional
         Bias level to add to the first read (default: 1000 e-).
     dark : None or flat or np.ndarray, optional
         Dark current level to add to each read (e-/s/pixel) (default: 0)
-        The flat field is applied BFEORE adding the dark current. This is because dark subtraction is typically done
-        before the flat fielding step.
+        The flat field is applied BEFORE adding the dark current. This is because dark subtraction is typically done before the flat fielding step.
     read_noise : None or float or np.ndarray, optional
         Standard deviation of read noise (e-) for each read (default: 3 e-).
     kTC_noise : None or float or np.ndarray, optional
@@ -171,6 +169,12 @@ def create_ramp(
         If True, round and convert the output data to np.uint16 (default: True).
     clip_ramps: bool, optional
         If True, clip_ramps the output data to the range of np.uint16 (0 to 65535) (default: True).
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing (default: 1).
+    block_size : int or None, optional
+        Number of rows to process in each block when using multiple cores (default: None).
+
+    Returns
     -------
     dict[str, np.ndarray]
         Dictionary containing:

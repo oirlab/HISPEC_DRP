@@ -1,16 +1,16 @@
-from ... import datamodels
+from ...datamodels.dqflags import DQ_FLAGS
+
 import numpy as np
 from numba import njit, prange
-from ...datamodels.dqflags import DQ_FLAGS
+from numba import set_num_threads, get_num_threads
 
 __all__ = ['jump_detection_difference']
 
-
-SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+SATURATED_FLAG_uint8 = np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
-@njit(nogil=True,cache=True,inline='always')
+@njit(nogil=True, cache=True, inline='always')
 def get_diffs(ramp_row):
     n_reads, nx = ramp_row.shape
     diffs = np.empty((n_reads-1, nx), dtype=ramp_row.dtype)
@@ -19,7 +19,7 @@ def get_diffs(ramp_row):
     return diffs
 
 
-@njit(nogil=True,cache=True,inline='always')
+@njit(nogil=True, cache=True, inline='always')
 def median_axis0_3d(ramp):
     """
     Median along axis=0 for a 3D array shaped (n_reads, ny, nx).
@@ -40,7 +40,7 @@ def median_axis0_3d(ramp):
                 out[y, x] = vec[mid]
     return out
 
-@njit(nogil=True,parallel=True,cache=True )
+@njit(nogil=True, parallel=True, cache=True)
 def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,rejection_threshold):
     n_reads, ny, nx = ramp_data.shape
 
@@ -70,19 +70,35 @@ def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,reject
 
     return
 
-def jump_detection_difference(ramp_data: np.ndarray, dq_raw: np.ndarray, dq: np.ndarray, rdnoise=None, gain=None,  max_cores=1, rejection_threshold=4.0) -> np.ndarray:
+def jump_detection_difference(
+    ramp_data: np.ndarray,
+    dq_raw: np.ndarray,
+    dq: np.ndarray,
+    rdnoise : np.ndarray | None = None,
+    gain: np.ndarray | None = None,
+    rejection_threshold: float = 4.0,
+    max_cores: int = 1,
+) -> np.ndarray:
     """
     Simple jump detection for a 3D array of up the ramp data.
+    Modifies the input dq array (in-place) to flag where jumps are detected.
 
-    Args:
-        ramp_data (np.ndarray): 3D array of the UTR data with shape n_ramps x ny x nx.
-        dq_raw (np.ndarray): Input data quality flags for the UTR data with shape n_ramps x ny x nx.
-        dq (np.ndarray): Input data quality flags with shape ny x nx.
-        gain (np.ndarray): Input gain array with shape ny x nx
-        rdnoise (np.ndarray): Input read noise array with shape ny x nx
-        rejection_threshold (float): Sigma threshold for jump detection.
-    Returns:
-        np.ndarray: New data quality flags indicating where jumps are detected.
+    Parameters
+    ----------
+    ramp_data : np.ndarray
+        3D array of the UTR data with shape (Nreads, Ny, Nx).
+    dq_raw : np.ndarray
+        Input data quality flags for the UTR data with shape (Nreads, Ny, Nx).
+    dq : np.ndarray
+        Input data quality flags with shape (Ny, Nx).
+    rdnoise : np.ndarray or None, optional
+        Input read noise array with shape (Ny, Nx). Defaults to 0.
+    gain : np.ndarray or None, optional
+        Input gain array with shape (Ny, Nx). Defaults to 1.
+    rejection_threshold : float, optional
+        Sigma threshold for jump detection. Default is 4.0.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing (default: 1).
     """
 
     n_reads, ny, nx = ramp_data.shape
@@ -91,14 +107,19 @@ def jump_detection_difference(ramp_data: np.ndarray, dq_raw: np.ndarray, dq: np.
 
     if rdnoise is None:
         # TODO - optimize read noise when array is not passed
-        rdnoise = np.zeros((ny, nx)).astype(np.float32)
+        rdnoise = np.zeros((ny, nx), dtype=np.float32)
     if gain is None:
         # TODO - optimize gain when array is not passed
-        gain = np.ones((ny, nx)).astype(np.float32)
+        gain = np.ones((ny, nx), dtype=np.float32)
 
     if n_reads <= 2:
         return
+    
+    max_cores0 = get_num_threads()
+    set_num_threads(max_cores)
 
     _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain, rejection_threshold)
+
+    set_num_threads(max_cores0)
 
     return
