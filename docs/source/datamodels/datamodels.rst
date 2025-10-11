@@ -19,8 +19,12 @@ Calibration Models
    :maxdepth: 1
 
    instrument_params
+   bias
+   read_noise
+   saturation
    nonlin
    dark
+   gain
    detector_flat
    lfcfitparams
    lfcwavesol
