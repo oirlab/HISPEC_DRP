@@ -55,9 +55,9 @@ class FitRampPrimitive(BasePrimitive):
         rn_cal, _ = self.get_calibration(input_model, 'rn')
         rn_model = datamodels.open(rn_cal)
 
-        if self.mcds_num_coadd is None:
+        if self.mcds_num_coadd is None and self.method.lower() == 'mcds':
             n_read = input_model.data.shape[0]
-            _mcds_num_coadd = n_read // 2
+            _mcds_num_coadd = np.max([n_read // 4, 1]) # Ensure at least 1 read is used.
         else:
             _mcds_num_coadd = self.mcds_num_coadd
 
@@ -69,46 +69,54 @@ class FitRampPrimitive(BasePrimitive):
             set_num_threads(self.max_cores)
 
         if self.method.lower() == 'ols':
-            result = fit_ramps_ols(delta_readtimes,
-                                    input_model.data,
-                                    dq_raw=input_model.dq_raw,
-                                    dq=input_model.dq,
-                                    rdnoise=rn_model.rn,
-                                    gain=detgain_model.gain,
-                                    start_times=first_read_mjd,
-                                    dark_current=None) # Not used because we assume dark subtraction is done in rate maps.
+            result = fit_ramps_ols(
+                delta_readtimes,
+                input_model.data,
+                dq_raw=input_model.dq_raw,
+                dq=input_model.dq,
+                rdnoise=rn_model.rn,
+                gain=detgain_model.gain,
+                start_times=first_read_mjd,
+                dark_current=None  # Not used because we assume dark subtraction is done in rate maps.
+            )
         elif self.method.lower() in ('cds'):
-            result = fit_ramps_mcds(delta_readtimes,
-                                    input_model.data,
-                                    dq_raw=input_model.dq_raw,
-                                    dq=input_model.dq,
-                                    rdnoise=rn_model.rn,
-                                    gain=detgain_model.gain,
-                                    start_times=first_read_mjd,
-                                    dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=1)
+            result = fit_ramps_mcds(
+                delta_readtimes,
+                input_model.data,
+                dq_raw=input_model.dq_raw,
+                dq=input_model.dq,
+                rdnoise=rn_model.rn,
+                gain=detgain_model.gain,
+                start_times=first_read_mjd,
+                dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
+                num_coadd=1
+            )
         elif self.method.lower() in ('mcds'):
-            result = fit_ramps_mcds(delta_readtimes,
-                                    input_model.data,
-                                    dq_raw=input_model.dq_raw,
-                                    dq=input_model.dq,
-                                    rdnoise=rn_model.rn,
-                                    gain=detgain_model.gain,
-                                    start_times=first_read_mjd,
-                                    dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=_mcds_num_coadd)
+            result = fit_ramps_mcds(
+                delta_readtimes,
+                input_model.data,
+                dq_raw=input_model.dq_raw,
+                dq=input_model.dq,
+                rdnoise=rn_model.rn,
+                gain=detgain_model.gain,
+                start_times=first_read_mjd,
+                dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
+                num_coadd=_mcds_num_coadd
+            )
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
-            result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32),
-                                    dq_raw=input_model.dq_raw,
-                                    dq=input_model.dq,
-                                    rdnoise=rn_model.rn,
-                                    gain=detgain_model.gain,
-                                    start_times=first_read_mjd,
-                                    dark_current=None,
-                                    max_cores=self.max_cores,
-                                    algorithm=self.method.lower(),
-                                    jump_detection = self.jwst_jump_detection,
-                                    jump_rejection_threshold = self.jwst_jump_rejection_threshold)
+            result = fit_ramps_jwst(
+                delta_readtimes, input_model.data,
+                dq_raw=input_model.dq_raw,
+                dq=input_model.dq,
+                rdnoise=rn_model.rn,
+                gain=detgain_model.gain,
+                start_times=first_read_mjd,
+                dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
+                max_cores=self.max_cores,
+                algorithm=self.method.lower(),
+                jump_detection = self.jwst_jump_detection,
+                jump_rejection_threshold = self.jwst_jump_rejection_threshold
+            )
         else:
             self.log.error(f"Invalid ramp fit method {self.method.lower()}")
             raise ValueError(f"Invalid ramp fit method {self.method.lower()}")
