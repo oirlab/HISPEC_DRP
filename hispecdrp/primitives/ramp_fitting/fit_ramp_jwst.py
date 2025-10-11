@@ -18,6 +18,13 @@ from tqdm import tqdm
 
 __all__ = ['fit_ramps_jwst']
 
+SATURATED_FLAG = DQ_FLAGS["SATURATED"]
+DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
+JUMP_DET_FLAG = DQ_FLAGS["JUMP_DET"]
+SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
+JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
+
 def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     """
     Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit algorithms.
@@ -184,7 +191,7 @@ def _fit_ramps_worker(args : tuple) -> tuple:
     mid_times_np[block_start:block_end, :] = start_times_np[block_start:block_end, :] +\
                                              get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :])
 
-    _dq_raw = dq_raw[:, block_start:block_end, :] - (dq_raw[:, block_start:block_end, :] & DO_NOT_USE_FLAG_uint8)
+    _dq_raw = dq_raw_np[:, block_start:block_end, :] - (dq_raw_np[:, block_start:block_end, :] & DO_NOT_USE_FLAG_uint8)
     dq_image_np[block_start:block_end, :] |= np.bitwise_or.reduce(_dq_raw)
 
     return (block_start, block_end)
