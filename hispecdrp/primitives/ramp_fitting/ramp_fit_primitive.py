@@ -73,8 +73,7 @@ class FitRampPrimitive(BasePrimitive):
                                     rdnoise=rn_model.rn,
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
-                                    dark_current=None,
-                                    max_cores=self.max_cores) # Not used because we assume dark subtraction is done in rate maps.
+                                    dark_current=None) # Not used because we assume dark subtraction is done in rate maps.
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data,
@@ -84,8 +83,7 @@ class FitRampPrimitive(BasePrimitive):
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=1,
-                                    max_cores=self.max_cores)
+                                    num_coadd=1)
         elif self.method.lower() in ('mcds'):
             result = fit_ramps_mcds(delta_readtimes,
                                     input_model.data,
@@ -95,8 +93,7 @@ class FitRampPrimitive(BasePrimitive):
                                     gain=detgain_model.gain,
                                     start_times=first_read_mjd,
                                     dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                                    num_coadd=_mcds_num_coadd,
-                                    max_cores=self.max_cores)
+                                    num_coadd=_mcds_num_coadd)
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
             result = fit_ramps_jwst(delta_readtimes, input_model.data.astype(np.float32),
                                     dq_raw=input_model.dq_raw,
@@ -118,7 +115,7 @@ class FitRampPrimitive(BasePrimitive):
         output_model.rate_err = result['rate_err']
         output_model.rate_var_poisson = result['rate_var_poisson']
         output_model.rate_var_rnoise = result['rate_var_rnoise']
-        output_model.dq = result['DQ']
+        output_model.dq = result['dq']
         output_model.mid_time = result['mid_time']
 
         return dict(output=output_model, method=self.method)

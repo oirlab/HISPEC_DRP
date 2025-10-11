@@ -14,26 +14,42 @@ from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 
-import os
 from tqdm import tqdm
 
 __all__ = ['fit_ramps_jwst']
 
-def _fit_ramps_jwst_row(indata):
+def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     """
-    Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit methods.
+    Passes data for each row of a ramp to stcal.ramp_fitting.likely_fit algorithms.
 
-    Args:
-        data Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,np.ndarray, str]:
-            Tuple containing the row index, and the following data arrays for a single row:
-                ramp row index, read times, ramp data, readnoise, gain, DQ cube, DQ image, dark current, algorithm
-    Returns:
-        i (int): index of input row from the ramps, same as input.
-        slope (np.ndarray): slope image (1, nx).
-        dq_out (np.ndarray): output data quality image with flags from algorithm (1, nx).
-        var_poisson (np.ndarray): output variance from poisson noise (1, nx).
-        var_rnoise (np.ndarray): output variance from read noise (1, nx).
-        err (np.ndarray): output error in slope image (1, nx).
+    Parameters
+    ----------
+    indata : Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]
+        Tuple containing the following elements:
+            ramp row index (int)
+            read times (np.ndarray)
+            ramp data (np.ndarray)
+            readnoise (np.ndarray)
+            gain (np.ndarray)
+            DQ cube (np.ndarray)
+            DQ image (np.ndarray)
+            dark current (np.ndarray)
+            algorithm (str)
+     
+    Returns
+    -------
+    i : int
+        Index of input row from the ramps, same as input.
+    slope : np.ndarray
+        Slope image (1, nx).
+    dq_out : np.ndarray
+        Output data quality image with flags from algorithm (1, nx).
+    var_poisson : np.ndarray
+        Output variance from poisson noise (1, nx).
+    var_rnoise : np.ndarray
+        Output variance from read noise (1, nx).
+    err : np.ndarray
+        Output error in slope image (1, nx).
     """
 
     i, times, data_3d, readnoise_2d, gain_2d, groupdq, pixeldq_2d, dark_current_2d, algorithm = indata
@@ -41,22 +57,21 @@ def _fit_ramps_jwst_row(indata):
     # We are implicitly fitting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = data_3d.shape
 
-    # Set static parameters for stcal.ramp_fitting methods
-    save_opt=False # Save optional output
-    weighting="optimal"
-    suppress_one_group=False # Suppress saturated ramps with good 0th group
+    # Set static parameters for stcal.ramp_fitting algorithms
+    save_opt = False # Save optional output
+    weighting = "optimal"
+    suppress_one_group = False # Suppress saturated ramps with good 0th group
 
     # Initialize ramp data model
     ramp_data = RampData()
 
-    flags = datamodels.DQ_FLAGS
     # Explicitly set flags required by JWST pipeline
-    ramp_data.flags_do_not_use = flags['DO_NOT_USE']
-    ramp_data.flags_jump_det = flags['JUMP_DET']
-    ramp_data.flags_saturated = flags['SATURATED']
-    ramp_data.flags_no_gain_val = flags['UNRELIABLE_FLAT'] # Check if this is best/optimal flag
-    ramp_data.flags_unreliable_slope = flags['UNRELIABLE_SLOPE']
-    ramp_data.flags_chargeloss = flags['OUTLIER'] # Check if this is best/optimal flag - only required by OLS_C
+    ramp_data.flags_do_not_use = DQ_FLAGS['DO_NOT_USE']
+    ramp_data.flags_jump_det = DQ_FLAGS['JUMP_DET']
+    ramp_data.flags_saturated = DQ_FLAGS['SATURATED']
+    ramp_data.flags_no_gain_val = DQ_FLAGS['UNRELIABLE_FLAT'] # Check if this is best/optimal flag
+    ramp_data.flags_unreliable_slope = DQ_FLAGS['UNRELIABLE_SLOPE']
+    ramp_data.flags_chargeloss = DQ_FLAGS['OUTLIER'] # Check if this is best/optimal flag - only required by OLS_C
 
     # Explicitly set data arrays
     ramp_data.data = data_3d
@@ -69,18 +84,18 @@ def _fit_ramps_jwst_row(indata):
     group_time = np.average(diffs)
 
     # Set other required parameters
-    ramp_data.algorithm=algorithm
-    ramp_data.start_row=0
-    ramp_data.num_rows=ny
-    ramp_data.nframes=1 # this corresponds to nints instead of nframes as above
+    ramp_data.algorithm = algorithm
+    ramp_data.start_row = 0
+    ramp_data.num_rows = ny
+    ramp_data.nframes = 1 # this corresponds to nints instead of nframes as above
 
     # Required by OLS_C for frame time
-    ramp_data.frame_time=0.0
-    ramp_data.group_time=group_time
-    ramp_data.groupgap=0
-    ramp_data.drop_frames1=0
+    ramp_data.frame_time = 0.0
+    ramp_data.group_time = group_time
+    ramp_data.groupgap = 0
+    ramp_data.drop_frames1 = 0
 
-    ramp_data.suppress_one_group_ramps=suppress_one_group
+    ramp_data.suppress_one_group_ramps = suppress_one_group
 
     # Times information is set as read_pattern parameter of RampData
     ramp_data.read_pattern = list(times)
@@ -90,14 +105,14 @@ def _fit_ramps_jwst_row(indata):
     ramp_data.rejection_threshold = np.inf
 
     # Run ramp fitting
-    if algorithm=='LIKELY':
+    if algorithm == 'LIKELY':
         if nframes < ramp_fit.likely_fit.LIKELY_MIN_NGROUPS:
-            raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY method requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
+            raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY algorithm requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
         # Call directly to likely ramp fit code
         image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
             ramp_data, readnoise_2d, gain_2d
         )
-    elif algorithm=='OLS_C':
+    elif algorithm == 'OLS_C':
         # Call to C extension for OLS slope fitting
         image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(
             ramp_data, gain_2d, readnoise_2d, weighting, save_opt)
@@ -105,15 +120,25 @@ def _fit_ramps_jwst_row(indata):
     # Parse output image info that we need to pass to output data model
     outdata, dq, var_poisson, var_rnoise, err = image_info
 
-    return(i, outdata, dq, var_poisson, var_rnoise, err)
+    return (i, outdata, dq, var_poisson, var_rnoise, err)
 
-def _fit_ramps_worker(args):
+def _fit_ramps_worker(args : tuple) -> tuple:
     """
     Worker function for multiprocessing. Runs _fit_ramps_jwst_row on a block of rows using shared arrays.
-    Args:
-        args (tuple): (block_start, block_end, times, algorithm, types_tuple)
-    Returns:
-        tuple: (block_start, block_end, results)
+
+    Parameters
+    ----------
+    args : tuple
+        (block_start, block_end, times, algorithm, types_tuple)
+    
+    Returns
+    -------
+    block_start : int
+        Starting index of the block of rows processed.
+    block_end : int
+        Ending index of the block of rows processed.
+    results : list
+        List of results from processing each row in the block.
     """
     block_start, block_end, times, algorithm, types_tuple = args
     mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type = types_tuple
@@ -164,14 +189,19 @@ def _fit_ramps_worker(args):
 
     return (block_start, block_end)
 
-
-def _jump_detection_worker(args):
+def _jump_detection_worker(args : tuple) -> tuple:
     """
     Worker function for multiprocessing. Runs _jump_detection_worker on a block of rows using shared arrays.
-    Args:
-        args (tuple): (block_start, block_end, times, algorithm, types_tuple)
-    Returns:
-        tuple: (block_start, block_end, results)
+
+    Parameters
+    ----------
+    args : tuple
+        Tuple containing: (block_start, block_end, times, algorithm, types_tuple)
+
+    Returns
+    -------
+    tuple
+        (block_start, block_end)
     """
     block_start, block_end, times, rejection_threshold, types_tuple = args
     mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type = types_tuple
@@ -184,44 +214,74 @@ def _jump_detection_worker(args):
 
     results = []
     for row in range(block_start, block_end):
-        args_row = (row,
-                     rejection_threshold,
-                     ramps_np[np.newaxis,:, [row], :],
-                     # Make sure to add a new axis to each array to maintain number of dimensions
-                     rdnoise_np[[row], :],
-                     gain_np[[row], :],
-                     dq_raw_np[np.newaxis,:, [row], :],
-                     dq_image_np[[row], :],)
+        args_row = (
+            row,
+            rejection_threshold,
+            ramps_np[np.newaxis, :, [row], :],
+            # Make sure to add a new axis to each array to maintain number of dimensions
+            rdnoise_np[[row], :],
+            gain_np[[row], :],
+            dq_raw_np[np.newaxis, :, [row], :],
+            dq_image_np[[row], :]
+        )
 
         results.append(_jump_detection_jwst_row(args_row))
 
     for row_element in results:
         _row, _dq = row_element
 
-        dq_raw_np[:,[_row], :] = _dq
+        dq_raw_np[:, [_row], :] = _dq
 
     return (block_start, block_end)
 
-def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=None, dq=None,rdnoise=None, gain=None,
-                   dark_current=None,start_times=None,jump_detection=False,jump_rejection_threshold=4.0):
+def fit_ramps_jwst(
+    times : np.ndarray,
+    ramps : np.ndarray,
+    dq_raw : np.ndarray = None,
+    dq : np.ndarray = None,
+    rdnoise : np.ndarray = None,
+    gain : np.ndarray = None,
+    dark_current : np.ndarray | None = None,
+    start_times : np.ndarray | None = None,
+    jump_detection : bool = False,
+    jump_rejection_threshold : float = 4.0,
+    max_cores : int = 1,
+    algorithm : str = 'JWST_LIKELY',
+) -> dict:
     """
-    Top-level function for fitting ramps with methods in stcal.ramp_fitting.
+    Fit ramps using JWST ramp fitting algorithms from stcal.ramp_fitting.
 
-    Args:
-        times (np.ndarray): Read times.
-        ramps (np.ndarray): 3D array of ramp data with shape (n_reads,ny, nx).
-        max_cores (int): Number of cores for parallelization.
-        algorithm (str): Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'.
-        dq_raw (np.ndarray): 3D array of data quality flags across detector (n_reads, ny, nx)
-        dq (np.ndarray): 2D array of data quality flags across detector (ny, nx)
-        rdnoise (np.ndarray): 2D array of read noise across detector (ny, nx)
-        gain (np.ndarray): 2D array of gain across detector (ny, nx)
-        dark_current (np.ndarray): 2D array of dark current across detector (ny, nx)
-        start_times (float): MJD time of the start of the first read.
-        jump_detection (bool): Whether to perform jump detection before ramp fitting.
-        jump_rejection_threshold (float): Sigma threshold for jump detection.
-    Returns:
-        dict[str, np.ndarray]:
+    Parameters
+    ----------
+    times : np.ndarray
+        Read times.
+    ramps : np.ndarray
+        3D array of ramp data with shape (Nreads, Ny, Nx).
+    dq_raw : np.ndarray, optional
+        3D array of data quality flags across detector (Nreads, Ny, Nx)
+    dq : np.ndarray, optional
+        2D array of data quality flags across detector (Ny, Nx)
+    rdnoise : np.ndarray, optional
+        2D array of read noise across detector (Ny, Nx)
+    gain : np.ndarray, optional
+        2D array of gain across detector (Ny, Nx)
+    dark_current : np.ndarray, optional
+        2D array of dark current across detector (Ny, Nx)
+    start_times : np.ndarray, optional
+        MJD time of the start of the first read.
+    jump_detection : bool, optional
+        Whether to perform jump detection before ramp fitting. Default is False.
+    jump_rejection_threshold : float, optional
+        Sigma threshold for jump detection. Default is 4.0.
+    max_cores : int, optional
+        Number of cores for parallelization. Default is 1 (no parallelization).
+    algorithm : str, optional
+        Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'. Default is 'JWST_LIKELY'.
+    
+    Returns
+    -------
+    output : dict[str, np.ndarray]
+        Dictionary containing the L0 rate arrays.
     """
 
     n_reads, ny, nx = ramps.shape
@@ -438,27 +498,26 @@ def fit_ramps_jwst(times, ramps, max_cores=1, algorithm='JWST_LIKELY', dq_raw=No
     output['rate_var_rnoise'] = var_rnoise_image_np
     output['rate_var_poisson'] = var_poisson_image_np
     output['mid_time'] = mid_times_np
-    output['DQ'] = dq_image_np
+    output['dq'] = dq_image_np
 
     return output
 
-
-def _tpool_init_jwst_ramp(data, data_shape,
-                dq_raw, dq_raw_shape,
-                gain, gain_shape,
-                dark, dark_shape,
-                read_noise, read_noise_shape,
-                slope_image, slope_image_shape,
-                slope_errors, slope_errors_shape,
-                var_poisson_image, var_poisson_image_shape,
-                var_rnoise_image, var_rnoise_image_shape,
-                dq_image, dq_image_shape,
-                start_times, start_times_shape,
-                mid_times, mid_times_shape
-                ):
+def _tpool_init_jwst_ramp(
+    data : np.ndarray, data_shape : tuple,
+    dq_raw : np.ndarray, dq_raw_shape : tuple,
+    gain : np.ndarray, gain_shape : tuple,
+    dark : np.ndarray, dark_shape : tuple,
+    read_noise : np.ndarray, read_noise_shape : tuple,
+    slope_image : np.ndarray, slope_image_shape : tuple,
+    slope_errors : np.ndarray, slope_errors_shape : tuple,
+    var_poisson_image : np.ndarray, var_poisson_image_shape : tuple,
+    var_rnoise_image : np.ndarray, var_rnoise_image_shape : tuple,
+    dq_image : np.ndarray, dq_image_shape : tuple,
+    start_times : np.ndarray, start_times_shape : tuple,
+    mid_times : np.ndarray, mid_times_shape : tuple
+):
     """
-    Initializer function for the thread pool that initializes various shared variables. Main things to note that all
-    except the shapes are shared arrays (mp.Array).
+    Initialize shared global variables for the multiprocessing pool.
     """
 
     global shared_data, shared_data_shape, \
