@@ -1,11 +1,11 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-import numpy as np
-from ...calibrations import DetectorGainSelector,ReadNoiseSelector #,DarkSelector
+from ...calibrations import DetectorGainSelector,ReadNoiseSelector
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
-from ...datamodels.dqflags import DQ_FLAGS
+
+import numpy as np
 
 __all__ = ['FitRampPrimitive']
 
