@@ -2,6 +2,7 @@ from numba import njit, prange
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times_ramp,get_ramp_chunks,bitwise_or_reduce
+from numba import get_num_threads, set_num_threads
 
 SATURATED_FLAG = DQ_FLAGS["SATURATED"]
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
@@ -155,6 +156,7 @@ def fit_ramps_ols(
     gain : np.ndarray | None = None,
     dark_current : np.ndarray | None = None,
     start_times : np.ndarray | None = None,
+    max_cores : int = 1
 ) -> dict[str, np.ndarray]:
     """
     Fits ramps using the ordinary least squares (OLS) method.
@@ -180,6 +182,8 @@ def fit_ramps_ols(
         2D array of MJD times of the first read across detector (ny, nx).
     num_coadd : int, optional
         Number of coadds. Default is 1.
+    max_cores : int, optional
+        Maximum number of CPU cores to use. Default is 1.
 
     Returns
     -------
@@ -201,7 +205,12 @@ def fit_ramps_ols(
     if start_times is None:
         start_times = np.zeros((ny, nx), dtype=np.float64)
 
+    max_cores0 = get_num_threads()
+    set_num_threads(max_cores)
+
     result = _fit_ramps_slope_pedestal(times, ramps, dq_raw, dq, rdnoise, gain, dark_current, start_times)
+
+    set_num_threads(max_cores0)
 
     output = {}
     output['rate'] = result[0]
@@ -366,7 +375,8 @@ def fit_ramps_mcds(
     gain : np.ndarray | None = None,
     dark_current : np.ndarray | None = None,
     start_times : np.ndarray | None = None,
-    num_coadd : int = 1
+    num_coadd : int = 1,
+    max_cores : int = 1
 ) -> dict[str, np.ndarray]:
     """
     Fits ramps using the MCDS method.
@@ -392,6 +402,8 @@ def fit_ramps_mcds(
         2D array of MJD times of the first read across detector (ny, nx).
     num_coadd : int, optional
         Number of coadds. Default is 1.
+    max_cores : int, optional
+        Maximum number of CPU cores to use. Default is 1.
 
     Returns
     -------
@@ -414,7 +426,13 @@ def fit_ramps_mcds(
     if start_times is None:
         start_times = np.zeros((ny, nx), dtype=np.float64)
 
+    max_cores0 = get_num_threads()
+    set_num_threads(max_cores)
+
     result = _fit_ramps_mcds(times, ramps, dq_raw, dq, rdnoise, gain, dark_current, start_times, num_coadd)
+
+    set_num_threads(max_cores0)
+
     slope_image = result[0]
     slope_err = result[1]
     var_rnoise = result[2]

@@ -7,8 +7,6 @@ from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
 from ...datamodels.dqflags import DQ_FLAGS
 
-from numba import get_num_threads, set_num_threads
-
 __all__ = ['FitRampPrimitive']
 
 
@@ -64,10 +62,6 @@ class FitRampPrimitive(BasePrimitive):
         delta_readtimes = input_model.get_delta_readtimes()
         first_read_mjd = input_model.get_first_read_mjd()
 
-        if self.method.lower() in ('ols', 'cds', 'mcds'):
-            num_threads_original = get_num_threads()
-            set_num_threads(self.max_cores)
-
         if self.method.lower() == 'ols':
             result = fit_ramps_ols(
                 delta_readtimes,
@@ -77,7 +71,8 @@ class FitRampPrimitive(BasePrimitive):
                 rdnoise=rn_model.rn,
                 gain=detgain_model.gain,
                 start_times=first_read_mjd,
-                dark_current=None  # Not used because we assume dark subtraction is done in rate maps.
+                dark_current=None,  # Not used because we assume dark subtraction is done in rate maps.
+                max_cores=self.max_cores
             )
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(
@@ -89,7 +84,8 @@ class FitRampPrimitive(BasePrimitive):
                 gain=detgain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                num_coadd=1
+                num_coadd=1,
+                max_cores=self.max_cores
             )
         elif self.method.lower() in ('mcds'):
             result = fit_ramps_mcds(
@@ -101,7 +97,8 @@ class FitRampPrimitive(BasePrimitive):
                 gain=detgain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                num_coadd=_mcds_num_coadd
+                num_coadd=_mcds_num_coadd,
+                max_cores=self.max_cores
             )
         elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
             result = fit_ramps_jwst(
@@ -120,9 +117,6 @@ class FitRampPrimitive(BasePrimitive):
         else:
             self.log.error(f"Invalid ramp fit method {self.method.lower()}")
             raise ValueError(f"Invalid ramp fit method {self.method.lower()}")
-        
-        if self.method.lower() in ('ols', 'cds', 'mcds'):
-            set_num_threads(num_threads_original)
 
         output_model = self.get_output_model(input_model)
         output_model.rate = result['rate']
