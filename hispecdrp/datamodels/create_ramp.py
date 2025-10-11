@@ -11,7 +11,7 @@ __all__ = ['create_ramp']
 # NOTE: Find a new home for this function
 
 def _create_ramp(
-        data,dq_raw,
+    data,dq_raw,
     source : np.ndarray, # e- / s / pixel including all sources
     readtime : float = 1.7, # seconds between reads
     n_reads : int = 10,

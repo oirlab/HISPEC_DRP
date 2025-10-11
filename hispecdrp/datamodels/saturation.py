@@ -8,7 +8,7 @@ __all__ = ['SaturationModel', 'HISPECSaturationModel', 'PARVISaturationModel']
 
 
 class SaturationModel(CalibrationModel):
-    EXTENSIONS = {"SAT_THRESH":IMAGE_UINT16_HDU,**DQ_L0}
+    EXTENSIONS = {"SAT_THRESH": IMAGE_UINT16_HDU, **DQ_L0}
     CAL_TYPE = 'saturation'
 
 
