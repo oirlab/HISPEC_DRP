@@ -1,6 +1,8 @@
 import multiprocessing as mp
 import ctypes
 import numpy as np
+import numba
+from contextlib import contextmanager
 
 _CTYPES_TO_NP = {
     ctypes.c_float:   np.float32,
@@ -44,3 +46,25 @@ def _arraytonumpy(shared_array, shape=None, dtype=None):
         numpy_array.shape = shape
 
     return numpy_array
+
+@contextmanager
+def numba_thread_scope(num_threads : int):
+    """
+    Context manager to temporarily set the number of threads used by numba, and reset when finished.
+
+    Parameters
+    ----------
+    num_threads
+        The number of threads to set.
+
+    Examples
+    --------
+    with numba_thread_scope(num_threads):
+        # Numba calls here
+    """
+    original_num_threads = numba.get_num_threads()
+    numba.set_num_threads(num_threads)
+    try:
+        yield
+    finally:
+        numba.set_num_threads(original_num_threads)
