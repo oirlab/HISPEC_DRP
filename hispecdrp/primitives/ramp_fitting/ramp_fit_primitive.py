@@ -53,11 +53,7 @@ class FitRampPrimitive(BasePrimitive):
         rn_cal, _ = self.get_calibration(input_model, 'rn')
         rn_model = datamodels.open(rn_cal)
 
-        if self.mcds_num_coadd is None and self.method.lower() == 'mcds':
-            n_read = input_model.data.shape[0]
-            _mcds_num_coadd = np.max([n_read // 4, 1]) # Ensure at least 1 read is used.
-        else:
-            _mcds_num_coadd = self.mcds_num_coadd
+        _mcds_num_coadd = self.mcds_num_coadd
 
         delta_readtimes = input_model.get_delta_readtimes()
         first_read_mjd = input_model.get_first_read_mjd()
@@ -88,6 +84,9 @@ class FitRampPrimitive(BasePrimitive):
                 max_cores=self.max_cores
             )
         elif self.method.lower() in ('mcds'):
+            if _mcds_num_coadd is None:
+                n_read = input_model.data.shape[0]
+                _mcds_num_coadd = np.max([n_read // 4, 1]) # Ensure at least 1 read is used.
             result = fit_ramps_mcds(
                 delta_readtimes,
                 input_model.data,
@@ -126,5 +125,5 @@ class FitRampPrimitive(BasePrimitive):
         output_model.dq = result['dq']
         output_model.mid_time = result['mid_time']
 
-        return dict(output=output_model, method=self.method)
+        return dict(output=output_model, method=self.method, mcds_num_coadd=_mcds_num_coadd)
     
