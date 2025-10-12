@@ -19,6 +19,8 @@ from koa_middleware import CalibrationStore
 
 from .meta_data import CalibrationCoreMeta,CoreMeta
 
+_VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
+
 class DataModel:
     """
     Base class for data models.
