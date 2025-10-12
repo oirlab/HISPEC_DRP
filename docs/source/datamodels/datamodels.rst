@@ -19,6 +19,7 @@ Calibration Models
    :maxdepth: 1
 
    instrument_params
+   dq
    bias
    read_noise
    saturation

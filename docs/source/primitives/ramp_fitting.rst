@@ -1,5 +1,5 @@
-Fit Ramp
-========
+Ramp Fitting
+============
 
 
 Overview
@@ -31,10 +31,10 @@ Arguments
     - **ols**: Ordinary Least Squares with numba. No weights.
     - **cds**: Correlated double sampling.
     - **mcds**: Multiple correlated double sampling (see argument num_coadd).
-    - **jwst_gls**: Approximated generalized least squares method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
+    - **jwst_ols**: Approximated generalized least squares method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
     - **jwst_likely**: Likelihood-based method with `stcal <https://stcal.readthedocs.io/en/latest/stcal/ramp_fitting/description.html#ramp-slopes-and-variances>`_.
 
-- **num_coadd** : ``int``
+- **mcds_num_coadd** : ``int``
     Number of coadds for ``method='mcds'``.
 - **max_cores** : ``int``
-    Maximum number of cores to use for parallel processing for method. Defaults to 1 (no parallel processing). Only supported by jwst methods for now.
+    Maximum number of cores to use for parallel processing for method. Defaults to 1 (no parallel processing). For ``method='jwst_ols'`` or ``'jwst_likely'``, parallelization is handled through Python's multiprocessing module. For numba methods (``cds, mcds, ols``) the parallelization is handled through multithreading with numba's ``prange``.
