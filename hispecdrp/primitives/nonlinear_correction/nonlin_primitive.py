@@ -26,6 +26,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
+
         set_num_threads(self.max_cores)
 
         input_model = datamodels.open(self.input)
@@ -39,13 +40,15 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         if result.data.dtype != np.float32:
             self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
             result.data = result.data.astype(np.float32)
-        self.log.info(f"Polynomial coefficients are {nonlin_model.coeffs.dtype}.")
+        self.log.info(f"Polynomial coeffs dtype: {nonlin_model.coeffs.dtype}.")
 
-        correct_nonlinearity(result.data,
-                             result.dq_raw,
-                             result.dq,
-                             nonlin_model.coeffs,
-                             nonlin_model.nonlin_max,
-                             nonlin_model.dq)
+        correct_nonlinearity(
+            result.data,
+            result.dq_raw,
+            result.dq,
+            nonlin_model.coeffs,
+            nonlin_model.nonlin_max,
+            nonlin_model.dq
+        )
 
         return dict(output=result, nonlin=nonlin)
