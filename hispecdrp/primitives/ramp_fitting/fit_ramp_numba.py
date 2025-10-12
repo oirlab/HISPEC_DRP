@@ -60,8 +60,8 @@ def _fit_ramp_slope_pedestal(
     for k in range(len(first_indices)):
         if first_indices[k] == last_indices[k] or rdnoise == 0:
             continue
-        _times = times[first_indices[k]: last_indices[k]].astype(np.float32)
-        _ramp = ramp[first_indices[k]: last_indices[k]].astype(np.float32)
+        _times = times[first_indices[k]: last_indices[k]]
+        _ramp = ramp[first_indices[k]: last_indices[k]]
 
         n = len(_times) / rdnoise**2
         times_tot = np.sum(_times) / rdnoise**2
@@ -283,8 +283,8 @@ def _fit_ramp_mcds(
     for k in range(len(first_indices)):
         if first_indices[k] == last_indices[k]+1:
             continue
-        _times = times[first_indices[k]: last_indices[k]].astype(np.float32)
-        _ramp = ramp[first_indices[k]: last_indices[k]].astype(np.float32)
+        _times = times[first_indices[k]: last_indices[k]]
+        _ramp = ramp[first_indices[k]: last_indices[k]]
 
         n1 = np.sum(_ramp[:num_coadd])
         n2 = np.sum(_ramp[-num_coadd:])
