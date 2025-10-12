@@ -341,7 +341,7 @@ def fit_ramps_jwst(
     start_times_shape = (ny, nx)
     start_times_np = _arraytonumpy(start_times_mp, start_times_shape, dtype=mp_float_type)
     if start_times is None:
-        start_times_np[:] = np.zeros((ny, nx)).astype(np.float32)
+        start_times_np[:] = np.zeros((ny, nx), dtype=np.float32)
     else:
         start_times_np[:] = start_times
 
@@ -355,7 +355,7 @@ def fit_ramps_jwst(
     gain_np = _arraytonumpy(gain_mp, gain_shape, dtype=mp_float_type)
     if gain is None:
         # TODO? - optimize gain when array is not passed
-        gain_np[:] = np.ones((ny, nx)).astype(np.float32)
+        gain_np[:] = np.ones((ny, nx), dtype=np.float32)
     else:
         gain_np[:] = gain
 
@@ -363,7 +363,7 @@ def fit_ramps_jwst(
     dark_shape = (ny, nx)
     dark_np = _arraytonumpy(dark_mp, dark_shape, dtype=mp_float_type)
     if dark_current is None:
-        dark_np[:] = np.zeros((ny, nx)).astype(np.float32)
+        dark_np[:] = np.zeros((ny, nx), dtype=np.float32)
     else:
         dark_np[:] = dark_current
 
@@ -372,7 +372,7 @@ def fit_ramps_jwst(
     rdnoise_np = _arraytonumpy(rdnoise_mp, dark_shape, dtype=mp_float_type)
     if rdnoise is None:
         # TODO? - optimize rdnoise when array is not passed
-        rdnoise_np[:] = np.ones((ny, nx)).astype(np.float32)
+        rdnoise_np[:] = np.ones((ny, nx), dtype=np.float32)
     else:
         rdnoise_np[:] = rdnoise
 
