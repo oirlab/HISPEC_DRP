@@ -6,11 +6,11 @@ from hispecdrp.datamodels.dqflags import DQ_FLAGS
 from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
 
 from hispecdrp.primitives.dq_init.dqinit_primitive import apply_dq_mask
-from hispecdrp.primitives.saturation.saturation_primitive import _check_saturation_numba
-from hispecdrp.primitives.bias_subtraction.bias_primitive import _bias_subtraction_numba
-from hispecdrp.primitives.dark_subtraction.dark_primitive import _dark_subtraction_rate_numba
-from hispecdrp.primitives.detector_gain.detgain_primitive import _detector_gain_correction_numba
-from hispecdrp.primitives.detector_flat.detflat_primitive import _detector_flat_correction_numba
+from hispecdrp.primitives.saturation.saturation_primitive import check_saturation
+from hispecdrp.primitives.bias_subtraction.bias_primitive import bias_subtraction
+from hispecdrp.primitives.dark_subtraction.dark_primitive import dark_subtraction_rate
+from hispecdrp.primitives.detector_gain.detgain_primitive import detector_gain_correction
+from hispecdrp.primitives.detector_flat.detflat_primitive import detector_flat_correction
 from hispecdrp.primitives.jump_detection.jump_detection_difference import jump_detection_difference
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
@@ -39,7 +39,7 @@ def test_stage0_units(tmp_path):
         data_raw[1::, 1, 1] = saturation_threshold
         saturation_map = np.full((2, 2), saturation_threshold, dtype=np.float32)
         sat_dq = np.zeros((2, 2), dtype=np.uint32)
-        _check_saturation_numba(
+        check_saturation(
             data_raw,
             dq_raw,
             dq,
@@ -76,7 +76,7 @@ def test_stage0_units(tmp_path):
                                 [2, 4]], dtype=np.uint32)
 
             # Run the numba kernel
-            _bias_subtraction_numba(
+            bias_subtraction(
                 data_raw,
                 dq,
                 bias_map,
@@ -163,7 +163,7 @@ def test_stage0_units(tmp_path):
                             [2, 4]], dtype=np.uint32)
 
         # Run kernel
-        rate_out, err_out, dq_out = _dark_subtraction_rate_numba(
+        rate_out, err_out, dq_out = dark_subtraction_rate(
             rate.copy(), err.copy(), dq.copy(),
             dark_rate, dark_err, dark_dq
         )
@@ -217,7 +217,7 @@ def test_stage0_units(tmp_path):
                             [2, 4]], dtype=np.uint32)
 
         # Run kernel
-        rate_out, err_out, dq_out = _detector_gain_correction_numba(
+        rate_out, err_out, dq_out = detector_gain_correction(
             rate.copy(), err.copy(), dq.copy(),
             gain, gain_err, gain_dq
         )
@@ -278,7 +278,7 @@ def test_stage0_units(tmp_path):
                             [2, 4]], dtype=np.uint32)
 
         # Run kernel
-        rate_out, err_out, dq_out = _detector_flat_correction_numba(
+        rate_out, err_out, dq_out = detector_flat_correction(
             rate.copy(), err.copy(), dq.copy(),
             flat, flat_err, flat_dq
         )
