@@ -2,6 +2,7 @@ from numba import njit, prange
 from ...utils.math import polyval1d
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
+from ...utils.parallelization_utils import numba_thread_scope
 
 __all__ = ['correct_nonlinearity']
 
@@ -26,7 +27,6 @@ def _correct_nonlinearity_numba(
                 if ramps[k, i, j] > nonlin_max[i, j]:
                     dq_raw[k, i, j] |= NON_LINEAR_FLAG_uint8
             dq[i, j] |= nonlin_dq[i, j]
-    return
 
 
 def correct_nonlinearity(
@@ -35,7 +35,8 @@ def correct_nonlinearity(
     dq : np.ndarray,
     coeffs : np.ndarray,
     nonlin_max : np.ndarray,
-    nonlin_dq : np.ndarray
+    nonlin_dq : np.ndarray,
+    max_cores : int = 1,
 ):
     """
     Apply non-linearity correction to up-the-ramps. Correction is done in place.
@@ -59,6 +60,19 @@ def correct_nonlinearity(
     nonlin_dq
         2D array of shape (Ny, Nx) containing the DQ flags from the non-linearity model
         to be applied to all pixels.
+    max_cores
+        Maximum number of CPU cores to use. Default is 1.
+
+    Returns
+    -------
+    ramps
+        The non-linearity corrected ramps (same as input `ramps` but modified in place).
+    dq_raw
+        The updated raw DQ array (same as input `dq_raw` but modified in place).
+    dq
+        The updated DQ array (same as input `dq` but modified in place).
     """
     assert not np.issubdtype(ramps.dtype, np.integer), f"Ramps must be floating point, got {ramps.dtype}"
-    return _correct_nonlinearity_numba(ramps, dq_raw, dq, coeffs, nonlin_max, nonlin_dq)
+    with numba_thread_scope(max_cores):
+        _correct_nonlinearity_numba(ramps, dq_raw, dq, coeffs, nonlin_max, nonlin_dq)
+    return ramps, dq_raw, dq

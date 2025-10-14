@@ -1,8 +1,8 @@
 from ...datamodels.dqflags import DQ_FLAGS
+from ...utils.parallelization_utils import numba_thread_scope
 
 import numpy as np
 from numba import njit, prange
-from numba import set_num_threads, get_num_threads
 
 __all__ = ['jump_detection_difference']
 
@@ -112,14 +112,7 @@ def jump_detection_difference(
         # TODO - optimize gain when array is not passed
         gain = np.ones((ny, nx), dtype=np.float32)
 
-    if n_reads <= 2:
-        return
-    
-    max_cores0 = get_num_threads()
-    set_num_threads(max_cores)
+    assert n_reads >= 2, "Need at least 2 reads to do jump detection."
 
-    _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain, rejection_threshold)
-
-    set_num_threads(max_cores0)
-
-    return
+    with numba_thread_scope(max_cores):
+        _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain, rejection_threshold)

@@ -1,5 +1,3 @@
-from ... import datamodels
-
 import numpy as np
 
 from stcal.ramp_fitting import ramp_fit
@@ -7,7 +5,7 @@ from stcal.ramp_fitting.ramp_fit_class import RampData
 
 import multiprocessing as mp
 import ctypes
-from ...utils.parallelization_utils import _arraytonumpy
+from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 
 from ...datamodels.dqflags import DQ_FLAGS
@@ -429,14 +427,14 @@ def fit_ramps_jwst(
                 # block_start, block_end, times, algorithm, types_tuple = args
                 args = (block_start, block_end, times, jump_rejection_threshold, types_tuple)
                 args_list.append(args)
-            # try:
-            tasks = [tpool.apply_async(_jump_detection_worker, args=(args_tuple,))
-                     for args_tuple in args_list]
+
+            tasks = [
+                tpool.apply_async(_jump_detection_worker, args=(args_tuple,))
+                for args_tuple in args_list
+            ]
 
             for t in tqdm(tasks, desc="Processing blocks"):
                 t.wait()
-            # except:
-            #     pass
 
         args_list = []
         for block_start in range(0, ny, block_size):
@@ -447,8 +445,11 @@ def fit_ramps_jwst(
             args_list.append(args)
 
         try:
-            tasks = [tpool.apply_async(_fit_ramps_worker, args=(args_tuple,))
-                     for args_tuple in args_list]
+            with numba_thread_scope(max_cores):
+                tasks = [
+                    tpool.apply_async(_fit_ramps_worker, args=(args_tuple,))
+                    for args_tuple in args_list
+                ]
 
             for t in tqdm(tasks, desc="Processing blocks"):
                 t.wait()
@@ -459,45 +460,50 @@ def fit_ramps_jwst(
         # If not parallelizing, ie max_cores=1, just run directly without shared memory
         results = []
         for row in np.arange(ny):
-            print(f"Processing row {row+1} of {ny}.")
+            print(f"JWST Ramp Fitting: Processing row {row + 1} of {ny}.")
 
             if jump_detection:
-                args_row = (row,
-                             jump_rejection_threshold,
-                             ramps[np.newaxis,:, [row], :],
-                             # Make sure to add a new axis to each array to maintain number of dimensions
-                             rdnoise_np[[row], :],
-                             gain_np[[row], :],
-                             dq_raw[np.newaxis,:, [row], :],
-                             dq_image_np[[row], :],)
-
-                _row, _dq  = _jump_detection_jwst_row(args_row)
-                dq_raw[:,[_row], :] = _dq
-
-            args = (row,
-                    times,
-                    # Reshape to add the nints axis that JWST pipeline requires
-                    ramps[np.newaxis,:,[row],:],
+                args_row = (
+                    row,
+                    jump_rejection_threshold,
+                    ramps[np.newaxis, :, [row], :],
                     # Make sure to add a new axis to each array to maintain number of dimensions
                     rdnoise_np[[row], :],
                     gain_np[[row], :],
-                    dq_raw[np.newaxis,:,[row],:],
-                    dq_image_np[[row], :],
-                    dark_np[[row], :],
-                    algorithm)
+                    dq_raw[np.newaxis, :, [row], :],
+                    dq_image_np[[row], :]
+                )
+
+                _row, _dq  = _jump_detection_jwst_row(args_row)
+                dq_raw[:, [_row], :] = _dq
+
+            args = (
+                row,
+                times,
+                # Reshape to add the nints axis that JWST pipeline requires
+                ramps[np.newaxis, :, [row], :],
+                # Make sure to add a new axis to each array to maintain number of dimensions
+                rdnoise_np[[row], :],
+                gain_np[[row], :],
+                dq_raw[np.newaxis, :, [row], :],
+                dq_image_np[[row], :],
+                dark_np[[row], :],
+                algorithm
+            )
 
             results.append(_fit_ramps_jwst_row(args))
 
         for row_element in results:
             row, outdata, dq, var_poisson, var_rnoise, err = row_element
 
-            slope_image_np[row,:] = outdata
-            slope_errors_np[row,:] = err
+            slope_image_np[row, :] = outdata
+            slope_errors_np[row, :] = err
             dq_image_np[row, :] = dq_image_np[row, :] | dq[0]
             var_poisson_image_np[row, :] = var_poisson
             var_rnoise_image_np[row, :] = var_rnoise
 
-        mid_times_np = start_times + get_mid_delta_times(times, dq_raw)
+        with numba_thread_scope(max_cores):
+            mid_times_np = start_times + get_mid_delta_times(times, dq_raw)
 
     output = {}
     output['rate'] = slope_image_np

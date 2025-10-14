@@ -1,8 +1,8 @@
 from numba import njit, prange
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
-from .utils import get_mid_delta_times_ramp,get_ramp_chunks,bitwise_or_reduce
-from numba import get_num_threads, set_num_threads
+from .utils import get_mid_delta_times_ramp, get_ramp_chunks, bitwise_or_reduce
+from ...utils.parallelization_utils import numba_thread_scope
 
 SATURATED_FLAG = DQ_FLAGS["SATURATED"]
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
@@ -205,12 +205,11 @@ def fit_ramps_ols(
     if start_times is None:
         start_times = np.zeros((ny, nx), dtype=np.float64)
 
-    max_cores0 = get_num_threads()
-    set_num_threads(max_cores)
-
-    result = _fit_ramps_slope_pedestal(times, ramps, dq_raw, dq, rdnoise, gain, dark_current, start_times)
-
-    set_num_threads(max_cores0)
+    with numba_thread_scope(max_cores):
+        result = _fit_ramps_slope_pedestal(
+            times, ramps, dq_raw, dq,
+            rdnoise, gain, dark_current, start_times
+        )
 
     output = {}
     output['rate'] = result[0]
@@ -426,12 +425,11 @@ def fit_ramps_mcds(
     if start_times is None:
         start_times = np.zeros((ny, nx), dtype=np.float64)
 
-    max_cores0 = get_num_threads()
-    set_num_threads(max_cores)
-
-    result = _fit_ramps_mcds(times, ramps, dq_raw, dq, rdnoise, gain, dark_current, start_times, num_coadd)
-
-    set_num_threads(max_cores0)
+    with numba_thread_scope(max_cores):
+        result = _fit_ramps_mcds(
+            times, ramps, dq_raw, dq,
+            rdnoise, gain, dark_current, start_times, num_coadd
+        )
 
     slope_image = result[0]
     slope_err = result[1]

@@ -4,7 +4,6 @@ from ... import datamodels
 import numpy as np
 
 from .nonlincorr_numba import correct_nonlinearity
-from numba import get_num_threads, set_num_threads
 
 
 __all__ = ['NonlinearCorrectionPrimitive']
@@ -27,8 +26,6 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        set_num_threads(self.max_cores)
-
         input_model = datamodels.open(self.input)
 
         nonlin, _ = self.get_calibration(input_model, 'nonlin')
@@ -48,7 +45,8 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
             result.dq,
             nonlin_model.coeffs,
             nonlin_model.nonlin_max,
-            nonlin_model.dq
+            nonlin_model.dq,
+            max_cores=self.max_cores
         )
 
         return dict(output=result, nonlin=nonlin)

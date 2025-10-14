@@ -41,6 +41,12 @@ class JumpDetectionPrimitive(BasePrimitive):
         # Output
         result = self.get_output_model(input_model)
 
+        n_reads = result.data.shape[0]
+        if n_reads <= 2:
+            self.log.warning("Not enough reads for jump detection, skipping.")
+            self.status = 'SKIPPED'
+            return dict(output=result, method=self.method.lower())
+
         # Perform jump detection - this only modifies the DQ mask
         if self.method.lower() == 'jwst':
             self.log.info(

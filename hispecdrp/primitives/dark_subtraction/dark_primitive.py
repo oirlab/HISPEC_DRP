@@ -3,9 +3,9 @@ from ...calibrations import DarkSelector
 from ... import datamodels
 import numpy as np
 from numba import njit, prange
-from numba import get_num_threads, set_num_threads
+from ...utils.parallelization_utils import numba_thread_scope
 
-__all__ = ['DarkSubtractionPrimitive']
+__all__ = ['DarkSubtractionPrimitive', 'dark_subtraction_rate']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
@@ -24,7 +24,6 @@ class DarkSubtractionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        set_num_threads(self.max_cores)
 
         # Load the input model
         input_model = datamodels.open(self.input)
@@ -37,73 +36,79 @@ class DarkSubtractionPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying dark correction with {dark} to {input_model}")
+        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
 
         # Perform dark subtraction
-        output_model = dark_subtraction_rate(result, dark_model)
+        dark_subtraction_rate(
+            result.rate, result.rate_err, result.dq,
+            dark_model.rate, dark_model.rate_err, dark_model.dq,
+            max_cores=self.max_cores
+        )
 
         # Output
-        return dict(output=output_model, dark=dark)
+        return dict(output=result, dark=dark)
 
 
-def dark_subtraction_rate(input_model: datamodels.L0Model, dark_model: datamodels.DarkModel) -> datamodels.L0Model:
+def dark_subtraction_rate(
+    input_rate: np.ndarray, input_err: np.ndarray, input_dq: np.ndarray,
+    dark_rate: np.ndarray, dark_err: np.ndarray, dark_dq: np.ndarray,
+    max_cores : int = 1
+):
     """
-    Subtract the dark model from an input rate (level 0) model.
-    Dark rates are DN/s not e-/s. Dark should be corrected before gain correction.
+    Subtract the dark current rate from the input rate.
+    Input and dark rates are DN/s.
+    The error arrays are added in quadrature.
+    The data quality arrays are combined with a bitwise OR.
+    The corrections are done in-place.
+    Dark should be corrected before gain correction.
 
-    Args:
-        input_model: Input level 0 model.
-        dark_model: Dark calibration model.
-    
-    Returns:
-        HISPECL0Model: The dark-subtracted data.
+    Parameters
+    ----------
+    input_rate : np.ndarray
+        2D array of rate values (DN/s)
+    input_err : np.ndarray
+        2D array of error values (DN/s)
+    input_dq : np.ndarray
+        2D array of data quality flags
+    dark_rate : np.ndarray
+        2D array of dark rate values (DN/s)
+    dark_err : np.ndarray
+        2D array of dark error values (DN/s)
+    dark_dq : np.ndarray
+        2D array of dark data quality flags
+    max_cores : int
+        Maximum number of CPU cores to use for parallel processing.
+
+    Returns
+    -------
+    input_rate : np.ndarray
+        Dark-subtracted rate array (modified in place)
+    input_err : np.ndarray
+        Updated error array (modified in place)
+    input_dq : np.ndarray
+        Updated data quality array (modified in place)
     """
-    if not hasattr(input_model, 'RATE'):
-        raise Exception("RATE extension not found in input model for dark subtraction.")
-    if not hasattr(input_model, 'RATE_ERR'):
-        raise Exception("RATE_ERR extension not found in input model for dark subtraction.")
-    if not hasattr(input_model, 'DQ'):
-        raise Exception("DQ extension not found in input model for dark subtraction.")
-    if not hasattr(dark_model, 'RATE'):
-        raise Exception("RATE extension not found in dark model for dark subtraction.")
-    if not hasattr(dark_model, 'RATE_ERR'):
-        raise Exception("RATE_ERR extension not found in dark model for dark subtraction.")
-    if not hasattr(dark_model, 'DQ'):
-        raise Exception("DQ extension not found in dark model for dark subtraction.")
-
-    out=_dark_subtraction_rate_numba(input_model.rate.astype(np.float32), input_model.rate_err.astype(np.float32), input_model.dq.astype(np.uint32), dark_model.rate.astype(np.float32), dark_model.rate_err.astype(np.float32), dark_model.dq.astype(np.uint32))
-
-    input_model.rate, input_model.rate_err, input_model.dq = out
-
-    return input_model
+    with numba_thread_scope(max_cores):
+        _dark_subtraction_rate_numba(
+            input_rate, input_err, input_dq,
+            dark_rate, dark_err, dark_dq
+        )
+    return input_rate, input_err, input_dq
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def _dark_subtraction_rate_numba(rate, err, dq, dark_rate, dark_err, dark_dq):
-    """
-    Subtract dark current from 2D rate image, propagate errors and DQ.
-
-    Args:
-        rate:       (ny, nx) float32/float64 input rate data
-        err:        (ny, nx) float32/float64 input error map
-        dq:     (ny, nx) uint32 input DQ map (modified in place)
-        dark_rate:  (ny, nx) float32 dark calibration
-        dark_err:   (ny, nx) float32 dark error map
-        dark_dq:    (ny, nx) uint32 dark DQ map
-
-    Returns:
-        rate (in place), err (in place or None), dq_raw (in place or None)
-    """
-    ny, nx = rate.shape
+def _dark_subtraction_rate_numba(
+    input_rate : np.ndarray, input_err : np.ndarray, input_dq : np.ndarray,
+    dark_rate : np.ndarray, dark_err : np.ndarray, dark_dq : np.ndarray
+):
+    ny, nx = input_rate.shape
     for j in prange(ny):
         for i in range(nx):
             # Subtract dark rate
-            rate[j, i] = rate[j, i] - dark_rate[j, i]
+            input_rate[j, i] = input_rate[j, i] - dark_rate[j, i]
 
             # Propagate error
-            err[j, i] = np.sqrt(err[j, i] * err[j, i] + dark_err[j, i] * dark_err[j, i])
+            input_err[j, i] = np.sqrt(input_err[j, i] * input_err[j, i] + dark_err[j, i] * dark_err[j, i])
 
             # Propagate DQ
-            dq[j, i] |= dark_dq[j, i]
-
-    return rate, err, dq
+            input_dq[j, i] |= dark_dq[j, i]

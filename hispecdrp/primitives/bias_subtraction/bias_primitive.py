@@ -1,8 +1,8 @@
 from ..base_primitive import BasePrimitive
 from ...calibrations import BiasSelector
 from ... import datamodels
+from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
-from numba import get_num_threads, set_num_threads
 import numpy as np
 
 __all__ = ['BiasSubtractionPrimitive']
@@ -24,7 +24,6 @@ class BiasSubtractionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        set_num_threads(self.max_cores)
 
         # Load the input model
         input_model = datamodels.open(self.input)
@@ -36,6 +35,11 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Output
         result = self.get_output_model(input_model)
 
+        if not hasattr(result, 'DATA'):
+            raise Exception("DATA extension not found in input model for bias subtraction.")
+        if not hasattr(result, 'DQ'):
+            raise Exception("DQ extension not found in input model for bias subtraction.")
+
         # Log
         self.log.info(f"Applying bias correction with {bias} to {input_model}")
 
@@ -44,54 +48,48 @@ class BiasSubtractionPrimitive(BasePrimitive):
             result.data = result.data.astype(np.float32)
 
         # Perform bias subtraction
-        bias_subtraction(result, bias_model)
+        bias_subtraction(
+            result.data, result.dq,
+            bias_model.data, bias_model.dq,
+            max_cores=self.max_cores
+        )
 
         # Output
         return dict(output=result, bias=bias)
 
 
-def bias_subtraction(input_model: datamodels.RampModel, bias_model: datamodels.BiasModel) -> datamodels.RampModel:
+def bias_subtraction(
+    input_data : np.ndarray,
+    input_dq : np.ndarray,
+    bias_data : np.ndarray,
+    bias_dq : np.ndarray,
+    max_cores : int = 1
+):
     """
     Subtract the bias from the ramps.
 
-    Args:
-        input_model: Input RampModel.
-        bias_model: Bias calibration model.
-    
-    Returns:
-        RampModel: The bias-subtracted data.
+    Parameters
+    ----------
+    input_data
+        Input ramp data with shape (Nreads, Ny, Nx).
+    input_dq
+        Input DQ array with shape (Ny, Nx).
+    bias_data
+        Bias data with shape (Ny, Nx).
+    bias_dq
+        Bias DQ array with shape (Ny, Nx).
+    max_cores
+        Maximum number of CPU cores to use.
     """
-    if not hasattr(input_model, 'DATA'):
-        raise Exception("DATA extension not found in input model for bias subtraction.")
-    if not hasattr(input_model, 'DQ'):
-        raise Exception("DQ extension not found in input model for bias subtraction.")
-
-    _bias_subtraction_numba(
-        input_model.data,
-        input_model.dq,
-        bias_model.bias,
-        bias_model.dq,
-    )
-    return
+    with numba_thread_scope(max_cores):
+        _bias_subtraction_numba(input_data, input_dq, bias_data, bias_dq)
+    return input_data, input_dq
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def _bias_subtraction_numba(data, dq, bias, bias_dq):
-    """
-    Subtract bias and propagate DQ flags.
-
-    Args:
-        data:    (n_read, ny, nx) float32/float64 ramp data
-        dq:      (ny, nx) uint32 DQ array (modified in place)
-        bias:    (ny, nx) float32 bias calibration image
-        bias_dq: (ny, nx) uint32 DQ map for bias model
-
-    Returns:
-        data (in place), dq_raw (in place)
-    """
+def _bias_subtraction_numba(data : np.ndarray, dq : np.ndarray, bias : np.ndarray, bias_dq : np.ndarray):
     n_read, ny, nx = data.shape
-    for j in prange(ny):  # parallelize across spatial rows
+    for j in prange(ny):
         for i in range(nx):
             data[:, j, i] = data[:, j, i] - bias[j, i]
             dq[j, i] |= bias_dq[j, i]
-    return
