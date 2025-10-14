@@ -154,7 +154,6 @@ class DataModel:
                         warnings.warn(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
                         data = data.astype(dtype, copy=False)
                 data = convert_endianness(data, output_endianness='little')
-                    
         elif hdu_type is fits.BinTableHDU:
             data = astropy.table.Table(data)
         return data
