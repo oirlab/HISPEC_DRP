@@ -54,7 +54,7 @@ dependencies = [
   "numba",
   "sqlalchemy>2.0",
   "tqdm",
-  "stcal",
+  "stcal==1.15.2",
   "gdown",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing",

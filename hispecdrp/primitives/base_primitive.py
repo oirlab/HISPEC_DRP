@@ -94,11 +94,11 @@ class BasePrimitive(ProcessingComponent):
         Args:
             input: The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
             **kwargs: Additional keyword arguments to set or override for this primitive. These will override any arguments set during initialization.
-        
+
         Returns:
             dict: The main output of the primitive (self._output['output']), which is typically a datamodel or a container of datamodels.
         """
-        
+
         # CURRENT PROCESSING TIME, USED FOR CONSISTENT LOGGING OF PROCESSING AT DIFFERENT PLACES.
         # NOTE: TBD IF THIS IS THE RIGHT APPROACH
         self._date_time = datetime.datetime.now().isoformat()
@@ -293,6 +293,7 @@ class BasePrimitive(ProcessingComponent):
             assert isinstance(
                 cal_model,
                 (
+                    datamodels.CalibrationModel,
                     datamodels.HISPECCalibrationModel,
                     datamodels.PARVICalibrationModel,
                 )
@@ -365,7 +366,7 @@ class BasePrimitive(ProcessingComponent):
         ) -> datamodels.DataModel:
         """
         Get the output model based on the input model and the specified output model type.
-        
+
         Args:
             input_model (datamodels.DataModel, optional): The input data model to base the output on.
             output_model (str | datamodels.DataModel | type[datamodels.DataModel], optional): The desired output model type or specification. It can take on several values:
@@ -395,7 +396,7 @@ class BasePrimitive(ProcessingComponent):
                 input_model, datamodels.DataModel
             ), "Input model must be provided if output_model is 'input'."
             return input_model
-                
+
         ####################################
         #### Return copy of input model ####
         ####################################
@@ -419,13 +420,12 @@ class BasePrimitive(ProcessingComponent):
         #### DataModel class name (str) #####
         #####################################
         if isinstance(output_model, str):
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model)
+            if input_model.meta.instrument_name is not None:
+                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model)
             else:
                 model_class = datamodels.model_type_from_name(output_model)
             return model_class.from_datamodel(input_model)
-        
+
         #################################
         #### DataModel class (type) #####
         #################################
@@ -433,16 +433,15 @@ class BasePrimitive(ProcessingComponent):
             assert isinstance(
                 input_model, datamodels.DataModel
             ), "Input model must be provided if output_model is a DataModel class."
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model.__class__.__name__)
+            if input_model.meta.instrument_name is not None:
+                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model.__class__.__name__)
             else:
                 model_class = output_model
             return output_model.from_datamodel(input_model)
 
         #####################################
         #### Everything else is an error ####
-        #####################################        
+        #####################################
         raise ValueError(f"Invalid output_model argument {output_model=}.")
 
     @staticmethod
@@ -464,7 +463,7 @@ class BasePrimitive(ProcessingComponent):
         if do_orders is None:
             do_orders = input_model.make_order_vec()
         return do_fibers, do_orders
-    
+
     def __getattr__(self, attr):
         if '_output' in self.__dict__ and attr in self._output:
             return self._output[attr]

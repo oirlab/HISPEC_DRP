@@ -70,7 +70,7 @@ def polyval1d(coeffs : np.ndarray, x : np.ndarray) -> np.ndarray:
         coeffs (np.ndarray): Coefficients of the polynomial, ordered from lowest degree to highest (NOTE: numpy is reversed).
         x (np.ndarray): Points at which to evaluate the polynomial.
     """
-    v = np.zeros_like(x)
+    v = np.zeros(x.shape, dtype=coeffs.dtype)
     for coeff in coeffs[::-1]:
         v = v * x + coeff
     return v

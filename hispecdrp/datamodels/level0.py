@@ -7,7 +7,7 @@ __all__ = ['L0Model', 'HISPECL0Model', 'PARVIL0Model']
 
 class L0Model(DataModel):
 
-    EXTENSIONS = create_L0_extensions(name='DATA')
+    EXTENSIONS = create_L0_extensions(name='RATE')
 
     @property
     def data_level_suffix(self):

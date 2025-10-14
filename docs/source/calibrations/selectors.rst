@@ -1,6 +1,63 @@
 Calibration Selectors
 =====================
 
+Bias Selector
++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.BiasSelector`
+
+**Selection Logic:**
+
+- match instrument era (``meta['instrument.era']``)
+- match spectrograph (``meta['instrument.spectrograph']``)
+- closest in observation time (``meta['exposure.mjd_start']``)
+
+
+Detector Gain Selector
+++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.DetectorGainSelector`
+
+**Selection Logic:**
+
+- match instrument era (``meta['instrument.era']``)
+- match spectrograph (``meta['instrument.spectrograph']``)
+- closest in observation time (``meta['exposure.mjd_start']``)
+
+
+DQ Selector
++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.DQSelector`
+
+**Selection Logic:**
+
+- match instrument era (``meta['instrument.era']``)
+- match spectrograph (``meta['instrument.spectrograph']``)
+- closest in observation time (``meta['exposure.mjd_start']``)
+
+Nonlinear Correction Selector
++++++++++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
+
+**Selection Logic:**
+
+- match instrument era (``meta['instrument.era']``)
+- match spectrograph (``meta['instrument.spectrograph']``)
+- closest in observation time (``meta['exposure.mjd_start']``)
+
+
+Saturation Selector
++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.SaturationSelector`
+
+**Selection Logic:**
+
+- match instrument era (``meta['instrument.era']``)
+- match spectrograph (``meta['instrument.spectrograph']``)
+- closest in observation time (``meta['exposure.mjd_start']``)
 
 Dark Selector
 +++++++++++++

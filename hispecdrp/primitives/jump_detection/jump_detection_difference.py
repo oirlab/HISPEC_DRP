@@ -1,66 +1,104 @@
-from ... import datamodels
+from ...datamodels.dqflags import DQ_FLAGS
+from ...utils.parallelization_utils import numba_thread_scope
 
 import numpy as np
-
-import multiprocessing as mp
+from numba import njit, prange
 
 __all__ = ['jump_detection_difference']
 
-def _jump_detection_difference_row(indata):
+SATURATED_FLAG_uint8 = np.uint8(DQ_FLAGS["SATURATED"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
+JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
+@njit(nogil=True, cache=True, inline='always')
+def get_diffs(ramp_row):
+    n_reads, nx = ramp_row.shape
+    diffs = np.empty((n_reads-1, nx), dtype=ramp_row.dtype)
+    for i in range(n_reads - 1):
+        diffs[i] = ramp_row[i+1,:] - ramp_row[i,:]
+    return diffs
+
+
+@njit(nogil=True, cache=True, inline='always')
+def median_axis0_3d(ramp):
     """
-    Finds jumps for row of a ramp using simple two-point difference algorithm
-
-    Args:
-        data Tuple[int, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
-            Tuple containing the following information for a single row:
-                ramp row index, rejection threshold, ramp data, readnoise, gain, data quality
-    Returns:
-        i (int): index of input row from the ramps, same as input.
-        dq_out (np.ndarray): output data quality image with flags from algorithm (1, nx).
+    Median along axis=0 for a 3D array shaped (n_reads, ny, nx).
+    Returns NumPy's median on integer inputs.
     """
+    n, ny, nx = ramp.shape
+    out = np.empty((ny, nx), dtype=ramp.dtype)
+    for y in range(ny):
+        for x in range(nx):
+            vec = np.empty(n, dtype=np.float64)
+            for i in range(n):
+                vec[i] = ramp[i, y, x]
+            vec.sort()
+            mid = n // 2
+            if n % 2 == 0:
+                out[y, x] = 0.5 * (vec[mid - 1] + vec[mid])
+            else:
+                out[y, x] = vec[mid]
+    return out
 
-    i, rejection_threshold, ramp_data, rdnoise, gain, dq_in = indata
-
+@njit(nogil=True, parallel=True, cache=True)
+def _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain,rejection_threshold):
     n_reads, ny, nx = ramp_data.shape
-    dq_out = np.zeros((n_reads, ny, nx), dtype=np.uint32)
 
-    # Calculate differences between successive reads
-    diffs = np.diff(ramp_data, axis=0)
+    for i in prange(ny):
+        for j in range(nx):
+            # Find first saturated index; exclude it and everything after.
+            n_use = 1
+            for k in range(n_reads):
+                # checking backward for saturation to speed up processing since saturation will be at the end of the ramp
+                if (dq_raw[n_reads-k-1,i,j] & (SATURATED_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)) == 0:
+                    n_use = n_reads-k
+                    break
 
-    # Estimate the typical value of differences and the noise in the differences
-    median_diff = np.median(diffs, axis=0) * gain
-    photon_noise_squared = np.abs(median_diff) # Assuming Poisson
-    total_noise_squared = (rdnoise**2) * 2 + photon_noise_squared # Factor of 2 for diffs
-    sigma_diff = np.sqrt(total_noise_squared) / gain # Convert back to ADU
+            # Calculate differences between successive reads
+            diffs = get_diffs(ramp_data[0:n_use,i,j:j+1])  # np.diff(ramp_data, axis=0)
 
-    # Identify jumps
-    jumps = np.abs(diffs) > (rejection_threshold * sigma_diff)
+            # Estimate the typical value of differences and the noise in the differences
+            median_diff = median_axis0_3d(diffs[:,None,:])[0,0] * gain[i,j]  # np.median(diffs, axis=0) * gain
+            photon_noise_squared = np.abs(median_diff)  # Assuming Poisson
+            total_DN_noise_squared = (rdnoise[i,j] ** 2) * 2 + (photon_noise_squared / (gain[i,j]**2))  # Factor of 2 for diffs
+            sigma_diff = np.sqrt(total_DN_noise_squared)   # Convert back to ADU
 
-    # Pad the first axis by 1 so jumps has same shape as ramp_data
-    padding = np.zeros((1, ny, nx), dtype=bool)
-    jumps = np.concatenate((padding, jumps), axis=0)
+            # Identify jumps
+            jumps = (np.abs(diffs[:,0]-median_diff) > (rejection_threshold * sigma_diff)).astype(np.uint8) * JUMP_DET_FLAG_uint8
+            # Modify dq_out to flag where jumps occurred
+            dq_raw[1:n_use, i, j] |= jumps
 
-    # Identify the correct flag for jumps from the dqflags datamodel
-    jump_flag = datamodels.DQ_FLAGS['JUMP_DET']
+    return
 
-    # Modify dq_out to flag where jumps occurred
-    dq_out[jumps] = jump_flag
-
-    return(i, dq_out)
-
-def jump_detection_difference(ramp_data: np.ndarray, dq_in: np.ndarray, gain=None, rdnoise=None, max_cores=1, rejection_threshold=4.0) -> np.ndarray:
+def jump_detection_difference(
+    ramp_data: np.ndarray,
+    dq_raw: np.ndarray,
+    dq: np.ndarray,
+    rdnoise : np.ndarray | None = None,
+    gain: np.ndarray | None = None,
+    rejection_threshold: float = 4.0,
+    max_cores: int = 1,
+) -> np.ndarray:
     """
     Simple jump detection for a 3D array of up the ramp data.
+    Modifies the input dq array (in-place) to flag where jumps are detected.
 
-    Args:
-        ramp_data (np.ndarray): 3D array of the UTR data with shape n_ramps x ny x nx.
-        dq_in (np.ndarray): Input data quality flags for the UTR data with shape n_ramps x ny x nx.
-        gain (np.ndarray): Input gain array with shape ny x nx
-        rdnoise (np.ndarray): Input read noise array with shape ny x nx
-        rejection_threshold (float): Sigma threshold for jump detection.
-    Returns:
-        np.ndarray: New data quality flags indicating where jumps are detected.
+    Parameters
+    ----------
+    ramp_data : np.ndarray
+        3D array of the UTR data with shape (Nreads, Ny, Nx).
+    dq_raw : np.ndarray
+        Input data quality flags for the UTR data with shape (Nreads, Ny, Nx).
+    dq : np.ndarray
+        Input data quality flags with shape (Ny, Nx).
+    rdnoise : np.ndarray or None, optional
+        Input read noise array with shape (Ny, Nx). Defaults to 0.
+    gain : np.ndarray or None, optional
+        Input gain array with shape (Ny, Nx). Defaults to 1.
+    rejection_threshold : float, optional
+        Sigma threshold for jump detection. Default is 4.0.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing (default: 1).
     """
 
     n_reads, ny, nx = ramp_data.shape
@@ -69,36 +107,12 @@ def jump_detection_difference(ramp_data: np.ndarray, dq_in: np.ndarray, gain=Non
 
     if rdnoise is None:
         # TODO - optimize read noise when array is not passed
-        rdnoise = np.zeros((ny, nx)).astype(np.float32)
+        rdnoise = np.zeros((ny, nx), dtype=np.float32)
     if gain is None:
         # TODO - optimize gain when array is not passed
-        gain = np.ones((ny, nx)).astype(np.float32)
+        gain = np.ones((ny, nx), dtype=np.float32)
 
-    if n_reads <= 2:
-        return dq_out
+    assert n_reads >= 2, "Need at least 2 reads to do jump detection."
 
-    with mp.Pool(max_cores) as pool:
-        # TODO - parallelize with memory sharing instead of this way
-        data = []
-        for row in np.arange(ny):
-            ramps_3d = ramp_data[:,[row],:]
-
-            data.append((row,
-                         rejection_threshold,
-                         ramps_3d,
-                         # Make sure to add a new axis to each array to maintain number of dimensions
-                         rdnoise[[row], :],
-                         gain[[row], :],
-                         dq_in[:,[row], :]))
-
-        results = pool.map(_jump_detection_difference_row, data)
-
-    # Reassemble output 
-    dq_out = np.zeros(shape=(n_reads, ny, nx), dtype=np.uint32)
-
-    for row_element in results:
-        row, dq = row_element
-
-        dq_out[:, [row], :] = dq
-
-    return dq_out
+    with numba_thread_scope(max_cores):
+        _jump_detection_difference_numba(ramp_data, dq_raw, dq, rdnoise, gain, rejection_threshold)

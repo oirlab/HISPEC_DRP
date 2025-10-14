@@ -14,6 +14,7 @@ class HISPECDataModel(DataModel):
         'telescope' : 'Keck-II',
         'order_start' : 125,
         'order_end' : 85,
+        'clock_rate' : 150000,  # in Hz
     }
 
     INSTRUMENT_ALIASES = {'BSPEC': 'HB', 'RSPEC': 'HR'}

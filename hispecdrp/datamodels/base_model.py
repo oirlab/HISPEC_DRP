@@ -11,12 +11,18 @@ import warnings
 from astropy.io.fits.verify import VerifyWarning
 import uuid
 from .utils import open as datamodel_open
+from ..utils import convert_endianness
 
 from .extensions import RECEIPT, CALIBRATIONS
 
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
 
+from .meta_data import CalibrationCoreMeta,CoreMeta
+
+import sys
+
+_VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
 
 class DataModel:
     """
@@ -45,6 +51,8 @@ class DataModel:
     ]
 
     EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename']
+
+    META_MODEL = CoreMeta
 
     def __init__(
         self,
@@ -113,7 +121,7 @@ class DataModel:
         self,
         extensions : str | list[str] | None = None,
         do_not_scale_image_data : bool | None = None,
-        correct_dtypes : bool = False,
+        correct_dtypes : bool = False
     ) -> dict[str, _VALID_HDU]:
         """
         Read the data from the FITS file.
@@ -144,7 +152,8 @@ class DataModel:
                 if not np.issubdtype(data.dtype, dtype):
                     if correct_dtype:
                         warnings.warn(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
-                        data = data.astype(dtype)
+                        data = data.astype(dtype, copy=False)
+                data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
             data = astropy.table.Table(data)
         return data
@@ -502,7 +511,7 @@ class DataModel:
         remove_row_index = None
         if cal_role in self.calibrations['CAL_ROLE']:
             if replace_existing:
-                remove_row_index = self.calibrations['CAL_ROLE'].index(cal_role)
+                remove_row_index = np.where(self.calibrations['CAL_ROLE']==cal_role)[0][0]
             else:
                 warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
                 return
@@ -632,6 +641,8 @@ class DataModel:
 
 
 class CalibrationModel(DataModel):
+
+    META_MODEL = CalibrationCoreMeta
 
     CAL_TYPE = None # Type of calibration
 

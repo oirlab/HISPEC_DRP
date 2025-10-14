@@ -8,10 +8,14 @@ Stage 0 (Detector Processing)
 .. toctree::
    :maxdepth: 1
 
+   dq_init
+   saturation
+   bias_subtraction
    nonlinear_correction
    jump_detection
-   fit_ramp
+   ramp_fitting
    dark_subtraction
+   detector_gain
    detector_flat
 
 

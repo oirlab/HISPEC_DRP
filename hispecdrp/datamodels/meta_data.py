@@ -351,6 +351,11 @@ class ExposureMeta(MetaModel):
         title="Effective exposure time",
         unit="sec"
     )
+    clock_rate: float | None = FitsField(
+        fits_keyword="CLOCKRAT",
+        title="Clock rate of the readout of the detector.",
+        unit="Hz"
+    )
 
 
 class TargetMeta(MetaModel):
@@ -444,7 +449,7 @@ class CoreMeta(_CoreMeta, KOAMeta, InstrumentMeta, ExposureMeta, TargetMeta, Pro
     pass
 
 
-class CalibrationCoreMeta(MetaModel):
+class CalibrationCoreMeta(CoreMeta):
     SECTION_NAME = 'Calibration'
     cal_id: str | None = FitsField(
         fits_keyword="CALID",

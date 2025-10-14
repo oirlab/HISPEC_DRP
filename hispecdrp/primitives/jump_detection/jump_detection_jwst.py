@@ -9,20 +9,25 @@ import multiprocessing as mp
 
 __all__ = ['jump_detection_jwst']
 
-def _jump_detection_jwst_row(indata):
+def _jump_detection_jwst_row(indata : tuple) -> tuple[int, np.ndarray]:
     """
     Finds jumps for row of a ramp using stcal.jump.jump.detect_jumps_data
 
-    Args:
-        data Tuple[int, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
-            Tuple containing the following information for a single row:
-                ramp row index, rejection threshold, ramp data, readnoise, gain, data quality
-    Returns:
-        i (int): index of input row from the ramps, same as input.
-        dq_out (np.ndarray): output data quality image with flags from algorithm (1, nx).
+    Parameters
+    ----------
+    data : tuple[int, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        Tuple containing the following information for a single row:
+            ramp row index, rejection threshold, ramp data, readnoise, gain, data quality
+
+    Returns
+    -------
+    i : int
+        index of input row from the ramps, same as input.
+    dq_out : np.ndarray
+        output data quality image with flags from algorithm (1, nx).
     """
 
-    i, rejection_threshold, ramp_data, rdnoise, gain, dq_in = indata
+    i, rejection_threshold, ramp_data, rdnoise, gain, dq_raw, dq = indata
 
     # We are implicitly detecting by row, so columns is only other axis and nrows=1
     nints, nframes, ny, nx = ramp_data.shape
@@ -38,8 +43,8 @@ def _jump_detection_jwst_row(indata):
 
     # Spoof unused data structure for the groupdq - can be refactored if want to use data quality flags at the group/frame level
     # TODO - update these from input dq
-    jump_data.gdq = np.zeros((nints, nframes, ny, nx), dtype=np.uint8)
-    jump_data.pdq = np.zeros((ny, nx), dtype=np.uint32)
+    jump_data.gdq = dq_raw
+    jump_data.pdq = dq
 
     # Tunable parameters - update to be able to tweak these:
     # https://github.com/spacetelescope/stcal/blob/main/src/stcal/jump/jump_class.py
@@ -94,68 +99,75 @@ def _jump_detection_jwst_row(indata):
     jump_data.fl_dnu = datamodels.DQ_FLAGS['DO_NOT_USE']
     jump_data.fl_ref = datamodels.DQ_FLAGS['REFERENCE_PIXEL']
 
-    gdq, pdq, total_primary_crs, number_extended_events, stddev = detect_jumps_data(jump_data)
+    gdq, pdq, total_primary_crs, number_extended_events = detect_jumps_data(jump_data)
 
     # Ignore first axis since we have nints=1
     gdq = gdq[0, :].astype(np.uint32)
 
-    return(i, gdq)
+    return (i, gdq)
 
-def jump_detection_jwst(ramp_data: np.ndarray, dq_in: np.ndarray, gain=None, rdnoise=None, max_cores=1, rejection_threshold=4.0) -> np.ndarray:
+def jump_detection_jwst(
+    ramp_data: np.ndarray,
+    dq_raw: np.ndarray,
+    dq: np.ndarray,
+    gain : np.ndarray | None = None,
+    rdnoise : np.ndarray | None = None,
+    max_cores: int = 1,
+    rejection_threshold: float = 4.0
+):
     """
     Top-level function for running jump detection with stcal.jump.jump.detect_jumps_data
 
-    Args:
-        ramp_data (np.ndarray): 3D array of the UTR data with shape n_ramps x ny x nx.
-        dq_in (np.ndarray): Input data quality flags for the UTR data with shape n_ramps x ny x nx.
-        gain (np.ndarray): Input gain array with shape ny x nx
-        rdnoise (np.ndarray): Input read noise array with shape ny x nx
-        rejection_threshold (float): Sigma threshold for jump detection.
-    Returns:
-        np.ndarray: New data quality flags indicating where jumps are detected.
+    Parameters
+    ----------
+    ramp_data : np.ndarray
+        3D array of the UTR data with shape n_ramps x ny x nx.
+    dq_raw : np.ndarray
+        Input data quality flags for the UTR data with shape n_ramps x ny x nx.
+    dq : np.ndarray
+        Input data quality flags with shape ny x nx.
+    gain : np.ndarray
+        Input gain array with shape ny x nx
+    rdnoise : np.ndarray
+        Input read noise array with shape ny x nx
+    rejection_threshold : float
+        Sigma threshold for jump detection. Default is 4.0.
     """
 
     n_reads, ny, nx = ramp_data.shape
 
-    # TODO - determine how to use the input DQ flags to ignore bad data
-
-    dq_out = np.zeros((n_reads, ny, nx), dtype=np.uint32)
-
     if rdnoise is None:
         # TODO - optimize read noise when array is not passed
-        rdnoise = np.zeros((ny, nx)).astype(np.float32)
+        rdnoise = np.zeros((ny, nx), dtype=np.float32)
     if gain is None:
         # TODO - optimize gain when array is not passed
-        gain = np.ones((ny, nx)).astype(np.float32)
+        gain = np.ones((ny, nx), dtype=np.float32)
 
-    if n_reads <= 2:
-        return dq_out
+    assert n_reads >= 2, "Need at least 2 reads to do jump detection."
 
     with mp.Pool(max_cores) as pool:
         # TODO - parallelize with memory sharing instead of this way
         data = []
-        for row in np.arange(ny):
-            ramps_3d = ramp_data[:,[row],:]
+        for row in range(ny):
+            ramps_3d = ramp_data[:, [row], :]
+            dq_raw_3d = dq_raw[:, [row], :]
             # Reshape to add the nints axis that JWST pipeline requires
-            ramps_3d = ramps_3d[np.newaxis,:]
+            ramps_3d = ramps_3d[np.newaxis, :]
+            dq_raw_3d = dq_raw_3d[np.newaxis, :]
 
-            data.append((row,
-                         rejection_threshold,
-                         ramps_3d,
-                         # Make sure to add a new axis to each array to maintain number of dimensions
-                         rdnoise[[row], :],
-                         gain[[row], :],
-                         dq_in[:, [row], :]))
+            data.append((
+                row,
+                rejection_threshold,
+                ramps_3d,
+                # Make sure to add a new axis to each array to maintain number of dimensions
+                rdnoise[[row], :],
+                gain[[row], :],
+                dq_raw_3d,
+                dq[[row], :]
+            ))
 
         results = pool.map(_jump_detection_jwst_row, data)
 
-    # Reassemble output 
-    dq_out = np.zeros(shape=(n_reads, ny, nx), dtype=np.uint32)
-
     for row_element in results:
-        row, dq = row_element
-
-        dq_out[:,[row], :] = dq
-
-    return dq_out
-
+        _row, _dq = row_element
+        dq_raw[:, [_row], :] = _dq

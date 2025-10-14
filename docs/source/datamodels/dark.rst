@@ -18,8 +18,8 @@ Extensions
 .. csv-table::
    :header: "Hdu Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
 
-   DATA, Image, Float32, "4096 x 4096", "e-/s", "Dark current data."
-   ERR, Image, Float32, "4096 x 4096", "e-/s", "Dark current error (all sources)."
-   VAR_POISSON, Image, Float32, "4096 x 4096", "e-/s", "Dark current variance (Poisson)."
-   VAR_RNOISE, Image, Float32, "4096 x 4096", "e-/s", "Dark current variance (read noise)."
+   DARK_RATE, Image, Float32, "4096 x 4096", "DN", "Dark current data."
+   DARK_ERR, Image, Float32, "4096 x 4096", "DN", "Dark current error (all sources)."
+   DARK_VAR_POISSON, Image, Float32, "4096 x 4096", "DN^2", "Dark current variance (Poisson)."
+   DARK_VAR_RNOISE, Image, Float32, "4096 x 4096", "DN^2", "Dark current variance (read noise)."
    DQ, Image, UInt32, "4096 x 4096", None, "Data quality."
