@@ -19,9 +19,22 @@ class HISPECTraceProfModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
         },
+
         ### Add data quality extensions
 
         ### Also add positions to this datamodel
+        'POS_FIB1': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'POS_FIB2': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'POS_FIB3': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
     }
 
-    CAL_TYPE = 'tracepos'
+    CAL_TYPE = 'traceprof'

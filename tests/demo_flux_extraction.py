@@ -65,12 +65,24 @@ def find_trace_locs(data):
 
     ### Do polynomial fit/smoothing to traces
     smooth_trace_locs, loc_coeffs = _polynomial_smooth(trace_locs,deg=deg)
-    for order in range(trace_locs.shape[0]):
-        plt.plot(trace_widths[order,:],color='k')
-    plt.show()
+    ### Convert to FWHM and smooth
     smooth_trace_widths, width_coeffs = _polynomial_smooth(2.355*trace_widths, deg=deg)
 
     return smooth_trace_locs, loc_coeffs, smooth_trace_widths, width_coeffs
+
+def fit_trace_prof(data, trace_pos, width):
+    ### Instantiate output array - norder x npix x width
+    out = np.zeros((trace_pos.shape[0],trace_pos.shape[1], 2*width+1))
+    ### Loop over orders
+    for i in range(trace_pos.shape[0]):
+        ### Loop over pixels
+        for j in range(trace_pos.shape[1]):
+            ### Slice out the data within +/- width of the center
+            center = int(trace_pos[i,j])
+            dslice = data[center-width:center+width+1, j]
+            ### Normalize so that it sums to 1 and save
+            out[i,j,:] = dslice/np.nansum(dslice)
+    return out
 
 def extract_fluxes(data, pos,dy=5):
     flux = np.empty(pos.shape)
@@ -101,16 +113,29 @@ if __name__ == '__main__':
     hdul_trace = fits.open(fname_trace)
     data_trace = hdul_trace[0].data
     trace_locs, _, trace_widths, _ = find_trace_locs(data_trace)
+    trace_profile = fit_trace_prof(data_trace, trace_locs,7)
 
+    ### Plot the trace locations
     plt.imshow(data_trace,vmin=np.nanpercentile(data_trace,5),vmax=np.nanpercentile(data_trace,95))
     for order in range(trace_locs.shape[0]):
         plt.plot(trace_locs[order,:],color='k')
     plt.show()
 
+    ### Plot the rough measured FWHM
     for order in range(trace_locs.shape[0]):
         plt.plot(trace_widths[order,:],color='k')
     plt.xlabel('X Pixel')
     plt.ylabel('Trace FWHM')
+    plt.show()
+
+    ### Plot the trace profiles
+    ### Note that this is double peaked because of how things are rounded
+    ### that is fine as long as the optimal extraction code does the rounding
+    ### in the same way when it goes to fit things
+    for pix in range(trace_profile.shape[1]):
+        plt.plot(trace_profile[4,pix,:],color='k',alpha=0.01)
+    plt.xlabel('Pixel from integer trace center')
+    plt.ylabel('Profile weight')
     plt.show()
 
 

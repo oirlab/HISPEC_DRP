@@ -18,13 +18,15 @@ class TraceProfilePrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'traceprof',
         'tracepos' : None,
-        'deg':4
+        'width':7
     }
 
     def _perform(self):
         ### FIXME Input model should be a flat/dark corrected rate map, how do we enforce that?
         ### By using a pipeline file
         input_model = datamodels.open(self.args.name, copy=False)
+        output_model = self.get_output_model(input_mdoel, model_suffix='HISPECTraceProfModel')
+        out_dict = {}
 
         ### Load the trace positions if not passed
         if self.args.tracepos is None:
@@ -33,24 +35,43 @@ class TraceProfilePrimitive(BasePrimitive):
             tracepos_path = self.args.tracepos
         tracepos_model = datamodels.open(tracepos_path, copy=False)
 
-        result = input_model.copy()
-        self.log.info(f"Performing trace profile fitting on {input_model} with positions {tracepos_model}")
 
-       
-        result = fit_trace_prof(result, self.args.tracepos_model, self.args.deg)
-        return result
+         for fiber in self.args.do_fibers:
+            result = input_model.copy()
+            ### I'm assuming fiber is an int for now, or has a corresponding int
+            self.log.info(f"Performing trace finding on {input_model} fiber {fiber}")
+            self.log.info(f"Performing trace profile fitting on {input_model} with positions {tracepos_model}")
+            ### Get the right fiber locations from the trace position file
+            fib_locs = self.args.tracepos_model[f'POS_FIB{fiber}']
+            ### Do the calculation
+            result = fit_trace_prof(result, fib_locs, self.args.width)
+            ### Save to the extension for the corresponding fiber
+            out_dict[f'PROF_FIB{fiber}'] = result
+            out_dict[f'POS_FIB{fiber}'] fib_locs
+        return Arguments(name=output_model,fit_results=out_dict)
     
-
-
 
 def fit_trace_prof(
         input_model : datamodels.HISPECL0Model,
-        trace_pos : datamodels.HISPECTracePosModel
-        deg : int
+        trace_pos : np.ndarray,
+        width: int
     ) -> datamodels.HISPECTracePosModel:
+    
+    ### Get the data
+    data = input_model.data
 
-    ### Full frame weights for cross talk 
+    ### Instantiate output array - norder x npix x width
+    out = np.zeros((trace_pos.shape[0],trace_pos.shape[1], 2*width+1))
 
-    ### Normalize each column and use that as empirical weights
+    ### Loop over orders
+    for i in range(trace_pos.shape[0]):
+        ### Loop over pixels
+        for j in range(trace_pos.shape[1]):
+            ### Slice out the data within +/- width of the center
+            center = int(trace_pos[i,j])
+            dslice = data[center-width:center+width+1, j]
+            ### Normalize so that it sums to 1 and save
+            out[i,j,:] = dslice/np.nansum(dslice)
+    return out
 
     
