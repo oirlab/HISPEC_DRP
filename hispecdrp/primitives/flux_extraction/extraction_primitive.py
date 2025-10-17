@@ -120,6 +120,7 @@ def flux_extraction(
             out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
             out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
             out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
+            ### FIXME this should be a logical or
             out_dict[f'SPEC_DQ_FIB{i}'] = dq
             ### How do we calculate mid time
             # output[f'MID_TIME_FIB{i}']
@@ -130,21 +131,33 @@ def flux_extraction(
         for i in range(1,4):
             ### Get the trace positions for the fiber
             pos = tracepos_model[f'POS_FIB{i}']
-            profiles = traceprof_model[f'POF_FIB{i}']
+            prof = traceprof_model[f'POF_FIB{i}']
             ### Set up the output arrays
             flux = np.empty(pos.shape)
             err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
             dq = np.empty(pos.shape)
             ### Loop over orders and wavlength channels for the specified fiber
             ### We can definitely find ways to speed up the nested loop
-            for channel in range(pos.shape[0]):
-                ys = pos[channel,:]
-                profs = profiles[channel,:]
-                
-                ### Now we have a 3x norders free parameter fit
-
-                ### Sort that out into the right orders/fibers
-
+            for xpix in range(pos.shape[1]):
+                ### Get data slice around position of each order
+                cutdata = np.zeros((prof.shape[0],prof.shape[-1]))
+                cutprof = np.zeros((prof.shape[0],prof.shape[-1]))
+                for i in range(prof.shape[0]):
+                    ### Cut data. Careful that this is done exactly how it was done when the 
+                    ### trace profile was calculated
+                    center = int(pos[i,xpix])
+                    width = (prof.shape[-1]-1) // 2
+                    dslice = data[center-width:center+width+1,xpix]
+                    pslice = np.atleast_2d(prof[i,xpix])
+                    ### Now we do the linear algebra to get the flux, solving
+                    ### data = flux x profile for the OLS flux value
+                    ### Did the linalg explicitly so that we could maybe
+                    ### jit compile this, and because scipy is super slow
+                    inv = np.linalg.inv(np.dot(pslice,pslice.T))
+                    pfactor = np.dot(pslice.T, inv)
+                    flux[i,xpix] = np.sum(dslice*pfactor[:,0])
+                    ### FIXME how does error propegation work with this
+                    
 
             ### Save the results for each fiber to a separate extension
             out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
