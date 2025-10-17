@@ -5,7 +5,8 @@ import astropy.time
 
 def open(init, copy : bool = False, **kwargs):
     """
-    Creates a DataModel from a FITS file. More types might be added later.
+    Creates a DataModel from a FITS file. Automatically select the right DataModel class based on the `DATAMODL` header keyword.
+    More types might be added later.
 
     Args:
         init:

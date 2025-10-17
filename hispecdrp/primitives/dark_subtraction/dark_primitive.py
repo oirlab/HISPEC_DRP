@@ -2,15 +2,18 @@ from ..base_primitive import BasePrimitive
 from ...calibrations import DarkSelector
 from ... import datamodels
 import numpy as np
+from numba import njit, prange
+from ...utils.parallelization_utils import numba_thread_scope
 
-__all__ = ['DarkSubtractionPrimitive']
+__all__ = ['DarkSubtractionPrimitive', 'dark_subtraction_rate']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
     
     ARGUMENTS = {
         'suffix' : 'darksub',
-        'output_model' : 'input'
+        'output_model' : 'input',
+        'max_cores' : 1,
     }
 
     CALIBRATIONS = {
@@ -33,29 +36,79 @@ class DarkSubtractionPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying dark correction with {dark} to {input_model}")
+        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
 
         # Perform dark subtraction
-        output_model = dark_subtraction_rate(result, dark_model)
+        dark_subtraction_rate(
+            result.rate, result.rate_err, result.dq,
+            dark_model.rate, dark_model.rate_err, dark_model.dq,
+            max_cores=self.max_cores
+        )
 
         # Output
-        return dict(output=output_model, dark=dark)
+        return dict(output=result, dark=dark)
 
 
-def dark_subtraction_rate(input_model, dark_model):
+def dark_subtraction_rate(
+    input_rate: np.ndarray, input_err: np.ndarray, input_dq: np.ndarray,
+    dark_rate: np.ndarray, dark_err: np.ndarray, dark_dq: np.ndarray,
+    max_cores : int = 1
+):
     """
-    Subtract the dark model from an input rate (level 0) model. The correction is done in-place.
+    Subtract the dark current rate from the input rate.
+    Input and dark rates are DN/s.
+    The error arrays are added in quadrature.
+    The data quality arrays are combined with a bitwise OR.
+    The corrections are done in-place.
+    Dark should be corrected before gain correction.
 
-    Args:
-        input_model: Input level 0 model.
-        dark_model: Dark calibration model.
-    
-    Returns:
-        HISPECL0Model: The dark-subtracted data.
+    Parameters
+    ----------
+    input_rate : np.ndarray
+        2D array of rate values (DN/s)
+    input_err : np.ndarray
+        2D array of error values (DN/s)
+    input_dq : np.ndarray
+        2D array of data quality flags
+    dark_rate : np.ndarray
+        2D array of dark rate values (DN/s)
+    dark_err : np.ndarray
+        2D array of dark error values (DN/s)
+    dark_dq : np.ndarray
+        2D array of dark data quality flags
+    max_cores : int
+        Maximum number of CPU cores to use for parallel processing.
+
+    Returns
+    -------
+    input_rate : np.ndarray
+        Dark-subtracted rate array (modified in place)
+    input_err : np.ndarray
+        Updated error array (modified in place)
+    input_dq : np.ndarray
+        Updated data quality array (modified in place)
     """
-    input_model.data = input_model.data - dark_model.data
-    if hasattr(input_model, 'err'):
-        input_model.err = np.sqrt(input_model.err**2 + dark_model.err**2)
-    if hasattr(input_model, 'dq'):
-        input_model.dq |= dark_model.dq
-    return input_model
+    with numba_thread_scope(max_cores):
+        _dark_subtraction_rate_numba(
+            input_rate, input_err, input_dq,
+            dark_rate, dark_err, dark_dq
+        )
+    return input_rate, input_err, input_dq
+
+
+@njit(nogil=True, parallel=True, cache=True)
+def _dark_subtraction_rate_numba(
+    input_rate : np.ndarray, input_err : np.ndarray, input_dq : np.ndarray,
+    dark_rate : np.ndarray, dark_err : np.ndarray, dark_dq : np.ndarray
+):
+    ny, nx = input_rate.shape
+    for j in prange(ny):
+        for i in range(nx):
+            # Subtract dark rate
+            input_rate[j, i] = input_rate[j, i] - dark_rate[j, i]
+
+            # Propagate error
+            input_err[j, i] = np.sqrt(input_err[j, i] * input_err[j, i] + dark_err[j, i] * dark_err[j, i])
+
+            # Propagate DQ
+            input_dq[j, i] |= dark_dq[j, i]

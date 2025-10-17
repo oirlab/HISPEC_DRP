@@ -5,18 +5,26 @@ Pipelines
 Overview
 --------
 
-Pipelines are a collection of primitives that are executed in a specified order. The base class :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines. The pipeline level interface largely matches the primitive interface.
+Pipelines are a collection of :doc:`Primitives <primitives>`. that are executed in a specified order. The base class :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines which inherits from :py:class:`~hispecdrp.processing_component.ProcessingComponent`. The pipeline level interface largely matches the primitive interface.
+
+
+Pipeline Primitives
+-------------------
+
+Every pipeline must define a PRIMITIVE table as a class attribute ``PRIMITIVES`` which is a dictionary of primitive alias (key; ``str``) and their associated classes (value; ``type[BasePrimitive]``). The order of the primitives in this dictionary defines the order in which they are executed. Each primitive can also have its own configuration file and/or additional arguments that override the default arguments or those set in the configuration file.
+
+
 
 Pipeline Arguments
 ------------------
 
-Like primitives, pipelines also use an ``ARGUMENTS`` variable to parametrize their behavior and are available as attributes.
+Pipelines arguments behave identical to :doc:`Primitives <primitives>`. The base pipeline defines no new arguments.
 
 
 Pipeline Configuration Files
 ----------------------------
 
-Pipelines may also utilize configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
+Pipelines can also use configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
 
 .. code-block:: yaml
     
@@ -34,47 +42,41 @@ Pipelines may also utilize configuration files. An example configuration for the
       dark_sub:
         config_file: 'dark_config.yaml' # Optional
         arguments: # Additional arguments will override those in 'dark_config.yaml'
-          suffix: 'exampledarksuffix'
+          suffix: 'darksub'
       flat_field:
         arguments:
           run: True
-          save_results: True
-          suffix: 'exampleflatsuffix'
+          save_result: True
+          suffix: 'flat_field'
 
 
 Logging
-+++++++
+-------
 
-By default, pipelines will pass any logging-specific config to each primitive it uses.
+Pipelines will pass any logging-specific config to each primitive it uses.
 
 
 Saving Results
-++++++++++++++
+--------------
 
-The argument ``save_result`` can take on different values for a pipeline:
+The argument ``save_result`` behaves the same as in primitives and will save whatever output is returned from a pipeline's ``_perform`` method. This will typically be the output of the last primitive called (including a skipped primitive), but this is not enforced and a Pipeline can choose to return what is needs to just like primitives.
 
-- ``all``: Pipeline will save results of every primitive.
-- ``final``: Pipeline will only save the final result of the pipeline.
-- ``None``: Primitives will manage their own saving behavior.
+A primitive will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments and that primitive's ``save_result`` argument is ``True``.
 
-Primitives will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments.
 
 Pipeline Methods
 ----------------
 
-Below are most methods one can implement or override when creating custom pipelines. Note some are required for certain behavior. See the full API for full documentation of available methods.
+Every pipeline must implement the following method:
 
-* _perform(self) -> Arguments
-    - Required. This method takes in no arguments. It contains the primary logic of the pipeline and returns an instance of ``Arguments`` where the attribute ``name`` contains the primary output model. Extra outputs may be stored in the output ``Arguments`` object. If ``full_output`` is ``True``, the entire ``Arguments`` object is returned, otherwise only the ``name`` attribute is returned. _perform will call each primitive's ``apply`` method in any order specified, but should reflect the ordering in ``PRIMITIVES``.
+* .. automethod:: hispecdrp.pipelines.base_pipeline.BasePipeline._perform
+    :noindex:
 
 
 Implementing a Pipeline
 -----------------------
 
-Pipelines must extend either:
-
-* :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline` for general science pipelines.
-* :py:class:`hispecdrp.pipelines.calibration.base_calibration_pipeline.BaseCalibrationPipeline`. for pipelines which create calibration products.
+Pipelines must extend from :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline`.
 
 Below is the implementation of the LFC processing pipeline.
 

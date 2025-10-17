@@ -19,8 +19,10 @@ The appropriate wavelength solution is associated with the input data model. Thi
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.level2.HISPECL2Model`
-    The input file or data model to process. Should be a level 0 (rate map) data product.
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.level1.L1Model` | :py:class:`~hispecdrp.datamodels.level2.L2Model`
+    The input file or data model to process. Should be a level 1 or 2 (spectrum) data product.
+- **suffix** : ``str`` | ``None``
+    Suffix to append to the output filename (default: None).
 
 
 Calibrations

@@ -2,7 +2,6 @@ import numpy as np
 import scipy
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import savgol_filter
-from ...utils.endian_utils import normalize_dtype_array
 from numba import njit
 
 
@@ -148,12 +147,8 @@ def profile_background_fit(
         np.array([1.5, mu_bounds[1] + mu_guess, fwhm_bounds[1], 0.2]),
     )
     n_dof = len(x) - len(p0)
-
-    # Fit
-    x = normalize_dtype_array(x)
-    y = normalize_dtype_array(y)
-    yerr = normalize_dtype_array(yerr)
     
+    # Fit
     try:
         result = scipy.optimize.least_squares(
             _profile_background_chi2_residuals, 
@@ -163,10 +158,12 @@ def profile_background_fit(
             ftol=1E-10, 
             xtol=1E-10
         )
-    except:
-        breakpoint()
-        import matplotlib.pyplot as plt
-        plt.plot(x, yy, label='Data')
+    except Exception as e:
+        print(e)
+        
+        #breakpoint()
+        #import matplotlib.pyplot as plt
+        #plt.plot(x, yy, label='Data')
     
     pbest = result.x
     redchi2 = result.cost / n_dof

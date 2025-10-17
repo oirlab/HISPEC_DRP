@@ -8,8 +8,8 @@ API Reference
    :recursive:
 
    processing_component
-   datamodels
    primitives
    pipelines
+   datamodels
    calibrations
    utils

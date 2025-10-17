@@ -19,10 +19,12 @@ Converts the nonlinear signal to a linear signal through a polynomial transforma
 Arguments
 ---------
 
-- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.hispec.ramp.HISPECRampModel`
+- **input** : ``str`` | :py:class:`~hispecdrp.datamodels.ramp.RampModel`
     The input file or data model to process. Should be a raw (UTR ramp) data product.
 - **suffix** : ``str`` | ``None``
-    Suffix to append to the output filename (default: 'nonlin').
+    Suffix to append to the output filename (default: 'nonlincorr').
+- **output_model** : ``str`` | type[:py:class:`~hispecdrp.datamodels.base_model.DataModel`] | ``None``
+    The DataModel class or instance to return. Defaults to the string `'input'`. See method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model`.
 
 Calibrations
 ------------
