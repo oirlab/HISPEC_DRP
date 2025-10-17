@@ -31,6 +31,30 @@ class HISPECTracePosModel(HISPECCalibrationModel):
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
         },
+        'FWHM_FIB1': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'FWHM_FIB2': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'FWHM_FIB3': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'FWHM_COEFF_FIB1': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'FWHM_COEFF_FIB2': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
+        'FWHM_COEFF_FIB3': {
+            'hdu_type' : fits.ImageHDU,
+            'dtype' : np.float64
+        },
     }
 
     CAL_TYPE = 'tracepos'

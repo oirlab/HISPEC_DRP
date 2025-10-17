@@ -3,6 +3,19 @@ from astropy.io import fits
 from scipy import signal
 import matplotlib.pyplot as plt
 
+def _polynomial_smooth(data, deg=4):
+    coeffs = np.zeros((data.shape[0],deg+1))
+    smooth_data = np.zeros(data.shape)
+    xpts = np.arange(data.shape[1])
+    for i in range(data.shape[0]):
+        ypts = data[i]
+        goodinds = np.isfinite(ypts)
+        coeffs[i] = np.polyfit(xpts[goodinds], ypts[goodinds], deg)
+        fit = np.poly1d(coeffs[i])
+        smooth_data[i,:] = fit(xpts)
+    return smooth_data, coeffs
+    
+
 def find_trace_locs(data):
     threshold_peak = 500
     cutsize = 10
@@ -13,7 +26,9 @@ def find_trace_locs(data):
     
     ### Declare output arrays
     trace_locs = np.zeros((len(peaks),data.shape[1]))
+    trace_widths = np.zeros(trace_locs.shape)
     smooth_trace_locs = np.zeros(trace_locs.shape)
+    smooth_trace_widths = np.zeros(trace_locs.shape)
     # print(trace_locs.shape)
     # print(smooth_trace_locs.shape)
     coeffs = np.zeros((trace_locs.shape[0],deg+1))
@@ -26,22 +41,36 @@ def find_trace_locs(data):
         ### has prominence/width criteria which might be helpful for
         ### avoiding bad pixels, once we have the actual assembled 
         ### detectors to check
+        ### There are a number of additional checks we may need to add if 
+        ### real fiber flats are noisy - the simulations are so photon-
+        ### dominated that it's hard to be sure waht's needed
         peaks, _ = signal.find_peaks(data[:,i],height=threshold_peak)
         ### Get flux-weighted center for each peak on its own
         for j, peak in enumerate(peaks):
             inds = np.arange(peak-cutsize,peak+cutsize+1)
             dslice = data[inds,i]
+
             trace_locs[j,i] = np.sum(inds*dslice)/np.sum(dslice)
+            trace_widths[j,i] = np.sqrt(np.sum((inds-peak)**2 * dslice)/np.sum(dslice))
+            ### This is to reject bad pixels, will want to tune this value
+            if trace_widths[j,i] > 1.9:
+                trace_widths[j,i] = np.nan
+            # print(trace_widths[j,i])
+            # plt.axvline(-2.355/2*trace_widths[j,i])
+            # plt.axvline(2.355/2*trace_widths[j,i])
+            # plt.axhline(0.5*np.max(dslice))
+            # plt.plot(inds-trace_locs[j,i],dslice)
+            # plt.show()
 
-    ### Do polynomial fit to traces
-    xpts = np.arange(trace_locs.shape[1])
-    for i in range(trace_locs.shape[0]):
-        ypts = trace_locs[i]
-        coeffs[i] = np.polyfit(xpts, ypts, deg)
-        fit = np.poly1d(coeffs[i])
-        smooth_trace_locs[i,:] = fit(xpts)
 
-    return smooth_trace_locs
+    ### Do polynomial fit/smoothing to traces
+    smooth_trace_locs, loc_coeffs = _polynomial_smooth(trace_locs,deg=deg)
+    for order in range(trace_locs.shape[0]):
+        plt.plot(trace_widths[order,:],color='k')
+    plt.show()
+    smooth_trace_widths, width_coeffs = _polynomial_smooth(2.355*trace_widths, deg=deg)
+
+    return smooth_trace_locs, loc_coeffs, smooth_trace_widths, width_coeffs
 
 def extract_fluxes(data, pos,dy=5):
     flux = np.empty(pos.shape)
@@ -71,11 +100,17 @@ if __name__ == '__main__':
     
     hdul_trace = fits.open(fname_trace)
     data_trace = hdul_trace[0].data
-    trace_locs = find_trace_locs(data_trace)
+    trace_locs, _, trace_widths, _ = find_trace_locs(data_trace)
 
     plt.imshow(data_trace,vmin=np.nanpercentile(data_trace,5),vmax=np.nanpercentile(data_trace,95))
     for order in range(trace_locs.shape[0]):
         plt.plot(trace_locs[order,:],color='k')
+    plt.show()
+
+    for order in range(trace_locs.shape[0]):
+        plt.plot(trace_widths[order,:],color='k')
+    plt.xlabel('X Pixel')
+    plt.ylabel('Trace FWHM')
     plt.show()
 
 
@@ -87,6 +122,8 @@ if __name__ == '__main__':
 
         for row in fluxes:
             plt.plot(row)
+        plt.xlabel('X Pixel')
+        plt.ylabel('Box extracted flux')
         plt.show()
 
         
