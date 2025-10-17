@@ -2,6 +2,7 @@ import numpy as np
 from astropy.io import fits
 from scipy import signal
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 def _polynomial_smooth(data, deg=4):
     coeffs = np.zeros((data.shape[0],deg+1))
@@ -134,8 +135,11 @@ if __name__ == '__main__':
     
     hdul_trace = fits.open(fname_trace)
     data_trace = hdul_trace[0].data
+    t1 = datetime.now()
     trace_locs, _, trace_widths, _ = find_trace_locs(data_trace)
+    t2 = datetime.now()
     trace_profile = fit_trace_prof(data_trace, trace_locs,7)
+    t3 = datetime.now()
 
     ### Plot the trace locations
     # plt.imshow(data_trace,vmin=np.nanpercentile(data_trace,5),vmax=np.nanpercentile(data_trace,95))
@@ -164,7 +168,9 @@ if __name__ == '__main__':
     for fname in fnames_flux:
         hdul_flux = fits.open(fname)
         data_flux = hdul_flux[0].data
+        t4 = datetime.now()
         fluxes_box = extract_fluxes(data_flux, trace_locs, prof=trace_profile,method='box')
+        t5 = datetime.now()
         np.save('demo_output/'+fname[12:-5]+'_1D_extracted_box.npy',fluxes_box)
 
         for row in fluxes_box:
@@ -176,7 +182,9 @@ if __name__ == '__main__':
     for fname in fnames_flux:
         hdul_flux = fits.open(fname)
         data_flux = hdul_flux[0].data
+        t6 = datetime.now()
         fluxes_opt = extract_fluxes(data_flux, trace_locs, prof=trace_profile,method='optimal')
+        t7 = datetime.now()
         np.save('demo_output/'+fname[12:-5]+'_1D_extracted_optimal.npy',fluxes_opt)
 
         for row in fluxes_opt:
@@ -191,4 +199,8 @@ if __name__ == '__main__':
     plt.xlabel('Detector X Pixel')
     plt.show()
 
+    print('Time for trace location:', t2-t1)
+    print('Time for trace profile:', t3-t2)
+    print('Time for box extraction:', t5-t4)
+    print('time for optimal extraction:', t7-t6)
         
