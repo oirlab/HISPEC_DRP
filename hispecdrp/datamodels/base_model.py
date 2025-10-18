@@ -13,7 +13,7 @@ import uuid
 from .utils import open as datamodel_open
 from ..utils import convert_endianness
 
-from .extensions import RECEIPT, CALIBRATIONS
+from .extensions import RECEIPT, CALIBRATIONS, COADD_SOURCES
 
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
@@ -38,7 +38,8 @@ class DataModel:
     EXTENSIONS = {
         'PRIMARY' : {'hdu_type' : fits.PrimaryHDU, 'dtype' : None},
         **RECEIPT,
-        **CALIBRATIONS
+        **CALIBRATIONS,
+        **COADD_SOURCES,
     }
 
     INHERIT_EXTENSIONS = True
@@ -96,6 +97,14 @@ class DataModel:
 
         # Hook
         self.on_init()
+
+    def add_coadd_sources(self, sources : list[DataModel | str]):
+        input_models = [datamodel_open(f) for f in sources]
+        for model in input_models:
+            self.coadd_sources.add_row({
+                'FILENAME' : str(model.meta.filename),
+                'DATETIME_OBS' : str(model.meta.datetime_obs)
+            })
     
     def set_meta_from_headers(
         self,
@@ -425,7 +434,7 @@ class DataModel:
         return None
     
     @classmethod
-    def from_datamodel(cls, model : 'DataModel' | type['DataModel'], copy : bool = True) -> 'DataModel':
+    def from_datamodel(cls, model : 'DataModel' | type['DataModel'], copy : bool = True, exclude : bool = True) -> 'DataModel':
         """
         Create a new DataModel from another DataModel by copying over any valid data and metadata entries. The _filepath is not copied.
         
@@ -436,11 +445,16 @@ class DataModel:
         if copy:
             _data = deepcopy(_data)
         meta = deepcopy(model.meta.model_dump())
-        for key in cls.EXCLUDE_META_KEYS_COPY:
-            if key in meta:
-                meta[key] = None
+        if exclude:
+            for key in cls.EXCLUDE_META_KEYS_COPY:
+                if key in meta:
+                    meta[key] = None
         model_out = cls(data=_data, meta=meta)
         return model_out
+    
+    def add_to_lineage_table(self, model):
+        pass
+
     
     def make_order_vec(self) -> np.ndarray:
         return self._make_order_vec(self.meta.order_start, self.meta.order_end)

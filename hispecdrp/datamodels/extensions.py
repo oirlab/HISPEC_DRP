@@ -47,6 +47,16 @@ CALIBRATIONS = {
     }
 }
 
+COADD_SOURCES = {
+    'COADD_SOURCES': {
+        'hdu_type': fits.BinTableHDU,
+        'columns': {
+            'FILENAME' : str,
+            'DATETIME_OBS' : str,
+        }
+    }
+}
+
 
 #### Raw
 
