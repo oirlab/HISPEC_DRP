@@ -176,26 +176,58 @@ def robust_stats(
 
 
 @njit(nogil=True)
-def weighted_mean(x : np.ndarray, w : np.ndarray | None = None) -> float:
+def weighted_mean(x : np.ndarray, w : np.ndarray) -> float:
     """
     Calculate the weighted mean of an array.
 
-    Args:
-        x (np.ndarray): Array of values.
-        w (np.ndarray | None): Array of weights. If None, uniform weights are used.
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of values.
+    w : np.ndarray
+        Array of weights.
 
-    Returns:
-        float: Weighted mean or NaN if no valid data.
+    Returns
+    -------
+    float
+        Weighted mean.
     """
-    if w is None:
-        w = np.ones(x.shape, dtype=np.float64)
-
-    w_sum = np.nansum(w)
+    w_sum = np.sum(w)
     if w_sum == 0:
         return np.nan
+    w = w / w_sum
+    return np.sum(x * w)
 
-    return np.nansum(x * w) / w_sum
 
+@njit(nogil=True)
+def weighted_stddev(x : np.ndarray, w : np.ndarray, mu : float | None = None):
+    """
+    Calculate the weighted standard deviation of an array.
+    
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of values.
+    w : np.ndarray
+        Array of weights.
+    mu : float | None, optional
+        Pre-computed weighted mean. If None, it will be calculated from x and w.
+
+    Returns
+    -------
+    float
+        Weighted standard deviation or NaN if no valid data.
+    """
+    w_sum = np.sum(w)
+    if w_sum == 0:
+        return np.nan
+    w = w / w_sum
+    if mu is None:
+        mu = np.sum(x * w) / w_sum
+    dev = x - mu
+    bias_estimator = 1.0 - np.nansum(w**2)
+    var = np.nansum(dev ** 2 * w) / bias_estimator
+    return np.sqrt(var)
 
 @njit(nogil=True)
 def biweight_location(
@@ -348,28 +380,6 @@ def weighted_quantile(x : np.ndarray, w : np.ndarray | None = None, q : float = 
         return sorted_values[i-1]
     else:
         return sorted_values[0]
-    
-
-@njit(nogil=True)
-def weighted_stddev(x : np.ndarray, w : np.ndarray, M : float | None = None):
-    """
-    Calculate the weighted standard deviation of an array.
-    
-    Args:
-        x (np.ndarray): Array of values.
-        w (np.ndarray): Array of weights.
-        M (float | None): Optional mean value. If None, it will be calculated from x and w.
-
-    Returns:
-        np.ndarray: Weighted standard deviation or NaN if no valid data
-    """
-    w = w / np.nansum(w)
-    if M is None:
-        M = np.sum(x * w)
-    dev = x - M
-    bias_estimator = 1.0 - np.nansum(w**2)
-    var = np.nansum(dev ** 2 * w) / bias_estimator
-    return np.sqrt(var)
 
 
 @njit(nogil=True)
@@ -383,3 +393,10 @@ def all_sc(arr : np.ndarray) -> bool:
         else:
             return False
     return True
+
+@njit(nogil=True, cache=True, parallel=False)
+def bitwise_or_reduce_uint32(arr: np.ndarray) -> np.uint32:
+    result = np.uint32(0)
+    for k in range(arr.shape[0]):
+        result |= arr[k]
+    return result
