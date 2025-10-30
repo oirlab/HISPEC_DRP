@@ -15,13 +15,7 @@ class CoaddFramesPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'coadded',
         'mean_calc' : 'wmean',
-        'err_calc' : 'measure',
-        'data_ext' : 'rate',
-        'err_ext' : 'rate_err',
-        'var_poisson_ext' : 'rate_var_poisson',
-        'var_rnoise_ext' : 'rate_var_rnoise',
-        'dq_ext' : 'dq',
-        'mid_time_ext' : 'mid_time'
+        'err_calc' : 'wse',
     }
 
     def _perform(self):
@@ -33,8 +27,11 @@ class CoaddFramesPrimitive(BasePrimitive):
             self.log.warning("Input is a single model or path, returning without coadding.")
             return dict(output=self.input)
         if input_type in (list, tuple):
-            self.log.info(f"Coadding {len(self.input)} frames:\n" + "\n".join([str(i) for i in self.input]))
-            output = self.coadd_group(self.input)
+            input_grouped = self.group_input_by_fiber_object(self.input)
+            output = []
+            for key, group in input_grouped.items():
+                self.log.info(f"Coadding group with objects {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
+                output.append(self.coadd_group(group))
         elif input_type is dict:
             output = {}
             for key, group in self.input.items():
@@ -42,39 +39,33 @@ class CoaddFramesPrimitive(BasePrimitive):
                 output[key] = self.coadd_group(group)
         return dict(output=output)
 
+
     def coadd_group(self, group : list[datamodels.DataModel]) -> datamodels.DataModel:
-        attrs = (
-            self.data_ext,
-            self.err_ext, self.var_poisson_ext, self.var_rnoise_ext,
-            self.dq_ext,
-            self.mid_time_ext
-        )
+        
         input_models = [datamodels.open(f) for f in group]
-        frame_cubes = self.make_frame_cube(input_models, attrs, copy=False)
+        attrs = self.get_data_attrs(input_models[0])
+        frame_cubes = self.make_frame_cube(input_models, tuple(attrs.values()), copy=False)
         result = coadd_frames(
-            data_cube=frame_cubes[self.data_ext],
-            err_cube=frame_cubes[self.err_ext],
-            var_poisson_cube=frame_cubes[self.var_poisson_ext],
-            var_rnoise_cube=frame_cubes[self.var_rnoise_ext],
-            dq_cube=frame_cubes[self.dq_ext],
-            mid_time_cube=frame_cubes[self.mid_time_ext],
+            data_cube=frame_cubes[attrs['data_ext']],
+            err_cube=frame_cubes[attrs['err_ext']],
+            var_poisson_cube=frame_cubes[attrs['var_poisson_ext']],
+            var_rnoise_cube=frame_cubes[attrs['var_rnoise_ext']],
+            dq_cube=frame_cubes[attrs['dq_ext']],
+            mid_time_cube=frame_cubes[attrs['mid_time_ext']],
             mean_calc=self.mean_calc,
             err_calc=self.err_calc
         )
         model_class_out = input_models[0].__class__
-        model_out = model_class_out(
-            data=dict(
-                rate=result['data'],
-                rate_err=result['err'],
-                rate_var_poisson=result['var_poisson'],
-                rate_var_rnoise=result['var_rnoise'],
-                dq=result['dq'],
-                mid_time=result['mid_time']
-            ),
-            meta=input_models[0].meta.model_copy()
-        )
-        model_out.add_coadd_sources(input_models)
+        model_out = model_class_out.from_datamodel(input_models[0], include_data=False)
+        setattr(model_out, attrs['data_ext'], result['data'])
+        setattr(model_out, attrs['err_ext'], result['err'])
+        setattr(model_out, attrs['var_poisson_ext'], result['var_poisson'])
+        setattr(model_out, attrs['var_rnoise_ext'], result['var_rnoise'])
+        setattr(model_out, attrs['dq_ext'], result['dq'])
+        setattr(model_out, attrs['mid_time_ext'], result['mid_time'])
+        self.add_data_ancestors(model_out, input_models)
         return model_out
+
 
     @staticmethod
     def make_frame_cube(
@@ -113,7 +104,35 @@ class CoaddFramesPrimitive(BasePrimitive):
                 else:
                     out[attr][i, :, :] = arr
         return out
-
+    
+    def get_data_attrs(self, input_model : datamodels.DataModel) -> dict[str, str]:
+        if isinstance(input_model, datamodels.L0Model):
+            return dict(
+                data_ext='rate',
+                err_ext='rate_err',
+                var_poisson_ext='rate_var_poisson',
+                var_rnoise_ext='rate_var_rnoise',
+                dq_ext='dq',
+                mid_time_ext='mid_time'
+            )
+        elif isinstance(input_model, datamodels.DarkModel):
+            return dict(
+                data_ext='dark',
+                err_ext='dark_err',
+                var_poisson_ext='dark_var_poisson',
+                var_rnoise_ext='dark_var_rnoise',
+                dq_ext='dq',
+                mid_time_ext='mid_time'
+            )
+        elif isinstance(input_model, datamodels.DetectorFlatModel):
+            return dict(
+                data_ext='flat',
+                err_ext='flat_err',
+                var_poisson_ext='flat_var_poisson',
+                var_rnoise_ext='flat_var_rnoise',
+                dq_ext='dq',
+                mid_time_ext='mid_time'
+            )
 
 def coadd_frames(
     data_cube : np.ndarray,
@@ -151,15 +170,21 @@ def coadd_frames(
     n_frames, ny, nx = data_cube.shape
 
     # Create output arrays
-    data_out = np.zeros((ny, nx), dtype=data_cube.dtype)
-    err_out = np.zeros((ny, nx), dtype=data_cube.dtype)
-    var_poisson_out = np.zeros((ny, nx), dtype=data_cube.dtype)
-    var_rnoise_out = np.zeros((ny, nx), dtype=data_cube.dtype)
-    dq_out = np.zeros((ny, nx), dtype=dq_cube.dtype)
-    mid_times_out = np.zeros((ny, nx), dtype=mid_time_cube.dtype)
+    data_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
+    err_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
+    var_poisson_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
+    var_rnoise_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
+    dq_out = np.full((ny, nx), np.nan, dtype=dq_cube.dtype)
+    mid_times_out = np.full((ny, nx), np.nan, dtype=mid_time_cube.dtype)
     _coadd_frames_numba(
-        data_cube, err_cube, var_poisson_cube, var_rnoise_cube, dq_cube, mid_time_cube,
-        data_out, err_out, var_poisson_out, var_rnoise_out, dq_out, mid_times_out,
+        data_cube=data_cube, err_cube=err_cube,
+        var_poisson_cube=var_poisson_cube, var_rnoise_cube=var_rnoise_cube,
+        dq_cube=dq_cube,
+        mid_time_cube=mid_time_cube,
+        data_out=data_out, err_out=err_out,
+        var_poisson_out=var_poisson_out, var_rnoise_out=var_rnoise_out,
+        dq_out=dq_out,
+        mid_times_out=mid_times_out,
     )
 
     return dict(
