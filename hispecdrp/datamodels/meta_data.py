@@ -1,8 +1,9 @@
 from astropy.io import fits
-from pydantic import BaseModel, Field
+import astropy.time
+import warnings
+from pydantic import BaseModel, Field, model_validator
 from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 from sqlalchemy import Column, Integer, String, Float, Boolean
-from sqlalchemy.orm import DeclarativeBase
 
 from koa_middleware import CalibrationORM
 
@@ -10,11 +11,9 @@ __all__ = [
     'FitsField', 'MetaModel',
     'CoreMeta',
     'InstrumentMeta', 'ExposureMeta', 'TargetMeta', 'ProgramMeta',
-    'CalibrationCoreMeta', 'CoreMeta',
+    #'CalibrationCoreMeta', 'CoreMeta',
+    'CoreMeta',
 ]
-
-class _DeclarativeBase(DeclarativeBase):
-    pass
 
 def FitsField(*,
     default : Any = None,
@@ -70,7 +69,7 @@ class MetaModel(BaseModel):
                 if issubclass(_class, MetaModel) and attr in getattr(_class, '__annotations__', {}):
                     section_name = _class.SECTION_NAME
                     break
-            
+
             assert section_name is not None, f"No Meta section found for {attr}"
             meta_sections[attr] = section_name
 
@@ -99,28 +98,6 @@ class MetaModel(BaseModel):
                 unit = field.json_schema_extra['unit']
                 if unit is not None:
                     print(f"  unit: {unit}")
-
-    @classmethod
-    def get_orm_class(cls) -> dict:
-        model_attrs = {}
-        model_attrs['__tablename__'] = cls.ORM_TABLE_NAME
-        model_attrs['__table_args__'] = {'extend_existing': True}
-        for attr, field in cls.model_fields.items():
-            if field.json_schema_extra['orm_field']:
-                field_name = cls.get_orm_field_name(attr, field)
-                model_attrs[field_name] = cls.field_to_mapped(attr, field)
-        orm_class = type(f"{cls.__name__}ORM", (_DeclarativeBase, CalibrationORM), model_attrs)
-        return orm_class
-
-    def to_orm(self) -> dict:
-        meta_vals = {}
-        for attr, field in self.__class__.model_fields.items():
-            if field.json_schema_extra['orm_field']:
-                field_name = self.get_orm_field_name(attr, field)
-                meta_vals[field_name] = getattr(self, attr)
-        orm_class = self.get_orm_class()
-        meta_orm = orm_class(**meta_vals)
-        return meta_orm
     
     @classmethod
     def field_to_mapped(cls, attr : str, field : Field) -> dict:
@@ -228,16 +205,13 @@ class _CoreMeta(MetaModel):
 
     last_updated: str | None = FitsField(
         fits_keyword="LASTUPD",
-        title="ISO 8601 datetime file was last updated YYYYMMDDTHHMMSS",
+        title="ISO 8601 datetime file was last updated YYYY-MM-DDTHH:MM:SS.SSS",
         orm_field=True,
     )
-    date_obs: str | None = FitsField(
-        fits_keyword="DATE-OBS",
-        title="ISO 8601 datetime of the observation YYYYMMDD for KOA",
-    )
-    utc_obs: str | None = FitsField(
-        fits_keyword="UTC",
-        title="UTC time of the observation HHMMSS.SS for KOA"
+    datetime_obs: str | None = FitsField(
+        fits_keyword="DATETOBS",
+        title="Exposure observation datetime in format YYYY-MM-DDTHH:MM:SS.SSS",
+        orm_field=True,
     )
     filename: str | None = FitsField(
         fits_keyword="FILENAME",
@@ -272,14 +246,6 @@ class _CoreMeta(MetaModel):
         title="Custom note",
         orm_field=True,
     )
-    order_start : int | None = FitsField(
-        fits_keyword="ORDERST",
-        title="Starting echelle order of the data array",
-    )
-    order_end: int | None = FitsField(
-        fits_keyword="ORDEREND",
-        title="End echelle order of the data array",
-    )
 
 
 class InstrumentMeta(MetaModel):
@@ -288,21 +254,10 @@ class InstrumentMeta(MetaModel):
         fits_keyword="INSTRUME",
         title="Name of the instrument used to acquire the data",
     )
-    spectrograph: Literal['BSPEC', 'RSPEC'] | None = FitsField(
-        fits_keyword="SPECTROG",
-        title="Name of the spectrograph (BSPEC or RSPEC)",
-        orm_field=True,
-    )
     instrument_era: str | None = FitsField(
         fits_keyword="INSTERA",
         title="Instrument era specified via semver",
         default="0.0.1",
-        orm_field=True,
-    )
-    instrument_mode: str | None = FitsField(
-        fits_keyword="INSTMODE",
-        title="Instrument mode (YJ, HK, YJHK)",
-        default="YJHK",
         orm_field=True,
     )
     lfc_nu0: float | None = FitsField(
@@ -315,29 +270,33 @@ class InstrumentMeta(MetaModel):
         title="LFC delta nu",
         unit="GHz",
     )
+    order_start : int | None = FitsField(
+        fits_keyword="ORDERST",
+        title="Starting echelle order of the data array",
+    )
+    order_end: int | None = FitsField(
+        fits_keyword="ORDEREND",
+        title="End echelle order of the data array",
+    )
 
+_IMTYPES = Literal['DARK', 'BIAS', 'DETFLAT', 'SPEC']
 
 class ExposureMeta(MetaModel):
     SECTION_NAME = 'Exposure'
-    exposure_type : str | None = FitsField(
+    exposure_type : _IMTYPES | None = FitsField(
         fits_keyword="IMTYPE",
         title="Type of exposure",
         orm_field=True,
-        default='SCI'
+        default='SPEC'
     )
     data_quality: str | None = FitsField(
         fits_keyword="DATAQUAL",
         title="Data quality flag at the exposure level",
         default="GOOD"
     )
-    datetime_obs: str | None = FitsField(
-        fits_keyword="DATEOBS",
-        title="Exposure observation datetime in format YYYY-MM-DDTHH:MM:SS.SSS",
-        orm_field=True,
-    )
     mjd_start: float | None = FitsField(
         fits_keyword="EXPMJDST",
-        title="Exposure start Modified Julian Date",
+        title="Exposure start Modified Julian Date of first read",
         orm_field=True,
     )
     read_mode: str | None = FitsField(
@@ -396,7 +355,7 @@ class TargetMeta(MetaModel):
     )
     airmass_start: float | None = FitsField(
         fits_keyword="AIRMAST",
-        title="Airmass at start of exposure"
+        title="Airmass at start of exposure",
     )
     airmass_end: float | None = FitsField(
         fits_keyword="AIRMAEND",
@@ -444,16 +403,11 @@ class KOAMeta(MetaModel):
         title="KOA file path"
     )
 
-
-class CoreMeta(_CoreMeta, KOAMeta, InstrumentMeta, ExposureMeta, TargetMeta, ProgramMeta):
-    pass
-
-
-class CalibrationCoreMeta(CoreMeta):
+class CalibrationMeta(MetaModel):
     SECTION_NAME = 'Calibration'
     cal_id: str | None = FitsField(
         fits_keyword="CALID",
-        title="Unique identifier",
+        title="Unique calibration identifier",
         orm_field='id',
     )
     cal_type: str | None = FitsField(
@@ -467,3 +421,42 @@ class CalibrationCoreMeta(CoreMeta):
         default=True,
         orm_field=True,
     )
+
+
+class CoreMeta(_CoreMeta, KOAMeta, InstrumentMeta, ExposureMeta, TargetMeta, ProgramMeta, CalibrationMeta):
+
+    @model_validator(mode='before')
+    def set_time_defaults(cls, data: Any) -> Any:
+        """
+        Fills in missing datetime_obs or mjd_start values based on the other if one is present.
+
+        Note
+        ----
+        This method is only for development and may be removed in future versions.
+        """
+        
+        # Get current values
+        dt = data.get("datetime_obs")
+        mjd = data.get("mjd_start")
+
+        # Both are set, do nothing
+        if dt is not None and mjd is not None:
+            return data
+
+        # datetime_obs is set but mjd_start is None
+        if dt is not None and mjd is None:
+            data["mjd_start"] = astropy.time.Time(dt, format="isot").mjd
+            return data
+
+        # mjd_start is set but datetime_obs is None
+        if dt is None and mjd is not None:
+            data["datetime_obs"] = astropy.time.Time(mjd, format="mjd").isot
+            return data
+
+        # NOTE: This is useful for development.
+        # In later versions, we should likely return a dummy value.
+        warnings.warn("meta.datetime_obs and meta.mjd_start not provided, defaulting to '2024-09-24T00:00:00.000'")
+        data["datetime_obs"] = "2024-09-24T00:00:00.000"
+        data["mjd_start"] = astropy.time.Time(data["datetime_obs"], format="isot").mjd
+
+        return data

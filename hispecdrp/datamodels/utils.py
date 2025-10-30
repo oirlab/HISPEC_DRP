@@ -74,23 +74,3 @@ def model_type_from_name(model_type : str):
         raise ValueError(f"Model type '{model_type}' not found in MODEL_REGISTER.")
     else:
         return model_class
-
-
-def set_default_meta(model : DataModel, **kwargs):
-
-    # Date and time
-    if model.meta.datetime_obs is None and model.meta.mjd_start is None:
-        model.meta.datetime_obs = '2024-09-24T00:00:00.000'
-    if model.meta.datetime_obs is None and model.meta.mjd_start is not None:
-        dt = astropy.time.Time(model.meta.mjd_start, format='mjd')
-        model.meta.datetime_obs = dt.isot
-    elif model.meta.datetime_obs is not None and model.meta.mjd_start is None:
-        dt = astropy.time.Time(model.meta.datetime_obs, format='isot')
-        model.meta.mjd_start = dt.mjd
-        
-    if model.meta.date_obs is None:
-        if model.meta.datetime_obs is not None:
-            dt = astropy.time.Time(model.meta.datetime_obs, format='isot')
-            model.meta.date_obs = dt.strftime('%Y%m%d')
-            model.meta.utc_obs = dt.strftime('%H:%M:%S.%f')
-    return model

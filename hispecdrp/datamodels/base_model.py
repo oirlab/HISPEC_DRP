@@ -13,14 +13,17 @@ import uuid
 from .utils import open as datamodel_open
 from ..utils import convert_endianness
 
-from .extensions import RECEIPT, CALIBRATIONS, COADD_SOURCES
+from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS
 
 from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
+from sqlalchemy.orm import DeclarativeBase
 
-from .meta_data import CalibrationCoreMeta,CoreMeta
+from .meta_data import CoreMeta
 
-import sys
+from sqlalchemy.orm import DeclarativeBase
+class _DeclarativeBase(DeclarativeBase):
+    pass
 
 _VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
 
@@ -39,7 +42,7 @@ class DataModel:
         'PRIMARY' : {'hdu_type' : fits.PrimaryHDU, 'dtype' : None},
         **RECEIPT,
         **CALIBRATIONS,
-        **COADD_SOURCES,
+        **DATA_ANCESTORS,
     }
 
     INHERIT_EXTENSIONS = True
@@ -51,9 +54,11 @@ class DataModel:
         'meta', '_data', '_filepath', 'ALLOWED_ATTRIBUTES', 'META_DEFAULTS'
     ]
 
-    EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename']
+    EXCLUDE_META_KEYS_COPY = ['cal_id', 'last_updated', 'filename', 'koa_id', 'koa_id', 'koa_filepath']
 
     META_MODEL = CoreMeta
+
+    INSTRUMENT_NAME = None
 
     def __init__(
         self,
@@ -82,7 +87,6 @@ class DataModel:
                 raise FileNotFoundError(f"File not found: {filepath}")
             self._filepath = os.path.abspath(filepath)
             self.init_meta(meta=meta)
-            self.set_meta_from_headers(extensions=extensions)
             if not meta_only:
                 self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
             else:
@@ -97,14 +101,6 @@ class DataModel:
 
         # Hook
         self.on_init()
-
-    def add_coadd_sources(self, sources : list[DataModel | str]):
-        input_models = [datamodel_open(f) for f in sources]
-        for model in input_models:
-            self.coadd_sources.add_row({
-                'FILENAME' : str(model.meta.filename),
-                'DATETIME_OBS' : str(model.meta.datetime_obs)
-            })
     
     def set_meta_from_headers(
         self,
@@ -237,7 +233,11 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         hdulist = fits.HDUList()
-        for extname in self.EXTENSIONS:
+        extensions_list = list(self.EXTENSIONS.keys())
+        extensions_list = ['PRIMARY'] \
+                        + [e for e in self.EXTENSIONS.keys() if e not in {'PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS'}] \
+                        + ['RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS']
+        for extname in extensions_list:
             if not include_empty_extensions \
                 and (extname not in self._data or self._data[extname] is None) \
                 and extname not in ('RECEIPT', 'PRIMARY'):
@@ -247,6 +247,8 @@ class DataModel:
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', VerifyWarning)
             hdulist.writeto(self._filepath, output_verify=output_verify, **kwargs)
+
+        return self._filepath
 
     def on_init(self):
         """
@@ -394,16 +396,42 @@ class DataModel:
         Args:
             meta (MetaModel | dict, optional): Metadata to merge in. Defaults to None.
         """
+        
         if isinstance(meta, MetaModel):
             assert isinstance(meta, self.META_MODEL), f"meta must be of type {self.META_MODEL}, got {type(meta)}"
             self.meta = meta
-        elif isinstance(meta, dict):
-            self.meta = self.META_MODEL(**{**self.META_DEFAULTS, **meta})
+            return self.meta
+        
+        # Meta from file headers
+        if self._filepath is None:
+            meta_from_headers = {}
+        else:
+            meta_from_headers = self.get_meta_from_headers()
+
+        if isinstance(meta, dict):
+            self.meta = self.META_MODEL(**(meta_from_headers | meta))
         elif meta is None:
-            self.meta = self.META_MODEL(**self.META_DEFAULTS)
+            self.meta = self.META_MODEL(**meta_from_headers)
         else:
             raise ValueError(f"Unknown type for meta: {type(meta)}")
         return self.meta
+    
+    def get_meta_from_headers(self) -> dict:
+        """
+        Get metadata from the FITS headers.
+
+        Returns:
+            dict: Metadata dictionary.
+        """
+        meta_dict = {}
+        with fits.open(self._filepath, memmap=True) as hdulist:
+            for attr, field in self.META_MODEL.model_fields.items():
+                fits_hdu = field.json_schema_extra['fits_hdu']
+                fits_keyword = field.json_schema_extra['fits_keyword']
+                header = hdulist[fits_hdu].header
+                if fits_keyword in header:
+                    meta_dict[attr] = header[fits_keyword]
+        return meta_dict
 
     def init_receipt(self):
         """
@@ -434,26 +462,38 @@ class DataModel:
         return None
     
     @classmethod
-    def from_datamodel(cls, model : 'DataModel' | type['DataModel'], copy : bool = True, exclude : bool = True) -> 'DataModel':
+    def from_datamodel(
+        cls,
+        model : 'DataModel' | type['DataModel'],
+        include_data : bool = True,
+        copy_data : bool = True,
+        exclude_meta_keys : bool = True
+    ) -> 'DataModel':
         """
         Create a new DataModel from another DataModel by copying over any valid data and metadata entries. The _filepath is not copied.
-        
-        Args:
-            other (DataModel): The DataModel to copy from.
+
+        Parameters
+        ----------
+        model : DataModel
+            The DataModel to instantiate from.
+        copy_data : bool, optional
+            If True, copy the data arrays from the input model.
+        exclude_meta_keys : bool, optional
+            If True, exclude metadata keys in cls.EXCLUDE_META_KEYS_COPY from being copied over.
         """
-        _data = {k : v for k, v in model._data.items() if k in cls.EXTENSIONS}
-        if copy:
-            _data = deepcopy(_data)
+        if include_data:
+            _data = {k : v for k, v in model._data.items() if k in cls.EXTENSIONS}
+            if copy_data:
+                _data = deepcopy(_data)
+        else:
+            _data = None
         meta = deepcopy(model.meta.model_dump())
-        if exclude:
+        if exclude_meta_keys:
             for key in cls.EXCLUDE_META_KEYS_COPY:
                 if key in meta:
                     meta[key] = None
         model_out = cls(data=_data, meta=meta)
         return model_out
-    
-    def add_to_lineage_table(self, model):
-        pass
 
     
     def make_order_vec(self) -> np.ndarray:
@@ -652,11 +692,32 @@ class DataModel:
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
+    
+    @classmethod
+    def get_calibration_orm_class(cls) -> type[CalibrationORM]:
+        model_attrs = {}
+        model_attrs['__tablename__'] = cls.ORM_TABLE_NAME
+        model_attrs['__table_args__'] = {'extend_existing': True}
+        for attr, field in cls.META_MODEL.model_fields.items():
+            if field.json_schema_extra['orm_field']:
+                field_name = cls.META_MODEL.get_orm_field_name(attr, field)
+                model_attrs[field_name] = cls.META_MODEL.field_to_mapped(attr, field)
+        orm_class = type(f"{cls.INSTRUMENT_NAME}ORM", (_DeclarativeBase, CalibrationORM), model_attrs)
+        return orm_class
+
+    def get_calibration_orm_instance(self) -> type[CalibrationORM]:
+        meta_vals = {}
+        for attr, field in self.meta.__class__.model_fields.items():
+            if field.json_schema_extra['orm_field']:
+                field_name = self.meta.get_orm_field_name(attr, field)
+                meta_vals[field_name] = getattr(self.meta, attr)
+        orm_class = self.get_calibration_orm_class()
+        meta_orm = orm_class(**meta_vals)
+        return meta_orm
+
 
 
 class CalibrationModel(DataModel):
-
-    META_MODEL = CalibrationCoreMeta
 
     CAL_TYPE = None # Type of calibration
 
@@ -670,8 +731,10 @@ class CalibrationModel(DataModel):
         """
         Generate the calibration ID.
 
-        Returns:
-            str: The calibration ID
+        Returns
+        -------
+        cal_id : str
+            The calibration ID
         """
         filename = self.meta.filename or 'unknown'
         drp_version = self.meta.drp_version or 'unknown'
@@ -697,14 +760,23 @@ class CalibrationModel(DataModel):
             master : Insert 'master-' before the cal_type if `master=True`.
             suffix : optional suffix
 
-        Args:
-            date_time (str): The date and time of the observation.
-            cal_type (str): The type of calibration data.
-            master (bool, optional): If True, insert 'master-' before the cal_type. Defaults to False.
-            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+        Parameters
+        ----------
+        date_time : str
+            The date and time of the observation.
+        instrument_alias : str
+            The two letter instrument alias.
+        cal_type : str
+            The type of calibration data.
+        master : bool, optional
+            If True, insert 'master-' before the cal_type. Defaults to False.
+        suffix : str, optional
+            An optional suffix to append to the filename. Defaults to None.
 
-        Returns:
-            str : The filename
+        Returns
+        -------
+        filename : str
+            The generated filename.
         """
         dt = astropy.time.Time(date_time, precision=3, format='isot')
         dt = dt.datetime
@@ -718,27 +790,20 @@ class CalibrationModel(DataModel):
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
     
-    @classmethod
-    def get_orm_class(cls) -> type[CalibrationORM]:
-        """
-        Get the ORM class for the CalibrationModel metadata model.
-
-        Returns:
-            type[CalibrationORM]: The ORM class.
-        """
-        return cls.META_MODEL.get_orm_class()
-    
     def to_orm(self, note : str | None = None) -> CalibrationORM:
         """
-        Convert the CalibrationModel metadata to a CalibrationORM object.
+        Convert the CalibrationModel metadata to a CalibrationORM object. Keep for backwards compatibility with koa_middleware.
 
-        Args:
-            note (str, optional): An optional note to add to the ORM object. Defaults to None.
+        Parameters
+        ----------
+        note (str, optional): An optional note to add to the ORM object. Defaults to None.
 
-        Returns:
-            CalibrationORM: The CalibrationORM object.
+        Returns
+        -------
+        cal_orm : CalibrationORM
+            The CalibrationORM object.
         """
-        cal_orm = self.meta.to_orm()
+        cal_orm = self.get_calibration_orm_instance()
         if note is not None:
             cal_orm.note = note
         return cal_orm

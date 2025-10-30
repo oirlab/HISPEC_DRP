@@ -193,6 +193,17 @@ class BasePrimitive(ProcessingComponent):
             'STATUS' : self._status
         }
         model.receipt.add_row(row)
+
+    def add_data_ancestors(self, input_model : datamodels.DataModel, sources : datamodels.DataModel | str | list[datamodels.DataModel | str]):
+        if not isinstance(sources, list):
+            sources = [sources]
+        for f in sources:
+            source_model = datamodels.open(f, meta_only=True)
+            input_model.data_ancestors.add_row({
+                'FILENAME' : str(source_model.meta.filename),
+                'DATETIME_OBS' : str(source_model.meta.datetime_obs),
+                'PRIMITIVE' : self.__class__.__name__
+            })
     
     def _get_args_repr(self):
         """Helper to get a string representation of current arguments."""
@@ -273,7 +284,7 @@ class BasePrimitive(ProcessingComponent):
                 pass
             if is_uuid:
                 input_model = datamodels.open(input, meta_only=True)
-                with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class(), use_cached=use_cached) as store:
+                with CalibrationStore(orm_class=input_model.get_calibration_orm_class(), use_cached=use_cached) as store:
                     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
                     if local_filepath is not None:
                         self._calibrations_used[cal_role] = calibration_orm
@@ -308,7 +319,7 @@ class BasePrimitive(ProcessingComponent):
             return cal_model, None  # Return the cal model as is. Ignore ORM.
 
             # Check if the calibration is in the DB.
-            # with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
+            # with CalibrationStore(orm_class=cal_model.get_calibration_orm_class(), use_cached=True) as store:
             #     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
             #     if local_filepath is not None:
             #         self._calibrations_used[cal_role] = calibration_orm
@@ -338,7 +349,7 @@ class BasePrimitive(ProcessingComponent):
             selector_kwargs = calibration_config.get('selector_kwargs', {})
             selector = selector_class(**selector_kwargs)
             input_model = datamodels.open(input, meta_only=True)
-            with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
+            with CalibrationStore(orm_class=input_model.get_calibration_orm_class()) as store:
                 local_filepath, calibration_orm = store.get_calibration(input_model.meta.model_dump(), selector=selector)
                 return local_filepath, calibration_orm
 
@@ -468,3 +479,45 @@ class BasePrimitive(ProcessingComponent):
         if '_output' in self.__dict__ and attr in self._output:
             return self._output[attr]
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")
+    
+    @staticmethod
+    def associate_fibers(input: list[str | datamodels.DataModel]) -> dict[str, object]:
+        fiber_map = {}
+        input_models = [datamodels.open(f, meta_only=True) for f in input]
+
+        for i, model in enumerate(input_models):
+            for fiber in range(1, model.NUM_FIBERS + 1):
+                val = getattr(model.meta, f'object_fiber{fiber}', None)
+                if val is None or val == 'BLOCKED':
+                    continue  # skip blocked fibers
+                key = str(fiber)
+                if key in fiber_map:
+                    raise ValueError(f"Multiple models for fiber {key}")
+                fiber_map[key] = input[i]
+
+        return fiber_map
+    
+    @staticmethod
+    def group_input_by_fiber_object(input: list[str | datamodels.DataModel]) -> dict[tuple, list]:
+        inputs_grouped = {}
+        input_models = [datamodels.open(f, meta_only=True) for f in input]
+
+        ref_set = None
+
+        for i, model in enumerate(input_models):
+            objs = []
+            for fiber in range(1, model.NUM_FIBERS + 1):
+                val = getattr(model.meta, f'object_fiber{fiber}', None)
+                objs.append('BLOCKED' if val is None or val == 'BLOCKED' else val)
+
+            objs = tuple(objs)
+            objs_set = frozenset(o for o in objs if o != 'BLOCKED')
+
+            if ref_set is None:
+                ref_set = objs_set
+            elif objs_set != ref_set:
+                raise ValueError(f"Inconsistent illuminated fiber types: {ref_set} vs {objs_set}")
+
+            inputs_grouped.setdefault(objs, []).append(input[i])
+
+        return inputs_grouped

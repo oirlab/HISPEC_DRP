@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .base_model import DataModel, CalibrationModel
-from .hispec_meta import HISPECMeta, HISPECCalibrationMeta
+from .hispec_meta import HISPECMeta
 from .dqflags import DQ_FLAGS
 
 __all__ = ['HISPECDataModel', 'HISPECCalibrationModel']
@@ -8,15 +8,9 @@ __all__ = ['HISPECDataModel', 'HISPECCalibrationModel']
 class HISPECDataModel(DataModel):
 
     META_MODEL = HISPECMeta
+    ORM_TABLE_NAME = 'HISPEC'
 
-    META_DEFAULTS = {
-        'instrument_name' : 'HISPEC',
-        'telescope' : 'Keck-II',
-        'order_start' : 125,
-        'order_end' : 85,
-        'clock_rate' : 150000,  # in Hz
-    }
-
+    INSTRUMENT_NAME = 'HISPEC'
     INSTRUMENT_ALIASES = {'BSPEC': 'HB', 'RSPEC': 'HR'}
 
     DQ_FLAGS = DQ_FLAGS
@@ -47,8 +41,6 @@ class HISPECDataModel(DataModel):
     
 
 class HISPECCalibrationModel(CalibrationModel, HISPECDataModel):
-
-    META_MODEL = HISPECCalibrationMeta
     
     def generate_filename(self, suffix : str | None = None) -> str:
         """
