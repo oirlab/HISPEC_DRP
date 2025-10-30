@@ -40,6 +40,8 @@ from .lfcfitparams import *
 from .lfcwavesol import *
 from .gausslsf import *
 from .ref_etalon import *
+from .tracepos import *
+from .traceprof import *
 
 # Registry of models
 _local_dict = locals()

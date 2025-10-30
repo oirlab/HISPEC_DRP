@@ -1,60 +1,43 @@
+from .base_model import CalibrationModel
+from .hispec_base import HISPECCalibrationModel
+from .parvi_base import PARVICalibrationModel
+
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
 import numpy as np
 
-__all__ = ['HISPECTracePosModel']
+__all__ = ['TracePosModel', 'HISPECTracePosModel', 'PARVITracePosModel']
 
-class HISPECTracePosModel(HISPECCalibrationModel):
 
-    EXTENSIONS = {
-        'POS_FIB1': {
+def _create_tracepos_extensions(num_fibers: int):
+    ext = {}
+    for fiber in range(1, num_fibers + 1):
+        ext[f'COEFF_POS_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'POS_FIB2': {
+        }
+        ext[f'COEFF_FWHM_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'POS_FIB3': {
+        }
+        ext[f'POS_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'COEFF_FIB1': {
+        }
+        ext[f'FWHM_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'COEFF_FIB2': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'COEFF_FIB3': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_FIB1': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_FIB2': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_FIB3': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_COEFF_FIB1': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_COEFF_FIB2': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'FWHM_COEFF_FIB3': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-    }
+        }
+    return ext
 
+
+class TracePosModel(CalibrationModel):
     CAL_TYPE = 'tracepos'
+
+
+class HISPECTracePosModel(HISPECCalibrationModel, TracePosModel):
+    EXTENSIONS = _create_tracepos_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
+
+
+class PARVITracePosModel(PARVICalibrationModel, TracePosModel):
+    EXTENSIONS = _create_tracepos_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
+

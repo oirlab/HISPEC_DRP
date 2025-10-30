@@ -1,40 +1,35 @@
+from .base_model import CalibrationModel
+from .hispec_base import HISPECCalibrationModel
+from .parvi_base import PARVICalibrationModel
+
 from astropy.io import fits
-from .hispec_calibration_base import HISPECCalibrationModel
 import numpy as np
 
-__all__ = ['HISPECTraceProfModel']
+__all__ = ['TraceProfModel', 'HISPECTraceProfModel', 'PARVITraceProfModel']
 
-class HISPECTraceProfModel(HISPECCalibrationModel):
 
-    EXTENSIONS = {
-        'PROF_FIB1': {
+def _create_traceprof_extensions(num_fibers: int):
+    ext = {}
+    for fiber in range(1, num_fibers + 1):
+        ext[f'PROF_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'PROF_FIB2': {
+        }
+        ext[f'PROF_ERR_FIB{fiber}'] = {
             'hdu_type' : fits.ImageHDU,
             'dtype' : np.float64
-        },
-        'PROF_FIB3': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
+        }
+    return ext
 
-        ### Add data quality extensions
 
-        ### Also add positions to this datamodel
-        'POS_FIB1': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'POS_FIB2': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-        'POS_FIB3': {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        },
-    }
-
+class TraceProfModel(CalibrationModel):
     CAL_TYPE = 'traceprof'
+
+
+class HISPECTraceProfModel(HISPECCalibrationModel, TraceProfModel):
+    EXTENSIONS = _create_traceprof_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
+
+
+class PARVITraceProfModel(PARVICalibrationModel, TraceProfModel):
+    EXTENSIONS = _create_traceprof_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
+
