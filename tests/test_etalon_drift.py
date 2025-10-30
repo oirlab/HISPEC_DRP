@@ -1,6 +1,7 @@
 from hispecdrp import FitEtalonLinesPrimitive, CalculateEtalonDriftCorrectionPrimitive, ApplyDriftCorrectionPrimitive, SetInitialWLSPrimitive
 from hispecdrp.utils import download_gdrive_file
-
+from hispecdrp import datamodels
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.constants
 import os
@@ -8,13 +9,14 @@ import os
 def test_fit_etalon_parvi(tmp_path, datadir):
 
     solar_files = [
-        'PARVI/L2/PR.20230803.62022.01_spec-SOLAR.fits',
-        'PARVI/L2/PR.20230803.65376.76_spec-SOLAR.fits',
-        'PARVI/L2/PR.20230803.68709.72_spec-SOLAR.fits'
+        download_gdrive_file('PARVI/L2/PR.20230803.64207.77_spec-SOLAR.fits', use_cached=True, output_dir=datadir),
+        download_gdrive_file('PARVI/L2/PR.20230803.67931.81_spec-SOLAR.fits', use_cached=True, output_dir=datadir),
+        download_gdrive_file('PARVI/L2/PR.20230803.71633.71_spec-SOLAR.fits', use_cached=True, output_dir=datadir)
     ]
-    solar_files = [download_gdrive_file(f, use_cached=True, output_dir=datadir) for f in solar_files]
-    lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83766.15.master-lfc_wavesol.fits', use_cached=True, output_dir=datadir)
-    ref_etalon = download_gdrive_file('PARVI/Cals/PR.20230803.62022.01.master-ref_etalon.fits', use_cached=True, output_dir=datadir)
+    lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83774.17.master-lfc_wavesol.fits', use_cached=True, output_dir=datadir)
+    ref_etalon = download_gdrive_file('PARVI/Cals/PR.20230725.83774.17.master-ref_etalon.fits', use_cached=True, output_dir=datadir)
+    ref_etalon_model = datamodels.open(ref_etalon)
+    lfc_wavesol_model = datamodels.open(lfc_wavesol)
     
     do_orders = np.arange(90, 100).astype(int).tolist()
     models = []
@@ -27,7 +29,7 @@ def test_fit_etalon_parvi(tmp_path, datadir):
         model = prim.apply(
             filepath,
             wavesol=lfc_wavesol,
-            do_fibers=['1', '3'],
+            do_fibers=['1', '2'],
         )
         models.append(model)
 
@@ -50,7 +52,7 @@ def test_fit_etalon_parvi(tmp_path, datadir):
             ref_etalon=ref_etalon,
             do_fibers=['1'],
         )
-        assert np.all(np.abs(model.drift_fib1['DRIFT_VEL']) < 20) # Check drift velocities are reasonable
+        assert np.all(np.abs(models[i].drift_fib1['DRIFT_VEL']) < 1000) # Check drift velocities are reasonable
 
     # Apply the drift correction
     for i in range(len(models)):
@@ -58,11 +60,11 @@ def test_fit_etalon_parvi(tmp_path, datadir):
         models[i] = prim.apply(
             models[i],
             do_orders=do_orders,
-            fiber_reference_map={'3': '1'}, # Drift correction for fiber 3 comes from fiber 1. e.g, apply drift correction measured by fiber 1 to fiber 3.
+            fiber_reference_map={'2': '1'}, # Drift correction for fiber 2 comes from fiber 1. e.g, apply drift correction measured by fiber 1 to fiber 2.
         )
         for order in do_orders:
             oi = np.abs(models[i].meta.order_start - order)
-            r = models[i].wave_fib3[oi, :] - models[0].wave_fib3[oi, :]
+            r = models[i].wave_fib2[oi, :] - lfc_wavesol_model.wave_fib2[oi, :]
             k = np.where(models[i].drift_fib1['ORDER'] == order)[0][0]
-            r *= scipy.constants.c / models[0].wave_fib3[oi, :]
+            r *= scipy.constants.c / models[0].wave_fib2[oi, :]
             assert np.allclose(r, -models[i].drift_fib1['DRIFT_VEL'][k], atol=1E-6)

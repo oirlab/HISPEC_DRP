@@ -7,10 +7,11 @@ def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
     filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    #filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits'
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'HISPEC'
-        assert model.meta.exposure_type == "SCI"
+        assert model.meta.exposure_type == "SPEC"
         assert model.meta.spectrograph == 'BSPEC'
         assert model.meta.model_type == 'HISPECL0Model'
         assert model.meta.instrument_mode == 'YJHK'
@@ -57,11 +58,12 @@ def test_hispec_level0(tmp_path, datadir):
 def test_parvi_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True, output_dir=datadir)
+    filepath = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', use_cached=True, output_dir=datadir)
+    #filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits'
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'PARVI'
-        assert model.meta.exposure_type == "SCI"
+        assert model.meta.exposure_type == "SPEC"
         assert model.meta.model_type == 'PARVIL0Model'
         shape = (2048, 2048)
         assert model.rate.shape == shape
