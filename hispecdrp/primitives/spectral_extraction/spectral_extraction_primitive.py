@@ -2,172 +2,316 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
 
-__all__ = ['FluxExtractionPrimitive']
+from .extract_box import extract_spectrum_box
+from .extract_optimal import extract_spectrum_optimal
+from .extract_cross_talk import extract_spectra_cross_talk
+from ...calibrations import TracePosSelector, TraceProfSelector
+
+import matplotlib.pyplot as plt
+
+__all__ = ['SpectralExtractionPrimitive']
 
 
-class FluxExtractionPrimitive(BasePrimitive):
-    """
-    ARGUMENTS:
-        tracepos (datamodels.HISPECTracePosModel | str | None): Trace traceposs for flux extraction
-            if None, the trace traceposs will be queried
-        traceprof (datamodels.HISPECTraceProfModel | str | None): Profile traceprof to use for flux extraction
-            If None, the fiber flat will be queried.
-        method (str | 'box'): method to use for flux extraction.
-            At present, only box is implemented
-        boxwidth (int | 5): width to use for box extraction
-    """
-
-    class_alias = 'flux_extract'
+class SpectralExtractionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'fluxextracted',
-        'tracepos' : None
-        'traceprof' : None
-        method : 'box' 
-        boxwidth : 5
+        'suffix' : 'specextracted',
+        'method' : 'box',
+        'extraction_aperture' : None,
+        'do_fibers' : None,
+        'do_orders' : None,
+        'xrange' : None,
+        'output_model' : 'L1Model',
+    }
+
+    CALIBRATIONS = {
+        'tracepos': {
+            'selector': TracePosSelector,
+            'selector_kwargs': {}
+        },
+        'traceprof': {
+            'selector': TraceProfSelector,
+            'selector_kwargs': {}
+        },
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.args.name, copy=False)
 
-        ### Load the trace positions if not passed
-        if self.args.tracepos is None:
-            tracepos_path = self.get_calibration_file(input_model, cal_type='tracepos')
+        # Open the input model
+        input_model = datamodels.open(self.input)
+        nx = input_model.rate.shape[1]
+
+        # Get calibrations
+        tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
+        traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
+
+        # Init output model
+        output_model = self.get_output_model(input_model)
+
+        # Which fibers and orders to process
+        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
+        order_vec = input_model.make_order_vec()
+        n_orders = len(order_vec)
+
+        for fiber in do_fibers:
+            if getattr(output_model, f'SPEC_UNCAL_FIB{fiber}') is None:
+                setattr(output_model, f'SPEC_UNCAL_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate.dtype))
+                setattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_err.dtype))
+                setattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_poisson.dtype))
+                setattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_rnoise.dtype))
+                setattr(output_model, f'SPEC_DQ_FIB{fiber}', np.zeros((n_orders, nx), dtype=input_model.dq.dtype))
+
+        # Dispatch to extraction method
+        if self.method.lower() == 'box':
+            self.extract_box(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
+            )
+        elif self.method.lower() == 'optimal':
+            self.extract_optimal(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                traceprof_model=traceprof_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
+            )
+        elif self.method.lower() == 'cross_talk':
+            self.extract_cross_talk(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                traceprof_model=traceprof_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
+            )
         else:
-            tracepos_path = self.args.tracepos
-        tracepos_model = datamodels.open(tracepos_path, copy=False)
+            raise ValueError(f"Unknown extraction method: {self.method}")
 
-        ### If using box extraction, the traceprof should be empty
-        if self.args.method.lower() == 'optimal':
-            if self.args.traceprof is None:
-                traceprof_path = self.get_calibration_file(input_model, cal_type='traceprof')
-            else:
-                traceprof_path = self.args.traceprof
-            traceprof_model = datamodels.open(tracepos_path, copy=False)
-        elif self.args.metho.lower() == 'box':
-            traceprof_model = None
-        else:
-            self.log.error(f"Invalid flux extraction method {self.args.method.lower()}")
-            raise ValueError(f"Invalid flux extraction method {self.args.method.lower()}")
+        # Return
+        return dict(output=output_model)
 
+    def extract_box(
+        self,
+        input_model : datamodels.L0Model,
+        output_model : datamodels.L1Model,
+        tracepos_model : datamodels.TracePosModel,
+        do_fibers : np.ndarray,
+        do_orders : np.ndarray,
+    ):
+        order_vec = input_model.make_order_vec()
+        for fiber in do_fibers:
 
-        result = input_model.copy()
-        if self.args.method.lower() == 'box'
-            self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and width {boxwidth}")
-        else:
-            self.log.info(f"Performing {method} extraction on {input_model} with tracepos {tracepos_model} and traceprof {traceprof_mdoel}")
+            # Get the trace position coefficients for the fiber
+            trace_positions = getattr(tracepos_model, f'POS_FIB{fiber}')
+            
+            # Sanity check
+            assert trace_positions.shape[0] == len(order_vec), "Trace position coefficients do not match number of orders"
+
+            for j, order in enumerate(order_vec):
+                self.log.info(f"Extracting {input_model} with method {self.method} [Fiber {fiber}][Order {order}]")
+
+                # Alias output
+                spec_output = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')
+                err_output = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')
+                var_rnoise_output = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
+                var_poisson_output = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
+                dq_output = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+
+                # Perform box extraction
+                extract_spectrum_box(
+                    input_data=input_model.rate,
+                    input_err=input_model.rate_err,
+                    input_dq=input_model.dq,
+                    input_var_rnoise=input_model.rate_var_rnoise,
+                    input_var_poisson=input_model.rate_var_poisson,
+                    trace_positions=trace_positions[j, :],
+                    extraction_aperture=self.extraction_aperture,
+                    xrange=self.xrange,
+                    spec_output=spec_output[j, :],
+                    err_output=err_output[j, :],
+                    var_rnoise_output=var_rnoise_output[j, :],
+                    var_poisson_output=var_poisson_output[j, :],
+                    dq_output=dq_output[j, :],
+                )
+
+                # NOTE: Keep for debugging
+                # breakpoint()
+                # import matplotlib.pyplot as plt; plt.imshow(input_model.rate, vmin=0, vmax=np.nanquantile(input_model.rate, 0.995)); plt.plot(trace_positions,color='r'); plt.show()
+                # plt.plot(spec_uncal[j, :]); plt.show()
+
+    def extract_optimal(
+        self,
+        input_model : datamodels.L0Model,
+        output_model : datamodels.L1Model,
+        tracepos_model : datamodels.TracePosModel,
+        traceprof_model : datamodels.TraceProfModel,
+        do_fibers : np.ndarray,
+        do_orders : np.ndarray,
+    ):
+        nx = input_model.rate.shape[1]
+        order_vec = input_model.make_order_vec()
+        for fiber in do_fibers:
+
+            # Get the trace position coefficients for the fiber
+            trace_positions = getattr(tracepos_model, f'POS_FIB{fiber}')
+            # Sanity check
+            #assert trace_pos_coeffs.shape[0] == len(order_vec), "Trace position coefficients do not match number of orders"
+            fiberflat_profile = getattr(traceprof_model, f'PROF_FIB{fiber}')
+
+            for j, order in enumerate(order_vec):
+
+                if order not in do_orders:
+                    continue
+                self.log.info(f"Extracting {input_model} with method {self.method} [Fiber {fiber}][Order {order}]")
+
+                # Alias output
+                spec_output = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')
+                err_output = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')
+                var_rnoise_output = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
+                var_poisson_output = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
+                dq_output = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+
+                # NOTE: Keep for debugging
+                #if order == 94:
+                #    breakpoint()
+                    # plt.imshow(input_model.rate); plt.plot(trace_positions[0], c='red'); plt.plot(trace_positions[1], c='red'); plt.show()
+
+                # Perform box extraction
+
+                extract_spectrum_optimal(
+                    input_data=input_model.rate,
+                    input_err=input_model.rate_err,
+                    input_dq=input_model.dq,
+                    input_var_rnoise=input_model.rate_var_rnoise,
+                    input_var_poisson=input_model.rate_var_poisson,
+                    trace_positions=trace_positions[j, :],
+                    profile=fiberflat_profile,
+                    extraction_aperture=self.extraction_aperture,
+                    xrange=self.xrange,
+                    spec_output=spec_output[j, :],
+                    err_output=err_output[j, :],
+                    var_rnoise_output=var_rnoise_output[j, :],
+                    var_poisson_output=var_poisson_output[j, :],
+                    dq_output=dq_output[j, :],
+                )
+
+                # NOTE: Keep for debugging
+                # breakpoint()
+                # import matplotlib.pyplot as plt; plt.imshow(input_model.rate, vmin=0, vmax=np.nanquantile(input_model.rate, 0.995)); plt.plot(trace_positions,color='r'); plt.show()
+                # plt.plot(spec_uncal[j, :]); plt.show()
+    
+    def extract_cross_talk(
+        self,
+        input_model : datamodels.L0Model,
+        output_model : datamodels.L1Model,
+        tracepos_model : datamodels.TracePosModel,
+        traceprof_model : datamodels.TraceProfModel,
+        do_fibers : np.ndarray,
+        do_orders : np.ndarray,
+    ):
         
-        result = flux_extraction(result, tracepos_model, traceprof_model, method, boxwidth)
-        return result
-    
+        n_fibers = len(do_fibers)
+        ny, nx = input_model.rate.shape
+        order_vec = input_model.make_order_vec()
+        fiberflat_profiles = np.zeros((n_fibers, ny, nx), dtype=input_model.rate.dtype)
+        
+        for j, fiber in enumerate(do_fibers):
+            fiberflat_profiles[j, :, :] = getattr(traceprof_model, f'PROF_FIB{fiber}')
+
+        for i, order in enumerate(order_vec):
+            if order not in do_orders:
+                continue
+            trace_positions = np.zeros((n_fibers, nx), dtype=input_model.rate.dtype)
+            for j, fiber in enumerate(do_fibers):
+                trace_positions[j, :] = getattr(tracepos_model, f'POS_FIB{fiber}')[i, :]
+                
+            self.log.info(f"Extracting {input_model} with method {self.method} [Fibers {do_fibers}][Order {order}]")
+
+            # NOTE: Keep for debugging
+            #breakpoint()
+            # plt.imshow(input_model.rate); plt.plot(trace_positions[0], c='red'); plt.plot(trace_positions[1], c='red'); plt.show()
+
+            # Extract all pixels, all fibers for this order
+            result = extract_spectra_cross_talk(
+                input_data=input_model.rate,
+                input_err=input_model.rate_err,
+                input_dq=input_model.dq,
+                input_var_rnoise=input_model.rate_var_rnoise,
+                input_var_poisson=input_model.rate_var_poisson,
+                trace_positions=trace_positions,
+                profile=fiberflat_profiles,
+                extraction_aperture=self.extraction_aperture,
+                xrange=self.xrange,
+            )
+            for j, fiber in enumerate(do_fibers):
+                
+                spec_uncal = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')
+                spec_uncal[i, :] = result['spec'][j, :]
+
+                err_output_fiber = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')
+                err_output_fiber[i, :] = result['err'][j, :]
+
+                var_rnoise_output_fiber = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
+                var_rnoise_output_fiber[i, :] = result['var_rnoise'][j, :]
+
+                var_poisson_output_fiber = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
+                var_poisson_output_fiber[i, :] = result['var_poisson'][j, :]
+
+                dq_output_fiber = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+                dq_output_fiber[i, :] = result['dq'][j, :]
+
+            # NOTE: Keep for debugging
+            # breakpoint()
+            # import matplotlib.pyplot as plt; plt.imshow(input_model.rate, vmin=0, vmax=np.nanquantile(input_model.rate, 0.995)); plt.plot(trace_positions,color='r'); plt.show()
+            # plt.plot(spec_uncal[j, :]); plt.show()
 
 
 
-def flux_extraction(
-        input_model : datamodels.HISPECL0Model,
-        tracepos_model : datamodels.HISPECTracePosModel,
-        traceprof_model : datamodels.HISPECTraceProfModel ,
-        method : str,
-        boxwidth : int
-    ) -> datamodels.HISPECL1Model:
-    """
-    Flux extraction.
-
-    Args:
-        input_model (HISPECL0Model): Input level 0 model.
-        tracepos_model (HISPECTracePosModel): Trace center tracepos
-        traceprof_model (HISPECTraceProfModel): traceprof for optimal extraction
-        method (str): Type of extraction to perform.
-        boxwidth (int): size of box to use for box extraction
-    
-    Returns:
-        HISPECL1Model: The extracted 1D sepectra.
-    """
-
-    ### How do we compute average reference time for each wavelength
-
-    ### Dictionary that will be filled with output data
-    out_dict = {}
-
-    ### Basic box extraction for now
-    if method == 'box':
-        dy = (boxwidth - 1) // 2
-        ### Loop over fibers
-        for i in range(1,4):
-            ### Get the trace positions for the fiber
-            pos = tracepos_model[f'POS_FIB{i}']
-            ### Set up the output arrays
-            flux = np.empty(pos.shape)
-            err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
-            dq = np.empty(pos.shape)
-            ### Loop over orders and wavlength channels for the specified fiber
-            ### We can definitely find ways to speed up the nested loop
-            for order in range(pos.shape[0]):
-                for channel in range(pos.shape[1]):
-                    y = int(np.round(pos[order, channel]),0)
-                    ### Check axes with some simulated data
-                    ### Simple sum of the flux
-                    flux[order, channel] = np.sum(input_model.data[y-dy:y+dy+1,channel])
-                    ### Assuming the errors add in quadrature but can revisit
-                    err[order, channel] = np.sqrt(np.sum(input_model.err[y-dy:y+dy+1,channel]**2))
-                    ### Assuming there are no covariances so that this is a straight sum
-                    rnoise[order, channel] = np.sum(input_model.var_rnoise[y-dy:y+dy+1,channel])
-                    poisson[order, channel] = np.sum(input_model.var_poisson[y-dy:y+dy+1,channel])
-                    ### Just check if any pixels in the slice were bad or do something more complicated?
-                    dq = int(~np.any(input_model.dq[y-dy:y+dy+1,channel] != 0))
-            ### Save the results for each fiber to a separate extension
-            out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
-            out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
-            out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
-            out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
-            ### FIXME this should be a logical or
-            out_dict[f'SPEC_DQ_FIB{i}'] = dq
-            ### How do we calculate mid time
-            # output[f'MID_TIME_FIB{i}']
-            ### Are we attaching wavelength solution now?
-        return output
-
-    elif method == 'optimal':
-        for i in range(1,4):
-            ### Get the trace positions for the fiber
-            pos = tracepos_model[f'POS_FIB{i}']
-            prof = traceprof_model[f'POF_FIB{i}']
-            ### Set up the output arrays
-            flux = np.empty(pos.shape)
-            err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
-            dq = np.empty(pos.shape)
-            ### Loop over orders and wavlength channels for the specified fiber
-            ### We can definitely find ways to speed up the nested loop
-            for xpix in range(pos.shape[1]):
-                ### Get data slice around position of each order
-                cutdata = np.zeros((prof.shape[0],prof.shape[-1]))
-                cutprof = np.zeros((prof.shape[0],prof.shape[-1]))
-                for i in range(prof.shape[0]):
-                    ### Cut data. Careful that this is done exactly how it was done when the 
-                    ### trace profile was calculated
-                    center = int(pos[i,xpix])
-                    width = (prof.shape[-1]-1) // 2
-                    dslice = data[center-width:center+width+1,xpix]
-                    pslice = np.atleast_2d(prof[i,xpix])
-                    ### Now we do the linear algebra to get the flux, solving
-                    ### data = flux x profile for the OLS flux value
-                    ### Did the linalg explicitly so that we could maybe
-                    ### jit compile this, and because scipy is super slow
-                    inv = np.linalg.inv(np.dot(pslice,pslice.T))
-                    pfactor = np.dot(pslice.T, inv)
-                    flux[i,xpix] = np.sum(dslice*pfactor[:,0])
-                    ### FIXME how does error propegation work with this
+    # elif method == 'optimal':
+    #     for i in range(1,4):
+    #         ### Get the trace positions for the fiber
+    #         pos = tracepos_model[f'POS_FIB{i}']
+    #         prof = traceprof_model[f'POF_FIB{i}']
+    #         ### Set up the output arrays
+    #         flux = np.empty(pos.shape)
+    #         err, rnoise, poisson = np.empty(pos.shape), np.empty(pos.shape), np.empty(pos.shape)
+    #         dq = np.empty(pos.shape)
+    #         ### Loop over orders and wavlength channels for the specified fiber
+    #         ### We can definitely find ways to speed up the nested loop
+    #         for xpix in range(pos.shape[1]):
+    #             ### Get data slice around position of each order
+    #             cutdata = np.zeros((prof.shape[0],prof.shape[-1]))
+    #             cutprof = np.zeros((prof.shape[0],prof.shape[-1]))
+    #             for i in range(prof.shape[0]):
+    #                 ### Cut data. Careful that this is done exactly how it was done when the 
+    #                 ### trace profile was calculated
+    #                 center = int(pos[i,xpix])
+    #                 width = (prof.shape[-1]-1) // 2
+    #                 dslice = data[center-width:center+width+1,xpix]
+    #                 pslice = np.atleast_2d(prof[i,xpix])
+    #                 ### Now we do the linear algebra to get the flux, solving
+    #                 ### data = flux x profile for the OLS flux value
+    #                 ### Did the linalg explicitly so that we could maybe
+    #                 ### jit compile this, and because scipy is super slow
+    #                 inv = np.linalg.inv(np.dot(pslice,pslice.T))
+    #                 pfactor = np.dot(pslice.T, inv)
+    #                 flux[i,xpix] = np.sum(dslice*pfactor[:,0])
+    #                 ### FIXME how does error propegation work with this
                     
 
-            ### Save the results for each fiber to a separate extension
-            out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
-            out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
-            out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
-            out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
-            out_dict[f'SPEC_DQ_FIB{i}'] = dq
+    #         ### Save the results for each fiber to a separate extension
+    #         out_dict[f'SPEC_UNCAL_FIB{i}'] = flux
+    #         out_dict[f'SPEC_UNCAL_ERR_FIB{i}'] = err
+    #         out_dict[f'SPEC_UNCAL_VAR_POISSON_FIB{i}'] = poisson
+    #         out_dict[f'SPEC_UNCAL_VAR_RNOISE{i}'] = rnoise
+    #         out_dict[f'SPEC_DQ_FIB{i}'] = dq
 
 
-    ### Write the output model
-    model_result = HISPECL1Model(data=out_dict,meta=input_model.meta)
+    # ### Write the output model
+    # model_result = HISPECL1Model(data=out_dict,meta=input_model.meta)
 
-    return model_result
+    # return model_result

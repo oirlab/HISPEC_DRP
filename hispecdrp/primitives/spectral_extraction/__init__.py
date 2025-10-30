@@ -1,3 +1,1 @@
-from .extraction_primitive import FluxExtractionPrimitive
-
-__all__ = ['FluxExtractionPrimitive']
+from .spectral_extraction_primitive import SpectralExtractionPrimitive
