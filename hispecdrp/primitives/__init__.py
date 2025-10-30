@@ -8,8 +8,10 @@ from .detector_gain import *
 from .ramp_fitting import *
 from .coadd import *
 from .nonlinear_correction import *
+from .trace_fitting import *
 from .line_fitting import *
 from .wavesol import *
 from .lsf import *
 from .register_calibration import *
 from .jump_detection import *
+from .spectral_extraction import *
