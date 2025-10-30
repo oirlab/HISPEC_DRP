@@ -47,12 +47,13 @@ CALIBRATIONS = {
     }
 }
 
-COADD_SOURCES = {
-    'COADD_SOURCES': {
+DATA_ANCESTORS = {
+    'DATA_ANCESTORS': {
         'hdu_type': fits.BinTableHDU,
         'columns': {
             'FILENAME' : str,
             'DATETIME_OBS' : str,
+            'PRIMITIVE' : str,
         }
     }
 }
