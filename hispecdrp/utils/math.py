@@ -170,7 +170,7 @@ def robust_stats(
     if x_good.size < 2 or w_sum == 0:
         return np.nan, np.nan, good
     mu_final = weighted_mean(x_good, w_good)
-    sig_final = weighted_stddev(x_good, w_good, M=mu_final)
+    sig_final = weighted_stddev(x_good, w_good, mu=mu_final)
 
     return mu_final, sig_final, good
 
@@ -348,7 +348,7 @@ def weighted_quantile(x : np.ndarray, w : np.ndarray | None = None, q : float = 
 
     # Default weights
     if w is None:
-        w = np.ones(x.shape, dtype=int)
+        w = np.ones(x.shape, dtype=np.float64)
 
     # Flatten
     x = x.ravel()
@@ -394,9 +394,87 @@ def all_sc(arr : np.ndarray) -> bool:
             return False
     return True
 
+@njit(nogil=True)
+def any_sc(arr : np.ndarray) -> bool:
+    """
+    Optimized version of np.any which short circuits, unlike numpy.any.
+    """
+    for item in arr.ravel():
+        if item:
+            return True
+    return False
+
 @njit(nogil=True, cache=True, parallel=False)
 def bitwise_or_reduce_uint32(arr: np.ndarray) -> np.uint32:
     result = np.uint32(0)
     for k in range(arr.shape[0]):
         result |= arr[k]
     return result
+
+@njit(nogil=True)
+def _calc_median_insertion_sort(vals, m):
+    # insertion sort first m entries, then return median
+    for i in range(1, m):
+        key = vals[i]
+        j = i - 1
+        while j >= 0 and vals[j] > key:
+            vals[j + 1] = vals[j]
+            j -= 1
+        vals[j + 1] = key
+    if m == 0:
+        return np.nan
+    if m % 2 == 1:
+        return vals[m // 2]
+    else:
+        a = vals[(m // 2) - 1]
+        b = vals[m // 2]
+        return 0.5 * (a + b)
+
+
+@njit(nogil=True)
+def median_filter_1d(data : np.ndarray, dq : np.ndarray, window_size : int):
+    n = data.shape[0]
+    out = np.empty(n, dtype=data.dtype)
+    half = window_size // 2
+    # temporary array sized to window for collecting valid values
+    temp = np.empty(window_size, dtype=data.dtype)
+    for i in range(n):
+        m = 0
+        start = i - half
+        end = i + half
+        for j in range(start, end + 1):
+            if 0 <= j < n and dq[j] == 0:
+                temp[m] = data[j]
+                m += 1
+        if m == 0:
+            out[i] = np.nan
+        else:
+            out[i] = _calc_median_insertion_sort(temp, m)
+    return out
+
+
+@njit(nogil=True)
+def median_filter_2d(data, dq, window_size : tuple[int, int]):
+    ny, nx = data.shape
+    out = np.empty((ny, nx), dtype=data.dtype)
+    hy = window_size[0] // 2
+    hx = window_size[1] // 2
+    temp = np.empty(window_size[0] * window_size[1], dtype=data.dtype)
+
+    for iy in range(ny):
+        for ix in range(nx):
+            m = 0
+            for jy in range(iy - hy, iy + hy + 1):
+                if jy < 0 or jy >= ny:
+                    continue
+                for jx in range(ix - hx, ix + hx + 1):
+                    if jx < 0 or jx >= nx:
+                        continue
+                    if dq[jy, jx] == 0:
+                        temp[m] = data[jy, jx]
+                        m += 1
+            if m == 0:
+                out[iy, ix] = np.nan
+            else:
+                out[iy, ix] = _calc_median_insertion_sort(temp, m)
+    return out
