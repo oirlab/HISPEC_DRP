@@ -27,6 +27,8 @@ Calibration Models
    dark
    gain
    detector_flat
+   tracepos
+   traceprof
    lfcfitparams
    lfcwavesol
    gausslsf

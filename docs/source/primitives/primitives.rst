@@ -22,7 +22,10 @@ Stage 0 (Detector Processing)
 Stage 1 (Spectral Extraction)
 -----------------------------
 
-In progress...
+.. toctree::
+   :maxdepth: 1
+
+   spectral_extraction
 
 
 Stage 2 (Spectral Calibration)
@@ -43,6 +46,17 @@ Calibrations
    :maxdepth: 1
 
    register_cal
+   trace_finding
+   trace_profile
    lfc_line_fitting
    lfc_wavesol
    gauss_lsf
+
+
+Miscellaneous
+-------------
+
+.. toctree::
+   :maxdepth: 1
+
+   coadd_frames
