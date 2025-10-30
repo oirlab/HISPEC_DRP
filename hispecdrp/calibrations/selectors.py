@@ -14,6 +14,8 @@ __all__ = [
     'DetectorGainSelector',
     'WavelengthSolutionSelector',
     'ReferenceEtalonSelector',
+    'TracePosSelector',
+    'TraceProfSelector',
 ]
 
 class DQSelector(CalibrationSelector):
@@ -65,6 +67,44 @@ class DarkSelector(CalibrationSelector):
                 return session.query(db.orm_class).filter(
                     db.orm_class.cal_type == 'dark',
                     db.orm_class.instrument_era == meta['instrument_era'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            
+
+class TracePosSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'tracepos',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                    db.orm_class.master_cal == True,
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'tracepos',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            
+
+class TraceProfSelector(CalibrationSelector):
+
+    def get_candidates(self, meta : dict, db : CalibrationDB):
+        with db.session_manager() as session:
+            if meta['instrument_name'].lower() == 'hispec':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'traceprof',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
+                    db.orm_class.master_cal == True,
+                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+            elif meta['instrument_name'].lower() == 'parvi':
+                return session.query(db.orm_class).filter(
+                    db.orm_class.cal_type == 'traceprof',
+                    db.orm_class.instrument_era == meta['instrument_era'],
+                    db.orm_class.spectrograph == meta['spectrograph'],
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
 
