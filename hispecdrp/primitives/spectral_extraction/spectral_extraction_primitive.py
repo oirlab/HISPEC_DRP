@@ -112,6 +112,10 @@ class SpectralExtractionPrimitive(BasePrimitive):
             assert trace_positions.shape[0] == len(order_vec), "Trace position coefficients do not match number of orders"
 
             for j, order in enumerate(order_vec):
+
+                if order not in do_orders:
+                    continue
+
                 self.log.info(f"Extracting {input_model} with method {self.method} [Fiber {fiber}][Order {order}]")
 
                 # Alias output
@@ -180,8 +184,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 #    breakpoint()
                     # plt.imshow(input_model.rate); plt.plot(trace_positions[0], c='red'); plt.plot(trace_positions[1], c='red'); plt.show()
 
-                # Perform box extraction
-
+                # Perform optimal extraction
                 extract_spectrum_optimal(
                     input_data=input_model.rate,
                     input_err=input_model.rate_err,
