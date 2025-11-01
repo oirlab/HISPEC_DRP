@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
+from typing import Sequence
 
 from .extract_box import extract_spectrum_box
 from .extract_optimal import extract_spectrum_optimal
@@ -37,62 +38,79 @@ class SpectralExtractionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        # Open the input model
-        input_model = datamodels.open(self.input)
-        nx = input_model.rate.shape[1]
+        if isinstance(self.input, (datamodels.DataModel, str)):
+            output = None
+            input = [self.input]
+        elif isinstance(self.input, Sequence):
+            output = []
+            input = self.input
 
-        # Get calibrations
-        tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
-        traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
+        # Loop over inputs (now a list)
+        for _input in input:
+        
+            # Open the input model
+            input_model = datamodels.open(_input)
+            nx = input_model.rate.shape[1]
 
-        # Init output model
-        output_model = self.get_output_model(input_model)
+            # Get calibrations
+            tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
+            traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
 
-        # Which fibers and orders to process
-        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
-        order_vec = input_model.make_order_vec()
-        n_orders = len(order_vec)
+            # Init output model
+            output_model = self.get_output_model(input_model)
 
-        for fiber in do_fibers:
-            if getattr(output_model, f'SPEC_UNCAL_FIB{fiber}') is None:
-                setattr(output_model, f'SPEC_UNCAL_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate.dtype))
-                setattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_err.dtype))
-                setattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_poisson.dtype))
-                setattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_rnoise.dtype))
-                setattr(output_model, f'SPEC_DQ_FIB{fiber}', np.zeros((n_orders, nx), dtype=input_model.dq.dtype))
+            # Which fibers and orders to process
+            do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
+            order_vec = input_model.make_order_vec()
+            n_orders = len(order_vec)
 
-        # Dispatch to extraction method
-        if self.method.lower() == 'box':
-            self.extract_box(
-                input_model=input_model,
-                output_model=output_model,
-                tracepos_model=tracepos_model,
-                do_fibers=do_fibers,
-                do_orders=do_orders
-            )
-        elif self.method.lower() == 'optimal':
-            self.extract_optimal(
-                input_model=input_model,
-                output_model=output_model,
-                tracepos_model=tracepos_model,
-                traceprof_model=traceprof_model,
-                do_fibers=do_fibers,
-                do_orders=do_orders
-            )
-        elif self.method.lower() == 'cross_talk':
-            self.extract_cross_talk(
-                input_model=input_model,
-                output_model=output_model,
-                tracepos_model=tracepos_model,
-                traceprof_model=traceprof_model,
-                do_fibers=do_fibers,
-                do_orders=do_orders
-            )
-        else:
-            raise ValueError(f"Unknown extraction method: {self.method}")
+            # Initialize output arrays if not already set
+            for fiber in do_fibers:
+                if getattr(output_model, f'SPEC_UNCAL_FIB{fiber}') is None:
+                    setattr(output_model, f'SPEC_UNCAL_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate.dtype))
+                    setattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_err.dtype))
+                    setattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_poisson.dtype))
+                    setattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}', np.full((n_orders, nx), np.nan, dtype=input_model.rate_var_rnoise.dtype))
+                    setattr(output_model, f'SPEC_DQ_FIB{fiber}', np.zeros((n_orders, nx), dtype=input_model.dq.dtype))
+
+            # Dispatch to extraction method
+            if self.method.lower() == 'box':
+                self.extract_box(
+                    input_model=input_model,
+                    output_model=output_model,
+                    tracepos_model=tracepos_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders
+                )
+            elif self.method.lower() == 'optimal':
+                self.extract_optimal(
+                    input_model=input_model,
+                    output_model=output_model,
+                    tracepos_model=tracepos_model,
+                    traceprof_model=traceprof_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders
+                )
+            elif self.method.lower() == 'cross_talk':
+                self.extract_cross_talk(
+                    input_model=input_model,
+                    output_model=output_model,
+                    tracepos_model=tracepos_model,
+                    traceprof_model=traceprof_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders
+                )
+            else:
+                raise ValueError(f"Unknown extraction method: {self.method}")
+                
+            # Append to output list
+            if isinstance(output, list):
+                output.append(output_model)
+            else:
+                output = output_model
 
         # Return
-        return dict(output=output_model)
+        return dict(output=output)
 
     def extract_box(
         self,
