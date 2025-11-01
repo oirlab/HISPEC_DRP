@@ -215,3 +215,65 @@ class ProcessingComponent(_BasePrimitive):
             str: A formatted string showing all current argument values.
         """
         return print(self.prepr_args())
+    
+    @staticmethod
+    def get_do_traces(input_model : datamodels.DataModel, do_fibers : list[str] | None = None, do_orders : list[int] | None = None) -> tuple[list[str], list[int]]:
+        """
+        Helper to get the default fibers and orders to process. By default, all fibers and orders in the input model are processed if not provided.
+        This method may get updated depending on where the DRP determines which fibers to process.
+
+        Args:
+            input_model (datamodels.DataModel): The input data model.
+            do_fibers (list[str], optional): List of fiber numbers to process. If None, process all fibers.
+            do_orders (list[int], optional): List of order numbers to process. If None, process all orders.
+
+        Returns:
+            tuple[list[str], list[int]]: A tuple of (do_fibers, do_orders).
+        """
+        if do_fibers is None:
+            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
+        if do_orders is None:
+            do_orders = input_model.make_order_vec()
+        return do_fibers, do_orders
+    
+    @staticmethod
+    def associate_fibers(input: list[str | datamodels.DataModel]) -> dict[str, object]:
+        fiber_map = {}
+        input_models = [datamodels.open(f, meta_only=True) for f in input]
+
+        for i, model in enumerate(input_models):
+            for fiber in range(1, model.NUM_FIBERS + 1):
+                val = getattr(model.meta, f'object_fiber{fiber}', None)
+                if val is None or val == 'BLOCKED':
+                    continue  # skip blocked fibers
+                key = str(fiber)
+                if key in fiber_map:
+                    raise ValueError(f"Multiple models for fiber {key}")
+                fiber_map[key] = input[i]
+
+        return fiber_map
+    
+    @staticmethod
+    def group_input_by_fiber_object(input: list[str | datamodels.DataModel]) -> dict[tuple, list]:
+        inputs_grouped = {}
+        input_models = [datamodels.open(f, meta_only=True) for f in input]
+
+        ref_set = None
+
+        for i, model in enumerate(input_models):
+            objs = []
+            for fiber in range(1, model.NUM_FIBERS + 1):
+                val = getattr(model.meta, f'object_fiber{fiber}', None)
+                objs.append('BLOCKED' if val is None or val == 'BLOCKED' else val)
+
+            objs = tuple(objs)
+            objs_set = frozenset(o for o in objs if o != 'BLOCKED')
+
+            if ref_set is None:
+                ref_set = objs_set
+            elif objs_set != ref_set:
+                raise ValueError(f"Inconsistent illuminated fiber types: {ref_set} vs {objs_set}")
+
+            inputs_grouped.setdefault(objs, []).append(input[i])
+
+        return inputs_grouped
