@@ -1,11 +1,9 @@
 from astropy.io import fits
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
 
 from .extensions import IMAGE_FLOAT32_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
-__all__ = ['GaussianLSFModel', 'HISPECGaussianLSFModel', 'PARVIGaussianLSFModel']
+__all__ = ['GaussianLSFModel']
 
 
 def _create_gausslsf_extensions(num_fibers : int):
@@ -21,12 +19,10 @@ def _create_gausslsf_extensions(num_fibers : int):
 
 
 class GaussianLSFModel(CalibrationModel):
+    def __init__(self, *args, **kwargs):
+        if 'config' in kwargs and kwargs['config'] is not None:
+            self.EXTENSIONS.update(_create_gausslsf_extensions(kwargs['config'].num_fibers))
+        else:
+            self.EXTENSIONS.update(_create_gausslsf_extensions(self.DEFAULT_CONFIG.num_fibers))
+        super().__init__(*args, **kwargs)
     CAL_TYPE = 'lsf'
-
-
-class HISPECGaussianLSFModel(HISPECCalibrationModel, GaussianLSFModel):
-    EXTENSIONS = _create_gausslsf_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
-
-
-class PARVIGaussianLSFModel(PARVICalibrationModel, GaussianLSFModel):
-    EXTENSIONS = _create_gausslsf_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)

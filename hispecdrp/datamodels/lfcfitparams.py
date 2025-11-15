@@ -1,10 +1,7 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
-
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_lfcfitparam_extensions
 
-__all__ = ['LFCFitParamsModel', 'HISPECLFCFitParamsModel', 'PARVILFCFitParamsModel']
+__all__ = ['LFCFitParamsModel']
 
 
 def _create_lfcfitparams_extensions(num_fibers: int):
@@ -19,11 +16,9 @@ def _create_lfcfitparams_extensions(num_fibers: int):
 
 class LFCFitParamsModel(CalibrationModel):
     CAL_TYPE = 'lfc_fitparams'
-
-
-class HISPECLFCFitParamsModel(HISPECCalibrationModel, LFCFitParamsModel):
-    EXTENSIONS = _create_lfcfitparams_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
-
-
-class PARVILFCFitParamsModel(PARVICalibrationModel, LFCFitParamsModel):
-    EXTENSIONS = _create_lfcfitparams_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
+    def __init__(self, *args, **kwargs):
+        if 'config' in kwargs and kwargs['config'] is not None:
+            self.EXTENSIONS.update(_create_lfcfitparams_extensions(kwargs['config'].num_fibers))
+        else:
+            self.EXTENSIONS.update(_create_lfcfitparams_extensions(self.DEFAULT_CONFIG.num_fibers))
+        super().__init__(*args, **kwargs)

@@ -1,11 +1,9 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
 
 from astropy.io import fits
 import numpy as np
 
-__all__ = ['TraceProfModel', 'HISPECTraceProfModel', 'PARVITraceProfModel']
+__all__ = ['TraceProfModel']
 
 
 def _create_traceprof_extensions(num_fibers: int):
@@ -24,12 +22,9 @@ def _create_traceprof_extensions(num_fibers: int):
 
 class TraceProfModel(CalibrationModel):
     CAL_TYPE = 'traceprof'
-
-
-class HISPECTraceProfModel(HISPECCalibrationModel, TraceProfModel):
-    EXTENSIONS = _create_traceprof_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
-
-
-class PARVITraceProfModel(PARVICalibrationModel, TraceProfModel):
-    EXTENSIONS = _create_traceprof_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
-
+    def __init__(self, *args, **kwargs):
+        if 'config' in kwargs and kwargs['config'] is not None:
+            self.EXTENSIONS.update(_create_traceprof_extensions(kwargs['config'].num_fibers))
+        else:
+            self.EXTENSIONS.update(_create_traceprof_extensions(self.DEFAULT_CONFIG.num_fibers))
+        super().__init__(*args, **kwargs)
