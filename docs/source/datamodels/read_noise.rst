@@ -3,11 +3,7 @@ Read Noise
 
 The read noise specifies the read noise associated with each pixel.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.read_noise.ReadNoiseModel`
-* :py:class:`~hispecdrp.datamodels.read_noise.HISPECReadNoiseModel`
-* :py:class:`~hispecdrp.datamodels.read_noise.PARVIReadNoiseModel`
+**Class:** :py:class:`~hispecdrp.datamodels.read_noise.ReadNoiseModel`
 
 **Calibration type:** rn
 

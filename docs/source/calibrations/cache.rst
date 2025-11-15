@@ -35,12 +35,11 @@ Examples
 
     from hispecdrp import RegisterCalibrationPrimitive
     from hispecdrp import datamodels
-    from hispecdrp.utils import download_gdrive_file
     
     import os
 
     # Open dark model
-    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits', use_cached=True)
+    dark_path = 'HB.20240924.0000.00.master-dark.fits'
     dark_model = datamodels.open(dark_path)
 
     # Set the cache path
@@ -56,14 +55,13 @@ Examples
 
     from koa_middleware import CalibrationStore
     from hispecdrp import DarkSubtractionPrimitive
-    from hispecdrp.calibrations import HISPECCalibrationORM, HISPECDarkSelector
+    from hispecdrp.calibrations import DarkSelector
     from hispecdrp import datamodels
-    from hispecdrp.utils import download_gdrive_file
     
     import os
 
     # Open science model
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits', use_cached=True)
+    sci_path = 'HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
     sci_model = datamodels.open(sci_path)
 
     # Set the cache path
@@ -74,5 +72,5 @@ Examples
     dark_path = dark_prim.get_calibration(sci_model, use_cached=True)
     
     # Alternatively, query for a dark calibration using the CalibrationStore directly
-    with CalibrationStore(orm_class=HISPECCalibrationORM) as store:
-        dark_path = store.get_calibration(sci_model, selector=HISPECDarkSelector(), use_cached=True)
+    with CalibrationStore(orm_class=sci_model.get_calibration_orm_class()) as store:
+        dark_path = store.get_calibration(sci_model, selector=DarkSelector(), use_cached=True)

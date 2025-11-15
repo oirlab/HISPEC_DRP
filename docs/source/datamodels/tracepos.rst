@@ -3,11 +3,7 @@ Trace Positions
 
 The trace positions are determined from the fiber flat data. They are stored as polynomial coeffs and evaluated positions for each order/fiber.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.tracepos.TracePosModel`
-* :py:class:`~hispecdrp.datamodels.tracepos.HISPECTracePosModel`
-* :py:class:`~hispecdrp.datamodels.tracepos.PARVITracePosModel`
+**Class:** :py:class:`~hispecdrp.datamodels.tracepos.TracePosModel`
 
 **Calibration type:** tracepos
 

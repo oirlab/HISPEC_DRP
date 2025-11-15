@@ -24,7 +24,7 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits')
 
     # Specify which fibers and orders to fit
-    do_fibers = ['3']
+    do_fibers = ['1']
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
 
     # Init pipeline object
@@ -58,7 +58,7 @@ This pipeline takes as input level 2 laser frequency comb (LFC) data, and does t
             'run': False,
         },
     }
-    # Alternatively, one can also set an argument with:
+    # Alternatively, one can set an argument with:
     #   pipe.fit_lfc_lines.do_orders = do_orders
 
     # Call the pipeline with these arguments.

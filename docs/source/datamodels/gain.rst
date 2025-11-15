@@ -3,11 +3,7 @@ Gain
 
 The detector gain specifies the conversion factor between electrons and data numbers (DN) for each pixel in the detector.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.detector_gain.DetectorGainModel`
-* :py:class:`~hispecdrp.datamodels.detector_gain.HISPECDetectorGainModel`
-* :py:class:`~hispecdrp.datamodels.detector_gain.PARVIDetectorGainModel`
+**Class:** :py:class:`~hispecdrp.datamodels.detector_gain.DetectorGainModel`
 
 **Calibration type:** gain
 

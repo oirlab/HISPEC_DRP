@@ -3,11 +3,7 @@ Raw (Ramp) Data
 
 The Teledyne Hawaii HXRG detectors use up-the-ramp (UTR) non-destructive reads, so raw data is a cube where each 2D slice is a single read.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.ramp.RampModel`
-* :py:class:`~hispecdrp.datamodels.ramp.HISPECRampModel`
-* :py:class:`~hispecdrp.datamodels.ramp.PARVIRampModel`
+**Class:** :py:class:`~hispecdrp.datamodels.ramp.RampModel`
 
 **File suffix:** raw
 
