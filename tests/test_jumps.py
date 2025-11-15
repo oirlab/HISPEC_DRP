@@ -10,7 +10,6 @@ def test_jumps(tmp_path):
     source = np.full((4096, 4096), slope, dtype=np.float32)
     ramp_data = datamodels.create_ramp(source, readtime=1.0, n_reads=16, bias=0, read_noise=None, kTC_noise=None, poisson_noise=False, nonlin_coeffs=None)
     ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']), meta=ramp_data['meta'])
-    datamodels.set_default_meta(ramp_model)
 
     # Modify rows to insert a jump of 100 on specified reads in pixel at specified column
     # Also, create a comparison array with JUMP_DET flag set

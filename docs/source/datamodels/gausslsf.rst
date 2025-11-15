@@ -3,11 +3,7 @@ Line Spread Function (LSF)
 
 The effective line spread function (LSF) is modeled with a Gaussian where the width is described with a 2D polynomial (pixel, order, width).
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel`
-* :py:class:`~hispecdrp.datamodels.gausslsf.HISPECGaussianLSFModel`
-* :py:class:`~hispecdrp.datamodels.gausslsf.PARVIGaussianLSFModel`
+**Class:** :py:class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel`
 
 **Calibration type:** lsf
 

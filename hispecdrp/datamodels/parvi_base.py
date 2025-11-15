@@ -1,62 +1,50 @@
-from .parvi_meta import PARVIMeta, PARVICalibrationMeta
-from .base_model import DataModel, CalibrationModel
-from .dqflags import DQ_FLAGS
+# from .parvi_meta import PARVIMeta
+# from .base_model import DataModel, CalibrationModel
+# from .dqflags import DQ_FLAGS
 
-import scipy.constants
+# __all__ = ['PARVIDataModel']
 
-__all__ = ['PARVIDataModel', 'PARVICalibrationModel']
+# class PARVIDataModel(DataModel):
 
-class PARVIDataModel(DataModel):
+#     INSTRUMENT_NAME = 'PARVI'
+#     INSTRUMENT_ALIAS = 'PR'
 
-    META_MODEL = PARVIMeta
+#     META_MODEL = PARVIMeta
+#     ORM_TABLE_NAME = 'PARVI'
 
-    INSTRUMENT_ALIAS = 'PR'
+#     DQ_FLAGS = DQ_FLAGS
 
-    META_DEFAULTS = {
-        'instrument_name' : 'PARVI',
-        'telescope' : 'Palomar',
-        'order_start' : 125,
-        'order_end' : 85,
-        'lfc_nu0' : scipy.constants.c / (1559.91370 * 1E-9),
-        'lfc_delta_nu' : 10.000000174E9,
-        'clock_rate' : 88802.1680217,  # in Hz. Computed from assuming 2048^2 pixels, 32 channels, 1.476 s per full-frame read.
-    }
-
-    DQ_FLAGS = DQ_FLAGS
-
-    NUM_FIBERS = 4
+#     NUM_FIBERS = 2
     
-    def generate_filename(self, suffix : str | None = None) -> str:
-        """
-        See _generate_filename for details.
-        """
-        date_time = self.meta.datetime_obs
-        if suffix is None:
-            if self.data_level_suffix is not None:
-                suffix = self.data_level_suffix
-        else:
-            if self.data_level_suffix is not None:
-                suffix = f"{self.data_level_suffix}-{suffix}"
-        return self._generate_filename(
-            instrument_alias=self.INSTRUMENT_ALIAS,
-            date_time=date_time,
-            suffix=suffix
-        )
+#     def generate_filename(self, suffix : str | None = None) -> str:
+#         """
+#         See _generate_filename for details.
+#         """
+#         date_time = self.meta.datetime_obs
+#         if suffix is None:
+#             if self.data_level_suffix is not None:
+#                 suffix = self.data_level_suffix
+#         else:
+#             if self.data_level_suffix is not None:
+#                 suffix = f"{self.data_level_suffix}-{suffix}"
+#         return self._generate_filename(
+#             instrument_alias=self.INSTRUMENT_ALIAS,
+#             date_time=date_time,
+#             suffix=suffix
+#         )
 
 
-class PARVICalibrationModel(CalibrationModel, PARVIDataModel):
-
-    META_MODEL = PARVICalibrationMeta
+# class PARVICalibrationModel(CalibrationModel, PARVIDataModel):
     
-    def generate_filename(self, suffix : str | None = None) -> str:
-        """
-        See _generate_filename for additional arguments.
-        """
-        master_cal = True
-        return self._generate_filename(
-            instrument_alias=self.INSTRUMENT_ALIAS,
-            date_time=self.meta.datetime_obs,
-            cal_type=self.CAL_TYPE,
-            master=master_cal,
-            suffix=suffix
-        )
+#     def generate_filename(self, suffix : str | None = None) -> str:
+#         """
+#         See _generate_filename for additional arguments.
+#         """
+#         master_cal = True
+#         return self._generate_filename(
+#             instrument_alias=self.INSTRUMENT_ALIAS,
+#             date_time=self.meta.datetime_obs,
+#             cal_type=self.CAL_TYPE,
+#             master=master_cal,
+#             suffix=suffix
+#         )

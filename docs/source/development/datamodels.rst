@@ -73,42 +73,6 @@ The **live** metadata resides in the datamodel's ``meta`` attribute, which suppo
     print(model.meta.__class__.model_fields['datetime_obs']) # -> <Summary of FieldInfo...>
 
 
-Declare new MetaModel
-^^^^^^^^^^^^^^^^^^^^^
-
-Instrument agnostic MetaModels live in :py:mod:`~hispecdrp.datamodels.meta_data` and provide nearly all metadata fields. Below are the special models declared for HISPEC.
-
-.. code-block:: python
-
-    class HISPECTargetMeta(TargetMeta):
-        object_fiber1: str | None = FitsField(
-            fits_keyword="OBJFIB1",
-            title="Object name in fiber 1"
-        )
-        object_fiber2: str | None = FitsField(
-            fits_keyword="OBJFIB2",
-            title="Object name in fiber 2"
-        )
-        object_fiber3: str | None = FitsField(
-            fits_keyword="OBJFIB3",
-            title="Object name in fiber 3"
-        )
-
-    class HISPECCoreMeta(HISPECTargetMeta, CoreMeta):
-        ORM_TABLE_NAME = 'HISPEC'
-
-        koa_id: str | None = FitsField(
-            fits_keyword="KOAID",
-            title="Keck Observatory Archive (KOA) ID"
-        )
-        koa_filepath: str | None = FitsField(
-            fits_keyword="KOAFPATH",
-            title="KOA file path"
-        )
-
-    class HISPECCalibrationMeta(HISPECCoreMeta, CalibrationCoreMeta):
-        pass
-
 
 Data Handling
 -------------
@@ -169,26 +133,21 @@ Implement New Data Model
 
 1. To implement a new data model, create a new class that inherits from the appropriate base type:
 
-- :py:class:`~hispecdrp.datamodels.base_model.DataModel` - Base class for all data models. Inherit from if implementing a new instrument.
+- :py:class:`~hispecdrp.datamodels.base_model.DataModel` - Base class for all data models. Inherit from for most data non-calibration models.
 
 - :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel` - Base class for all calibration data models. Inherit from if implementing a new calibration model.
 
-- :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` - Base class for HISPEC data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based HISPEC models or new abstract HISPEC models.
-
-- :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` - Base class for PARVI data models, subtype of :py:class:`~hispecdrp.datamodels.base_model.DataModel`. Use for new science based PARVI models or new abstract PARVI models.
-
-- :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECCalibrationModel` - Base class for HISPEC calibration data models, subtype of :py:class:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel` and :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel`.
-
-- :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVICalibrationModel` - Base class for PARVI calibration data models, subtype of :py:class:`~hispecdrp.datamodels.parvi.parvi_base.PARVIDataModel` and :py:class:`~hispecdrp.datamodels.base_model.CalibrationModel`.
-
-
-2. Specify the pydantic metadata model at the attribute ``META_MODEL`` if different from the parent datamodel's ``META_MODEL``.
-
-3. Calibration models must also specify the ``CAL_TYPE`` attribute: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to separate words if necessary (e.g. ``lfc_wavesol``).
+2. Calibration models must also specify the ``CAL_TYPE`` attribute: ``CAL_TYPE`` (string) specifies the type of calibration for calibration lookups. The string should be lowercase, and use underscores to separate words if necessary (e.g. ``dark``, ``lfc_wavesol``).
 
 4. Define the ``data_level_suffix`` *property*, which returns the suffix used in filenames to clearly identify this datamodel type when viewing files. For example, see :py:meth:`~hispecdrp.datamodels.hispec.hispec_base.HISPECDataModel._generate_filename`.
 
-For example, the HISPEC LFC fit parameters model is defined as follows:
+For example, the dark model is defined as follows:
+
+.. literalinclude:: ../../../hispecdrp/datamodels/dark.py
+   :language: python
+
+If the extensions depend on the number of fibers, construct the extensions attribute dynamically within the ``__init__`` method.
+For example, the LFC fit parameters model is defined as follows: 
 
 .. literalinclude:: ../../../hispecdrp/datamodels/lfcfitparams.py
    :language: python

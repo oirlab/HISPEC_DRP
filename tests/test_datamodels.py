@@ -6,13 +6,13 @@ from pydantic import ValidationError
 def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', use_cached=True, output_dir=datadir)
+    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'HISPEC'
-        assert model.meta.exposure_type == "SCI"
+        assert model.meta.exposure_type == "SPEC"
         assert model.meta.spectrograph == 'BSPEC'
-        assert model.meta.model_type == 'HISPECL0Model'
+        assert model.meta.model_type == 'L0Model'
         assert model.meta.instrument_mode == 'YJHK'
         shape = (4096, 4096)
         assert model.rate.shape == shape
@@ -27,7 +27,7 @@ def test_hispec_level0(tmp_path, datadir):
         assert np.issubdtype(model.dq.dtype, np.uint32)
 
     # Open directly as HISPECL0
-    model = datamodels.HISPECL0Model(filepath)
+    model = datamodels.L0Model(filepath)
 
     # Set arbitrary metadata
     model.meta.exposure_time = 10.0 # valid
@@ -57,12 +57,12 @@ def test_hispec_level0(tmp_path, datadir):
 def test_parvi_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('PARVI/L0/PR.20250407.39453.59_rate-GamDra.fits', use_cached=True, output_dir=datadir)
+    filepath = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'PARVI'
-        assert model.meta.exposure_type == "SCI"
-        assert model.meta.model_type == 'PARVIL0Model'
+        assert model.meta.exposure_type == "SPEC"
+        assert model.meta.model_type == 'L0Model'
         shape = (2048, 2048)
         assert model.rate.shape == shape
         assert model.rate_err.shape == shape
@@ -76,7 +76,7 @@ def test_parvi_level0(tmp_path, datadir):
         assert np.issubdtype(model.dq.dtype, np.uint32)
 
     # Open directly as PARVIL0
-    model = datamodels.PARVIL0Model(filepath)
+    model = datamodels.L0Model(filepath)
 
     # Save model
     model.save(output_dir=tmp_path)

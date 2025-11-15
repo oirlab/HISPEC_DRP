@@ -1,10 +1,8 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
 
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_etalonfitparam_extensions, create_drift_extensions, create_barycorr_extensions
 
-__all__ = ['ReferenceEtalonModel', 'HISPECReferenceEtalonModel', 'PARVIReferenceEtalonModel']
+__all__ = ['ReferenceEtalonModel']
 
 def _create_refetalon_extensions(num_fibers: int):
     ext = {}
@@ -20,11 +18,9 @@ def _create_refetalon_extensions(num_fibers: int):
 
 class ReferenceEtalonModel(CalibrationModel):
     CAL_TYPE = 'ref_etalon'
-
-
-class HISPECReferenceEtalonModel(HISPECCalibrationModel, ReferenceEtalonModel):
-    EXTENSIONS = _create_refetalon_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
-
-
-class PARVIReferenceEtalonModel(PARVICalibrationModel, ReferenceEtalonModel):
-    EXTENSIONS = _create_refetalon_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
+    def __init__(self, *args, **kwargs):
+        if 'config' in kwargs and kwargs['config'] is not None:
+            self.EXTENSIONS.update(_create_refetalon_extensions(kwargs['config'].num_fibers))
+        else:
+            self.EXTENSIONS.update(_create_refetalon_extensions(self.DEFAULT_CONFIG.num_fibers))
+        super().__init__(*args, **kwargs)

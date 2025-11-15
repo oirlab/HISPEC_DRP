@@ -3,14 +3,14 @@ from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
 from hispecdrp.utils import download_gdrive_file
 
 import os
+import numpy as np
 import copy
 
 def test_save_result_primitive(tmp_path, datadir):
 
-    # Setup
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True, output_dir=datadir)
+    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    do_fibers = ['3']
+    do_fibers = ['2']
 
     # Test passing output_dir
     prim = FitLFCLinesPrimitive()
@@ -62,8 +62,8 @@ def test_save_result_primitive(tmp_path, datadir):
 
 def test_save_result_pipeline(tmp_path, datadir):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    do_fibers = ['3']
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83766.15_spec-LFC.fits', use_cached=True, output_dir=datadir)
+    do_fibers = ['2']
+    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
     prim_args = {
         'fit_lfc_lines' : {
@@ -117,4 +117,4 @@ def test_save_result_pipeline(tmp_path, datadir):
 
     # Test line file is saved to output_dir as well
     lfc_model = datamodels.open(lfc_path)
-    assert os.path.isfile(str(tmp_path / datamodels.PARVILFCFitParamsModel.from_datamodel(lfc_model).generate_filename()))
+    assert os.path.isfile(str(tmp_path / datamodels.LFCFitParamsModel.from_datamodels(lfc_model).generate_filename()))

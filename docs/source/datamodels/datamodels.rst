@@ -1,7 +1,8 @@
 Data Models
 ===========
 
-Below are the available datamodels within the HISPEC DRP. Most models are available for PARVI and HISPEC with appropriate extensions and metadata fields.
+Below are the available datamodels within the HISPEC DRP. All models work with HISPEC and PARVI data products.
+
 
 .. toctree::
    :maxdepth: 1
@@ -27,7 +28,19 @@ Calibration Models
    dark
    gain
    detector_flat
+   tracepos
+   traceprof
    lfcfitparams
    lfcwavesol
    gausslsf
    ref_etalon
+
+
+
+Instrument Configuration
+------------------------
+
+.. toctree::
+   :maxdepth: 1
+   
+   instrument_config

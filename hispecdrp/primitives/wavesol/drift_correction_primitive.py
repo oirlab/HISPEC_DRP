@@ -1,6 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...utils.math import delta_pix_to_delta_wave, delta_wave_to_delta_vel, robust_stats, weighted_mean
+from ...utils.math import delta_pix_to_delta_wave, delta_wave_to_delta_vel, robust_stats, weighted_quantile
 from ...calibrations import ReferenceEtalonSelector
 
 from koa_middleware import CalibrationStore
@@ -55,15 +55,15 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
                 order_mask = params_table['ORDER'] == order
                 order_mask_ref = params_table_ref['ORDER'] == order
                 lcs = line_centers[order_mask]
-                lfc_ref = line_centers_ref[order_mask_ref]
+                lcs_ref = line_centers_ref[order_mask_ref]
                 lcs_err = line_center_errs[order_mask]
                 lcs_ref_err = line_center_errs_ref[order_mask_ref]
 
-                if len(lcs) == 0 or len(lfc_ref) == 0:
+                if len(lcs) == 0 or len(lcs_ref) == 0:
                     self.log.info(f'No etalon lines found for {order=}, {fiber=}. Skipping.')
                     continue
 
-                drifts = calculate_etalon_drifts_pix(lcs, lcs_err, lfc_ref, lcs_ref_err)
+                drifts = calculate_etalon_drifts_pix(lcs, lcs_err, lcs_ref, lcs_ref_err)
                 n_lines = len(drifts)
 
                 for i in range(n_lines):
@@ -96,7 +96,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
                     drift_order_err /= np.sqrt(np.count_nonzero(good) - 1)
                     pixels = np.array([d['PIXEL'] for d in drift_results[fiber] if d['ORDER'] == order])
                     
-                    pix_eff = weighted_mean(pixels[drift_mask], w=w[drift_mask])
+                    pix_eff = weighted_quantile(pixels[drift_mask], w=w[drift_mask])
                     wave_eff = np.interp(pix_eff, xarr, wave[oi, :], left=wave[oi, 0], right=wave[oi, -1])
                 else:
                     drift_pix_order, drift_order_err = np.nan, np.nan

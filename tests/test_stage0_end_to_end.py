@@ -45,7 +45,6 @@ def test_stage0(tmp_path):
                                                                  nonlin_thresh=thresh,
                                                                  nonlin_max=max,
                                                                  dq=nonlin_dq))
-    datamodels.set_default_meta(nonlin_model)
 
     step_time = time.time();
     print(f"Step: defining nonlin coefficients, elapsed: {step_time - start_time:.2f}s")
@@ -56,7 +55,6 @@ def test_stage0(tmp_path):
     # set row to bad
     dqinit_map[5, :] |= DQ_FLAGS["DO_NOT_USE"]
     dqinit_model = datamodels.DQModel(data={"DQ": dqinit_map})
-    datamodels.set_default_meta(dqinit_model)
 
     step_time = time.time();
     print(f"Step: defining DQ init calibration, elapsed: {step_time - start_time:.2f}s")
@@ -67,7 +65,6 @@ def test_stage0(tmp_path):
     saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
     saturation_model = datamodels.SaturationModel(data={'SAT_THRESH': saturation_map,
                                                         "DQ": np.zeros_like(saturation_map, dtype=np.uint32), })
-    datamodels.set_default_meta(saturation_model)
 
     step_time = time.time();
     print(f"Step: defining saturation calibration, elapsed: {step_time - start_time:.2f}s")
@@ -81,7 +78,6 @@ def test_stage0(tmp_path):
                                                        "GAIN_VAR_RNOISE": np.zeros_like(gain_map),
                                                        "GAIN_VAR_POISSON": np.zeros_like(gain_map),
                                                        "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
-    datamodels.set_default_meta(detgain_model)
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -95,7 +91,6 @@ def test_stage0(tmp_path):
                                             "RATE_VAR_RNOISE": np.zeros_like(dark_map),
                                             "RATE_VAR_POISSON": np.zeros_like(dark_map),
                                             "DQ": np.zeros_like(dark_map, dtype=np.uint32), })
-    datamodels.set_default_meta(dark_model)
 
     step_time = time.time();
     print(f"Step: defining dark calibration, elapsed: {step_time - start_time:.2f}s")
@@ -107,7 +102,6 @@ def test_stage0(tmp_path):
     bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
                                             "BIAS_ERR": np.zeros_like(bias_map),
                                             "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
-    datamodels.set_default_meta(bias_model)
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -120,7 +114,6 @@ def test_stage0(tmp_path):
                                                        "FLAT_VAR_RNOISE": np.zeros_like(detflat_map),
                                                        "FLAT_VAR_POISSON": np.zeros_like(detflat_map),
                                                        "DQ": np.zeros_like(detflat_map, dtype=np.uint32), })
-    datamodels.set_default_meta(detflat_model)
 
     step_time = time.time();
     print(f"Step: defining flat calibration, elapsed: {step_time - start_time:.2f}s")
@@ -132,7 +125,6 @@ def test_stage0(tmp_path):
     rn_model = datamodels.ReadNoiseModel(data={'RN': rn_map / gain_map,
                                                "RN_ERR": np.zeros_like(rn_map),
                                                "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
-    datamodels.set_default_meta(rn_model)
 
     # --- Create a fake UTR cube ---
     electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
@@ -158,7 +150,6 @@ def test_stage0(tmp_path):
 
     ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
                                       meta=ramp_data['meta'])
-    datamodels.set_default_meta(ramp_model)
     ramp_model.meta.filename = "simulated_ramp.fits"
     print(ramp_model.meta.clock_rate)
 

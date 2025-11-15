@@ -1,10 +1,8 @@
 from .base_model import DataModel
-from .hispec_base import HISPECDataModel
-from .parvi_base import PARVIDataModel
 from .extensions import IMAGE_UINT16_HDU, DQ_RAW, DQ_L0
 import numpy as np
 
-__all__ = ['RampModel', 'HISPECRampModel', 'PARVIRampModel']
+__all__ = ['RampModel']
 
 
 class RampModel(DataModel):
@@ -41,10 +39,3 @@ class RampModel(DataModel):
                         + np.arange(ny*nx, dtype=np.float32).reshape(ny, nx) \
                         / self.meta.clock_rate
         return first_read_mjd
-
-class HISPECRampModel(HISPECDataModel, RampModel):
-    pass
-
-
-class PARVIRampModel(PARVIDataModel, RampModel):
-    pass

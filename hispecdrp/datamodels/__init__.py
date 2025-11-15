@@ -1,7 +1,7 @@
 # Metadata
 from .meta_data import *
-from .hispec_meta import *
-from .parvi_meta import *
+# from .hispec_meta import *
+# from .parvi_meta import *
 
 # DQ flags
 from .dqflags import *
@@ -17,8 +17,8 @@ from .create_ramp import *
 # from . import extensions
 
 # Base instrument models
-from .hispec_base import *
-from .parvi_base import *
+#from .hispec_base import *
+#from .parvi_base import *
 
 # Concrete models
 from .ramp import *
@@ -40,6 +40,17 @@ from .lfcfitparams import *
 from .lfcwavesol import *
 from .gausslsf import *
 from .ref_etalon import *
+from .tracepos import *
+from .traceprof import *
+from .fiberflat import *
+
+# Instrument config
+from .parvi_config import *
+from .hispec_config import *
+INSTRUMENT_CONFIGS = {
+    'HISPEC' : HISPECConfig,
+    'PARVI'  : PARVIConfig
+}
 
 # Registry of models
 _local_dict = locals()

@@ -3,11 +3,7 @@ Reference Etalon
 
 Contains the reference etalon and corresponding parameters for wavelength drift corrections.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.ref_etalon.ReferenceEtalonModel`
-* :py:class:`~hispecdrp.datamodels.ref_etalon.HISPECReferenceEtalonModel`
-* :py:class:`~hispecdrp.datamodels.ref_etalon.PARVIReferenceEtalonModel`
+**Class:** :py:class:`~hispecdrp.datamodels.ref_etalon.ReferenceEtalonModel`
 
 **Calibration type:** ref_etalon
 

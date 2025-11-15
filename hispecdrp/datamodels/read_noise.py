@@ -1,10 +1,7 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
-
 from .extensions import IMAGE_FLOAT32_HDU, DQ_L0
 
-__all__ = ['ReadNoiseModel', 'HISPECReadNoiseModel', 'PARVIReadNoiseModel']
+__all__ = ['ReadNoiseModel']
 
 
 class ReadNoiseModel(CalibrationModel):
@@ -14,11 +11,3 @@ class ReadNoiseModel(CalibrationModel):
         **DQ_L0
     }
     CAL_TYPE = 'rn'
-
-
-class HISPECReadNoiseModel(HISPECCalibrationModel, ReadNoiseModel):
-    pass
-
-
-class PARVIReadNoiseModel(PARVICalibrationModel, ReadNoiseModel):
-    pass

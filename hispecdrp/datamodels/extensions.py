@@ -47,6 +47,17 @@ CALIBRATIONS = {
     }
 }
 
+DATA_ANCESTORS = {
+    'DATA_ANCESTORS': {
+        'hdu_type': fits.BinTableHDU,
+        'columns': {
+            'FILENAME' : str,
+            'DATETIME_OBS' : str,
+            'PRIMITIVE' : str,
+        }
+    }
+}
+
 
 #### Raw
 

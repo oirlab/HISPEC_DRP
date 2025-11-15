@@ -3,11 +3,7 @@ Saturation
 
 The saturation specifies the saturation level associated with each pixel.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.saturation.SaturationModel`
-* :py:class:`~hispecdrp.datamodels.saturation.HISPECSaturationModel`
-* :py:class:`~hispecdrp.datamodels.saturation.PARVISaturationModel`
+**Class:** :py:class:`~hispecdrp.datamodels.saturation.SaturationModel`
 
 **Calibration type:** saturation
 

@@ -1,86 +1,39 @@
 Calibration Selectors
 =====================
 
+**Temporal Matching:**
+
+The rules below result in a subset of possible calibration files.
+The "best" calibration file is chosen from this subset by selecting the one closest in time to the observation using the meta key ``meta.mjd_start``.
+
 Bias Selector
 +++++++++++++
 
 **Class**: :py:class:`~hispecdrp.calibrations.selectors.BiasSelector`
 
-**Selection Logic:**
-
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
-
-
-Detector Gain Selector
-++++++++++++++++++++++
-
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.DetectorGainSelector`
+**Calibration Type**: ``'bias'``
 
 **Selection Logic:**
 
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
 
-
-DQ Selector
-+++++++++++
-
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.DQSelector`
-
-**Selection Logic:**
-
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
-
-Nonlinear Correction Selector
-+++++++++++++++++++++++++++++
-
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
-
-**Selection Logic:**
-
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
-
-
-Saturation Selector
-+++++++++++++++++++
-
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.SaturationSelector`
-
-**Selection Logic:**
-
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
 
 Dark Selector
 +++++++++++++
 
 **Class**: :py:class:`~hispecdrp.calibrations.selectors.DarkSelector`
 
-**Selection Logic:**
-
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
-
-
-Nonlinear Correction Selector
-+++++++++++++++++++++++++++++
-
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
+**Calibration Type**: ``'dark'``
 
 **Selection Logic:**
 
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
 
 
 Detector Flat Selector
@@ -88,11 +41,133 @@ Detector Flat Selector
 
 **Class**: :py:class:`~hispecdrp.calibrations.selectors.DetectorFlatSelector`
 
+**Calibration Type**: ``'detflat'``
+
 **Selection Logic:**
 
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Detector Gain Selector
+++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.DetectorGainSelector`
+
+**Calibration Type**: ``'detgain'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+DQ Selector
++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.DQSelector`
+
+**Calibration Type**: ``'dq'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Nonlinear Correction Selector
++++++++++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
+
+**Calibration Type**: ``'nonlin'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Read Noise Selector
++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`
+
+**Calibration Type**: ``'rn'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Reference Etalon Selector
+++++++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.ReferenceEtalonSelector`
+
+**Calibration Type**: ``'ref_etalon'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Saturation Selector
++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.SaturationSelector`
+
+**Calibration Type**: ``'saturation'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Trace Position Selector
+++++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.TracePosSelector`
+
+**Calibration Type**: ``'tracepos'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
+
+
+Trace Profile Selector
++++++++++++++++++++++++
+
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.TraceProfSelector`
+
+**Calibration Type**: ``'traceprof'``
+
+**Selection Logic:**
+
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Require master calibration (``master_cal == True``)
+- Closest in observation time (``meta['mjd_start']``)
 
 
 Wavelength Solution Selector
@@ -100,12 +175,14 @@ Wavelength Solution Selector
 
 **Class**: :py:class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector`
 
+**Calibration Type**: Configurable (default: ``'lfc_wavesol'``)
+
 **Selection Logic:**
 
-- match instrument era (``meta['instrument.era']``)
-- match spectrograph (``meta['instrument.spectrograph']``)
-- closest in observation time (``meta['exposure.mjd_start']``)
+- Match instrument era (``meta['instrument_era']``)
+- Match spectrograph (``meta['spectrograph']``)
+- Closest in observation time (``meta['mjd_start']``)
 
-**Arguments**
+**Arguments:**
 
-- ``cal_type``: The type of wavelength calibration to select (e.g. 'lfc_wavesol').
+- ``cal_type`` (str, optional): The type of wavelength calibration to select. Default: ``'lfc_wavesol'``
