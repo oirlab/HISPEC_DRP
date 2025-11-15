@@ -1,4 +1,4 @@
-from koa_middleware import CalibrationDB, CalibrationORM
+from koa_middleware import CalibrationDB
 from sqlalchemy import func
 
 from koa_middleware.selector_base import CalibrationSelector
@@ -51,7 +51,6 @@ class SaturationSelector(CalibrationSelector):
                     db.orm_class.instrument_era == meta['instrument_era'],
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
-
 class DarkSelector(CalibrationSelector):
 
     def get_candidates(self, meta : dict, db : CalibrationDB):
@@ -68,7 +67,6 @@ class DarkSelector(CalibrationSelector):
                     db.orm_class.cal_type == 'dark',
                     db.orm_class.instrument_era == meta['instrument_era'],
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            
 
 class TracePosSelector(CalibrationSelector):
 
@@ -87,7 +85,6 @@ class TracePosSelector(CalibrationSelector):
                     db.orm_class.instrument_era == meta['instrument_era'],
                     db.orm_class.spectrograph == meta['spectrograph'],
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            
 
 class TraceProfSelector(CalibrationSelector):
 
@@ -107,7 +104,6 @@ class TraceProfSelector(CalibrationSelector):
                     db.orm_class.spectrograph == meta['spectrograph'],
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
-
 class BiasSelector(CalibrationSelector):
 
     def get_candidates(self, meta : dict, db : CalibrationDB):
@@ -118,15 +114,12 @@ class BiasSelector(CalibrationSelector):
                     db.orm_class.instrument_era == meta['instrument_era'],
                     db.orm_class.spectrograph == meta['spectrograph'],
                     db.orm_class.master_cal == True,
-                    db.orm_class.mjd_start <= meta['mjd_start']
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
             elif meta['instrument_name'].lower() == 'parvi':
                 return session.query(db.orm_class).filter(
                     db.orm_class.cal_type == 'bias',
                     db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.mjd_start <= meta['mjd_start']
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-
 
 class ReadNoiseSelector(CalibrationSelector):
 
@@ -163,7 +156,6 @@ class NonlinearCorrectionSelector(CalibrationSelector):
                     db.orm_class.master_cal == True
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
-
 class DetectorFlatSelector(CalibrationSelector):
 
     def get_candidates(self, meta : dict, db : CalibrationDB):
@@ -182,7 +174,6 @@ class DetectorFlatSelector(CalibrationSelector):
                     db.orm_class.master_cal == True
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
-
 class DetectorGainSelector(CalibrationSelector):
 
     def get_candidates(self, meta : dict, db : CalibrationDB):
@@ -193,14 +184,12 @@ class DetectorGainSelector(CalibrationSelector):
                     db.orm_class.instrument_era == meta['instrument_era'],
                     db.orm_class.spectrograph == meta['spectrograph'],
                     db.orm_class.master_cal == True,
-                    db.orm_class.mjd_start <= meta['mjd_start']
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
             elif meta['instrument_name'].lower() == 'parvi':
                 return session.query(db.orm_class).filter(
                     db.orm_class.cal_type == 'detgain',
                     db.orm_class.instrument_era == meta['instrument_era'],
                     db.orm_class.master_cal == True,
-                    db.orm_class.mjd_start <= meta['mjd_start']
                 ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
 
 class WavelengthSolutionSelector(CalibrationSelector):
