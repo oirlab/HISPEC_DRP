@@ -163,11 +163,14 @@ def _extract_optimal_numba(
         # Normalize profile
         PP = P / np.sum(P*W)
 
+        #if np.any(D_var == 0) or np.any(D_var_poisson == 0) or np.any(D_var_rnoise == 0) or np.sum(M) == 0 or np.sum(M * PP**2 * W / D_var_poisson) == 0 or np.sum(M * PP**2 * W / D_var_rnoise) == 0:
+        #    breakpoint()
+
         # Calculate optimal spectrum and errors
         spec_output[x] = np.sum(D * M * PP * W / D_var) / np.sum(M * PP**2 * W / D_var)
-        err_output[x] = np.sqrt(np.sum(M * PP * W) / np.sum(M * PP**2 * W / D_var))
-        var_rnoise_output[x] = np.sum(M * PP * W) / np.sum(M * PP**2 * W / D_var_rnoise)
-        var_poisson_output[x] = np.sum(M * PP * W) / np.sum(M * PP**2 * W / D_var_poisson)
+        err_output[x] = np.sqrt(np.sum(PP * W) / np.sum(M * PP**2 * W / D_var))
+        var_rnoise_output[x] = np.sum(PP * W) / np.sum(M * PP**2 * W / D_var_rnoise)
+        var_poisson_output[x] = np.sum(PP * W) / np.sum(M * PP**2 * W / D_var_poisson)
 
         # Always good if we get here
         dq_output[x] = 0

@@ -258,10 +258,10 @@ def solve_cross_talk(
     # Covariance and errors
     cov = np.linalg.pinv(A)
     spec_err = np.sqrt(np.diag(cov))
-    #spec_err = np.sqrt(np.sum(M[:, None] * P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var[:, None], axis=0))
+    #spec_err = np.sqrt(np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var[:, None], axis=0))
 
-    # Optional separate variance contributions
-    spec_var_rnoise = np.sum(M[:, None] * P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_rnoise[:, None], axis=0)
-    spec_var_poisson = np.sum(M[:, None] * P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_poisson[:, None], axis=0)
+    # Separate variance contributions
+    spec_var_rnoise = np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_rnoise[:, None], axis=0)
+    spec_var_poisson = np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_poisson[:, None], axis=0)
 
     return spec, spec_err, spec_var_rnoise, spec_var_poisson

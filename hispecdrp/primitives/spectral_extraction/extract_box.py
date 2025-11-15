@@ -153,6 +153,14 @@ def _extract_box_numba(
         # Normalization factor
         N = np.sum(M * W) / np.sum(W)
 
+        if N == 0:
+            spec_output[x] = np.nan
+            err_output[x] = np.nan
+            var_rnoise_output[x] = np.nan
+            var_poisson_output[x] = np.nan
+            dq_output[x] = DO_NOT_USE
+            continue
+
         # Compute raw box extraction sums using full pixels
         spec_output[x] = np.sum(M * D * W) / N
         err_output[x] = np.sqrt(np.sum(M * W**2 * D_var)) / N

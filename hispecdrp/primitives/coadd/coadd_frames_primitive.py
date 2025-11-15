@@ -16,6 +16,7 @@ class CoaddFramesPrimitive(BasePrimitive):
         'suffix' : 'coadded',
         'mean_calc' : 'wmean',
         'err_calc' : 'wse',
+        'output_model' : None,
     }
 
     def _perform(self):
@@ -27,7 +28,7 @@ class CoaddFramesPrimitive(BasePrimitive):
             self.log.warning("Input is a single model or path, returning without coadding.")
             return dict(output=self.input)
         if input_type in (list, tuple):
-            input_grouped = self.group_input_by_fiber_object(self.input)
+            input_grouped = datamodels.group_input_by_fiber_object(self.input)
             output = []
             for key, group in input_grouped.items():
                 self.log.info(f"Coadding group with objects {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
@@ -55,14 +56,17 @@ class CoaddFramesPrimitive(BasePrimitive):
             mean_calc=self.mean_calc,
             err_calc=self.err_calc
         )
+        data = {
+            attrs['data_ext']: result['data'],
+            attrs['err_ext']: result['err'],
+            attrs['var_poisson_ext']: result['var_poisson'],
+            attrs['var_rnoise_ext']: result['var_rnoise'],
+            attrs['dq_ext']: result['dq'],
+            attrs['mid_time_ext']: result['mid_time']
+        }
+        meta_merged = datamodels.merge_meta(input_models)
         model_class_out = input_models[0].__class__
-        model_out = model_class_out.from_datamodel(input_models[0], include_data=False)
-        setattr(model_out, attrs['data_ext'], result['data'])
-        setattr(model_out, attrs['err_ext'], result['err'])
-        setattr(model_out, attrs['var_poisson_ext'], result['var_poisson'])
-        setattr(model_out, attrs['var_rnoise_ext'], result['var_rnoise'])
-        setattr(model_out, attrs['dq_ext'], result['dq'])
-        setattr(model_out, attrs['mid_time_ext'], result['mid_time'])
+        model_out = model_class_out(data=data, meta=meta_merged, config=input_models[0].config)
         self.add_data_ancestors(model_out, input_models)
         return model_out
 

@@ -3,6 +3,7 @@ from ... import datamodels
 import numpy as np
 from numba import njit
 import scipy.signal
+from typing import Sequence
 from ...utils.math import median_filter_2d
 import matplotlib.pyplot as plt
 
@@ -22,35 +23,56 @@ class TracePositionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_type = type(self.input)
-        if input_type in (datamodels.DataModel, str):
-            input = self.associate_fibers([self.input])
-        elif input_type in (list, tuple):
-            input = self.associate_fibers(self.input)
-        elif input_type is dict:
+
+        # Associate inputs by fiber number
+        if isinstance(self.input, (datamodels.DataModel, str)):
+            input = datamodels.associate_fibers([self.input])
+        if  isinstance(self.input, Sequence):
+            input = datamodels.associate_fibers(self.input)
+        elif isinstance(self.input, dict):
             input = self.input
         else:
-            raise ValueError(f"Unsupported input type: {input_type}")
+            raise ValueError(f"Unsupported input type: {type(self.input)}")
 
-        first_model = datamodels.open(input[list(input.keys())[0]])
-        output_model = self.get_output_model(first_model)
+        # Prepare output model
+        first_model = datamodels.open(list(input.values())[0])
+        output_model = self.get_output_model(input, include_data=False)
+
+        # Init trace dict
         trace_results = {}
+
+        # Pixel array
         nx = first_model.rate.shape[1]
         xarr = np.arange(nx)
-        order_vec = output_model.make_order_vec()
+
+        # Order array
+        order_vec = first_model.make_order_vec()
         n_orders = len(order_vec)
+
+        # Loop over fibers and fit traces
         for fiber in input.keys():
+
+            # Open input model for this fiber
             input_model = datamodels.open(input[fiber])
+
+            # Get y range for this fiber
             yrange = self.yrange[fiber] if isinstance(self.yrange, dict) else self.yrange
+
+            # Find trace positions
             self.log.info(f"Performing trace finding on {input_model} fiber {fiber}")
             r = find_trace_positions(
                 input_model.rate, input_model.dq,
                 xrange=self.xrange, yrange=yrange,
                 deg_pos=self.deg_pos, deg_width=self.deg_width, window_size=self.window_size,
             )
+
+            # Sanity check
             num_orders_found = r['coeffs_pos'].shape[0]
-            #assert num_orders_found == n_orders, f"Found {num_orders_found} traces, expected {n_orders} for fiber {fiber}"
+            assert num_orders_found == n_orders, f"Found {num_orders_found} traces, expected {n_orders} for fiber {fiber}"
             self.log.info(f"Found {num_orders_found} traces")
+
+            # Store results in output model
+            # Evaluate polynomials
             trace_results[fiber] = r
             pos = np.full((n_orders, nx), np.nan)
             fwhm = np.full((n_orders, nx), np.nan)
@@ -61,10 +83,13 @@ class TracePositionPrimitive(BasePrimitive):
             setattr(output_model, f'COEFF_FWHM_FIB{fiber}', r['coeffs_width'])
             setattr(output_model, f'POS_FIB{fiber}', pos)
             setattr(output_model, f'FWHM_FIB{fiber}', fwhm)
+
+            # Add individual fiberflats as data ancestors
             self.add_data_ancestors(output_model, input[fiber])
 
         # Return
         return dict(output=output_model, trace_results=trace_results)
+
 
 
 def find_trace_positions(

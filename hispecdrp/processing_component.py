@@ -3,7 +3,9 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 from . import datamodels
 from .utils.logging import get_logger
 
-from typing import Sequence
+from typing import Sequence, Any
+
+import os
 
 __all__ = ['ProcessingComponent']
 
@@ -16,6 +18,7 @@ class ProcessingComponent(_BasePrimitive):
         'output_dir': None,
         'suffix': None,
         'full_output': False,
+        'output_model' : None,
     }
     
     LOGGING = {
@@ -231,49 +234,106 @@ class ProcessingComponent(_BasePrimitive):
             tuple[list[str], list[int]]: A tuple of (do_fibers, do_orders).
         """
         if do_fibers is None:
-            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
+            do_fibers = [str(f + 1) for f in range(input_model.num_fibers)]
         if do_orders is None:
             do_orders = input_model.make_order_vec()
         return do_fibers, do_orders
     
-    @staticmethod
-    def associate_fibers(input: list[str | datamodels.DataModel]) -> dict[str, object]:
-        fiber_map = {}
-        input_models = [datamodels.open(f, meta_only=True) for f in input]
-
-        for i, model in enumerate(input_models):
-            for fiber in range(1, model.NUM_FIBERS + 1):
-                val = getattr(model.meta, f'object_fiber{fiber}', None)
-                if val is None or val == 'BLOCKED':
-                    continue  # skip blocked fibers
-                key = str(fiber)
-                if key in fiber_map:
-                    raise ValueError(f"Multiple models for fiber {key}")
-                fiber_map[key] = input[i]
-
-        return fiber_map
+    def get_output_model(
+        self,
+        input : Any,
+        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None,
+        **kwargs
+    ) -> datamodels.DataModel:
+        """
+        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
+        """
+        if output_model is None:
+            output_model = getattr(self, 'output_model', None)
+        return self._get_output_model(input, output_model, **kwargs)
     
     @staticmethod
-    def group_input_by_fiber_object(input: list[str | datamodels.DataModel]) -> dict[tuple, list]:
-        inputs_grouped = {}
-        input_models = [datamodels.open(f, meta_only=True) for f in input]
+    def _get_output_model(
+        input : Any,
+        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None,
+        **kwargs
+        ) -> datamodels.DataModel:
+        """
+        Get the output model based on the input model and the specified output model type.
 
-        ref_set = None
+        Args:
+            input_model (datamodels.DataModel, optional): The input data model to base the output on.
+            output_model (str | datamodels.DataModel | type[datamodels.DataModel], optional): The desired output model type or specification. It can take on several values:
+                - DataModel instance (datamodels.DataModel): Returns `output_model` as is.
+                - 'input' (str): Returns `input_model` as is.
+                - 'input_copy' (str): Returns a copy of `input_model`.
+                - Valid filepath (str): Opens and returns the model from the specified file.
+                - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
+                - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
+                - None (default value): Raises an error.
+            **kwargs: Additional keyword arguments passed to `DataModel.from_datamodels()`.
 
-        for i, model in enumerate(input_models):
-            objs = []
-            for fiber in range(1, model.NUM_FIBERS + 1):
-                val = getattr(model.meta, f'object_fiber{fiber}', None)
-                objs.append('BLOCKED' if val is None or val == 'BLOCKED' else val)
+        Returns:
+            datamodels.DataModel: The instantiated output DataModel class.
+        """
 
-            objs = tuple(objs)
-            objs_set = frozenset(o for o in objs if o != 'BLOCKED')
+        ###################################
+        #### Return output model as is ####
+        ###################################
+        if isinstance(output_model, datamodels.DataModel):
+            return output_model
 
-            if ref_set is None:
-                ref_set = objs_set
-            elif objs_set != ref_set:
-                raise ValueError(f"Inconsistent illuminated fiber types: {ref_set} vs {objs_set}")
+        ##################################
+        #### Return input model as is ####
+        ##################################
+        if isinstance(output_model, str) and output_model.lower() == 'input':
+            assert isinstance(
+                input, (datamodels.DataModel, str)
+            ), "Input DataModel or filepath must be provided if output_model is 'input'."
+            return datamodels.open(input) # Assume only one input
 
-            inputs_grouped.setdefault(objs, []).append(input[i])
+        ####################################
+        #### Return copy of input model ####
+        ####################################
+        if isinstance(output_model, str) and output_model.lower() == 'input_copy':
+            assert isinstance(
+                input, (datamodels.DataModel, str)
+            ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
+            input_model = datamodels.open(input) # Assume only one input
+            return input_model.from_datamodels(input_model, **kwargs)
 
-        return inputs_grouped
+        ##################
+        #### Filepath ####
+        ##################
+        if isinstance(output_model, str) and os.path.isfile(output_model):
+            out_model = datamodels.open(output_model)
+            return out_model
+
+        #####################################
+        #### DataModel class name (str) #####
+        #####################################
+        if isinstance(output_model, str):
+            model_class = datamodels.get_model_type_from_name(output_model)
+            return model_class.from_datamodels(input, **kwargs)
+
+        #################################
+        #### DataModel class (type) #####
+        #################################
+        if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
+            return model_class.from_datamodels(input, **kwargs)
+
+        #####################################
+        #### Everything else is an error ####
+        #####################################
+        raise ValueError(f"Invalid output_model argument {output_model=}.")
+    
+    def add_data_ancestors(self, input_model : datamodels.DataModel, sources : datamodels.DataModel | str | list[datamodels.DataModel | str]):
+        if not isinstance(sources, list):
+            sources = [sources]
+        for f in sources:
+            source_model = datamodels.open(f, meta_only=True)
+            input_model.data_ancestors.add_row({
+                'FILENAME' : str(source_model.meta.filename),
+                'DATETIME_OBS' : str(source_model.meta.datetime_obs),
+                'PRIMITIVE' : self.__class__.__name__
+            })

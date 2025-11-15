@@ -8,6 +8,8 @@ from koa_middleware import CalibrationStore
 from .. import datamodels
 from .. import utils
 
+from typing import Any
+
 from koa_middleware import CalibrationORM
 
 from ..processing_component import ProcessingComponent
@@ -193,17 +195,6 @@ class BasePrimitive(ProcessingComponent):
             'STATUS' : self._status
         }
         model.receipt.add_row(row)
-
-    def add_data_ancestors(self, input_model : datamodels.DataModel, sources : datamodels.DataModel | str | list[datamodels.DataModel | str]):
-        if not isinstance(sources, list):
-            sources = [sources]
-        for f in sources:
-            source_model = datamodels.open(f, meta_only=True)
-            input_model.data_ancestors.add_row({
-                'FILENAME' : str(source_model.meta.filename),
-                'DATETIME_OBS' : str(source_model.meta.datetime_obs),
-                'PRIMITIVE' : self.__class__.__name__
-            })
     
     def _get_args_repr(self):
         """Helper to get a string representation of current arguments."""
@@ -302,12 +293,7 @@ class BasePrimitive(ProcessingComponent):
             # Open to get cal id (open in full mode to return for processing)
             cal_model = datamodels.open(cal_value)
             assert isinstance(
-                cal_model,
-                (
-                    datamodels.CalibrationModel,
-                    datamodels.HISPECCalibrationModel,
-                    datamodels.PARVICalibrationModel,
-                )
+                cal_model, datamodels.CalibrationModel
             ), "Input must be a valid CalibrationDataModel."
 
             cal_id = cal_model.meta.cal_id
@@ -357,103 +343,6 @@ class BasePrimitive(ProcessingComponent):
         msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
         self.log.error(msg)
         raise ValueError(msg)
-
-    def get_output_model(
-        self,
-        input_model : datamodels.DataModel | None = None,
-        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
-    ) -> datamodels.DataModel:
-        """
-        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-        """
-        if output_model is None:
-            output_model = getattr(self, 'output_model', None)
-        return self._get_output_model(input_model, output_model)
-    
-    @staticmethod
-    def _get_output_model(
-        input_model : datamodels.DataModel | None = None,
-        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
-        ) -> datamodels.DataModel:
-        """
-        Get the output model based on the input model and the specified output model type.
-
-        Args:
-            input_model (datamodels.DataModel, optional): The input data model to base the output on.
-            output_model (str | datamodels.DataModel | type[datamodels.DataModel], optional): The desired output model type or specification. It can take on several values:
-                - DataModel instance (datamodels.DataModel): Returns `output_model` as is.
-                - 'input' (str): Returns `input_model` as is.
-                - 'input_copy' (str): Returns a copy of `input_model`.
-                - Valid filepath (str): Opens and returns the model from the specified file.
-                - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - None (default value): Raises an error.
-
-        Returns:
-            datamodels.DataModel: The instantiated output DataModel class.
-        """
-
-        ###################################
-        #### Return output model as is ####
-        ###################################
-        if isinstance(output_model, datamodels.DataModel):
-            return output_model
-
-        ##################################
-        #### Return input model as is ####
-        ##################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is 'input'."
-            return input_model
-
-        ####################################
-        #### Return copy of input model ####
-        ####################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is 'input_copy'."
-            out_model = input_model.copy()
-            out_model._filepath = None # NOTE: Revisit if we want to keep the filepath.
-            out_model.meta.filename = None
-            return out_model
-
-        ##################
-        #### Filepath ####
-        ##################
-        if isinstance(output_model, str) and os.path.isfile(output_model):
-            out_model = datamodels.open(output_model)
-            return out_model
-
-        #####################################
-        #### DataModel class name (str) #####
-        #####################################
-        if isinstance(output_model, str):
-            if input_model.meta.instrument_name is not None:
-                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model)
-            else:
-                model_class = datamodels.model_type_from_name(output_model)
-            return model_class.from_datamodel(input_model)
-
-        #################################
-        #### DataModel class (type) #####
-        #################################
-        if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is a DataModel class."
-            if input_model.meta.instrument_name is not None:
-                model_class = datamodels.model_type_from_name(input_model.meta.instrument_name.upper() + output_model.__class__.__name__)
-            else:
-                model_class = output_model
-            return output_model.from_datamodel(input_model)
-
-        #####################################
-        #### Everything else is an error ####
-        #####################################
-        raise ValueError(f"Invalid output_model argument {output_model=}.")
 
     def __getattr__(self, attr):
         if '_output' in self.__dict__ and attr in self._output:
