@@ -6,18 +6,31 @@ from hispecdrp.utils import download_gdrive_file
 from hispecdrp.primitives.spectral_extraction.extraction_utils import get_extraction_window
 
 def test_stage1(tmp_path, datadir):
+    
     fiberflat_filepaths = {
         '1' : [
-            download_gdrive_file('PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
-            download_gdrive_file('PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
-            download_gdrive_file('PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
         ],
         '2' : [
-            download_gdrive_file('PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
-            download_gdrive_file('PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
-            download_gdrive_file('PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
+            download_gdrive_file('PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
         ],
     }
+    # fiberflat_filepaths = {
+    #     '1' : [
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits',
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits',
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits',
+    #     ],
+    #     '2' : [
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits',
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits',
+    #         '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits',
+    #     ],
+    # }
 
     fibers = list(fiberflat_filepaths.keys())
     ff_models = {}
@@ -51,7 +64,8 @@ def test_stage1(tmp_path, datadir):
     extraction_aperture = 5
     do_orders = [94]
 
-    filepath_solar = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', use_cached=True, output_dir=datadir)
+    filepath_solar = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', output_dir=datadir)
+    #filepath_solar = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits'
     temp_model = datamodels.open(filepath_solar)
 
     for fiber in fibers:

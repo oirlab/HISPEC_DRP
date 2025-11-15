@@ -1,5 +1,5 @@
 import numpy as np
-from hispecdrp import datamodels, TracePositionPrimitive, TraceProfilePrimitive, CoaddFramesPrimitive, SpectralExtractionPrimitive, Stage1Pipeline, ProcessFiberflatPipeline
+from hispecdrp import datamodels, TracePositionPrimitive, TraceProfilePrimitive, CoaddFramesPrimitive, SpectralExtractionPrimitive, Stage1Pipeline, ProcessFiberflatsPipeline
 import matplotlib.pyplot as plt
 from hispecdrp.utils import download_gdrive_file
 import os
@@ -9,15 +9,26 @@ def test_stage1_parvi(tmp_path, datadir):
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     fiberflat_filepaths = [
-        download_gdrive_file('PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
-        download_gdrive_file('PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
-        download_gdrive_file('PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
-        download_gdrive_file('PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
-        download_gdrive_file('PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
-        download_gdrive_file('PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
+        download_gdrive_file('PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
     ]
+    # fiberflat_filepaths = [
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.81693.45_rate-FIBERFLAT-FIB1.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82173.17_rate-FIBERFLAT-FIB2.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82210.07_rate-FIBERFLAT-FIB2.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230901.82246.97_rate-FIBERFLAT-FIB2.fits',
+    # ]
     fibers = ['1', '2']
     ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
+
+    lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83774.17.master-lfc_wavesol.fits', output_dir=datadir)
+    #lfc_wavesol = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/Cals/PR.20230725.83774.17.master-lfc_wavesol.fits'
 
     # Coadd Fiberflats per fiber
     prim = CoaddFramesPrimitive()
@@ -44,8 +55,10 @@ def test_stage1_parvi(tmp_path, datadir):
     do_orders = order_vec
     #do_orders = [94]
 
-    filepath_solar = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', use_cached=True, output_dir=datadir)
+    filepath_solar = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', output_dir=datadir)
+    #filepath_solar = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits'
     solar_model = datamodels.open(filepath_solar)
+    #plt.imshow(solar_model.rate, vmin=0, vmax=np.nanquantile(solar_model.rate, 0.995)); plt.plot(trace_pos_model.pos_fib1[34, :]); plt.ylim(0, 2048); plt.show()
 
     # Box extraction
     prim = SpectralExtractionPrimitive()
@@ -119,11 +132,13 @@ def test_stage1_parvi(tmp_path, datadir):
             # plt.show()
 
     # Test Fiberflat Pipeline
-    pipe = ProcessFiberflatPipeline()
+    pipe = ProcessFiberflatsPipeline()
     pipe.trace_pos.deg_pos = 4
     pipe.trace_pos.deg_width = 2
     pipe.trace_pos.yrange = yrange_parvi
     pipe.trace_pos.xrange = xrange
+    pipe.spec_extract.extraction_aperture = extraction_aperture
+    pipe.set_wavesol.wavesol = lfc_wavesol
     trace_results = pipe.apply(ff_models)
 
     # Test Stage1 Pipeline
@@ -135,6 +150,7 @@ def test_stage1_parvi(tmp_path, datadir):
     pipe.spec_extract.xrange = xrange
     pipe.spec_extract.extraction_aperture = extraction_aperture
     pipe.spec_extract.method = 'optimal'
+    pipe.set_wavesol.wavesol = lfc_wavesol
 
     spec_opt = pipe.apply(solar_model)
 

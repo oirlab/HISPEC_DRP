@@ -13,7 +13,7 @@ from datetime import datetime
 def test_local_caldb(tmp_path, datadir):
 
     # Science
-    input_model = datamodels.HISPECL0Model()
+    input_model = datamodels.L0Model()
     input_model.rate = np.abs(np.random.randn(4096, 4096) * 0.01 + 1).astype(np.float32)
     input_model.rate_err = np.full((4096, 4096), 0.01, dtype=np.float32)
     input_model.rate_var_poisson = np.abs(np.random.randn(4096, 4096).astype(np.float32))
@@ -21,7 +21,7 @@ def test_local_caldb(tmp_path, datadir):
     input_model.dq = np.zeros((4096, 4096), dtype=np.uint32)
 
     # Dark
-    dark_model = datamodels.HISPECDarkModel()
+    dark_model = datamodels.DarkModel()
     dark_model.rate = (np.random.randn(4096, 4096) * 0.01 + 1).astype(np.float32)
     dark_model.rate_err = np.full((4096, 4096), 0.01, dtype=np.float32)
     dark_model.rate_var_poisson = np.abs(np.random.randn(4096, 4096).astype(np.float32))

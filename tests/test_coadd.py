@@ -1,8 +1,6 @@
-from numba.core.datamodel import models
 from hispecdrp import CoaddFramesPrimitive
 from hispecdrp import datamodels
 import numpy as np
-import os
 
 
 def test_coadd_frames(tmp_path, datadir):
@@ -13,7 +11,7 @@ def test_coadd_frames(tmp_path, datadir):
     shape = (512, 512)
     scale = 1E-5
     for f in range(n):
-        model = datamodels.HISPECL0Model()
+        model = datamodels.L0Model()
         model.rate = scale * np.random.randn(*shape).astype(np.float32) + 1
         model.rate_var_rnoise = np.zeros(shape, dtype=np.float32)
         model.rate_var_poisson = (model.rate / 1000.0)**2

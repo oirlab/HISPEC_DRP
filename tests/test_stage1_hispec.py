@@ -1,15 +1,23 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
-from hispecdrp import datamodels, TracePositionPrimitive, TraceProfilePrimitive, CoaddFramesPrimitive, SpectralExtractionPrimitive
+from hispecdrp import datamodels, TracePositionPrimitive, TraceProfilePrimitive, CoaddFramesPrimitive, SpectralExtractionPrimitive, ProcessFiberflatsPipeline, Stage1Pipeline
 from hispecdrp.utils import download_gdrive_file
 
 def test_stage1_hispec(tmp_path, datadir):
+
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
     
     fiberflat_filepaths = [
         download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB1.fits', use_cached=True, output_dir=datadir),
         download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
         download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB3.fits', use_cached=True, output_dir=datadir)
     ]
+    # fiberflat_filepaths = [
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB1.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB2.fits',
+    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB3.fits',
+    # ]
     fibers = ['1', '2', '3']
     ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
 
@@ -30,13 +38,27 @@ def test_stage1_hispec(tmp_path, datadir):
     trace_prof_model = prim.apply(ff_models_coadded, tracepos=trace_pos_model)
 
     # Create combined fiberflat model for cross-talk extraction
-    fiberflat_all_fibers_model = datamodels.HISPECL0Model()
+    fiberflat_all_fibers_model = datamodels.L0Model()
     fiberflat_all_fibers_model.meta = ff_models_coadded[0].meta
-    fiberflat_all_fibers_model.rate = getattr(ff_models_coadded[0], 'rate') + getattr(ff_models_coadded[1], 'rate') + getattr(ff_models_coadded[2], 'rate')
-    fiberflat_all_fibers_model.rate_err = np.sqrt(getattr(ff_models_coadded[0], 'rate_err')**2 + getattr(ff_models_coadded[1], 'rate_err')**2 + getattr(ff_models_coadded[2], 'rate_err')**2)
-    fiberflat_all_fibers_model.rate_var_rnoise = getattr(ff_models_coadded[0], 'rate_var_rnoise') + getattr(ff_models_coadded[1], 'rate_var_rnoise') + getattr(ff_models_coadded[2], 'rate_var_rnoise')
-    fiberflat_all_fibers_model.rate_var_poisson = getattr(ff_models_coadded[0], 'rate_var_poisson') + getattr(ff_models_coadded[1], 'rate_var_poisson') + getattr(ff_models_coadded[2], 'rate_var_poisson')
-    fiberflat_all_fibers_model.dq = getattr(ff_models_coadded[0], 'dq') | getattr(ff_models_coadded[1], 'dq') | getattr(ff_models_coadded[2], 'dq')
+    fiberflat_all_fibers_model.rate = getattr(ff_models_coadded[0], 'rate') \
+                                      + getattr(ff_models_coadded[1], 'rate') \
+                                      + getattr(ff_models_coadded[2], 'rate')
+    
+    fiberflat_all_fibers_model.rate_err = np.sqrt(
+        getattr(ff_models_coadded[0], 'rate_err')**2 \
+        + getattr(ff_models_coadded[1], 'rate_err')**2 \
+        + getattr(ff_models_coadded[2], 'rate_err')**2
+    )
+    fiberflat_all_fibers_model.rate_var_rnoise = getattr(ff_models_coadded[0], 'rate_var_rnoise') \
+        + getattr(ff_models_coadded[1], 'rate_var_rnoise') \
+        + getattr(ff_models_coadded[2], 'rate_var_rnoise')
+    fiberflat_all_fibers_model.rate_var_poisson = getattr(ff_models_coadded[0], 'rate_var_poisson') \
+        + getattr(ff_models_coadded[1], 'rate_var_poisson') \
+        + getattr(ff_models_coadded[2], 'rate_var_poisson')
+    
+    fiberflat_all_fibers_model.dq = getattr(ff_models_coadded[0], 'dq') \
+        | getattr(ff_models_coadded[1], 'dq') \
+        | getattr(ff_models_coadded[2], 'dq')
 
     order_vec = trace_pos_model.make_order_vec()
 
@@ -67,7 +89,7 @@ def test_stage1_hispec(tmp_path, datadir):
         method='optimal',
     )
 
-    # NOTE: This works well for HISPEC but ignore tests for now.
+    # Cross-Talk Extraction
     prim = SpectralExtractionPrimitive()
     spec_ct = prim.apply(
         fiberflat_all_fibers_model,
@@ -113,3 +135,40 @@ def test_stage1_hispec(tmp_path, datadir):
             # plt.plot(spectrum_ct, label='CT')
             # plt.legend()
             # plt.show()
+
+
+    # Test Fiberflat Pipeline
+    pipe = ProcessFiberflatsPipeline()
+    pipe.trace_pos.deg_pos = 4
+    pipe.trace_pos.deg_width = 2
+    pipe.trace_pos.yrange = yrange
+    pipe.trace_pos.xrange = xrange
+    pipe.spec_extract.extraction_aperture = extraction_aperture
+    pipe.set_wavesol.run = False
+    pipe.register_fiberflat_cal.run = False
+    trace_results = pipe.apply(ff_models)
+
+    # Test Stage1 Pipeline
+    pipe = Stage1Pipeline()
+    pipe.spec_extract.tracepos = trace_pos_model
+    pipe.spec_extract.traceprof = trace_prof_model
+    pipe.spec_extract.do_fibers = fibers
+    pipe.spec_extract.do_orders = do_orders
+    pipe.spec_extract.xrange = xrange
+    pipe.spec_extract.extraction_aperture = extraction_aperture
+    pipe.spec_extract.method = 'optimal'
+    pipe.set_wavesol.run = False
+
+    spec_opt = pipe.apply(fiberflat_all_fibers_model)
+
+    for fiber in fibers:
+    	for order in do_orders:
+
+            oi = np.abs(order - trace_pos_model.meta.order_start)
+            
+            spectrum_opt = getattr(spec_opt, f'spec_uncal_fib{fiber}')[oi, :]
+            error_opt = getattr(spec_opt, f'spec_uncal_err_fib{fiber}')[oi, :]
+            snr_opt = np.nanmean(spectrum_opt / error_opt)
+            
+            print(f"Fiber {fiber} Order {order}: OPT SNR = {snr_opt:.2f}")
+            assert snr_opt > 0, f"Fiber {fiber} Order {order}: OPT SNR <= 10"
