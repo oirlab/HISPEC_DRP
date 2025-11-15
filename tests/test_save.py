@@ -9,7 +9,6 @@ import copy
 def test_save_result_primitive(tmp_path, datadir):
 
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
-    #lfc_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230725.83774.17_spec-LFC.fits'
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     do_fibers = ['2']
 
@@ -65,7 +64,6 @@ def test_save_result_pipeline(tmp_path, datadir):
     do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
     do_fibers = ['2']
     lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
-    #lfc_path = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230725.83774.17_spec-LFC.fits'
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
     prim_args = {
         'fit_lfc_lines' : {

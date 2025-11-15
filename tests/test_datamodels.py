@@ -7,7 +7,6 @@ def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
     filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
-    #filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits'
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'HISPEC'
@@ -56,12 +55,9 @@ def test_hispec_level0(tmp_path, datadir):
 
 
 def test_parvi_level0(tmp_path, datadir):
-
-    #datamodels.DataModel.DEFAULT_CONFIG = datamodels.PARVIConfig
     
     # Science file (just tellurics)
     filepath = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', output_dir=datadir)
-    #filepath = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits'
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'PARVI'

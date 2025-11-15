@@ -13,11 +13,6 @@ def test_stage1_hispec(tmp_path, datadir):
         download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB2.fits', use_cached=True, output_dir=datadir),
         download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB3.fits', use_cached=True, output_dir=datadir)
     ]
-    # fiberflat_filepaths = [
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB1.fits',
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB2.fits',
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/HISPEC/L0/HB.20240924.0000.00_rate-FIBERFLAT-FIB3.fits',
-    # ]
     fibers = ['1', '2', '3']
     ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
 

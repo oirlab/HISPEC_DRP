@@ -15,13 +15,6 @@ def test_fit_etalon_parvi(tmp_path, datadir):
     ]
     lfc_wavesol = download_gdrive_file('PARVI/Cals/PR.20230725.83774.17.master-lfc_wavesol.fits', output_dir=datadir)
     ref_etalon = download_gdrive_file('PARVI/Cals/PR.20230725.83774.17.master-ref_etalon.fits', output_dir=datadir)
-    # solar_files = [
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.64207.77_spec-SOLAR.fits',
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.67931.81_spec-SOLAR.fits',
-    #     '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/L2/PR.20230803.71633.71_spec-SOLAR.fits',
-    # ]
-    #lfc_wavesol = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/Cals/PR.20230725.83774.17.master-lfc_wavesol.fits'
-    #ref_etalon = '/Users/cale/Desktop/HISPEC_PARVI_Test_Data/PARVI/Cals/PR.20230725.83774.17.master-ref_etalon.fits'
 
 
     ref_etalon_model = datamodels.open(ref_etalon)
