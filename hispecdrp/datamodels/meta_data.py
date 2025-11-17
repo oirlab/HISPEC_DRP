@@ -227,7 +227,8 @@ class TargetMeta(BaseModel):
     target_name: str | None = FitsField(
         fits_keyword="OBJECT",
         title="Target or object name, internal or on-sky",
-        default='NONE'
+        default='NONE',
+        orm_field=True,
     )
     target_ra: float | None = FitsField(
         fits_keyword="RA",

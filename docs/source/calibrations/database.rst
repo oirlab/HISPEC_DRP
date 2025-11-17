@@ -33,7 +33,7 @@ The HISPEC calibration Object Relational Mapping (ORM) contain the following fie
    object_fiber2,string,None,Object in fiber 2, Yes
    object_fiber3,string,None,Object in fiber 3, Yes
    drp_version,string,None,DRP software version, Yes
-   note,string,None,Optional user-defined notes, Yes
+   note,string,None,Optional user-defined notes, No
    last_updated,string,ISO 8601,Timestamp of last update (auto-managed), Yes
 
 
@@ -63,5 +63,5 @@ The PARVI calibration Object Relational Mapping (ORM) contain the following fiel
    object_fiber1,string,None,Object in fiber 1, Yes
    object_fiber2,string,None,Object in fiber 2, Yes
    drp_version,string,None,DRP software version, Yes
-   note,string,None,Optional user-defined notes, Yes
+   note,string,None,Optional user-defined notes, No
    last_updated,string,ISO 8601,Timestamp of last update (auto-managed), Yes
