@@ -1,7 +1,5 @@
 # Metadata
 from .meta_data import *
-# from .hispec_meta import *
-# from .parvi_meta import *
 
 # DQ flags
 from .dqflags import *
@@ -15,10 +13,6 @@ from .create_ramp import *
 
 # Extensions
 # from . import extensions
-
-# Base instrument models
-#from .hispec_base import *
-#from .parvi_base import *
 
 # Concrete models
 from .ramp import *
