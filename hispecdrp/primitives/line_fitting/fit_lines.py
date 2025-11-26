@@ -3,6 +3,7 @@ import scipy
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import savgol_filter
 from numba import njit
+import warnings
 
 
 def fit_lines(
@@ -116,11 +117,32 @@ def profile_background_fit(
         profile_func = _gaussian
     elif profile_type == 'lorentzian':
         profile_func = _lorentzian
+
+    # Select good data points
+    good = np.where(np.isfinite(y) & np.isfinite(yerr))[0]
+    if len(good) < 3:
+        warnings.warn("Not enough good data points to perform fit.")
+        return {
+            'amplitude': np.nan,
+            'amplitude_err': np.nan,
+            'mu': np.nan,
+            'mu_err': np.nan,
+            'fwhm': np.nan,
+            'fwhm_err': np.nan,
+            'b' : np.nan,
+            'b_err': np.nan,
+            'redchi2': np.nan,
+            'profile_type': profile_type,
+        }
+    
+    x = x[good]
+    y = y[good]
+    yerr = yerr[good]
     
     # Initial params
-    ymin = np.nanmin(y)
+    ymin = np.min(y)
     yy = y - ymin
-    ymax = np.nanmax(yy)
+    ymax = np.max(yy)
     yy /= ymax
     yyerr = yerr / ymax
     
