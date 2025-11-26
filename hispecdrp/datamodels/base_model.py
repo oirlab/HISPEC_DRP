@@ -749,7 +749,7 @@ class DataModel:
         dt = dt.datetime
         midnight = datetime.combine(dt.date(), datetime.min.time())
         seconds = (dt - midnight).total_seconds()
-        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
+        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:08.2f}"
         filename = f"{instrument_alias}.{date_time}.fits"
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
