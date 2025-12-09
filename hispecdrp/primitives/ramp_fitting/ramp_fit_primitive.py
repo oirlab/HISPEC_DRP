@@ -4,7 +4,6 @@ from ...calibrations import DetectorGainSelector,ReadNoiseSelector
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
-from .fit_ramp_cython import fitramps_cython
 
 import numpy as np
 
@@ -100,18 +99,8 @@ class FitRampPrimitive(BasePrimitive):
                 num_coadd=_mcds_num_coadd,
                 max_cores=self.max_cores
             )
-        elif self.method.lower() == 'cython':
-            result = fitramps_cython(
-            delta_readtimes,
-            input_model.data,
-            dq_raw=input_model.dq_raw,
-            dq=input_model.dq,
-            rdnoise=rn_model.rn,
-            gain=detgain_model.gain,
-            start_times=first_read_mjd,
-            dark_current=None,  # Not used because we assume dark subtraction is done in rate maps.
-            )
-        elif self.method.lower() in ('jwst_likely', 'jwst_ols'):
+
+        elif self.method.lower() in ('jwst_likely', 'jwst_ols', 'cython_likely'):
             result = fit_ramps_jwst(
                 delta_readtimes, input_model.data,
                 dq_raw=input_model.dq_raw,
