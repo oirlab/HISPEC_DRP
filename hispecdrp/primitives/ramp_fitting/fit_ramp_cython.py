@@ -154,11 +154,11 @@ def fitramps_cython(delta_readtimes : np.ndarray,
     # shape (n_reads, npix)
 
     covar = Covar(actual_read_times)
-    
+    diffs_lin = np.diff(flat_ramps, axis=0)
 
     r = fitramp_cython.fit_ramps(
         diffs_lin, flat_dq_raw,
-        covar.alpha_phnoise/gain, covar.beta_phnoise/gain,
+        covar.alpha_phnoise/flat_gain, covar.beta_phnoise/flat_gain,
         covar.alpha_readnoise, covar.beta_readnoise,
         flat_rdnoise, cguess=None, n1=n_reads, n0=n_pix
         )

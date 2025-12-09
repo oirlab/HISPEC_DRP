@@ -8,7 +8,7 @@
 # Choosing a build backend:
 # https://packaging.python.org/en/latest/tutorials/packaging-projects/#choosing-a-build-backend
 [build-system]
-requires = ["setuptools>=38.3.0", "wheel", "setuptools_scm>=8"]
+requires = ["setuptools>=38.3.0", "wheel", "setuptools_scm>=8", "cython"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
@@ -85,3 +85,9 @@ hispecdrp = ["datamodels/hispec/schemas/*.yaml", "datamodels/parvi/schemas/*.yam
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--rootdir=."
+
+[tool.scikit-build]
+wheel.expand-macos-universal-tags = true
+
+[tool.scikit-build.cython]
+sources = ["hispecdrp/primitives/ramp_fitting/fit_ramp_cython.pyx"]
