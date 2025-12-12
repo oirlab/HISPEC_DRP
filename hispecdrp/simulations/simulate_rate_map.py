@@ -1,214 +1,415 @@
-#import the necessary modules from pyechelle
-from pyechelle.simulator import Simulator
-from pyechelle.telescope import Telescope
-from pyechelle.sources import ConstantPhotonFlux,CSVSource, IdealEtalon, Phoenix
-from pyechelle.spectrograph import ZEMAX
+from hispecdrp.utils import download_gdrive_file
+
+try:
+    from pyechelle.simulator import Simulator
+    from pyechelle.telescope import Telescope
+    from pyechelle.sources import CSVSource
+    from pyechelle.spectrograph import ZEMAX
+except ImportError:
+    print("pyechelle package not found. pyechelle simulations will not run.")
 
 import os
+import h5py
+
 import numpy as np
-from scipy.ndimage import shift
+from numba import njit
+
 from scipy.interpolate import interp1d
 from scipy.interpolate import PchipInterpolator
-from scipy.ndimage import fourier_shift
-import astropy.units as u
-import astropy.constants as const
-from astropy.io import fits
-import h5py
-from numba import njit
+from scipy.interpolate import RegularGridInterpolator
 from scipy.signal import fftconvolve
 
+import astropy.units as u
+import astropy.constants as const
+from astropy.units import Quantity
+from astropy.io import fits
 
-class SimulateRateMap():
-    def __init__(self):
-        self.bspec_hdf_path = '/home/aidan/code/HISPEC_DRP/hispecdrp/simulations/fixed_20231006A-1_HISPEC_SPECTRO_YJ_pyechelle.hdf'
-        self.rsepc_hdf_path = '/home/aidan/code/HISPEC_DRP/hispecdrp/simulations/fixed_20231006B-1_HISPEC_SPECTRO_HK_pyechelle.hdf'
-        self.output_directory = ''
-        self.pyechelle_outname = '_pyechelle_out.fits'
-        self.rate_map_outname = '_rate_map_out.fits'
-        self.telescope_primary_diameter = 9.96 * u.m
-        self.quantum_efficiency = 0.9
-        self.fibers = {}
-        return
+__all__ = ['SimulateRateMap', 'read_pyechelle_hdf']
 
-    def set_fiber_spectrum(self, fiber_number=1,
-                           spectrum_wavelengths=np.linspace(0.9,2.4,100)*u.micron,
-                           spectrum_flux=np.ones(100)*1e-12*u.erg/u.s/u.cm**2/u.micron,
-                           continuous=True):
 
-        if fiber_number not in [1,2,3]:
-            print('Fiber must be 1,2 or 3! No spectrum set.')
-            return
+simulations_directory = os.path.dirname(os.path.abspath(__file__))
+default_bspec_hdf = (
+            simulations_directory+'/hdf/' +
+            'HISPEC_yJ_20231006A-1_all_traces.hdf'
+        )
+default_rspec_hdf = (
+            simulations_directory+'/hdf/' +
+            'HISPEC_HK_20231006B-1_all_traces.hdf'
+        )
 
-        if continuous and not _check_wavelength_sampling(spectrum_wavelengths, min_resolution=3e5):
-            print('Input sectrum does not have sufficient sampling for HISPEC simulation.\n',
-                  'The input spectrum will be interpolated to a higher sampling.\n',
-                  'If the input is intended to be a list of unresolved lines, set continuous=False.')
-            spectrum_wavelengths, spectrum_flux = _upsample_spectrum(spectrum_wavelengths,
-                                                                     spectrum_flux,
-                                                                     desired_sampling_resolution=3e5)
+
+class SimulateRateMap:
+    """Class for simulating rate maps using pyechelle fiber spectra."""
+
+    def __init__(self) -> None:
+        self.bspec_hdf_model: str = (
+            simulations_directory+'/hdf/' +
+            'HISPEC_yJ_20231006A-1_all_traces.hdf'
+        )
+        self.rspec_hdf_model: str = (
+            simulations_directory+'/hdf/' +
+            'HISPEC_HK_20231006B-1_all_traces.hdf'
+        )
+        self.output_directory: str = simulations_directory+'/output/'
+        self.pyechelle_outname: str = '_pyechelle_out.fits'
+        self.rate_map_outname: str = 'rate_map_out.fits'
+
+        if os.path.isdir(self.output_directory) is False:
+            os.mkdir(self.output_directory)
+
+        self.telescope_primary_diameter: Quantity = 9.96 * u.m
+        self.quantum_efficiency: float = 0.9
+
+        self.fibers: dict = {}
+
+        self.bspec_orders: list[int] = list(range(110, 150))
+        self.rspec_orders: list[int] = list(range(59, 99))
+
+        self.rate_map: np.ndarray[np.float64] = None
+
+
+    def set_fiber_spectrum(
+        self,
+        fiber_number: int = 1,
+        spectrum_wavelengths: Quantity = np.linspace(0.9, 2.4, 100) * u.micron,
+        spectrum_flux: Quantity = (np.ones(100) * 1e-12 * u.erg / u.s / u.cm**2 / u.micron),
+        continuous: bool = True,
+    ) -> None:
+        """Assign spectral input to a fiber."""
+
+        if fiber_number not in (1, 2, 3):
+            raise ValueError('Fiber must be 1, 2, or 3!')
+
+        if continuous and not _check_wavelength_sampling(
+            spectrum_wavelengths, min_resolution=3e5
+        ):
+            print(
+                "Input spectrum does not have sufficient sampling for HISPEC "
+                "simulation.\nThe input spectrum will be interpolated to a higher "
+                "sampling.\nIf the input is intended to be a list of unresolved lines, "
+                " or you do not want to interpolate to higher sampling, set continuous=False."
+            )
+            spectrum_wavelengths, spectrum_flux = _upsample_spectrum(
+                spectrum_wavelengths,
+                spectrum_flux,
+                desired_sampling_resolution=3e5,
+            )
 
         self.fibers[fiber_number] = {
-            'wavelength': spectrum_wavelengths,
-            'flux': spectrum_flux
+            "wavelength": spectrum_wavelengths,
+            "flux": spectrum_flux,
+            "continuous": continuous
         }
-        return
 
-    def apply_throughput_total(self, fiber_number=1, spectrograph='BSPEC'):
+
+    def apply_throughput_total(
+        self,
+        fiber_number: int = 1,
+        spectrograph: str = "BSPEC"
+    ) -> tuple[Quantity, Quantity]:
+        """Apply telescope + instrument throughput to fiber flux."""
+        
         spectrograph = spectrograph.upper()
-        if spectrograph not in ['BSPEC', 'RSPEC']:
-            print('!Spectrograph must be BSPEC or RSPEC!')
-            return None
 
-        throughput_files_bspec = ['feicom_throughput.csv',
-                                 'ao_throughput.csv',
-                                 'bspec_throughput.csv',
-                                 'feiblue_throughput.csv',
-                                 'fibblue_throughput.csv',
-                                 'tel_throughput.csv']
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
 
-        throughput_files_rspec = ['feicom_throughput.csv',
-                                  'ao_throughput.csv',
-                                  'feired_throughput.csv',
-                                  'fibred_throughput.csv',
-                                  'rspec_throughput.csv',
-                                  'tel_throughput.csv']
+        throughput_files_bspec: list[str] = [
+            "feicom_throughput.csv",
+            "ao_throughput.csv",
+            "bspec_throughput.csv",
+            "feiblue_throughput.csv",
+            "fibblue_throughput.csv",
+            "tel_throughput.csv",
+        ]
 
-        throughput_files = throughput_files_rspec if spectrograph.upper() == 'RSPEC' else throughput_files_bspec
+        throughput_files_rspec: list[str] = [
+            "feicom_throughput.csv",
+            "ao_throughput.csv",
+            "feired_throughput.csv",
+            "fibred_throughput.csv",
+            "rspec_throughput.csv",
+            "tel_throughput.csv",
+        ]
 
-        total_throughput = np.ones_like(self.fibers[fiber_number]['wavelength'].value)
+        throughput_files: list[str] = (
+            throughput_files_rspec
+            if spectrograph == "RSPEC"
+            else throughput_files_bspec
+        )
+
+        wavelengths = self.fibers[fiber_number]["wavelength"]
+        total_throughput = np.ones_like(wavelengths.value)
+
         for file in throughput_files:
-            th_data = np.genfromtxt('throughput/'+file, delimiter=',',skip_header=1).T
+            file_path = os.path.join(simulations_directory, "throughput", file)
+            th_data = np.genfromtxt(file_path, delimiter=",", skip_header=1).T
             th_wv = th_data[0] * u.micron
-            th = th_data[1]
+            th_val = th_data[1]
 
-            intp_func = interp1d(th_wv, th)
-            total_throughput *= intp_func(self.fibers[fiber_number]['wavelength'])
+            interp_func = interp1d(th_wv, th_val, fill_value=0.0,
+                                    bounds_error=False)
+            total_throughput *= interp_func(wavelengths)
 
         total_throughput *= self.quantum_efficiency
-        self.fibers[fiber_number]['flux'] *= total_throughput
+        self.fibers[fiber_number]["flux"] *= total_throughput
 
-        return self.fibers[fiber_number]['wavelength'], self.fibers[fiber_number]['flux']
+        return wavelengths, self.fibers[fiber_number]["flux"]
 
-    def apply_tellurics(self, fiber_number=1):
-        print('Applying tellurics currently does nothing.')
-        return
 
-    def apply_radial_velocity(self, fiber_number=1, rv=0*u.km/u.s):
-        self.fibers[fiber_number]['wavelength'] *= (1 + (rv / const.c).to(u.dimensionless_unscaled))
-        return self.fibers[fiber_number]['wavelength'], self.fibers[fiber_number]['flux']
+    def apply_tellurics(self, fiber_number: int = 1) -> None:
+        """Placeholder for atmospheric absorption effects."""
+        raise NotImplementedError("Telluric application not yet implemented.")
 
-    def create_pyechelle_rate_map(self, spectrograph='BSPEC', exposure_time=300*u.s, save=True):
+
+    def apply_radial_velocity(
+        self,
+        fiber_number: int = 1,
+        rv: Quantity = 0 * u.km / u.s
+    ) -> tuple[Quantity, Quantity]:
+        """Apply Doppler shift to wavelengths."""
+
+        factor = (1 + (rv / const.c).to(u.dimensionless_unscaled))
+        self.fibers[fiber_number]["wavelength"] *= factor
+
+        return (
+            self.fibers[fiber_number]["wavelength"],
+            self.fibers[fiber_number]["flux"],
+        )
+
+
+    def create_pyechelle_rate_map(
+        self,
+        spectrograph: str = "BSPEC",
+        exposure_time: Quantity = 300 * u.s,
+        save: bool = True,
+    ) -> np.ndarray[np.float64]:
+        """Run pyechelle simulator to generate pixel-space rate map."""
+
         spectrograph = spectrograph.upper()
-        if spectrograph not in ['BSPEC', 'RSPEC']:
-            print('!Spectrograph must be BSPEC or RSPEC!')
-            return None
 
-        model_path = self.bspec_hdf_path if spectrograph == 'BSPEC' else self.rsepc_hdf_path
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
+
+        model_path = (
+            self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        )
+        # if model_path == default_bspec_hdf:
+        #     download_gdrive_file(default_bspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
+        # elif model_path == default_rspec_hdf:
+        #     download_gdrive_file(default_rspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
 
         sim = Simulator(ZEMAX(path=model_path))
-        sim.set_ccd(1)  # always leave as 1
+        sim.set_ccd(1)
         sim.set_bias(0)
         sim.set_read_noise(0)
-        sim.set_telescope(Telescope(self.telescope_primary_diameter.value, 0))  # Telescope(primary diameter, secondary diameter)
+        sim.set_telescope(
+            Telescope(self.telescope_primary_diameter.to(u.m).value, 0)
+        )
         sim.set_exposure_time(exposure_time.to(u.s).value)
-
-        sim.set_fibers([f for f in self.fibers])
+        sim.set_fibers(list(self.fibers))
+        sim.set_orders(
+            self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
+        )
+        
         fiber_sources = []
         for fiber in self.fibers:
-            fiber_csv_path = self.write_fiber_spectrum_to_pyechelle_csv(fiber)
-            source = CSVSource(file_path=fiber_csv_path,
-                               list_like=False,
-                               wavelength_units='micron',
-                               flux_units='ph/s/micron')
-            fiber_sources.append(source)
+            csv_path = self.write_fiber_spectrum_to_pyechelle_csv(fiber)
+            fiber_sources.append(
+                CSVSource(
+                    file_path=csv_path,
+                    list_like=not self.fibers[fiber]["continuous"],
+                    wavelength_units="micron",
+                    flux_units="ph/s/micron",
+                )
+            )
 
         sim.set_sources(fiber_sources)
-        sim.set_output(self.output_directory+spectrograph+self.pyechelle_outname, overwrite=True)
+        #sim.set_efficiency(ConstantEfficiency(1.0))
+
+        output_path = os.path.join(
+            self.output_directory, f"{spectrograph}{self.pyechelle_outname}"
+        )
+        sim.set_output(output_path, overwrite=True)
         sim.run()
 
-        self.rate_map = fits.getdata(self.output_directory+spectrograph+self.pyechelle_outname)  / exposure_time.to(u.s).value
+        self.rate_map = (
+            fits.getdata(output_path) / exposure_time.to(u.s).value
+        )
 
         if save:
-            fits.writeto(self.output_directory+spectrograph+'_pyechelle'+self.rate_map_outname, data=self.rate_map)
+            save_path = os.path.join(
+                self.output_directory,
+                f"{spectrograph}_pyechelle_{self.rate_map_outname}",
+            )
+            fits.writeto(save_path, data=self.rate_map, overwrite=True)
 
         return self.rate_map
+    
 
-    def create_native_rate_map(self, spectrograph='BSPEC',
-                               save=True,
-                               method='bilinear_weights'):
+    def create_native_rate_map(
+        self,
+        spectrograph: str = "BSPEC",
+        save: bool = True,
+        method: str = "prf_convolution",
+    ) -> np.ndarray[np.float64]:
+        """Create rate map using native model interpolation/convolution.
+          Faster than pyechelle for bright sources."""
+
         spectrograph = spectrograph.upper()
-        if spectrograph not in ['BSPEC', 'RSPEC']:
-            print('!Spectrograph must be BSPEC or RSPEC!')
-            return None
 
-        if method not in ['bilinear_weights', 'prf_convolution']:
-            print('!Method must be bilinear_weights (slower) or prf_convolution (psf convolved with prf, faster)!')
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
 
-        model_path = self.bspec_hdf_path if spectrograph == 'BSPEC' else self.rsepc_hdf_path
-        model_data_dict = read_pyechelle_hdf(model_path)
+        if method not in ("bilinear_weights", "prf_convolution"):
+            raise ValueError(
+                "Method must be bilinear_weights or "
+                "prf_convolution (psf convolved with prf)!"
+            )
 
-        for fiber in self.fibers:
-            wavelength = self.fibers[fiber]['wavelength'].to(u.micron)
-            tmp_flux = self.fibers[fiber]['flux'] * np.pi * (self.telescope_primary_diameter ** 2) / 4
-            flux = tmp_flux.to(u.ph / u.s / u.micron, equivalencies=u.spectral_density(wavelength))
+        model_path = (
+            self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        )
+        # if model_path == default_bspec_hdf:
+        #     download_gdrive_file(default_bspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
+        # elif model_path == default_rspec_hdf:
+        #     download_gdrive_file(default_rspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
 
-            if method=='bilinear_weights':
-                self.rate_map = bilinear_weights_rate_map(wavelength.value,
-                                                          flux.value,
-                                                          model_data_dict['fiber_'+str(fiber)],
-                                                          detector_shape=(model_data_dict['nx'], model_data_dict['ny']),
-                                                          pixelsize=model_data_dict['pixelsize']
-                                                          )
-            elif method=='prf_convolution':
-                self.rate_map = psf_prf_convolution_rate_map(wavelength.value,
-                                                          flux.value,
-                                                          model_data_dict['fiber_' + str(fiber)],
-                                                          detector_shape=(model_data_dict['nx'], model_data_dict['ny']),
-                                                          pixelsize=model_data_dict['pixelsize']
-                                                          )
+        model_data = read_pyechelle_hdf(model_path)
+
+        order_list = (
+            self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
+        )
+        order_list_str = [str(o) for o in order_list]
 
 
-        if save:
-            fits.writeto(self.output_directory+spectrograph+self.rate_map_outname, data=self.rate_map, overwrite=True)
+        detector_shape = (model_data["nx"], model_data["ny"])
+        pixelsize = model_data["pixelsize"]
+
+
+        rate_map_array = np.empty((len(self.fibers), detector_shape[1], detector_shape[0]), dtype=np.float64)
+        for i, fiber in enumerate(self.fibers):
+            fiber_key = f"fiber_{fiber}"
+
+            # remove orders in hdf model that will not be used
+            for key in list(model_data[fiber_key]):
+                if key not in order_list_str:
+                    del model_data[fiber_key][key]
+
+            wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
+            tmp_flux = (
+                self.fibers[fiber]["flux"] *
+                np.pi * (self.telescope_primary_diameter ** 2) / 4
+            )
+            flux = tmp_flux.to(
+                u.ph / u.s / u.micron,
+                equivalencies=u.spectral_density(wavelength),
+            )
+
+
+
+            if method == "bilinear_weights":
+                self.rate_map = bilinear_weights_rate_map(
+                    wavelength,
+                    flux,
+                    model_data[fiber_key],
+                    detector_shape=detector_shape,
+                    pixelsize=pixelsize,
+                )
+            else:
+                self.rate_map = psf_prf_convolution_rate_map(
+                    wavelength,
+                    flux,
+                    model_data[fiber_key],
+                    detector_shape=detector_shape,
+                    pixelsize=pixelsize,
+                )
+
+            rate_map_array[i, :, :] = self.rate_map
+
+        self.rate_map = np.sum(rate_map_array, axis=0)
+
+        if save and self.rate_map is not None:
+            save_path = os.path.join(
+                self.output_directory, f"{spectrograph}_{self.rate_map_outname}"
+            )
+            fits.writeto(save_path, data=self.rate_map, overwrite=True)
 
         return self.rate_map
 
-    def write_fiber_spectrum_to_pyechelle_csv(self, fiber):
-        wavelength = self.fibers[fiber]['wavelength'].to(u.micron)
-        tmp_flux = self.fibers[fiber]['flux'] * np.pi*(self.telescope_primary_diameter**2)/4
-        flux = tmp_flux.to(u.ph/u.s/u.micron, equivalencies=u.spectral_density(wavelength))
 
-        arr = np.array([wavelength.value, flux.value]).T
-        np.savetxt(self.output_directory+'fiber_'+str(fiber)+'.csv', arr, delimiter=',')
-        return os.path.abspath(self.output_directory+'fiber_'+str(fiber)+'.csv')
+    def write_fiber_spectrum_to_pyechelle_csv(
+        self,
+        fiber: int
+    ) -> str:
+        """Write fiber's wavelength + flux into a CSV formatted for pyechelle."""
+
+        wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
+        tmp_flux = (
+            self.fibers[fiber]["flux"] *
+            np.pi * (self.telescope_primary_diameter ** 2) / 4
+        )
+        flux = tmp_flux.to(
+            u.ph / u.s / u.micron,
+            equivalencies=u.spectral_density(wavelength),
+        )
+
+        arr = np.column_stack(
+            [wavelength.value, flux.value]
+        )
+        fname = f"fiber_{fiber}.csv"
+        out_path = os.path.join(self.output_directory, fname)
+
+        np.savetxt(out_path, arr, delimiter=",")
+        return os.path.abspath(out_path)
 
 
 def bilinear_weights_rate_map(
-    wave, flux,
-    orders,
-    detector_shape=(4096, 4096),
-    pixelsize=10 # microns
-):
+    wave: Quantity,
+    flux: Quantity,
+    orders: dict[str, dict],
+    detector_shape: tuple[int, int] = (4096, 4096),
+    pixelsize: float = 10.0
+) -> np.ndarray[np.float64]:
     """
-    Simulate detector rate map (photons/s/pixel)
-    using nearest PSF, oversampled PSF stamps, and optimized Numba deposition.
+    Simulate detector rate map (photons/s/pixel) by depositing
+    oversampled PSFs using bilinear interpolation.
+
+    Parameters
+    ----------
+    wave : Quantity
+        Input wavelengths corresponding to flux samples.
+    flux : Quantity
+        Flux array with photon rate density (photons/s/unit wavelength).
+    orders : dict
+        Nested structure containing wavelength trace and PSF stamps for orders. 
+        Top level keys are order numbers (str).
+    detector_shape : tuple of int, optional
+        Detector (ny, nx) pixel size, default = (4096, 4096).
+    pixelsize : float, optional
+        Pixel size in microns (affects oversampling), default = 10.
+
+    Returns
+    -------
+    det : ndarray[float64]
+        Detector photon rate map (photons/s/pixel).
+        Modified in-place by Numba-accelerated PSF deposit function.
     """
     det = np.zeros(detector_shape, dtype=np.float64)
 
     for od in orders:
-        print('Simulating order ', od)
+        print('Simulating order', od)
+
         ow = orders[od]['xy_wavelengths']
-        ox = orders[od]["x"]
-        oy = orders[od]["y"]
+        ox = orders[od]['x']
+        oy = orders[od]['y']
         psfw = orders[od]['psf_wavelengths']
         psf_list = orders[od]['psf_stamps']
-        oversample = pixelsize/orders[od]['psf_data_spacing']
+        oversample = pixelsize / orders[od]['psf_data_spacing']
 
-        # Interpolate trace centers
+        # Interpolate detector trace positions
         fx = PchipInterpolator(ow, ox, extrapolate=True)
         fy = PchipInterpolator(ow, oy, extrapolate=True)
-        #fx = interp1d(ow, ox, bounds_error=False, fill_value="extrapolate", kind='linear')
-        #fy = interp1d(ow, oy, bounds_error=False, fill_value="extrapolate", kind='linear')
 
         xc_arr = fx(wave)
         yc_arr = fy(wave)
@@ -219,124 +420,61 @@ def bilinear_weights_rate_map(
             dw = dws[i]
             photons_per_s = flux[i] * dw
 
-            if photons_per_s <= 0:
+            if photons_per_s.value <= 0:
                 continue
 
-            if lam0 < ow.min() or lam0 > ow.max():
+            if lam0.value < ow.min() or lam0.value > ow.max():
                 continue
 
-            xc = xc_arr[i]
-            yc = yc_arr[i]
+            xc = float(xc_arr[i])
+            yc = float(yc_arr[i])
 
-            # nearest PSF
-            idx = np.argmin(np.abs(psfw - lam0))
-            psf = psf_list[idx] / np.sum(psf_list[idx]) * photons_per_s   # scale PSF
+            # Nearest PSF by wavelength
+            idx = int(np.argmin(np.abs(psfw - lam0.value)))
+
+            # Normalize and scale PSF by total photons
+            psf = psf_list[idx]
+            psf = (psf / np.sum(psf)) * photons_per_s.value  
 
             _deposit_oversampled_psf_numba(det, psf, xc, yc, oversample)
 
     return det
 
 
-def psf_prf_convolution_rate_map(wave,
-                                 flux,
-                                 orders,
-                                 detector_shape=(4096, 4096),
-                                 pixelsize=10 # microns
-                                 ):
-
-    det = np.zeros(detector_shape, dtype=np.float64)
-
-    for od in orders:
-        print('Simulating order ', od)
-        ow = orders[od]['xy_wavelengths']
-        ox = orders[od]["x"]
-        oy = orders[od]["y"]
-        psfw = orders[od]['psf_wavelengths']
-        psf_list = orders[od]['psf_stamps']
-        oversample = pixelsize / orders[od]['psf_data_spacing']
-        oversample = int(oversample)
-
-        # Interpolate trace centers
-        fx = PchipInterpolator(ow, ox, extrapolate=True)
-        fy = PchipInterpolator(ow, oy, extrapolate=True)
-        # fx = interp1d(ow, ox, bounds_error=False, fill_value="extrapolate", kind='linear')
-        # fy = interp1d(ow, oy, bounds_error=False, fill_value="extrapolate", kind='linear')
-
-        prf_kernel = np.array([np.ones((oversample, oversample))]*len(psf_list))
-        psf_eff_list = fftconvolve(psf_list, prf_kernel, mode='same', axes=[1,2])
-        pad = (psf_eff_list[0].shape[0] // 2, psf_eff_list[1].shape[1] // 2)
-
-        xc_arr = fx(wave)
-        yc_arr = fy(wave)
-        xc_floor_arr = np.floor(xc_arr)
-        yc_floor_arr = np.floor(yc_arr)
-        subpixel_shifts_x_arr = xc_arr - xc_floor_arr
-        subpixel_shifts_y_arr = yc_arr - yc_floor_arr
-
-        dws = np.gradient(wave)
-
-        for i in range(len(wave) - 1):
-            lam0 = wave[i]
-            dw = dws[i]
-            photons_per_s = flux[i] * dw
-
-            if photons_per_s <= 0:
-                continue
-
-            if lam0 < ow.min() or lam0 > ow.max():
-                continue
-
-            xc_floor = int(xc_floor_arr[i])
-            dx = subpixel_shifts_x_arr[i]
-            yc_floor = int(yc_floor_arr[i])
-            dy = subpixel_shifts_y_arr[i]
-
-            # pad, shift, then crop
-            # nearest PSF
-            idx = np.argmin(np.abs(psfw - lam0))
-            psf_eff = psf_eff_list[idx]
-            psf_eff_pad = np.pad(psf_eff, ((pad[0],pad[0]), (pad[1],pad[1])),
-                                 mode='constant', constant_values=0.0)
-            shifted_psf_eff_pad = np.fft.ifftn(fourier_shift(np.fft.fftn(psf_eff_pad),
-                                                         shift=[dy, dx])).real
-            cy, cx = shifted_psf_eff_pad.shape[0] // 2, shifted_psf_eff_pad.shape[1] // 2
-            halfy, halfx = psf_eff.shape[0] // 2, psf_eff.shape[1] // 2
-            shifted_psf_eff = shifted_psf_eff_pad[cy - halfy:cy + halfy + 1, cx - halfx:cx + halfx + 1]
-
-            # 4) downsample by summing non-overlapping s x s blocks to get detector pixels
-            ny_f, nx_f = shifted_psf_eff.shape
-            ny = ny_f // oversample
-            nx = nx_f // oversample
-            shifted_psf_eff = shifted_psf_eff[:ny * oversample, :nx * oversample]  # trim to exact multiple
-            # reshape and sum blocks
-            down = shifted_psf_eff.reshape(ny, oversample, nx, oversample).sum(axis=(1, 3))
-
-            down /= np.sum(down)
-            flux_to_add = down * photons_per_s
-
-            #print(flux_to_add.shape)
-            if yc_floor > 100 and xc_floor > 100 and yc_floor<4000 and xc_floor<4000:
-                det[yc_floor-ny_f//2:yc_floor+ny_f//2+1, xc_floor-nx_f//2:xc_floor+nx_f//2+1] += flux_to_add
-
-    return det
-
-
-
-
-
-
 @njit(fastmath=True)
-def _deposit_oversampled_psf_numba(det, psf, xc, yc, oversample):
+def _deposit_oversampled_psf_numba(
+    det: np.ndarray[np.float64],
+    psf: np.ndarray[np.float64],
+    xc: float,
+    yc: float,
+    oversample: float
+) -> None:
     """
     Numba-accelerated deposition of an oversampled PSF into detector pixels
     using bilinear subpixel weighting. Flux is conserved.
+
+    Parameters
+    ----------
+    det : ndarray[float64]
+        The detector image array to update in-place (ny x nx).
+    psf : ndarray[float64]
+        The oversampled PSF stamp to deposit (H x W).
+    xc, yc : float
+        Center of PSF in detector pixel coordinates (x, y).
+    oversample : float
+        Oversampling factor (sampled PSF pixels per detector pixel).
+
+    Returns
+    -------
+    None
+        The detector array `det` is modified in place.
     """
     H, W = psf.shape
     ny, nx = det.shape
 
-    # Precompute center offset once
-    y0 = yc * oversample - (H * 0.5 + 1)
-    x0 = xc * oversample - (W * 0.5 + 1)
+    # Precompute center offset 
+    y0 = yc * oversample - (H * 0.5 + 1.0)
+    x0 = xc * oversample - (W * 0.5 + 1.0)
 
     for j in range(H):
         # detector-space y position of this oversampled pixel
@@ -351,90 +489,240 @@ def _deposit_oversampled_psf_numba(det, psf, xc, yc, oversample):
 
             val = psf[j, i]
 
-            # Skip if entire stencil is off-chip
+            # Skip if off-chip
             if (i0 < -1 or i0 > ny or j0 < -1 or j0 > nx):
                 continue
 
             # Contribute to 4 nearest neighbors
-            # Pixel (i0, j0)
             if 0 <= i0 < ny and 0 <= j0 < nx:
-                det[i0, j0] += val * (1 - dy) * (1 - dx)
+                det[i0, j0] += val * (1.0 - dy) * (1.0 - dx)
 
-            # Pixel (i0, j0+1)
-            if 0 <= i0 < ny and 0 <= j0+1 < nx:
-                det[i0, j0+1] += val * (1 - dy) * dx
+            if 0 <= i0 < ny and 0 <= j0 + 1 < nx:
+                det[i0, j0 + 1] += val * (1.0 - dy) * dx
 
-            # Pixel (i0+1, j0)
-            if 0 <= i0+1 < ny and 0 <= j0 < nx:
-                det[i0+1, j0] += val * dy * (1 - dx)
+            if 0 <= i0 + 1 < ny and 0 <= j0 < nx:
+                det[i0 + 1, j0] += val * dy * (1.0 - dx)
 
-            # Pixel (i0+1, j0+1)
-            if 0 <= i0+1 < ny and 0 <= j0+1 < nx:
-                det[i0+1, j0+1] += val * dy * dx
+            if 0 <= i0 + 1 < ny and 0 <= j0 + 1 < nx:
+                det[i0 + 1, j0 + 1] += val * dy * dx
 
 
-def _check_wavelength_sampling(wavelengths, min_resolution=1e6):
+def psf_prf_convolution_rate_map(
+    wave: Quantity,
+    flux: Quantity,
+    orders: dict[str, dict],
+    detector_shape: tuple[int, int] = (4096, 4096),
+    pixelsize: float = 10.0
+) -> np.ndarray[np.float64]:
+    """
+    Generate a detector rate map by convolving oversampled PSFs with
+    the pixel response function (PRF), and interpolating for many
+    trace positions across each order.
+
+    Parameters
+    ----------
+    wave : Quantity
+        Input wavelength samples.
+    flux : Quantity
+        Flux samples expressed as photon-rate density.
+    orders : dict
+        Nested dictionary containing trace coordinates and PSF stamps.
+    detector_shape : tuple of int, optional
+        Detector pixels (ny, nx). Default = (4096, 4096).
+    pixelsize : float, optional
+        Pixel size in microns, used to determine oversampling.
+
+    Returns
+    -------
+    det : ndarray[float64]
+        Detector photon rate map in photons/s/pixel.
+    """
+    det = np.zeros(detector_shape, dtype=np.float64)
+
+    for od in orders:
+        print('Simulating order', od)
+
+        ow = orders[od]['xy_wavelengths']
+        ox = orders[od]["x"]
+        oy = orders[od]["y"]
+        psfw = orders[od]['psf_wavelengths']
+        psf_list = orders[od]['psf_stamps']
+
+        oversample = pixelsize / orders[od]['psf_data_spacing']
+        if not float(oversample).is_integer():
+            raise ValueError("Oversample factor must be an integer")
+        oversample = int(oversample)
+
+        # Interpolate detector trace positions
+        fx = PchipInterpolator(ow, ox, extrapolate=True)
+        fy = PchipInterpolator(ow, oy, extrapolate=True)
+
+        # Create list of convolved effective PSFs across the order
+        prf_kernel = np.ones((oversample, oversample))
+        psf_eff_list = fftconvolve(
+            psf_list,
+            prf_kernel[None, ...],
+            mode='same',
+            axes=(1, 2)
+        )
+
+        order_wave_min = ow.min() * u.micron
+        order_wave_max = ow.max() * u.micron
+        order_wave = wave[(wave >= order_wave_min) & (wave <= order_wave_max)]   
+        order_flux = flux[(wave >= order_wave_min) & (wave <= order_wave_max)] 
+
+        xc_arr = fx(order_wave)
+        yc_arr = fy(order_wave)
+        xc_floor_arr = np.floor(xc_arr).astype(int)
+        yc_floor_arr = np.floor(yc_arr).astype(int)
+        subpixel_dx = xc_arr - xc_floor_arr
+        subpixel_dy = yc_arr - yc_floor_arr
+
+        dws = np.gradient(order_wave)
+        photons_per_s = order_flux * dws
+
+        psf_height, psf_width = psf_eff_list[0].shape
+        x_psf_eff = np.arange(psf_width) - psf_width // 2
+        y_psf_eff = np.arange(psf_height) - psf_height // 2
+
+        max_pixels_x = psf_width // oversample
+        max_pixels_y = psf_height // oversample
+
+        # Create interpolation function for effective psf
+        psf_eff_interp = RegularGridInterpolator((psfw, y_psf_eff, x_psf_eff), psf_eff_list, bounds_error=False, fill_value=None)
+
+        pixel_xs = (np.arange(max_pixels_x) - (max_pixels_x) // 2) * oversample
+        pixel_ys = (np.arange(max_pixels_y) - (max_pixels_y) // 2) * oversample
+
+
+        for i in range(len(order_wave) - 1):
+            # Get x,y grid to interpolate the effective psf on
+            pixels_xs_shifted = pixel_xs - subpixel_dx[i] * oversample
+            pixels_ys_shifted = pixel_ys - subpixel_dy[i] * oversample
+            xx, yy = np.meshgrid(pixels_xs_shifted, pixels_ys_shifted)
+
+            # Interpolate effective psf at this wavelength and normalize
+            stamp = psf_eff_interp((order_wave[i], yy, xx))
+            stamp_norm = stamp / np.sum(stamp)
+
+            xlo_idx = xc_floor_arr[i] - max_pixels_x // 2
+            xhi_idx = xc_floor_arr[i] + max_pixels_x // 2 + 1
+            ylo_idx = yc_floor_arr[i] - max_pixels_y // 2
+            yhi_idx = yc_floor_arr[i] + max_pixels_y // 2 + 1
+
+            # Calculate the slice boundaries for the source (stamp)
+            src_x_start = 0
+            src_x_end = max_pixels_x
+            src_y_start = 0
+            src_y_end = max_pixels_y
+
+            # Adjust x indices if they go out of bounds
+            if xlo_idx < 0:
+                src_x_start = -xlo_idx  # Skip the first part of the stamp
+                xlo_idx = 0
+            if xhi_idx > detector_shape[0]:
+                src_x_end = max_pixels_x - (xhi_idx - detector_shape[0])
+                xhi_idx = detector_shape[0]
+
+            # Adjust y indices if they go out of bounds
+            if ylo_idx < 0:
+                src_y_start = -ylo_idx  # Skip the first part of the stamp
+                ylo_idx = 0
+            if yhi_idx > detector_shape[1]:
+                src_y_end = max_pixels_y - (yhi_idx - detector_shape[1])
+                yhi_idx = detector_shape[1]
+
+            # Only add stamp if there's overlap
+            if xlo_idx < xhi_idx and ylo_idx < yhi_idx and src_x_start < src_x_end and src_y_start < src_y_end:
+                # Extract the valid portion of the stamp
+                valid_stamp = stamp_norm[src_y_start:src_y_end, src_x_start:src_x_end]
+                
+                # Add to det array
+                det[ylo_idx:yhi_idx, xlo_idx:xhi_idx] += valid_stamp * photons_per_s[i].value
+
+    return det
+
+
+def _check_wavelength_sampling(
+    wavelengths: Quantity,
+    min_resolution: float = 3e5
+) -> bool:
+    """Return True if all wavelength sampling meets resolution threshold."""
+
     wl = np.array(wavelengths, dtype=float)
 
-    # Ensure sorted input
+    # Ensure strictly increasing wavelengths
     if not np.all(np.diff(wl) > 0):
         raise ValueError("Wavelengths must be strictly increasing.")
 
     delta_wl = np.diff(wl)
     resolution = wl[:-1] / delta_wl
 
-    # Returns false if resolution below threshold anywhere
-    return np.all(resolution >= min_resolution)
+    return bool(np.all(resolution >= min_resolution))
 
 
-def _upsample_spectrum(wavelengths, flux, desired_sampling_resolution=3e5):
-    # Step size in ln(lambda)
+def _upsample_spectrum(
+    wavelengths: Quantity,
+    flux: Quantity,
+    desired_sampling_resolution: float = 3e5
+) -> tuple[Quantity, Quantity]:
+    """
+    Upsample spectrum in log-wavelength space to reach desired resolution.
+    """
+
     dloglam = 1.0 / desired_sampling_resolution
 
-    # Number of steps required
     lmax = np.max(wavelengths)
     lmin = np.min(wavelengths)
-    N = int(np.floor(np.log(lmax / lmin) / dloglam)) + 1
+    n_steps = int(np.floor(np.log(lmax / lmin) / dloglam)) + 1
 
-    # Logarithmically spaced wavelength array
-    new_wavelengths = lmin * np.exp(np.arange(N) * dloglam)
-    interp_func = interp1d(wavelengths, flux, kind='linear', fill_value=0.)
+    new_wavelengths = (
+        lmin * np.exp(np.arange(n_steps) * dloglam)
+    )
+
+    interp_func = interp1d(wavelengths, flux, kind="linear", fill_value=0.)
     new_flux = interp_func(new_wavelengths) * flux.unit
 
     return new_wavelengths, new_flux
 
 
-def read_pyechelle_hdf(hdf_model_path) -> dict:
-    """Read key data from a pyechelle HDF model file into a nested dictionary."""
+def read_pyechelle_hdf(hdf_model_path: str) -> dict:
+    """
+    Read pyechelle HDF model into nested dictionary structure.
+    """
+
     with h5py.File(hdf_model_path, "r") as hdf_data:
         ccd1_data = hdf_data["CCD_1"]
 
         base_dict = {
-            'nx': ccd1_data.attrs['Nx'],
-            'ny': ccd1_data.attrs['Ny'],
-            'pixelsize': ccd1_data.attrs['pixelsize']
+            "nx": ccd1_data.attrs["Nx"],
+            "ny": ccd1_data.attrs["Ny"],
+            "pixelsize": ccd1_data.attrs["pixelsize"],
         }
 
-        for fiber in ccd1_data:
-            if 'fiber' in fiber:
-                base_dict[fiber] = _parse_fiber(ccd1_data[fiber])
+        for fiber_key in ccd1_data:
+            if "fiber" in fiber_key:
+                base_dict[fiber_key] = _parse_fiber(ccd1_data[fiber_key])
 
         return base_dict
 
 
-def _parse_fiber(fiber_group) -> dict:
-    """Parse one fiber (fiber_x) group and return its orders/PSF data."""
+def _parse_fiber(fiber_group: h5py.Group) -> dict:
+    """
+    Parse one fiber group and return its orders & PSF data.
+    """
+
     fiber_dict = {}
 
-    # First create order entries (non-PSF)
+    # Create order placeholders (non-PSF groups)
     for key in fiber_group:
         if "psf" not in key:
             order = key.replace("order", "")
             fiber_dict[order] = {}
 
-    # Fill in data
+    # Fill in data for each entry
     for key in fiber_group:
-        if "psf" in key:
+        if "psf_order_" in key:
             _parse_psf_order(key, fiber_group[key], fiber_dict)
         else:
             _parse_order(key, fiber_group[key], fiber_dict)
@@ -442,26 +730,40 @@ def _parse_fiber(fiber_group) -> dict:
     return fiber_dict
 
 
-def _parse_psf_order(key: str, group, fiber_dict: dict) -> None:
-    """Parse a PSF order group like 'psf_order_12'."""
+def _parse_psf_order(
+    key: str,
+    group: h5py.Group,
+    fiber_dict: dict
+) -> None:
+    """
+    Parse a PSF order group like 'psf_order_59' into arrays.
+    """
+
     order = key.replace("psf_order_", "")
 
     wavelengths = np.array([
-        float(k.replace("wavelength_", ""))
-        for k in group
+        float(k.replace("wavelength_", "")) for k in group
     ])
-    stamps = np.array([group[k][()] for k in group])
 
+    stamps = np.array([group[k][()] for k in group])
     fiber_dict[order]["psf_wavelengths"] = wavelengths
     fiber_dict[order]["psf_stamps"] = stamps
-    fiber_dict[order]['psf_data_spacing'] = [group[k].attrs['dataSpacing'] for k in group][0]
+    fiber_dict[order]["psf_data_spacing"] = [
+        group[k].attrs["dataSpacing"] for k in group
+    ][0]
 
 
-def _parse_order(key: str, dataset, fiber_dict: dict) -> None:
-    """Parse a regular order dataset like 'order12'."""
+def _parse_order(
+    key: str,
+    dataset: h5py.Dataset,
+    fiber_dict: dict
+) -> None:
+    """
+    Parse a regular trace dataset like 'order59' into X, Y and wavelength arrays.
+    """
+
     order = key.replace("order", "")
     arr = np.vstack([list(k) for k in dataset])
-
     fiber_dict[order]["xy_wavelengths"] = arr[:, -1]
     fiber_dict[order]["x"] = arr[:, 4]
     fiber_dict[order]["y"] = arr[:, 5]
