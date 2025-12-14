@@ -4,10 +4,10 @@ Create Simulated HISPEC Data
 This example shows how to create simulated HISPEC data using the simulations folder of the HISPEC_DRP.
 
 Simulated rate maps can be created using a wrapper for the ``pyechelle`` package, or using a native DRP simulator. 
-``pyechelle`` uses raytracing of individua photons and naturally includes photon noise, whereas the native simulator creates noiseless rate maps.
+``pyechelle`` uses raytracing of individual photons and naturally includes photon noise, whereas the native simulator creates noiseless rate maps.
 ``pyechelle`` takes longer to run for brighter targets (more photons to trace), and the native simulator is expected to be faster for all but the faintest sources. 
 
-All simulations require downloading model PSF and trace data (~2 GB).
+All simulations require downloading model PSF and trace data (~2 GB). This will be done automatically the first time you run either simulator.
 
 To create simulated ramp data suitable for input to the stage0 pipeline:
 

@@ -24,7 +24,7 @@ import astropy.constants as const
 from astropy.units import Quantity
 from astropy.io import fits
 
-__all__ = ['SimulateRateMap', 'read_pyechelle_hdf']
+__all__ = ['SimulateRateMap', 'read_pyechelle_hdf', 'download_zemax_files']
 
 
 simulations_directory = os.path.dirname(os.path.abspath(__file__))
@@ -194,10 +194,13 @@ class SimulateRateMap:
         model_path = (
             self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
         )
-        # if model_path == default_bspec_hdf:
-        #     download_gdrive_file(default_bspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
-        # elif model_path == default_rspec_hdf:
-        #     download_gdrive_file(default_rspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
+        
+        if os.path.isfile(model_path) is False and model_path in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally.')
+            download_zemax_files()
+
+        if os.path.isfile(model_path) is False:
+            raise FileNotFoundError(f"ZEMAX model file not found at {model_path}!")
 
         sim = Simulator(ZEMAX(path=model_path))
         sim.set_ccd(1)
@@ -270,10 +273,13 @@ class SimulateRateMap:
         model_path = (
             self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
         )
-        # if model_path == default_bspec_hdf:
-        #     download_gdrive_file(default_bspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
-        # elif model_path == default_rspec_hdf:
-        #     download_gdrive_file(default_rspec_hdf.split('/')[-1], output_dir=simulations_directory+'/hdf/', use_cached=True)
+        
+        if os.path.isfile(model_path) is False and model_path in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally.')
+            download_zemax_files()
+
+        if os.path.isfile(model_path) is False:
+            raise FileNotFoundError(f"ZEMAX model file not found at {model_path}!")
 
         model_data = read_pyechelle_hdf(model_path)
 
@@ -362,6 +368,20 @@ class SimulateRateMap:
 
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
+    
+
+def download_zemax_files() -> None:
+    """Download HISPEC ZEMAX model files from Google Drive."""
+
+    zemax_files = [
+        'HISPEC_HK_20231006B-1_all_traces.hdf',
+        'HISPEC_yJ_20231006A-1_all_traces.hdf'
+    ]
+
+    for zfile in zemax_files:
+        download_gdrive_file(zfile, output_dir=simulations_directory+'/hdf/',
+                            use_cached=True,
+                            preserve_rel_path=False)
 
 
 def bilinear_weights_rate_map(

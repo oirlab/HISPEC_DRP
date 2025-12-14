@@ -37,4 +37,9 @@ GDRIVE_FILES = {
     'PARVI/L2/PR.20230803.64207.77_spec-SOLAR.fits' : '1g0scP1MuRJ69zdkJD2nyertMUhbLK-Tw',
     'PARVI/L2/PR.20230803.67931.81_spec-SOLAR.fits' : '1h5jp3ZuLpekJoUJzY8Xbnm8L35gdLCDD',
     'PARVI/L2/PR.20230803.71633.71_spec-SOLAR.fits' : '1CTcg5diw1BEUMXPjgwJYF37SQv6yBxS9',
+
+    # HISPEC PSF and Traces
+    'HISPEC_HK_20231006B-1_all_traces.hdf' : '1Cb2V_4vpVbvnvPd5hd9g3QCLIAGtcNCT',
+    'HISPEC_yJ_20231006A-1_all_traces.hdf' : '1ShJPuYqRV6j70EgtcX9kY1eGQw2l14Ho',
+
 }
