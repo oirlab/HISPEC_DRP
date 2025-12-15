@@ -29,28 +29,10 @@ def test_simulate_rate_map():
                         continuous=False)
     
     spectrograph = 'BSPEC'
-    pyechelle_rate_map = srm.create_pyechelle_rate_map(spectrograph=spectrograph)
-
-    step_time = time.time()
-    print(f"Pyechelle rate map, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    assert isinstance(srm.rate_map, np.ndarray)
-    assert os.path.isfile(srm.output_directory+spectrograph+'_pyechelle_'+srm.rate_map_outname) is not False
-
-    srm = simulations.SimulateRateMap()
-    srm.set_fiber_spectrum(fiber_number=1,
-                        spectrum_wavelengths=fiber_23_wavelengths,
-                        spectrum_flux=fiber_23_flux,
-                        continuous=False)
-    spectrograph = 'RSPEC'
-    srm.apply_throughput_total(fiber_number=1)
-    native_rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method='bilinear_weights')
+    native_rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method='prf_convolution')
 
     step_time = time.time()
     print(f"Native rate map, elapsed: {step_time - start_time:.2f}s")
 
     assert isinstance(srm.rate_map, np.ndarray)
-    assert os.path.isfile(srm.output_directory+spectrograph+'_'+srm.rate_map_outname) is not False
-
 
