@@ -26,7 +26,7 @@ def test_stage0(tmp_path):
     # --- Non-linearity and its inverse polynomial coefficients ---
 
     # Create an ideal ramp (1D array for demonstration)
-    ideal_ramp = np.linspace(0, np.iinfo(np.uint16).max, 1001, endpoint=True)
+    ideal_ramp = np.linspace(0, 1.5*np.iinfo(np.uint16).max, 1001, endpoint=True)
     nonlin_coeffs = [-1e-6, 1, 0]  # Example coefficients for a cubic non-linearity
     # nonlin_coeffs = [ 1, 0]  # Example coefficients for a cubic non-linearity
     nonlinear_ramp = np.polyval(nonlin_coeffs, ideal_ramp)
@@ -40,7 +40,7 @@ def test_stage0(tmp_path):
 
     coeffs = np.broadcast_to(nonlin_correction_coefs[::-1, None, None], (np.size(nonlin_correction_coefs), ny, nx))
     thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
-    max = np.zeros(shape=(ny, nx), dtype=np.uint16)
+    max = np.full(shape=(ny, nx), fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
     nonlin_dq = np.zeros(shape=(ny,nx), dtype=np.uint32)
     nonlin_model = datamodels.NonlinearCorrectionModel(data=dict(coeffs=coeffs,
                                                                  nonlin_thresh=thresh,

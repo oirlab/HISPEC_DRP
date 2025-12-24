@@ -9,9 +9,9 @@ DQ_FLAGS = {
     'OUTLIER_MID_TIME': np.uint32(2**3),   # Mid exposure time is outlier in spectral order
     'OUTLIER':          np.uint32(2**4),   # Flagged by outlier detection
     'PERSISTENCE':      np.uint32(2**5),   # High persistence
-    'RESERVED_1':       np.uint32(2**6),   # RESERVED_1/TBD
-    'RESERVED_2':       np.uint32(2**7),   # RESERVED_2/TBD
-    'NON_LINEAR': np.uint32(2**8),   # Non linear. None linearity correction might be worse than 1%.
+    'NON_LINEAR': np.uint32(2**6),   # Non linear. None linearity correction might be worse than 1%.
+    'RESERVED_1':       np.uint32(2**7),   # RESERVED_1/TBD
+    'RESERVED_2':       np.uint32(2**8),   # RESERVED_2/TBD
     # 'UNRELIABLE_ERROR': np.uint32(2**8),   # Uncertainty exceeds quoted error
     'NON_SCIENCE':      np.uint32(2**9),   # Pixel not on science portion of detector
     'DEAD':             np.uint32(2**10),  # Dead pixel
