@@ -77,12 +77,14 @@ def _create_ramp_worker(args):
     """
     Worker function for multiprocessing. Runs create_ramp on a block of rows.
     Args:
-        args (tuple): (source_block, readtime, n_reads, gain_block, flat_block, bias_block, dark_block, read_noise, kTC_noise, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps)
+        args (tuple): (source_block, readtime, n_reads, gain_block, flat_block, bias_block, dark_block, read_noise, kTC_noise, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple,myrandomseed)
     Returns:
         dict[str, np.ndarray]: Output from create_ramp for the block
     """
-    block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple = args
+    block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple,myrandomseed = args
     mp_data_type, mp_float_type, mp_dq_raw_type = types_tuple
+
+    np.random.seed(myrandomseed)
 
     data_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
     dq_raw_np = _arraytonumpy(shared_dq_raw, shared_dq_raw_shape, dtype=mp_dq_raw_type)
@@ -286,6 +288,14 @@ def create_ramp(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
+            # This is almost certainly not the best way to handle RNG seeds in multiprocessing,
+            # but it will at least ensure different seeds for each worker and I understand it.
+            myrandomseed = np.random.default_rng().integers(
+                low=0,
+                high=np.iinfo(np.uint32).max,
+                dtype=np.uint32
+            )
+
             args = (block_start, block_end,
                     readtime,
                     n_reads,
@@ -294,7 +304,8 @@ def create_ramp(
                     mjd_start,
                     convert_to_uint16,
                     clip_ramps,
-                    types_tuple
+                    types_tuple,
+                    myrandomseed
                     )
             args_list.append(args)
 
