@@ -89,5 +89,5 @@ addopts = "--rootdir=."
 [tool.scikit-build]
 wheel.expand-macos-universal-tags = true
 
-[tool.scikit-build.cython]
-sources = ["hispecdrp/primitives/ramp_fitting/fit_ramp_cython.pyx"]
+#[tool.scikit-build.cython]
+#sources = ["hispecdrp/primitives/ramp_fitting/fitramp_cython_Brandt.pyx"]

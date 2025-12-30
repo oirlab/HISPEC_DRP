@@ -1,3 +1,6 @@
+# Author: Tim Brandt
+# Shared with HISPEC team in Aug 2025
+
 import cython
 import numpy as np
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
