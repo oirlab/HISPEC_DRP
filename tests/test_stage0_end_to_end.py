@@ -75,9 +75,8 @@ def test_stage0(tmp_path):
     gain = 1.0  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
     detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "GAIN_ERR": np.zeros_like(gain_map),
-                                                       "GAIN_VAR_RNOISE": np.zeros_like(gain_map),
-                                                       "GAIN_VAR_POISSON": np.zeros_like(gain_map),
+                                                       "RN": np.full_like(gain_map, 0.0),
+                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
                                                        "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();

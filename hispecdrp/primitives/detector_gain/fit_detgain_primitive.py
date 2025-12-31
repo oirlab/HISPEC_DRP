@@ -212,9 +212,9 @@ def fit_gain_and_readnoise(
                                                              gains_init, rns_init, do_once=False,
                                                              countratesidentical=countratesidentical)
         elif method == 'grid' or method == 'both':
-            if self.method == 'grid':
+            if method == 'grid':
                 error_computation = 'posterior'
-            elif self.method == 'both':
+            elif method == 'both':
                 error_computation = 'quad'
             _out = fit_single_gain_readnoise(readtimes, ramps, dq_raw, C, gains_init,
                                                  rns_init, error_computation=error_computation,

@@ -45,8 +45,6 @@ class DetectorGainPrimitive(BasePrimitive):
             raise Exception("DQ extension not found in input model for detector gain correction.")
         if not hasattr(detgain_model, 'GAIN'):
             raise Exception("GAIN extension not found in gain model for dark subtraction.")
-        if not hasattr(detgain_model, 'GAIN_ERR'):
-            raise Exception("GAIN_ERR extension not found in gain model for dark subtraction.")
         if not hasattr(detgain_model, 'DQ'):
             raise Exception("DQ extension not found in gain model for dark subtraction.")
 
@@ -56,7 +54,7 @@ class DetectorGainPrimitive(BasePrimitive):
         # Perform detector flat correction
         detector_gain_correction(
             result.rate, result.rate_err, result.dq,
-            detgain_model.gain, detgain_model.gain_err, detgain_model.dq,
+            detgain_model.gain, np.sqrt(detgain_model.cov[0,0]), detgain_model.dq,
             max_cores=self.max_cores
         )
 
