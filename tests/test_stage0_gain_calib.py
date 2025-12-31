@@ -1,4 +1,4 @@
-from hispecdrp import ProcessDetflatsPipeline
+from hispecdrp import ProcessDetFlatsPipeline
 from hispecdrp import datamodels
 import numpy as np
 import os
@@ -228,7 +228,7 @@ def test_stage0_gain_calib(tmp_path):
     }
 
     # Setup and call the stage 0 pipeline
-    detflat_pipe = ProcessDetflatsPipeline()
+    detflat_pipe = ProcessDetFlatsPipeline()
 
     # Set any primitive args
 
@@ -527,7 +527,7 @@ def test_stage0_gain_calib_stats(tmp_path):
     }
 
     # Setup and call the stage 0 pipeline
-    detflat_pipe = ProcessDetflatsPipeline()
+    detflat_pipe = ProcessDetFlatsPipeline()
 
     # Set any primitive args
 

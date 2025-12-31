@@ -7,10 +7,10 @@ from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearC
                            CoaddFramesPrimitive)
 from typing import Sequence
 
-__all__ = ['ProcessDetflatsPipeline']
+__all__ = ['ProcessDetFlatsPipeline']
 
 
-class ProcessDetflatsPipeline(CalibrationPipeline):
+class ProcessDetFlatsPipeline(CalibrationPipeline):
 
     PRIMITIVES = {
         'dq_init': DQInitPrimitive,
