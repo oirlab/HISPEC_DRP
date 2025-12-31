@@ -18,7 +18,7 @@ DQ_FLAGS = {
     'HOT':              np.uint32(2**11),  # Hot pixel
     'WARM':             np.uint32(2**12),  # Warm pixel
     'LOW_QE':           np.uint32(2**13),  # Low quantum efficiency
-    'RESERVED_3':       np.uint32(2**14),  # RESERVED_3/TBD
+    'COLD':             np.uint32(2**14),  # Cold pixel
     'TELEGRAPH':        np.uint32(2**15),  # Telegraph pixel
     # 'NONLINEAR':        np.uint32(2**16),  # Pixel highly nonlinear
     'RESERVED_6':        np.uint32(2**16),  #
