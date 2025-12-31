@@ -137,11 +137,10 @@ class FitDetectorGainPrimitive(BasePrimitive):
         # ramp_arr = input_combined_array["data"]
         # dq_raw_arr = input_combined_array["dq_raw"]
 
-        # Make sure to open all input models in case some files are passed as strings
+        # Make all ramps from all files into a big cube
         ramp_arr = []
         dq_raw_arr = []
-        for _input in _input_list_tmp:
-            opened_input = datamodels.open(_input)
+        for opened_input in input_models:
             if nreads != opened_input.data.shape[0]:
                 raise ValueError("All input ramps must have the same number of reads.")
             ramp_arr.append(opened_input.data)
