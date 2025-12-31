@@ -1,5 +1,6 @@
 from . import fit_gain_Brandt
 from ..ramp_fitting import fitramp_Brandt
+# from ..coadd.coadd_frames_primitive import CoaddFramesPrimitive
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...calibrations import DetectorGainSelector,ReadNoiseSelector
@@ -68,18 +69,16 @@ class FitDetectorGainPrimitive(BasePrimitive):
             _input_list_tmp = [self.input]
         if  isinstance(self.input, Sequence):
             _input_list_tmp = self.input
-
-
-        # Make sure to open all input models in case some files are passed as strings
-        _input_list = []
-        for _input in _input_list_tmp:
-            _input_list.append(datamodels.open(_input))
-        nreads,ny,nx = _input_list[0].data.shape
         nfiles = len(_input_list_tmp)
-        self.log.info(f"Deriving the detector gain from a list of {len(_input_list)} inputs.")
+        self.log.info(f"Deriving the detector gain from a list of {nfiles} inputs.")
+
+
+        input_models = [datamodels.open(f) for f in _input_list_tmp]
+        datamodel0 = input_models[0]
+        nreads,ny,nx = datamodel0.data.shape
 
         if self.init_gain is None:
-            detgain_init, _ = self.get_calibration(_input_list[0], 'detgain_init')
+            detgain_init, _ = self.get_calibration(datamodel0, 'detgain_init')
             detgain_init_model = datamodels.open(detgain_init)
             detgain_init_arr = detgain_init_model.gain
             self.log.info(f"Using {detgain_init} as initial detector gain values with median value {np.nanmedian(detgain_init_arr)}.")
@@ -87,7 +86,7 @@ class FitDetectorGainPrimitive(BasePrimitive):
             detgain_init_arr = np.full((ny,nx),self.init_gain)
             self.log.info(f"Using user-defined initial detector gain values: {self.init_gain}.")
         if self.init_RN is None:
-            rn_cal_init, _ = self.get_calibration(_input_list[0], 'rn_init')
+            rn_cal_init, _ = self.get_calibration(datamodel0, 'rn_init')
             rn_model_init = datamodels.open(rn_cal_init)
             rn_init_arr = rn_model_init.RN
             self.log.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(rn_init_arr)} DN.")
@@ -96,7 +95,7 @@ class FitDetectorGainPrimitive(BasePrimitive):
             self.log.info(f"Using user-defined initial read noise values: {self.init_RN}.")
 
 
-        delta_readtimes = _input_list[0].get_delta_readtimes()
+        delta_readtimes = datamodel0.get_delta_readtimes()
 
 
         # if delta_readtimes[1] - delta_readtimes[0] != 1:
@@ -132,16 +131,21 @@ class FitDetectorGainPrimitive(BasePrimitive):
             self.log.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
             
         # Define output model from inputs
-        output_detgain = self.get_output_model(_input_list,"DetectorGainModel")
+        output_detgain = self.get_output_model(input_models,"DetectorGainModel")
 
+        # input_combined_array = CoaddFramesPrimitive.make_frame_cube(_input_list_tmp, ("data","dq_raw"), copy=False)
+        # ramp_arr = input_combined_array["data"]
+        # dq_raw_arr = input_combined_array["dq_raw"]
 
+        # Make sure to open all input models in case some files are passed as strings
         ramp_arr = []
         dq_raw_arr = []
-        for _input in _input_list:
-            if nreads != _input.data.shape[0]:
+        for _input in _input_list_tmp:
+            opened_input = datamodels.open(_input)
+            if nreads != opened_input.data.shape[0]:
                 raise ValueError("All input ramps must have the same number of reads.")
-            ramp_arr.append(_input.data)
-            dq_raw_arr.append(_input.dq_raw)
+            ramp_arr.append(opened_input.data)
+            dq_raw_arr.append(opened_input.dq_raw)
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
