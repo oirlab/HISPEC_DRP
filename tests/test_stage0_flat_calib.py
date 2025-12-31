@@ -13,8 +13,8 @@ def test_stage0_gain_calib(tmp_path):
     max_slope = 200  # e-/s
     readtime = 1.7  # seconds
     n_reads = 30
-    N_files = 100  # number of simulated files to create
-    ny, nx = 2, 2  # size of the detector
+    N_files = 10  # number of simulated files to create
+    ny, nx = 10, 10  # size of the detector
 
     step_time = time.time();
     print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
