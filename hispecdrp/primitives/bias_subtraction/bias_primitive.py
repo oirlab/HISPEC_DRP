@@ -50,7 +50,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Perform bias subtraction
         bias_subtraction(
             result.data, result.dq,
-            bias_model.data, bias_model.dq,
+            bias_model.bias, bias_model.dq,
             max_cores=self.max_cores
         )
 
