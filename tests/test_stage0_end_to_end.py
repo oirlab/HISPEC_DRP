@@ -100,7 +100,7 @@ def test_stage0(tmp_path):
     bias = 1000  # e-/s
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
     bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "BIAS_ERR": np.zeros_like(bias_map),
+                                            "kTC": np.zeros_like(bias_map),
                                             "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
 
     step_time = time.time();

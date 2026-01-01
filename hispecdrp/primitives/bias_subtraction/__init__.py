@@ -1,3 +1,2 @@
-from .bias_primitive import BiasSubtractionPrimitive
-
-__all__ = ['BiasSubtractionPrimitive']
+from .bias_primitive import *
+from .fit_bias_primitive import *

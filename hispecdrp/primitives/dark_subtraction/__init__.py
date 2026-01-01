@@ -1,3 +1,2 @@
-from .dark_primitive import DarkSubtractionPrimitive
-
-__all__ = ['DarkSubtractionPrimitive']
+from .dark_primitive import *
+from .fit_detdark_primitive import *

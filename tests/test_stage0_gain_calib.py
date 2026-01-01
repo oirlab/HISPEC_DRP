@@ -97,7 +97,7 @@ def test_stage0_gain_calib(tmp_path):
     bias = 1000  # e-/s
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
     bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "BIAS_ERR": np.zeros_like(bias_map),
+                                            "kTC": np.zeros_like(bias_map),
                                             "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
 
     step_time = time.time();
@@ -306,18 +306,6 @@ def test_stage0_gain_calib_stats(tmp_path):
     print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
     start_time = time.time()
 
-    # --- Define parameters for the simulated ramp ---
-    max_cores = 1
-    max_slope = 200  # e-/s
-    readtime = 1.7  # seconds
-    n_reads = 30
-    N_files = 100  # number of simulated files to create
-    ny, nx = 2, 2  # size of the detector
-
-    step_time = time.time();
-    print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
     # --- Non-linearity and its inverse polynomial coefficients ---
 
     # Create an ideal ramp (1D array for demonstration)
@@ -396,7 +384,7 @@ def test_stage0_gain_calib_stats(tmp_path):
     bias = 1000  # e-/s
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
     bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "BIAS_ERR": np.zeros_like(bias_map),
+                                            "kTC": np.zeros_like(bias_map),
                                             "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
 
     step_time = time.time();
@@ -439,16 +427,6 @@ def test_stage0_gain_calib_stats(tmp_path):
                                            poisson_noise=True, read_noise=rn_map,  # in e-/s
                                            convert_to_uint16=True, clip_ramps=True,
                                            max_cores=max_cores)
-        # adding a jump
-        # ramp_data['data'][4::,:,:] += 1000
-        # ramp_data['data'][10::,:,:] += 1000
-        # ramp_data['data'][15::,:,:] += 1000
-        # ramp_data['data'][20::,:,:] += 1000
-        # ramp_data['data'][4::,5,5] += 3000
-
-        # print(ramp_data['data'][:,0,0])
-        # print(gain_map)
-        # exit()
 
         step_time = time.time();
         print(f"Step: creating ramp (new), elapsed: {step_time - start_time:.2f}s")
@@ -499,7 +477,7 @@ def test_stage0_gain_calib_stats(tmp_path):
             'suffix': 'detgain',
             'max_cores': pipe_max_cores,
             'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
-            'method': 'quad',
+            'method': 'both',
             'fix_RN': False,
             'init_delta_gains': np.linspace(-0.5, 0.5, 100),  # Example delta gain values to try
             'init_delta_RNs': np.linspace(-1, 1, 100),

@@ -5,6 +5,7 @@ from .dark_subtraction import *
 from .bias_subtraction import *
 from .detector_flat import *
 from .detector_gain import *
+from .detector_readnoise import *
 from .ramp_fitting import *
 from .coadd import *
 from .nonlinear_correction import *

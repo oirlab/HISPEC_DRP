@@ -5,7 +5,7 @@ import os
 import time
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
-def test_stage0_gain_calib(tmp_path):
+def test_stage0_flat_calib(tmp_path):
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---
@@ -110,7 +110,7 @@ def test_stage0_gain_calib(tmp_path):
     bias = 1000  # e-/s
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
     bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "BIAS_ERR": np.zeros_like(bias_map),
+                                            "kTC": np.zeros_like(bias_map),
                                             "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
 
     step_time = time.time();

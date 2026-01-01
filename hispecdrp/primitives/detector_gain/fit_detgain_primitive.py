@@ -72,7 +72,6 @@ class FitDetectorGainPrimitive(BasePrimitive):
         nfiles = len(_input_list_tmp)
         self.log.info(f"Deriving the detector gain from a list of {nfiles} inputs.")
 
-
         input_models = [datamodels.open(f) for f in _input_list_tmp]
         datamodel0 = input_models[0]
         nreads,ny,nx = datamodel0.data.shape
@@ -80,50 +79,40 @@ class FitDetectorGainPrimitive(BasePrimitive):
         if self.init_gain is None:
             detgain_init, _ = self.get_calibration(datamodel0, 'detgain_init')
             detgain_init_model = datamodels.open(detgain_init)
-            detgain_init_arr = detgain_init_model.gain
-            self.log.info(f"Using {detgain_init} as initial detector gain values with median value {np.nanmedian(detgain_init_arr)}.")
+            _init_center_gain = detgain_init_model.gain
+            self.log.info(f"Using {detgain_init} as initial detector gain values with median value {np.nanmedian(_init_center_gain)}.")
         elif isinstance(self.init_gain, float):
-            detgain_init_arr = np.full((ny,nx),self.init_gain)
+            _init_center_gain = self.init_gain
             self.log.info(f"Using user-defined initial detector gain values: {self.init_gain}.")
         if self.init_RN is None:
             rn_cal_init, _ = self.get_calibration(datamodel0, 'rn_init')
             rn_model_init = datamodels.open(rn_cal_init)
-            rn_init_arr = rn_model_init.RN
-            self.log.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(rn_init_arr)} DN.")
+            _init_center_RN = rn_model_init.RN
+            self.log.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(_init_center_RN)} DN.")
         elif isinstance(self.init_RN, float):
-            rn_init_arr = np.full((ny,nx),self.init_RN)
+            _init_center_RN = self.init_RN
             self.log.info(f"Using user-defined initial read noise values: {self.init_RN}.")
-
 
         delta_readtimes = datamodel0.get_delta_readtimes()
 
-
-        # if delta_readtimes[1] - delta_readtimes[0] != 1:
-        #     raise ValueError("Delta readtimes must be unity currently until the bug is fixed in Tim's code?")
-
-
-        center_gain = detgain_init_arr[0, 0]  # single pixel for now
-        center_rn = rn_init_arr[0, 0]  # single pixel for now
-
         if self.method == 'quad':
-            gains_init = center_gain + np.array([-self.quad_delta_gain,0,+self.quad_delta_gain])
+            _init_delta_gains = np.array([-self.quad_delta_gain,0,+self.quad_delta_gain])
             if self.fix_RN:
-                rns_init = np.array([center_rn])
+                _init_delta_RNs = None
             else:
-                rns_init = center_rn + np.array([-self.quad_delta_RN,0,+self.quad_delta_RN])
+                _init_delta_RNs = np.array([-self.quad_delta_RN,0,+self.quad_delta_RN])
         elif self.method == 'grid' or self.method == 'both':
             if self.init_delta_gains is None:
-                self.init_delta_gains = np.linspace(0.1*center_gain, 10*center_gain, 101)
-            if self.init_delta_RNs is None:
-                self.init_delta_RNs = np.linspace(0.1*center_rn, 10*center_rn, 101)
-            gains_init = center_gain + self.init_delta_gains
-            if self.fix_RN:
-                rns_init = np.array([center_rn])
+                _init_delta_gains = np.linspace(-1, 1, 51)
             else:
-                rns_init = center_rn + self.init_delta_RNs
-            gains_init = gains_init[gains_init > 0]
-            rns_init = rns_init[rns_init > 0]
-
+                _init_delta_gains = self.init_delta_gains
+            if self.fix_RN:
+                _init_delta_RNs = None
+            else:
+                if self.init_delta_RNs is None:
+                    _init_delta_RNs = np.linspace(-10,10, 51)
+                else:
+                    _init_delta_RNs = self.init_delta_RNs
 
         if self.mode.lower() == 'full_detector':
             self.log.info(f"Running in full_detector mode. All detector pixels will be fitted jointly and a single gain and/or readnoise value will be returned for the entire chip.")
@@ -132,10 +121,6 @@ class FitDetectorGainPrimitive(BasePrimitive):
             
         # Define output model from inputs
         output_detgain = self.get_output_model(input_models,"DetectorGainModel")
-
-        # input_combined_array = CoaddFramesPrimitive.make_frame_cube(_input_list_tmp, ("data","dq_raw"), copy=False)
-        # ramp_arr = input_combined_array["data"]
-        # dq_raw_arr = input_combined_array["dq_raw"]
 
         # Make all ramps from all files into a big cube
         ramp_arr = []
@@ -148,7 +133,7 @@ class FitDetectorGainPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, gains_init, rns_init,
+        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, _init_center_gain, _init_center_RN,_init_delta_gains,_init_delta_RNs,
                                       countratesidentical=self.countratesidentical,
                                       mode = self.mode, method= self.method, max_cores =self.max_cores)
         bestfit_gain, bestfit_rn, cov = _out
@@ -163,7 +148,8 @@ class FitDetectorGainPrimitive(BasePrimitive):
 
 def fit_gain_and_readnoise(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray,
-    gains_init : np.ndarray, rns_init : np.ndarray,
+    center_gains : np.ndarray, center_rns : np.ndarray,
+    delta_gains: np.ndarray = None, delta_RNs : np.ndarray = None,
     countratesidentical: bool = False, mode : str = "per_pixel", method: str = 'quad',
     max_cores : int = 1,
 ):
@@ -178,12 +164,18 @@ def fit_gain_and_readnoise(
         2D array of input rates. Size n_files x nreads x ny x nx.
     dq_raw : np.ndarray
         2D array of input UTR data quality flags. Size n_files x nreads x ny x nx.
-    gains_init : np.ndarray
-        Initial guess for gain (e-/ADU). If 1D array, shoudl be three elements (left, middle, right).
-        If singleton, only fit for read noise while fixing gain to this value.
-    rns_init : float
-        Initial guess for read noise (in DN). Should be a 1D array with three elements (left, middle, right).
-        If singleton, only fit for gain while fixing read noise to this value.
+    center_gains : np.ndarray | float
+        Initial center guess for gain (e-/ADU).
+    center_rns : np.ndarray | float
+        Initial center guess for read noise (in DN).
+    delta_gains : np.ndarray
+        The grid sampling is defined as center_gains[i,j] + delta_gains for the maximum likelihood grid search.
+        If None, only fit for read noise while fixing gain to this value.
+        If method is 'quad', should be three elements [left, 0, right].
+    delta_RNs : np.ndarray
+        The grid sampling is defined as center_rns[i,j] + delta_RNs for the maximum likelihood grid search.
+        If None, only fit for gain while fixing read noise to this value.
+        If method is 'quad', should be three elements [left, 0, right].
     countratesidentical: bool
         If True, assume all ramps have identical count rates.
     mode : str
@@ -207,27 +199,70 @@ def fit_gain_and_readnoise(
         Covariance matrix of the fit.
         2D matrix if mode is 'full_detector', 4D array if mode is 'per_pixel'.
     """
+
+    if delta_gains is not None:
+        if method == 'quad' and len(delta_gains) != 3:
+            raise ValueError("In 'quad' method, delta_gains must have three elements: [left, 0, right]. Or be set to None.")
+        elif (method == 'grid' or method == 'both') and len(delta_gains) < 4:
+            raise ValueError("In 'grid' or 'both' method, delta_gains must have more than 3 elements.")
+    if delta_RNs is not None:
+        if method == 'quad' and len(delta_RNs) != 3:
+            raise ValueError("In 'quad' method, delta_RNs must have three elements: [left, 0, right]. Or be set to None.")
+        elif (method == 'grid' or method == 'both') and len(delta_RNs) < 4:
+            raise ValueError("In 'grid' or 'both' method, delta_RNs must have more than 3 elements.")
+
+
     if mode.lower() == 'full_detector':
         C = fitramp_Brandt.Covar(readtimes)
 
+        if isinstance(center_gains, np.ndarray):
+            _center_gain = np.nanmedian(center_gains)
+        else:
+            _center_gain = center_gains
+        if isinstance(center_rns, np.ndarray):
+            _center_rn = np.nanmedian(center_rns)
+        else:
+            _center_rn = center_rns
+
+        if delta_gains is not None:
+            gains_init = _center_gain + delta_gains
+        else:
+            gains_init = np.array([_center_gain])
+        if delta_RNs is not None:
+            rns_init = _center_rn + delta_RNs
+        else:
+            rns_init = np.array([_center_rn])
+
         if method == 'quad':
             _out = fit_single_gain_readnoise_quad_approx(readtimes, ramps, dq_raw, C,
-                                                             gains_init, rns_init, do_once=False,
-                                                             countratesidentical=countratesidentical)
+                                                         gains_init, rns_init,
+                                                         do_once=False, countratesidentical=countratesidentical)
         elif method == 'grid' or method == 'both':
             if method == 'grid':
                 error_computation = 'posterior'
             elif method == 'both':
                 error_computation = 'quad'
-            _out = fit_single_gain_readnoise(readtimes, ramps, dq_raw, C, gains_init,
-                                                 rns_init, error_computation=error_computation,
-                                                 countratesidentical=countratesidentical)
+            _out = fit_single_gain_readnoise(readtimes, ramps, dq_raw, C,
+                                             gains_init, rns_init,
+                                             error_computation=error_computation, countratesidentical=countratesidentical)
 
         bestfit_gain, bestfit_rn, cov = np.array([_out[0]]), np.array([_out[1]]), _out[2]
 
     elif mode.lower() == 'per_pixel':
+        n_files, n_reads, ny,nx = ramps.shape
+
+        if isinstance(center_gains, np.ndarray):
+            _center_gains = center_gains
+        elif isinstance(center_gains, float):
+            _center_gains = np.full((ny,nx), center_gains)
+        if isinstance(center_rns, np.ndarray):
+            _center_rns = center_rns
+        elif isinstance(center_rns, float):
+            _center_rns = np.full((ny,nx), center_rns)
+
         _out = fit_gain_and_readnoise_per_pixel(readtimes, ramps, dq_raw,
-                                                gains_init, rns_init,
+                                                _center_gains, _center_rns,
+                                                delta_gains, delta_RNs,
                                                 countratesidentical=countratesidentical,
                                                 method= method,max_cores =max_cores)
         bestfit_gain, bestfit_rn, cov = _out
@@ -237,7 +272,8 @@ def fit_gain_and_readnoise(
 
 def fit_gain_and_readnoise_per_pixel(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray,
-    gains_init : np.ndarray, rns_init : np.ndarray,
+    center_gains : np.ndarray, center_rns : np.ndarray,
+    delta_gains: np.ndarray = None, delta_RNs : np.ndarray = None,
     countratesidentical: bool = False,  method: str = 'quad',
     max_cores : int = 1,
 ):
@@ -252,12 +288,18 @@ def fit_gain_and_readnoise_per_pixel(
         2D array of input rates. Size n_files x nreads x ny x nx.
     dq_raw : np.ndarray
         2D array of input UTR data quality flags. Size n_files x nreads x ny x nx.
-    gains_init : np.ndarray
-        Initial guess for gain (e-/ADU). If 1D array, shoudl be three elements (left, middle, right).
-        If singleton, only fit for read noise while fixing gain to this value.
-    rns_init : float
-        Initial guess for read noise (in DN). Should be a 1D array with three elements (left, middle, right).
-        If singleton, only fit for gain while fixing read noise to this value.
+    center_gains : np.ndarray
+        Initial center guess for gain (e-/ADU).
+    center_rns : np.ndarray
+        Initial center guess for read noise (in DN).
+    delta_gains : np.ndarray
+        The grid sampling is defined as center_gains[i,j] + delta_gains for the maximum likelihood grid search.
+        If None, only fit for read noise while fixing gain to this value.
+        If method is 'quad', should be three elements [left, 0, right].
+    delta_RNs : np.ndarray
+        The grid sampling is defined as center_rns[i,j] + delta_RNs for the maximum likelihood grid search.
+        If None, only fit for gain while fixing read noise to this value.
+        If method is 'quad', should be three elements [left, 0, right].
     countratesidentical: bool
         If True, assume all ramps have identical count rates.
     method : str
@@ -300,6 +342,16 @@ def fit_gain_and_readnoise_per_pixel(
     cov_np = _arraytonumpy(cov_mp, cov_shape, dtype=mp_float_type)
     cov_np[:] = np.zeros(cov_shape, dtype=np.float32)
 
+    center_gains_mp = RawArray(mp_float_type, nx * ny)
+    center_gains_shape = (ny, nx)
+    center_gains_np = _arraytonumpy(center_gains_mp, center_gains_shape, dtype=mp_float_type)
+    center_gains_np[:] = center_gains.astype(np.float32)
+
+    center_rns_mp = RawArray(mp_float_type, nx * ny)
+    center_rns_shape = (ny, nx)
+    center_rns_np = _arraytonumpy(center_rns_mp, center_rns_shape, dtype=mp_float_type)
+    center_rns_np[:] = center_rns.astype(np.float32)
+
     if max_cores > 1:
         ramps_mp = RawArray(mp_data_type, nx * ny * n_reads * n_files)
         ramps_shape = (n_files,n_reads, ny, nx)
@@ -326,6 +378,8 @@ def fit_gain_and_readnoise_per_pixel(
             gain_mp, gain_shape,
             readnoise_mp, readnoise_shape,
             cov_mp, cov_shape,
+            center_gains_mp, center_gains_shape,
+            center_rns_mp, center_rns_shape
         )
 
         ctx = mp.get_context("spawn")  # avoids unsafe fork after OpenMP init
@@ -340,7 +394,9 @@ def fit_gain_and_readnoise_per_pixel(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
-            args = (block_start, block_end, readtimes,gains_init,rns_init, countratesidentical, method, types_tuple)
+            args = (block_start, block_end, readtimes,
+                    delta_gains,delta_RNs,
+                    countratesidentical, method, types_tuple)
             args_list.append(args)
 
         try:
@@ -366,8 +422,9 @@ def fit_gain_and_readnoise_per_pixel(
                 readtimes,
                 ramps[:, :, [row_id], :],
                 dq_raw[:, :, [row_id], :],
-                gains_init,
-                rns_init,
+                center_gains_np[[row_id], :],
+                center_rns_np[[row_id], :],
+                delta_gains,delta_RNs,
                 countratesidentical,
                 method
             )
@@ -391,6 +448,8 @@ def _tpool_init_fit_gain_readnoise(
     gain : np.ndarray, gain_shape : tuple,
     readnoise : np.ndarray, readnoise_shape : tuple,
     cov : np.ndarray, cov_shape : tuple,
+    center_gains : np.ndarray, center_gains_shape : tuple,
+    center_rns : np.ndarray, center_rns_shape : tuple,
 ):
     """
     Initialize shared global variables for the multiprocessing pool.
@@ -400,7 +459,9 @@ def _tpool_init_fit_gain_readnoise(
         shared_dq_raw, shared_dq_raw_shape, \
         shared_gain, shared_gain_shape, \
         shared_readnoise, shared_readnoise_shape, \
-        shared_cov, shared_cov_shape
+        shared_cov, shared_cov_shape, \
+        shared_center_gains, shared_center_gains_shape, \
+        shared_center_rns, shared_center_rns_shape
 
     shared_data = data
     shared_data_shape = data_shape
@@ -417,11 +478,17 @@ def _tpool_init_fit_gain_readnoise(
     shared_cov = cov
     shared_cov_shape = cov_shape
 
+    shared_center_gains = center_gains
+    shared_center_gains_shape = center_gains_shape
+
+    shared_center_rns = center_rns
+    shared_center_rns_shape = center_rns_shape
+
 def _fit_gain_and_readnoise_row(indata : tuple) -> tuple:
     """
     Helper function for parallelization fitting the gain and readnoise per detector row.
     """
-    row_id, delta_readtimes, ramp_row, dq_raw_row, gains_init, rns_init, countratesidentical,method  = indata
+    row_id, delta_readtimes, ramp_row, dq_raw_row, center_gains_row, center_rns_row, delta_gains,delta_RNs, countratesidentical,method  = indata
     n_files, n_reads, _, nx = ramp_row.shape
     # print(row_id, ramp_row.shape, ramp_row[0,:,0,0])
 
@@ -437,14 +504,23 @@ def _fit_gain_and_readnoise_row(indata : tuple) -> tuple:
     out_cov = np.zeros((2,2,nx), dtype=np.float32)
 
     for i in range(nx):
+        if delta_gains is not None:
+            gains_init = center_gains_row[0,i]+ delta_gains
+        else:
+            gains_init = np.array([center_gains_row[0,i]])
+        if delta_RNs is not None:
+            rns_init = center_rns_row[0,i]+delta_RNs
+        else:
+            rns_init = np.array([center_rns_row[0,i]])
+
         if method == 'quad':
             _out = fit_single_gain_readnoise_quad_approx(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
-                                                         gains_init, rns_init, do_once=False,
-                                                         countratesidentical=countratesidentical)
+                                                         gains_init, rns_init,
+                                                         do_once=False,countratesidentical=countratesidentical)
         elif method == 'grid' or method == 'both':
-            _out = fit_single_gain_readnoise(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C, gains_init,
-                                             rns_init, error_computation=error_computation,
-                                             countratesidentical=countratesidentical)
+            _out = fit_single_gain_readnoise(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
+                                             gains_init, rns_init,
+                                             error_computation=error_computation,countratesidentical=countratesidentical)
 
         bestfit_gain, bestfit_rn, cov = _out
 
@@ -461,7 +537,7 @@ def _fit_gain_and_readnoise_worker(args : tuple) -> tuple:
     Parameters
     ----------
     args : tuple
-        Tuple containing: (block_start, block_end, delta_readtimes,gains_init,rns_init, countratesidentical, method, types_tuple)
+        Tuple containing: (block_start, block_end, delta_readtimes,delta_gains,delta_RNs, countratesidentical, method, types_tuple)
 
     Returns
     -------
@@ -470,7 +546,7 @@ def _fit_gain_and_readnoise_worker(args : tuple) -> tuple:
     block_end : int
         Ending index of the block of rows processed.
     """
-    block_start, block_end, delta_readtimes,gains_init,rns_init, countratesidentical, method, types_tuple = args
+    block_start, block_end, delta_readtimes,delta_gains,delta_RNs, countratesidentical, method, types_tuple = args
     mp_data_type, mp_float_type, mp_dq_raw_type, mp_dq_type = types_tuple
 
     ramps_np = _arraytonumpy(shared_data, shared_data_shape, dtype=mp_data_type)
@@ -480,6 +556,9 @@ def _fit_gain_and_readnoise_worker(args : tuple) -> tuple:
     readnoise_np = _arraytonumpy(shared_readnoise, shared_readnoise_shape, dtype=mp_float_type)
     cov_np = _arraytonumpy(shared_cov, shared_cov_shape, dtype=mp_float_type)
 
+    center_gains_np = _arraytonumpy(shared_center_gains, shared_center_gains_shape, dtype=mp_float_type)
+    center_rns_np = _arraytonumpy(shared_center_rns, shared_center_rns_shape, dtype=mp_float_type)
+
     results = []
     for row_id in range(block_start, block_end):
         args_row = (
@@ -487,8 +566,9 @@ def _fit_gain_and_readnoise_worker(args : tuple) -> tuple:
             delta_readtimes,
             ramps_np[:,:, [row_id], :],
             dq_raw_np[:,:, [row_id], :],
-            gains_init,
-            rns_init,
+            center_gains_np[[row_id], :],
+            center_rns_np[[row_id], :],
+            delta_gains,delta_RNs,
             countratesidentical,
             method
 
@@ -528,11 +608,13 @@ def fit_single_gain_readnoise_quad_approx(
     covar : fitramp_Brandt.Covar class
            Should be appropriate for diffs_lin
     gains_init : np.ndarray
-        Initial guess for gain (e-/ADU). If 1D array, shoudl be three elements (left, middle, right).
-        If singleton, only fit for read noise while fixing gain to this value.
-    rns_init : float
-        Initial guess for read noise (in DN). Should be a 1D array with three elements (left, middle, right).
-        If singleton, only fit for gain while fixing read noise to this value.
+        Initial guess for gain (e-/ADU).
+        Should be three elements (left, middle, right) with all gains_init > 0.
+        Or if singleton, only fit for read noise while fixing gain to this value.
+    rns_init : np.ndarray
+        Initial guess for read noise (in DN).
+        Should be three elements (left, middle, right) with all rns_init > 0.
+        Or if singleton, only fit for gain while fixing read noise to this value.
     do_once : bool
         If True, perform the fit only once (no refinement).
     countratesidentical: bool
@@ -709,7 +791,9 @@ def fit_single_gain_readnoise(
     diffs2use = diffs2use.astype(np.uint8)
 
     _rns_init = rns_init.astype(np.float64)
+    _rns_init = _rns_init[_rns_init > 0]
     _gains_init = gains_init.astype(np.float64)
+    _gains_init = _gains_init[_gains_init > 0]
 
     likelihoods = fit_gain_Brandt.gen_likelihood_map(diffs_lin, diffs_quad, covar, _rns_init, _gains_init, [0],
                                                      d2use=diffs2use,countratesidentical=countratesidentical)[..., 0]
@@ -741,7 +825,7 @@ def fit_single_gain_readnoise(
 
         cov = np.full((2,2),np.nan)
         cov[0,0] = bestfit_gain_err
-        cov[1,1] = bestfit_rn
+        cov[1,1] = bestfit_rn_err
 
         if return_likelihood:
             other_outputs = {}
@@ -758,10 +842,16 @@ def fit_single_gain_readnoise(
         for i in range(n_iter):
             # three points each in read noise and gain to fit a quadratic form
             if i == 0:
-                delta_gain = (_gains_init[1] - _gains_init[0])/2
-                gains_short = [_gains_init[l]-delta_gain,_gains_init[l], _gains_init[l]+delta_gain]
-                delta_rn = (_rns_init[1] - _rns_init[0])/2
-                sigs_short = [_rns_init[k]-delta_rn,_rns_init[k], _rns_init[k]+delta_rn]
+                if len(_gains_init) > 1:
+                    delta_gain = (_gains_init[1] - _gains_init[0])/2
+                    gains_short = [_gains_init[l]-delta_gain,_gains_init[l], _gains_init[l]+delta_gain]
+                else:
+                    gains_short = _gains_init
+                if len(_rns_init) > 1:
+                    delta_rn = (_rns_init[1] - _rns_init[0])/2
+                    sigs_short = [_rns_init[k]-delta_rn,_rns_init[k], _rns_init[k]+delta_rn]
+                else:
+                    sigs_short = _rns_init
             else:
                 if len(gains_short) > 1:
                     bestfit_gain_err = np.sqrt(cov[0, 0])
