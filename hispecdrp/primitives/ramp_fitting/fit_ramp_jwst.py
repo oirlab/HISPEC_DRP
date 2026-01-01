@@ -12,6 +12,9 @@ from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 
+import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp_Brandt
+import hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt as fitramp_cython
+
 from tqdm import tqdm
 
 __all__ = ['fit_ramps_jwst']
@@ -22,6 +25,81 @@ JUMP_DET_FLAG = DQ_FLAGS["JUMP_DET"]
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
+
+
+def _fit_ramps_cython_row(indata: tuple) -> tuple:
+    """
+    Passes data for each row of a ramp to Tim Brandt's likelihood-based ramp fitting algorithm in Cython.
+
+    Parameters
+    ----------
+    indata : Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]
+        Tuple containing the following elements:
+            ramp row index (int)
+            read times (np.ndarray)
+            ramp data (np.ndarray)
+            readnoise (np.ndarray)
+            gain (np.ndarray)
+            DQ cube (np.ndarray)
+            DQ image (np.ndarray)
+            dark current (np.ndarray)
+            algorithm (str)
+
+    Returns
+    -------
+    i : int
+        Index of input row from the ramps, same as input.
+    slope : np.ndarray
+        Slope image (1, nx).
+    dq_out : np.ndarray
+        Output data quality image with flags from algorithm (1, nx).
+    var_poisson : np.ndarray
+        Output variance from poisson noise (1, nx).
+    var_rnoise : np.ndarray
+        Output variance from read noise (1, nx).
+    err : np.ndarray
+        Output error in slope image (1, nx).
+    """
+
+    i, readtimes, data_3d, readnoise_2d, gain_2d, groupdq, pixeldq_2d, dark_current_2d, algorithm = indata
+
+    # We are implicitly fitting by row, so columns is only other axis and nrows=1
+    nints, n_reads, ny, nx = data_3d.shape
+
+    _ramps = data_3d[0, :, 0,:]
+    _dq_raw = groupdq[0, :, 0,:]
+
+    y0 = 0
+    diff_times = np.diff(readtimes)[:, None]
+    diffs = np.diff(_ramps, axis=0).astype(np.float64) / diff_times
+    n0, n1 = diffs.shape
+
+    n_reads,n_ramps = _dq_raw.shape
+    mask = ((_dq_raw & DO_NOT_USE_FLAG_uint8) | (_dq_raw & SATURATED_FLAG_uint8)).astype(np.bool)
+    mask2 = (_dq_raw & JUMP_DET_FLAG_uint8).astype(np.bool)
+    diffs2use = ~(mask[1:n_reads] | mask[0:n_reads - 1] | mask2[1:n_reads])
+    diffs2use = diffs2use.astype(np.uint8)
+
+    # todo: try to put covar in shared memory?
+    covar = fitramp_Brandt.Covar(readtimes.astype(np.float64))
+
+    cguess = np.sum(diffs*diffs2use, axis=0)
+    cguess /= np.sum(diffs2use, axis=0)
+    cguess *= cguess > 0
+
+    cython_out = fitramp_cython.fit_ramps_row(
+        diffs, diffs2use,
+        covar.alpha_phnoise, covar.beta_phnoise,
+        covar.alpha_readnoise, covar.beta_readnoise,
+        readnoise_2d[0,:].astype(np.float64),gain_2d[0,:].astype(np.float64), cguess, n1, n0)
+    logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np = cython_out
+
+    var_poisson = np.full((1, nx),np.nan)
+    var_rnoise = np.full((1, nx),np.nan)
+    dq = np.zeros((1, nx), dtype=np.uint32)
+
+    return (i, countrate_np, dq, var_poisson, var_rnoise, uncert_np)
+
 
 def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     """
@@ -175,7 +253,10 @@ def _fit_ramps_worker(args : tuple) -> tuple:
             dark_np[[row], :],
             algorithm
         )
-        results.append(_fit_ramps_jwst_row(args_row))
+        if algorithm == 'CYTHON_LIKELY':
+            results.append(_fit_ramps_cython_row(args_row))
+        else:
+            results.append(_fit_ramps_jwst_row(args_row))
 
     for row_element in results:
         row, outdata, dq, var_poisson, var_rnoise, err = row_element
@@ -295,6 +376,8 @@ def fit_ramps_jwst(
         algorithm = 'LIKELY'
     elif algorithm.lower() in ('jwst_ols', 'jwst_ols_c'):
         algorithm = 'OLS_C'
+    elif algorithm.lower() in ('cython_likely', 'cython_like', 'cython_likelihood'):
+        algorithm = 'CYTHON_LIKELY'
     else:
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
 
@@ -424,7 +507,6 @@ def fit_ramps_jwst(
             for block_start in range(0, ny, block_size):
                 block_end = min(block_start + block_size, ny)
 
-                # block_start, block_end, times, algorithm, types_tuple = args
                 args = (block_start, block_end, times, jump_rejection_threshold, types_tuple)
                 args_list.append(args)
 
@@ -440,7 +522,6 @@ def fit_ramps_jwst(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
-            # block_start, block_end, times, algorithm, types_tuple = args
             args = (block_start, block_end, times, algorithm, types_tuple)
             args_list.append(args)
 
@@ -491,7 +572,10 @@ def fit_ramps_jwst(
                 algorithm
             )
 
-            results.append(_fit_ramps_jwst_row(args))
+            if algorithm == 'CYTHON_LIKELY':
+                results.append(_fit_ramps_cython_row(args))
+            else:
+                results.append(_fit_ramps_jwst_row(args))
 
         for row_element in results:
             row, outdata, dq, var_poisson, var_rnoise, err = row_element
