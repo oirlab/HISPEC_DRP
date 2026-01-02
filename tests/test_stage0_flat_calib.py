@@ -292,8 +292,6 @@ def test_stage0_flat_calib(tmp_path):
     assert not (model_result['detflat'].dq[0,3] & DQ_FLAGS['COLD'])
 
     rel_residuals = np.abs(model_result['detflat'].flat - detflat_model.flat) / model_result['detflat'].flat_err
-    print("Relative residuals")
-    print(rel_residuals)
     assert np.sum(rel_residuals > 5) == 0
 
     # Check 1 sigma statistics of the flat field residuals
