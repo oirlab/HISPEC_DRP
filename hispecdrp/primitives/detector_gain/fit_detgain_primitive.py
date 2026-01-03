@@ -34,7 +34,7 @@ class FitDetectorGainPrimitive(BasePrimitive):
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(1, 20, 101)).
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
         # 'per_pixel' compute gain for each pixel independently,
-        # 'channel' compute gain for each readout channel independently,
+        # 'channel' (Not implemented yet) compute gain for each readout channel independently,
         # 'full_detector' compute gain for the full detector at once. This can be used when a single exposure is available.
         'method': 'quad',# str, 'quad' | 'grid' | 'both', method to fit the parameters.
         # 'quad' uses quadratic approximation,
@@ -161,9 +161,9 @@ def fit_gain_and_readnoise(
     readtimes : np.ndarray
         1D array of read times.
     ramps : np.ndarray
-        2D array of input rates. Size n_files x nreads x ny x nx.
+        4D array of input rates. Size n_files x nreads x ny x nx.
     dq_raw : np.ndarray
-        2D array of input UTR data quality flags. Size n_files x nreads x ny x nx.
+        4D array of input UTR data quality flags. Size n_files x nreads x ny x nx.
     center_gains : np.ndarray | float
         Initial center guess for gain (e-/ADU).
     center_rns : np.ndarray | float

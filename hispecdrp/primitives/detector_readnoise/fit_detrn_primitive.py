@@ -22,7 +22,7 @@ class FitDetectorReadnoisePrimitive(BasePrimitive):
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(1, 20, 101)).
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
         # 'per_pixel' compute readnoise for each pixel independently,
-        # 'channel' compute readnoise for each readout channel independently,
+        # 'channel' (Not implemented yet) compute readnoise for each readout channel independently,
         # 'full_detector' compute readnoise for the full detector at once. This can be used when a single exposure is available.
         'method': 'quad',# str, 'quad' | 'grid' | 'both', method to fit the parameters.
         # 'quad' uses quadratic approximation,
