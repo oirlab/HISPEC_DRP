@@ -6,7 +6,7 @@ from tqdm import tqdm
 from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
 
-__all__ = ['create_ramp']
+__all__ = ['create_ramp','generate_1overf_noise','compute_psd','generate_1overf_noise_map','compute_channel_psds']
 
 # NOTE: Find a new home for this function
 
@@ -135,6 +135,9 @@ def create_ramp(
     clip_ramps: bool = True,
     max_cores: int = 1,
     block_size: int | None = None,
+    std_1overf: float | None = None, # e-
+    n_channels: int | None = None,
+    vertical: bool = True
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -175,6 +178,12 @@ def create_ramp(
         Maximum number of CPU cores to use for parallel processing (default: 1).
     block_size : int or None, optional
         Number of rows to process in each block when using multiple cores (default: None).
+   std_1overf : float or None, optional
+        Standard deviation of 1/f noise in ADU (ie, DN). If None, 1/f noise is not added (default: None).
+   n_channels = n_channels,
+        Number of readout channels. If None, assume 1 channel (default: None).
+    vertical : bool, optional
+        If True, channels are vertical; if False, channels are horizontal (default: True).
 
     Returns
     -------
@@ -331,12 +340,11 @@ def create_ramp(
         tpool.close()
         tpool.join()
 
-        _outputs = dict(data=data_np, dq_raw=dq_raw_np)
     else:
-        data = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
-        dq_raw = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint8)
+        data_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
+        dq_raw_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint8)
         _outputs = _create_ramp(
-            data, dq_raw,
+            data_np, dq_raw_np,
             source=source,
             readtime=readtime,
             n_reads=n_reads,
@@ -352,10 +360,21 @@ def create_ramp(
             convert_to_uint16=convert_to_uint16,
             clip_ramps=clip_ramps
         )
-        _outputs = dict(data=data, dq_raw=dq_raw)
 
-    _meta = dict(clock_rate=1/(readtime/(source.shape[0]*source.shape[1])),# in Hz
+    if n_channels is None:
+        n_channels = 1
+
+
+    if std_1overf is not None  and std_1overf > 0:
+        noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, readtime, std_1overf)
+        data_np += noise_1overf
+
+
+    _outputs = dict(data=data_np, dq_raw=dq_raw_np)
+
+    _meta = dict(clock_rate=1/(readtime/((nx*ny)//n_channels)),# in Hz
                  mjd_start=mjd_start)
+
     _outputs['meta'] = _meta
     return _outputs
 
@@ -411,3 +430,222 @@ def _tpool_init(data, data_shape,
 
     shared_kTC_noise = kTC_noise
     shared_kTC_noise_shape = kTC_noise_shape
+
+def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, readtime=1.0, std_1overf=1.0, seed=None):
+    """
+    Generate a 3D array of 1/f (pink) noise assuming same noise in each readout channel.
+
+    Parameters
+    ----------
+    shape_3d : tuple of int
+        Shape of the output array (n_reads, ny, nx).
+    n_channels : int, optional
+        Number of readout channels (default: 1).
+    vertical : bool, optional
+        If True, channels are vertical; if False, channels are horizontal.
+    readtime : float, optional
+        Time sampling interval. Only affects frequency scaling.
+    std_1overf : float, optional
+        Desired standard deviation of the output time series.
+    seed : int or None, optional
+        Random seed for reproducibility.
+
+    """
+    n_reads, ny, nx = shape_3d
+
+    if vertical:
+        if nx % n_channels != 0:
+            raise ValueError(
+                "nx is not divisible by n_channels. Detector size and number of channels are incompatible.")
+        nx_chan = nx // n_channels
+        ny_chan = ny
+    else:
+        if ny % n_channels != 0:
+            raise ValueError(
+                "ny is not divisible by n_channels. Detector size and number of channels are incompatible.")
+        nx_chan = ny // n_channels
+        ny_chan = nx
+
+    noise_1overf_channel = generate_1overf_noise(n=(n_reads * nx_chan * ny_chan),
+                                                 dt=readtime,
+                                                 std=std_1overf,
+                                                 seed=seed)
+    noise_1overf_channel = noise_1overf_channel.reshape(n_reads, ny_chan, nx_chan)
+
+    noise_1overf = np.tile(noise_1overf_channel, (1, 1, n_channels))
+
+    if vertical:
+        return noise_1overf
+    else:
+        return noise_1overf.transpose(0, 2, 1)
+
+def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None):
+    """
+    Generate a 1/f (pink) noise time series using frequency-domain synthesis.
+
+    Notes: generated from ChatGPT
+
+    Parameters
+    ----------
+    n : int
+        Number of samples in the time series.
+    dt : float, optional
+        Time sampling interval. Only affects frequency scaling.
+    std : float, optional
+        Desired standard deviation of the output time series.
+    seed : int or None, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    noise : ndarray, shape (n,)
+        Real-valued 1/f noise time series.
+    """
+    rng = np.random.default_rng(seed)
+
+    # Fourier frequencies (positive only, real FFT)
+    freqs = np.fft.rfftfreq(n, d=dt)
+
+    # Avoid division by zero at DC
+    scale = np.zeros_like(freqs)
+    nonzero = freqs > 0
+    scale[nonzero] = 1.0 / np.sqrt(freqs[nonzero])
+
+    # Random complex spectrum
+    real = rng.normal(size=freqs.size)
+    imag = rng.normal(size=freqs.size)
+    spectrum = (real + 1j * imag) * scale
+
+    # Enforce zero DC component
+    spectrum[0] = 0.0
+
+    # Inverse FFT to time domain
+    noise = np.fft.irfft(spectrum, n=n)
+
+    # Normalize to requested standard deviation
+    noise -= np.mean(noise)
+    noise *= std / np.std(noise)
+
+    return noise
+
+
+def compute_psd(x, dt=1.0, detrend=False, onesided=True):
+    """
+    Compute the power spectral density (PSD) of a time series using an FFT
+    periodogram.
+
+    Notes: generated from ChatGPT
+
+    Parameters
+    ----------
+    x : array_like, shape (n,)
+        Input time series.
+    dt : float, optional
+        Time sampling interval.
+    detrend : bool, optional
+        If True, subtract the mean before computing the PSD.
+    onesided : bool, optional
+        If True, return the one-sided PSD (recommended for real signals).
+
+    Returns
+    -------
+    freqs : ndarray
+        Fourier frequencies.
+    psd : ndarray
+        Power spectral density corresponding to `freqs`.
+    """
+    x = np.asarray(x)
+    n = x.size
+
+    if detrend:
+        x = x - np.mean(x)
+
+    # FFT
+    fft = np.fft.rfft(x) if onesided else np.fft.fft(x)
+
+    # Frequency axis
+    freqs = np.fft.rfftfreq(n, d=dt) if onesided else np.fft.fftfreq(n, d=dt)
+
+    # Periodogram normalization
+    psd = (np.abs(fft) ** 2) * (dt / n)
+
+    # One-sided correction (except DC and Nyquist)
+    if onesided and n % 2 == 0:
+        psd[1:-1] *= 2.0
+    elif onesided:
+        psd[1:] *= 2.0
+
+    return freqs, psd
+
+
+
+def compute_channel_psds(cube, n_channels=1, vertical=True, readtime=1.0,detrend=False, onesided=True):
+    """
+    Compute one power spectral density (PSD) per readout channel from a 3D
+    up-the-ramp datacube by flattening each channel into a 1D readout-ordered
+    time series.
+
+    This implementation effectively assumes that no signal is present in the data other than noise.
+
+    For each readout channel, the data are reshaped into a single 1D array
+    using NumPy's default (C-order) memory layout, such that the ordering of
+    samples matches the implicit readout order used when generating channel-
+    correlated 1/f noise. The PSD of this 1D sequence is then computed using
+    `compute_psd`.
+
+    Parameters
+    ----------
+    cube : ndarray, shape (n_reads, ny, nx)
+        Up-the-ramp datacube.
+    n_channels : int, optional
+        Number of detector readout channels. The detector dimension
+        corresponding to the channel direction must be divisible by
+        `n_channels`.
+    vertical : bool, optional
+        If True, channels are assumed to be vertical stripes along the x
+        dimension. If False, channels are assumed to be horizontal stripes
+        along the y dimension.
+    readtime : float, optional
+        Time sampling interval between consecutive readouts, passed to
+        `compute_psd` as `dt`.
+    detrend : bool, optional
+        If True, subtract the mean of each channel time series before
+        computing the PSD.
+    onesided : bool, optional
+        If True, compute a one-sided PSD appropriate for real-valued data.
+
+    Returns
+    -------
+    freqs : ndarray
+        Fourier frequency grid corresponding to the PSD.
+    psd_channels : ndarray, shape (n_channels, n_freq)
+        Power spectral density for each readout channel, computed from the
+        flattened channel data.
+    """
+    if cube.ndim != 3:
+        raise ValueError("cube must have shape (n_reads, ny, nx).")
+
+    if n_channels < 1:
+        raise ValueError("n_channels must be >= 1.")
+
+    if vertical:
+        _cube = cube
+    else:
+        _cube = cube.transpose(0, 2, 1)
+
+    n_reads, ny, nx = _cube.shape
+    if nx % n_channels != 0:
+        raise ValueError("Dimensions is not divisible by n_channels.")
+    nx_chan = nx // n_channels
+
+    psd_channels = []
+    for ic in range(n_channels):
+        x0 = ic * nx_chan
+        x1 = (ic + 1) * nx_chan
+        chan = _cube[:, :, x0:x1]
+
+        freqs, psd_chan = compute_psd(chan.ravel(), dt=readtime, detrend=detrend, onesided=onesided)
+
+        psd_channels.append(psd_chan)
+
+    return freqs, np.asarray(psd_channels)
