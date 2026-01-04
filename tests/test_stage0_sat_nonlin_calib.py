@@ -9,7 +9,7 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---
-    max_cores = 1
+    max_cores = 2
     max_slope = 1000  # e-/s
     readtime = 1.7  # seconds
     n_reads = 60
@@ -292,7 +292,7 @@ def test_stage0_sat_nonlin_calib(tmp_path):
 
     # Run pipeline
     prim_args['fit_nonlin']['mode'] = 'per_pixel'
-    model_result = satflats_pipe.apply(ramp_model, prim_args=prim_args, output_dir=tmp_path)
+    model_result = satflats_pipe.apply(ramp_model_sequence, prim_args=prim_args, output_dir=tmp_path)
 
     # print("nonlin per_pixel")
     # print(model_result['nonlin'].coeffs.shape)
