@@ -353,7 +353,7 @@ def fit_nonlin_coefs_per_pixel(
                     for args_tuple in args_list
                 ]
 
-            for t in tqdm(tasks, desc="Processing blocks"):
+            for t in tqdm(tasks, desc="Processing blocks nonlin coefs fitting"):
                 t.wait()
         finally:
             tpool.close()

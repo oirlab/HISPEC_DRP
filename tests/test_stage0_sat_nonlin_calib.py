@@ -270,7 +270,7 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     start_time = time.time()
 
     # Run pipeline
-    model_result = satflats_pipe.apply(ramp_model, prim_args=prim_args, output_dir=tmp_path)
+    model_result = satflats_pipe.apply(ramp_model_sequence, prim_args=prim_args, output_dir=tmp_path)
 
     np.testing.assert_allclose(model_result['saturation'].sat_thresh, 65435, rtol=1e-6, atol=1)
     assert model_result['saturation'].sat_thresh.shape[0] == ny
