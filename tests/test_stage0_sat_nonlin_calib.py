@@ -257,6 +257,7 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     satflats_pipe.fit_nonlin.detgain = detgain_model
     satflats_pipe.fit_nonlin.rn = rn_model
     satflats_pipe.fit_nonlin.saturation = saturation_model
+    satflats_pipe.fit_nonlin.bias = bias_model
     # satflats_pipe.nonlin_corr.nonlin = nonlin_model
     # satflats_pipe.ramp_fit.detgain = detgain_model
     # satflats_pipe.ramp_fit.rn = rn_model

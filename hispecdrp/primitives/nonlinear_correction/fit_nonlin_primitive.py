@@ -1,7 +1,7 @@
 import hispecdrp.primitives.nonlinear_correction.calc_nonlin_coefs_Brandt as nonlin_Brandt
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector, ReadNoiseSelector, SaturationSelector
+from ...calibrations import DetectorGainSelector, ReadNoiseSelector, SaturationSelector, BiasSelector
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence
@@ -53,6 +53,10 @@ class FitNonLinPrimitive(BasePrimitive):
         'saturation': {
             'selector': SaturationSelector,
             'selector_kwargs': {}
+        },
+        'bias': {
+            'selector': BiasSelector,
+            'selector_kwargs': {}
         }
     }
 
@@ -87,6 +91,10 @@ class FitNonLinPrimitive(BasePrimitive):
         sat, _ = self.get_calibration(datamodel0, 'saturation')
         saturation_model = datamodels.open(sat)
 
+        # Get the bias model
+        bias, _ = self.get_calibration(datamodel0, 'bias')
+        bias_model = datamodels.open(bias)
+
         # Define output model from inputs
         output_nonlin = self.get_output_model(input_models)
 
@@ -102,7 +110,7 @@ class FitNonLinPrimitive(BasePrimitive):
         dq_raw_arr = np.array(dq_raw_arr)
 
         _out = fit_nonlin_coefs(ramp_arr, dq_raw_arr, detgain_model.gain, rn_model.RN,
-                                order = self.order, satval = self.satval_frac*saturation_model.sat_thresh,
+                                order = self.order, satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias),
                                 mode = self.mode, use_legendre = self.use_legendre, readstart = self.readstart,
                                 criterion_for_nonlin_thresh = self.criterion_for_nonlin_thresh, criterion_for_nonlin_max = self.criterion_for_nonlin_max,
                                 max_cores =self.max_cores)

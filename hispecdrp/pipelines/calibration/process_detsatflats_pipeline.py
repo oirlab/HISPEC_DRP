@@ -18,9 +18,9 @@ class ProcessDetSatFlatsPipeline(CalibrationPipeline):
         'fit_saturation': FitSaturationPrimitive,
         'register_saturation_cal' : RegisterCalibrationPrimitive,
         'saturation': CheckSaturationPrimitive,
+        'bias': BiasSubtractionPrimitive,
         'fit_nonlin': FitNonLinPrimitive,
         'register_nonlin_cal' : RegisterCalibrationPrimitive,
-        'bias': BiasSubtractionPrimitive,
         'nonlin_corr': NonlinearCorrectionPrimitive,
         'jump_detec': JumpDetectionPrimitive,
         'ramp_fit': FitRampPrimitive,
@@ -56,6 +56,7 @@ class ProcessDetSatFlatsPipeline(CalibrationPipeline):
         for k, _result in enumerate(results):
             self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.saturation.apply(_result)
+            _result = self.bias.apply(_result)
             results[k] = _result
 
         # Fit for nonlinearity using all processed inputs
@@ -67,7 +68,6 @@ class ProcessDetSatFlatsPipeline(CalibrationPipeline):
         self.log.info(f"Continue loop over inputs to apply bias, nonlin, jump_detec, ramp_fit, dark, det_gain, and det_flat.")
         for k, _result in enumerate(results):
             self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
-            _result = self.bias.apply(_result)
             _result = self.nonlin_corr.apply(_result)
             _result = self.jump_detec.apply(_result)
             _result = self.ramp_fit.apply(_result)
