@@ -6,7 +6,7 @@ from tqdm import tqdm
 from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
 
-__all__ = ['create_ramp','generate_1overf_noise','compute_psd','generate_1overf_noise_map','compute_channel_psds']
+__all__ = ['create_ramp','generate_1overf_noise','compute_psd','generate_1overf_noise_map','compute_channel_psds','generate_1overf_noise_integrated','utr_variable_rate_cube']
 
 # NOTE: Find a new home for this function
 
@@ -26,6 +26,8 @@ def _create_ramp(
     mjd_start : float = 60577.0, # MJD start time of first read of first pixel
     convert_to_uint16 : bool = True,
     clip_ramps: bool = True,
+    flux_scaling: np.ndarray | None = None,
+    flux_scaling_times: np.ndarray | None = None
 ) -> dict[str, np.ndarray]:
 
     if convert_to_uint16:
@@ -33,14 +35,22 @@ def _create_ramp(
     else:
         _data = data
 
+    if flux_scaling is not None and flux_scaling_times is not None:
+        _source, s_mean = utr_variable_rate_cube(
+            source, flux_scaling, flux_scaling_times,
+            n_reads=n_reads, readtime=readtime, t0=0.0
+        )
+    else:
+        _source = np.tile(source[None, :, :], (n_reads-1, 1, 1))  # shape (n_reads-1, ny, nx)
+
     # First, compute photon counts only (no read noise or bias)
     for i in np.arange(1,n_reads):
         if poisson_noise:
             _data[i, :, :] = _data[i-1, :, :] + \
-                            (np.random.poisson(lam=source * readtime, size=source.shape)*flat +\
+                            (np.random.poisson(lam=_source[i-1] * readtime, size=source.shape)*flat +\
                             np.random.poisson(lam=dark * readtime, size=source.shape)) / gain
         else:
-            _data[i, :, :] = _data[i-1, :, :] + (source * readtime *flat + dark * readtime) / gain
+            _data[i, :, :] = _data[i-1, :, :] + (_source[i-1] * readtime *flat + dark * readtime) / gain
 
     # apply non-linear behavior
     if nonlin_coeffs is not None:
@@ -77,11 +87,14 @@ def _create_ramp_worker(args):
     """
     Worker function for multiprocessing. Runs create_ramp on a block of rows.
     Args:
-        args (tuple): (source_block, readtime, n_reads, gain_block, flat_block, bias_block, dark_block, read_noise, kTC_noise, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple,myrandomseed)
+        args (tuple): (source_block, readtime, n_reads, gain_block, flat_block, bias_block, dark_block, read_noise,
+        kTC_noise, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple,myrandomseed,
+        flux_scaling,flux_scaling_times)
     Returns:
         dict[str, np.ndarray]: Output from create_ramp for the block
     """
-    block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps, types_tuple,myrandomseed = args
+    (block_start, block_end, readtime, n_reads, nonlin_coeffs, poisson_noise, mjd_start, convert_to_uint16, clip_ramps,
+     types_tuple,myrandomseed,flux_scaling,flux_scaling_times) = args
     mp_data_type, mp_float_type, mp_dq_raw_type = types_tuple
 
     np.random.seed(myrandomseed)
@@ -112,7 +125,9 @@ def _create_ramp_worker(args):
         poisson_noise = poisson_noise,
         mjd_start = mjd_start,
         convert_to_uint16 = convert_to_uint16,
-        clip_ramps = clip_ramps
+        clip_ramps = clip_ramps,
+        flux_scaling=flux_scaling,
+        flux_scaling_times=flux_scaling_times
     )
 
     return (block_start, block_end)
@@ -137,7 +152,9 @@ def create_ramp(
     block_size: int | None = None,
     std_1overf: float | None = None, # e-
     n_channels: int | None = None,
-    vertical: bool = True
+    vertical: bool = True,
+    flux_scaling: np.ndarray | None = None,
+    flux_scaling_times: np.ndarray | None = None
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -178,12 +195,16 @@ def create_ramp(
         Maximum number of CPU cores to use for parallel processing (default: 1).
     block_size : int or None, optional
         Number of rows to process in each block when using multiple cores (default: None).
-   std_1overf : float or None, optional
+    std_1overf : float or None, optional
         Standard deviation of 1/f noise in ADU (ie, DN). If None, 1/f noise is not added (default: None).
-   n_channels = n_channels,
+    n_channels = n_channels,
         Number of readout channels. If None, assume 1 channel (default: None).
     vertical : bool, optional
         If True, channels are vertical; if False, channels are horizontal (default: True).
+    flux_scaling : np.ndarray or None, optional
+        Timeseries of flux to model variability centered on unity (default: None). Should match length of flux_scaling_times.
+    flux_scaling_times : np.ndarray or None, optional
+        Times corresponding to flux_scaling array (seconds) (default: None).
 
     Returns
     -------
@@ -314,7 +335,8 @@ def create_ramp(
                     convert_to_uint16,
                     clip_ramps,
                     types_tuple,
-                    myrandomseed
+                    myrandomseed,
+                    flux_scaling,flux_scaling_times
                     )
             args_list.append(args)
 
@@ -358,22 +380,25 @@ def create_ramp(
             poisson_noise=poisson_noise,
             mjd_start=mjd_start,
             convert_to_uint16=convert_to_uint16,
-            clip_ramps=clip_ramps
+            clip_ramps=clip_ramps,
+            flux_scaling=flux_scaling,
+            flux_scaling_times=flux_scaling_times
         )
 
     if n_channels is None:
         n_channels = 1
 
+    clock_rate = 1/(readtime/((nx*ny)//n_channels)) # in Hz
+    _meta = dict(clock_rate=clock_rate,
+                 mjd_start=mjd_start)
 
     if std_1overf is not None  and std_1overf > 0:
-        noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, readtime, std_1overf)
+        noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, clock_rate, std_1overf)
         data_np += noise_1overf
 
 
     _outputs = dict(data=data_np, dq_raw=dq_raw_np)
 
-    _meta = dict(clock_rate=1/(readtime/((nx*ny)//n_channels)),# in Hz
-                 mjd_start=mjd_start)
 
     _outputs['meta'] = _meta
     return _outputs
@@ -431,7 +456,7 @@ def _tpool_init(data, data_shape,
     shared_kTC_noise = kTC_noise
     shared_kTC_noise_shape = kTC_noise_shape
 
-def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, readtime=1.0, std_1overf=1.0, seed=None):
+def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, clock_rate=1.0, std_1overf=1.0, seed=None):
     """
     Generate a 3D array of 1/f (pink) noise assuming same noise in each readout channel.
 
@@ -443,8 +468,8 @@ def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, readtime=1.
         Number of readout channels (default: 1).
     vertical : bool, optional
         If True, channels are vertical; if False, channels are horizontal.
-    readtime : float, optional
-        Time sampling interval. Only affects frequency scaling.
+    clock_rate : float, optional
+        Clock rate in Hz (samples per second).
     std_1overf : float, optional
         Desired standard deviation of the output time series.
     seed : int or None, optional
@@ -467,7 +492,7 @@ def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, readtime=1.
         ny_chan = nx
 
     noise_1overf_channel = generate_1overf_noise(n=(n_reads * nx_chan * ny_chan),
-                                                 dt=readtime,
+                                                 dt=1/clock_rate,
                                                  std=std_1overf,
                                                  seed=seed)
     noise_1overf_channel = noise_1overf_channel.reshape(n_reads, ny_chan, nx_chan)
@@ -479,27 +504,33 @@ def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, readtime=1.
     else:
         return noise_1overf.transpose(0, 2, 1)
 
-def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None):
+def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
     """
     Generate a 1/f (pink) noise time series using frequency-domain synthesis.
 
-    Notes: generated from ChatGPT
+    Notes
+    -----
+    Generated from ChatGPT.
 
     Parameters
     ----------
     n : int
         Number of samples in the time series.
     dt : float, optional
-        Time sampling interval. Only affects frequency scaling.
+        Time sampling interval.
     std : float, optional
         Desired standard deviation of the output time series.
     seed : int or None, optional
         Random seed for reproducibility.
+    return_time : bool, optional
+        If True, also return the time sampling vector.
 
     Returns
     -------
     noise : ndarray, shape (n,)
         Real-valued 1/f noise time series.
+    t : ndarray, shape (n,), optional
+        Time sampling vector (returned if return_time=True).
     """
     rng = np.random.default_rng(seed)
 
@@ -526,8 +557,111 @@ def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None):
     noise -= np.mean(noise)
     noise *= std / np.std(noise)
 
+    if return_time:
+        t = np.arange(n) * dt
+        return noise, t
+
     return noise
 
+def generate_1overf_noise_integrated(
+    n,
+    dt=1.0,
+    readtime=1.0,
+    std=1.0,
+    seed=None,
+    return_time=False,
+    mode="same",
+):
+    """
+    Generate a 1/f (pink) noise time series sampled at dt and convolved with a
+    top-hat (boxcar) kernel of width `readtime` to emulate finite integration time.
+
+    Conceptually, this produces a *time-averaged* version of the underlying 1/f noise:
+    y(t) = (1/readtime) Integral_{t-readtime/2}^{t+readtime/2} x(u) du
+    when using a centered boxcar and `mode="same"`.
+
+    Notes
+    -----
+    Generated from ChatGPT.
+
+    Parameters
+    ----------
+    n : int
+        Number of samples in the output time series (sampled at dt).
+    dt : float, optional
+        Time sampling interval of the generated series. Should satisfy dt << readtime
+        for a good approximation of continuous-time integration.
+    readtime : float, optional
+        Integration time (width of the top-hat) in the same time units as dt.
+    std : float, optional
+        Desired standard deviation of the *final (convolved)* output time series.
+    seed : int or None, optional
+        Random seed for reproducibility.
+    return_time : bool, optional
+        If True, also return the time sampling vector.
+    mode : {"same","full","valid"}, optional
+        Convolution mode passed to np.convolve. Default "same" returns length n.
+
+    Returns
+    -------
+    noise_int : ndarray
+        The convolved (time-averaged) 1/f noise series. Length depends on `mode`
+        ("same" -> n).
+    t : ndarray, optional
+        Time vector corresponding to the returned samples (returned if return_time=True).
+
+    Notes
+    -----
+    - The top-hat kernel is *normalized* (sum=1), so it implements a moving average
+      over approximately `readtime`.
+    - The output is normalized to have standard deviation `std` *after* convolution.
+    - Edge behavior depends on `mode`. For "same", the result uses the implicit
+      zero-padding behavior of np.convolve; if you want different boundary handling
+      (reflect/nearest), you can pad manually before convolution.
+    """
+    if n <= 0:
+        raise ValueError("n must be a positive integer.")
+    if dt <= 0:
+        raise ValueError("dt must be > 0.")
+    if readtime <= 0:
+        raise ValueError("readtime must be > 0.")
+    if mode not in ("same", "full", "valid"):
+        raise ValueError('mode must be one of {"same","full","valid"}.')
+
+    # Generate underlying 1/f noise at fine sampling dt
+    base = generate_1overf_noise(n, dt=dt, std=1.0, seed=seed, return_time=False)
+
+    # Top-hat kernel width in samples (at least 1)
+    w = int(np.round(readtime / dt))
+    w = max(w, 1)
+
+    # Normalized boxcar (moving average) kernel
+    kernel = np.ones(w, dtype=float) / w
+
+    # Convolve to emulate finite integration time
+    noise_int = np.convolve(base, kernel, mode=mode)
+
+    # Normalize to requested std (after convolution)
+    noise_int -= np.mean(noise_int)
+    sigma = np.std(noise_int)
+    if sigma > 0:
+        noise_int *= std / sigma
+    else:
+        # Extremely unlikely, but keep behavior defined
+        noise_int[:] = 0.0
+
+    if return_time:
+        # Time vector must match output length (depends on convolution mode)
+        if mode == "same":
+            t = np.arange(n) * dt
+        elif mode == "full":
+            t = np.arange(n + w - 1) * dt
+        else:  # "valid"
+            t = np.arange(max(n - w + 1, 0)) * dt
+        return noise_int, t
+
+    noise_int = np.clip(noise_int,0,None)
+    return noise_int
 
 def compute_psd(x, dt=1.0, detrend=False, onesided=True):
     """
@@ -579,7 +713,7 @@ def compute_psd(x, dt=1.0, detrend=False, onesided=True):
 
 
 
-def compute_channel_psds(cube, n_channels=1, vertical=True, readtime=1.0,detrend=False, onesided=True):
+def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detrend=False, onesided=True):
     """
     Compute one power spectral density (PSD) per readout channel from a 3D
     up-the-ramp datacube by flattening each channel into a 1D readout-ordered
@@ -605,9 +739,8 @@ def compute_channel_psds(cube, n_channels=1, vertical=True, readtime=1.0,detrend
         If True, channels are assumed to be vertical stripes along the x
         dimension. If False, channels are assumed to be horizontal stripes
         along the y dimension.
-    readtime : float, optional
-        Time sampling interval between consecutive readouts, passed to
-        `compute_psd` as `dt`.
+    clock_rate : float, optional
+        Clock rate in Hz (samples per second).
     detrend : bool, optional
         If True, subtract the mean of each channel time series before
         computing the PSD.
@@ -644,8 +777,105 @@ def compute_channel_psds(cube, n_channels=1, vertical=True, readtime=1.0,detrend
         x1 = (ic + 1) * nx_chan
         chan = _cube[:, :, x0:x1]
 
-        freqs, psd_chan = compute_psd(chan.ravel(), dt=readtime, detrend=detrend, onesided=onesided)
+        freqs, psd_chan = compute_psd(chan.ravel(), dt=1/clock_rate, detrend=detrend, onesided=onesided)
 
         psd_channels.append(psd_chan)
 
     return freqs, np.asarray(psd_channels)
+
+
+
+def utr_variable_rate_cube(
+        source: np.ndarray,
+        flux_scaling: np.ndarray,
+        flux_scaling_times: np.ndarray,
+        n_reads: int,
+        readtime: float,
+        t0: float = 0.0,
+):
+    """
+    Build a (n_reads-1, ny, nx) cube of per-read *average* electron rates
+    for a time-variable UTR ramp, conserving total flux.
+
+    Parameters
+    ----------
+    source : ndarray, shape (ny, nx)
+        Average electron rate map (e-/s), averaged over the full exposure.
+    flux_scaling : ndarray, shape (nt,)
+        Dimensionless flux scaling vs time (mean ~ 1).
+    flux_scaling_times : ndarray, shape (nt,)
+        Time samples in seconds (assumed monotonic).
+    n_reads : int
+        Total number of reads (including the first zero-count read).
+    readtime : float
+        Time between reads in seconds.
+    t0 : float, optional
+        Start time of the ramp.
+
+    Returns
+    -------
+    rate_cube : ndarray, shape (n_reads-1, ny, nx)
+        Average e-/s rate map for each read interval.
+    scaling_mean_per_read : ndarray, shape (n_reads-1,)
+        Mean flux scaling applied during each interval.
+    """
+
+    if source.ndim != 2:
+        raise ValueError("source must be 2D (ny, nx).")
+    if flux_scaling.ndim != 1:
+        raise ValueError("flux_scaling must be 1D.")
+    if flux_scaling_times.ndim != 1:
+        raise ValueError("flux_scaling_times must be 1D.")
+    if flux_scaling.size != flux_scaling_times.size:
+        raise ValueError("flux_scaling and flux_scaling_times must match in size.")
+    if n_reads < 2:
+        raise ValueError("n_reads must be >= 2.")
+
+    ny, nx = source.shape
+    T = (n_reads - 1) * readtime
+
+    # Read boundaries
+    read_edges = t0 + np.arange(n_reads) * readtime
+
+    # Integration grid: union of read edges and provided samples
+    t_grid = np.unique(
+        np.concatenate([read_edges, flux_scaling_times])
+    )
+
+    # Restrict to the modeled exposure window
+    mask = (t_grid >= t0) & (t_grid <= t0 + T)
+    t_grid = t_grid[mask]
+
+    # Interpolate scaling onto integration grid
+    scaling_grid = np.interp(
+        t_grid,
+        flux_scaling_times,
+        flux_scaling,
+        left=flux_scaling[0],
+        right=flux_scaling[-1],
+    )
+
+    # Integral over each read interval
+    interval_integrals = np.empty(n_reads - 1, dtype=float)
+
+    for i in range(n_reads - 1):
+        t_lo = read_edges[i]
+        t_hi = read_edges[i + 1]
+
+        sel = (t_grid >= t_lo) & (t_grid <= t_hi)
+        interval_integrals[i] = np.trapz(
+            scaling_grid[sel],
+            t_grid[sel]
+        )
+
+    # Enforce flux conservation over the whole exposure
+    total_integral = np.sum(interval_integrals)
+    norm = T / total_integral
+
+    # Mean scaling per read
+    scaling_mean_per_read = norm * interval_integrals / readtime
+
+    # Build rate cube
+    rate_cube = source[None, :, :] * scaling_mean_per_read[:, None, None]
+
+    return rate_cube, scaling_mean_per_read
