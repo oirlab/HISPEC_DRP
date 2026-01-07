@@ -29,7 +29,7 @@ def test_simulate_rate_map():
                         continuous=False)
     
     spectrograph = 'BSPEC'
-    native_rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method='prf_convolution')
+    native_rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method='prf_convolution', save=False)
 
     step_time = time.time()
     print(f"Native rate map, elapsed: {step_time - start_time:.2f}s")

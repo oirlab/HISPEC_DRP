@@ -23,34 +23,23 @@ import astropy.units as u
 import astropy.constants as const
 from astropy.units import Quantity
 from astropy.io import fits
+import astropy.utils.data
 
 __all__ = ['SimulateRateMap', 'read_pyechelle_hdf', 'download_zemax_files']
 
 
 simulations_directory = os.path.dirname(os.path.abspath(__file__))
-default_bspec_hdf = (
-            simulations_directory+'/hdf/' +
-            'HISPEC_yJ_20231006A-1_all_traces.hdf'
-        )
-default_rspec_hdf = (
-            simulations_directory+'/hdf/' +
-            'HISPEC_HK_20231006B-1_all_traces.hdf'
-        )
-
+default_bspec_hdf = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
+default_rspec_hdf = 'HISPEC_HK_20231006B-1_all_traces.hdf'
 
 class SimulateRateMap:
     """Class for simulating rate maps using pyechelle fiber spectra."""
 
     def __init__(self) -> None:
-        self.bspec_hdf_model: str = (
-            simulations_directory+'/hdf/' +
-            'HISPEC_yJ_20231006A-1_all_traces.hdf'
-        )
-        self.rspec_hdf_model: str = (
-            simulations_directory+'/hdf/' +
-            'HISPEC_HK_20231006B-1_all_traces.hdf'
-        )
-        self.output_directory: str = simulations_directory+'/output/'
+        self.hdf_file_directory: str = str(astropy.utils.data._get_download_cache_loc()) + '/'
+        self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
+        self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
+        self.output_directory: str = os.getcwd()
         self.pyechelle_outname: str = '_pyechelle_out.fits'
         self.rate_map_outname: str = 'rate_map_out.fits'
 
@@ -191,12 +180,11 @@ class SimulateRateMap:
         if spectrograph not in ("BSPEC", "RSPEC"):
             raise ValueError("Spectrograph must be BSPEC or RSPEC!")
 
-        model_path = (
-            self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
-        )
-        
-        if os.path.isfile(model_path) is False and model_path in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally.')
+        model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        model_path = self.hdf_file_directory + model
+
+        if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally. Downloading to ', model_path)
             download_zemax_files()
 
         if os.path.isfile(model_path) is False:
@@ -245,7 +233,11 @@ class SimulateRateMap:
                 self.output_directory,
                 f"{spectrograph}_pyechelle_{self.rate_map_outname}",
             )
+            print('Saving rate map to ', save_path)
             fits.writeto(save_path, data=self.rate_map, overwrite=True)
+        else:
+            os.remove(csv_path)
+            os.remove(output_path)
 
         return self.rate_map
     
@@ -270,12 +262,11 @@ class SimulateRateMap:
                 "prf_convolution (psf convolved with prf)!"
             )
 
-        model_path = (
-            self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
-        )
-        
-        if os.path.isfile(model_path) is False and model_path in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally.')
+        model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        model_path = self.hdf_file_directory + model
+
+        if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally. Downloading to ', model_path)
             download_zemax_files()
 
         if os.path.isfile(model_path) is False:
@@ -339,6 +330,7 @@ class SimulateRateMap:
             save_path = os.path.join(
                 self.output_directory, f"{spectrograph}_{self.rate_map_outname}"
             )
+            print('Saving rate map to ', save_path)
             fits.writeto(save_path, data=self.rate_map, overwrite=True)
 
         return self.rate_map
@@ -379,9 +371,7 @@ def download_zemax_files() -> None:
     ]
 
     for zfile in zemax_files:
-        download_gdrive_file(zfile, output_dir=simulations_directory+'/hdf/',
-                            use_cached=True,
-                            preserve_rel_path=False)
+        download_gdrive_file(zfile, use_cached=True)
 
 
 def bilinear_weights_rate_map(
