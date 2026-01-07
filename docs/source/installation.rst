@@ -46,6 +46,7 @@ The ``available_models.txt`` in the ``pyechelle/models`` directory of pyechelle 
 (included in the fork).
 
 To install pyechelle from the fork, run:
+
 .. code-block:: bash
 
    git clone https://gitlab.com/abgibbs/pyechelle.git
