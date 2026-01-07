@@ -390,7 +390,10 @@ def create_ramp(
 
     clock_rate = 1/(readtime/((nx*ny)//n_channels)) # in Hz
     _meta = dict(clock_rate=clock_rate,
-                 mjd_start=mjd_start)
+                 mjd_start=mjd_start,
+                 n_channels=n_channels,
+                 channels_are_vertical=vertical,
+                 n_refpixs = 4)
 
     if std_1overf is not None  and std_1overf > 0:
         noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, clock_rate, std_1overf)

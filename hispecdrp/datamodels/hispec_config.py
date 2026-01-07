@@ -69,7 +69,12 @@ class HISPECMetaModel(HISPECInstrumentMeta, HISPECTargetMeta, MetaModel):
                 object.__setattr__(instance, 'order_end', echelle_orders[instance.spectrograph]['order_end'])
         if instance.clock_rate is None:
             object.__setattr__(instance, 'clock_rate', clock_rate)
-        
+        if instance.n_channels is None:
+            object.__setattr__(instance, 'n_channels', 65)
+        if instance.n_refpixs is None:
+            object.__setattr__(instance, 'n_refpixs', 4)
+        if instance.n_refpixs is None:
+            object.__setattr__(instance, 'channels_are_vertical', True)
         return instance
 
 class HISPECConfig:

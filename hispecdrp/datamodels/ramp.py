@@ -12,7 +12,7 @@ class RampModel(DataModel):
     def data_level_suffix(self) -> str:
         return "raw"
 
-    def get_delta_readtimes(self, n_channels=None, vertical = True) -> np.ndarray:
+    def get_delta_readtimes(self, n_channels=None, vertical = None) -> np.ndarray:
         """
         Get the time for each read in the ramp in seconds relative to the first read.
         The start time of the first read in MJD is given by get_first_read_mjd().
@@ -35,8 +35,11 @@ class RampModel(DataModel):
             1D array of length n_reads with the time of each read in seconds relative to the first read.
         """
         n_reads, ny, nx = self.data.shape
+
         if n_channels is None:
-            n_channels = 1
+            n_channels = self.meta.n_channels
+        if vertical is None:
+            vertical = self.meta.channels_are_vertical
 
         if vertical:
             if nx % n_channels != 0:
@@ -55,7 +58,7 @@ class RampModel(DataModel):
         readtimes = np.arange(n_reads, dtype=np.float32) * time_single_read
         return readtimes
 
-    def get_first_read_mjd(self, n_channels=None, vertical = True) -> np.ndarray:
+    def get_first_read_mjd(self, n_channels=None, vertical = None) -> np.ndarray:
         """
         Get the MJD times of the first reads for each pixel as a 2D array.
 
@@ -77,8 +80,11 @@ class RampModel(DataModel):
         first_read_mjd : np.ndarray
             2D array of shape (ny, nx) with the MJD time of the first read for each pixel.
         """
+
         if n_channels is None:
-            n_channels = 1
+            n_channels = self.meta.n_channels
+        if vertical is None:
+            vertical = self.meta.channels_are_vertical
 
         if vertical:
             _data = self.data

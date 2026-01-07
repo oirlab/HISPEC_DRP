@@ -140,6 +140,18 @@ class InstrumentMeta(BaseModel):
         fits_keyword="ORDEREND",
         title="End echelle order of the data array",
     )
+    n_channels: int | None = FitsField(
+        fits_keyword="NCHANNEL",
+        title="Number of readout channels for the detector",
+    )
+    n_refpixs: int | None = FitsField(
+        fits_keyword="NREFPIXS",
+        title="Number of reference pixels on each side of the detector.",
+    )
+    channels_are_vertical: bool | None = FitsField(
+        fits_keyword="CHANVERT",
+        title="Defines if the readout channels are vertical (True) or horizontal (False).",
+    )
 
     @classmethod
     def create(cls, instrument_name : str, valid_spectrographs : list[str], valid_modes : list[str]):
