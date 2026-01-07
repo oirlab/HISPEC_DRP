@@ -33,7 +33,47 @@ default_bspec_hdf = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
 default_rspec_hdf = 'HISPEC_HK_20231006B-1_all_traces.hdf'
 
 class SimulateRateMap:
-    """Class for simulating rate maps using pyechelle fiber spectra."""
+    """Class for simulating rate maps using pyechelle fiber spectra.
+
+    Spectra are set onto fibers with `set_fiber_spectrum`, and the rate map
+    can then be simulated either with pyechelle or with a native interpolation/convolution function.
+    All HDF model files are in a format usable by pyechelle. pyechelle contains photon noise, 
+    and takes increased time to run for bright sources. The runtime for the native method is only dependent on the
+    number of wavelength bins simulated. Note that the native method does not include photon noise.
+    Both pyechelle and the bilinear_weights native method do not interpolate the psfs, which can result in abrupt jumps
+    in the resulting extracted spectra which may or may not be acceptable depending on the use case.
+    The prf_convolution native method interpolates the psf and should be viewed as the default method.
+
+
+    Attributes
+    ----------
+    hdf_file_directory : str
+        Directory where HDF files that contain trace and psf data are stored. Defaults to astropy cache.
+    bspec_hdf_model : str
+        Name of the Blue (yJ) spectrograph HDF model file.
+    rspec_hdf_model : str
+        Name of the Red (HK) spectrograph HDF model file.
+    output_directory : str
+        Directory where output files are saved. Defaults to current working directory.
+    pyechelle_outname : str
+        Name of the pyechelle output file if saved. This is used to generate the rate map, but is not the rate map.
+        The spectrograph name is prepended when saving.
+    rate_map_outname : str
+        Name of the final rate map output file if saved. The spectrograph name is prepended when saving.
+    telescope_primary_diameter : Quantity
+        Effective diameter of the telescope primary mirror. Default is 9.96 m (Keck).
+    quantum_efficiency : float
+        Assumed quantum efficiency of the detectors across all wavelengths and pixels. Default is 0.9.
+    fibers : dict
+        Dictionary storing fiber spectra information set by `set_fiber_spectrum`.
+    bspec_orders : list of int
+        List of echelle orders to simulate for the Blue (yJ) spectrograph.
+    rspec_orders : list of int
+        List of echelle orders to simulate for the Red (HK) spectrograph.
+    rate_map : ndarray[float64]
+        The resulting rate map (photons/s/pixel) after simulation.
+
+    """
 
     def __init__(self) -> None:
         self.hdf_file_directory: str = str(astropy.utils.data._get_download_cache_loc()) + '/'
@@ -64,7 +104,9 @@ class SimulateRateMap:
         spectrum_flux: Quantity = (np.ones(100) * 1e-12 * u.erg / u.s / u.cm**2 / u.micron),
         continuous: bool = True,
     ) -> None:
-        """Assign spectral input to a fiber."""
+        """Assign spectral input to a fiber.
+
+        spectrum_flux is assumed to a flux density per unit of wavelength"""
 
         if fiber_number not in (1, 2, 3):
             raise ValueError('Fiber must be 1, 2, or 3!')
@@ -96,7 +138,11 @@ class SimulateRateMap:
         fiber_number: int = 1,
         spectrograph: str = "BSPEC"
     ) -> tuple[Quantity, Quantity]:
-        """Apply telescope + instrument throughput to fiber flux."""
+        """Apply telescope + instrument throughput to fiber flux.
+        
+        Should be applied AFTER any radial velocity shifts"""
+
+        print('WARNING: Throughput application is being developed and may not reflect true HISPEC throughput!')
         
         spectrograph = spectrograph.upper()
 
@@ -156,7 +202,9 @@ class SimulateRateMap:
         fiber_number: int = 1,
         rv: Quantity = 0 * u.km / u.s
     ) -> tuple[Quantity, Quantity]:
-        """Apply Doppler shift to wavelengths."""
+        """Apply Doppler shift to wavelengths.
+        
+        Must be applied BEFORE throughput/telluric application."""
 
         factor = (1 + (rv / const.c).to(u.dimensionless_unscaled))
         self.fibers[fiber_number]["wavelength"] *= factor
@@ -173,7 +221,11 @@ class SimulateRateMap:
         exposure_time: Quantity = 300 * u.s,
         save: bool = True,
     ) -> np.ndarray[np.float64]:
-        """Run pyechelle simulator to generate pixel-space rate map."""
+        """Run pyechelle simulator to generate pixel-space rate map.
+
+        Exposure time is used to convert counts to rate map as pyechelle generates total counts.
+        Adjust exposure time to reflect the actual exposure time of the observation.
+        Temporary CSV files are created during this process to feed pyechelle custom spectra."""
 
         spectrograph = spectrograph.upper()
 
@@ -249,7 +301,11 @@ class SimulateRateMap:
         method: str = "prf_convolution",
     ) -> np.ndarray[np.float64]:
         """Create rate map using native model interpolation/convolution.
-          Faster than pyechelle for bright sources."""
+
+        Likely faster than pyechelle for bright sources. Two methods are available:
+        'bilinear_weights' deposits oversampled PSFs using bilinear weighting.
+        'prf_convolution' convolves oversampled PSFs with the pixel response function (PRF).
+        The 'prf_convolution' method interpolates the PSFs, is faster, and is recommended as the default."""
 
         spectrograph = spectrograph.upper()
 
@@ -340,7 +396,9 @@ class SimulateRateMap:
         self,
         fiber: int
     ) -> str:
-        """Write fiber's wavelength + flux into a CSV formatted for pyechelle."""
+        """Write fiber's wavelength + flux into a CSV formatted for pyechelle.
+        
+        CSV spectra are in units of photons/s/micron."""
 
         wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
         tmp_flux = (
@@ -383,7 +441,7 @@ def bilinear_weights_rate_map(
 ) -> np.ndarray[np.float64]:
     """
     Simulate detector rate map (photons/s/pixel) by depositing
-    oversampled PSFs using bilinear interpolation.
+    oversampled PSFs using bilinear weighting.
 
     Parameters
     ----------
@@ -537,6 +595,7 @@ def psf_prf_convolution_rate_map(
         Flux samples expressed as photon-rate density.
     orders : dict
         Nested dictionary containing trace coordinates and PSF stamps.
+        Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
         Detector pixels (ny, nx). Default = (4096, 4096).
     pixelsize : float, optional
@@ -657,7 +716,8 @@ def _check_wavelength_sampling(
     wavelengths: Quantity,
     min_resolution: float = 3e5
 ) -> bool:
-    """Return True if all wavelength sampling meets resolution threshold."""
+    """Check if spectrum is sampled with enough resolution to avoid aliasing for HISPEC.
+      Return True if all sampled wavelength spacings meets resolution threshold."""
 
     wl = np.array(wavelengths, dtype=float)
 
@@ -698,7 +758,33 @@ def _upsample_spectrum(
 
 def read_pyechelle_hdf(hdf_model_path: str) -> dict:
     """
-    Read pyechelle HDF model into nested dictionary structure.
+    Read pyechelle HDF model into nested dictionary structure for native simulation methods.
+
+    Expected input HDF structure: 
+        CCD_1/fiber_#/order# and psf_order_# groups
+        CCD_1 attributes: Nx, Ny, pixelsize (microns)
+        order# groups: tuples with columns including x, y, wavelength of trace
+        psf_order_# groups: datasets named wavelength_# with 2D PSF stamps with dataSpacing attribute for sampling in microns
+
+    Output dictionary structure:
+    {
+        "nx": int,
+        "ny": int,
+        "pixelsize": float,
+        "fiber_1": {
+            "59": {
+                "x": ndarray,
+                "y": ndarray,
+                "xy_wavelengths": ndarray,
+                "psf_wavelengths": ndarray,
+                "psf_stamps": ndarray,
+                "psf_data_spacing": float
+            },
+            ...
+        },
+        "fiber_2": { ... },
+        "fiber_3": { ... }
+    }
     """
 
     with h5py.File(hdf_model_path, "r") as hdf_data:
