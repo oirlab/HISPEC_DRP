@@ -9,6 +9,8 @@ except ImportError:
     print("pyechelle package not found. pyechelle simulations will not run.")
 
 import os
+import warnings
+import importlib.resources
 import h5py
 
 import numpy as np
@@ -62,8 +64,6 @@ class SimulateRateMap:
         Name of the final rate map output file if saved. The spectrograph name is prepended when saving.
     telescope_primary_diameter : Quantity
         Effective diameter of the telescope primary mirror. Default is 9.96 m (Keck).
-    quantum_efficiency : float
-        Assumed quantum efficiency of the detectors across all wavelengths and pixels. Default is 0.9.
     fibers : dict
         Dictionary storing fiber spectra information set by `set_fiber_spectrum`.
     bspec_orders : list of int
@@ -87,8 +87,6 @@ class SimulateRateMap:
             os.mkdir(self.output_directory)
 
         self.telescope_primary_diameter: Quantity = 9.96 * u.m
-        self.quantum_efficiency: float = 0.9
-
         self.fibers: dict = {}
 
         self.bspec_orders: list[int] = list(range(110, 150))
@@ -136,57 +134,71 @@ class SimulateRateMap:
     def apply_throughput_total(
         self,
         fiber_number: int = 1,
-        spectrograph: str = "BSPEC"
+        mode: str = "NGS",
+        quantum_efficiency: float = 0.9,
+        calculate_blaze: bool = False
     ) -> tuple[Quantity, Quantity]:
         """Apply telescope + instrument throughput to fiber flux.
         
-        Should be applied AFTER any radial velocity shifts"""
+        fiber_number: int
+            should be either 1, 2, or 3. Must have been set with `set_fiber_spectrum` first.
+        mode: str
+            should be either "NGS" (Natural Guide Star) or "LGS" (Laser Guide Star).
+        quantum_efficiency: float
+            simple scalar multiplier applied to the total throughput.
+        calculate_blaze: bool
+            Calculate the blaze rather than applying tabulated blaze efficiency.
 
-        print('WARNING: Throughput application is being developed and may not reflect true HISPEC throughput!')
-        
-        spectrograph = spectrograph.upper()
+        Throughput should be applied AFTER any radial velocity shifts"""
 
-        if spectrograph not in ("BSPEC", "RSPEC"):
-            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
+        warnings.warn("Throughput application is in development and may not reflect true HISPEC throughput.", UserWarning)
 
-        throughput_files_bspec: list[str] = [
-            "feicom_throughput.csv",
-            "ao_throughput.csv",
-            "bspec_throughput.csv",
-            "feiblue_throughput.csv",
-            "fibblue_throughput.csv",
-            "tel_throughput.csv",
-        ]
+        mode = mode.upper()
+        if mode not in ("NGS", "LGS"):
+            raise ValueError("Mode must be NGS or LGS!")
 
-        throughput_files_rspec: list[str] = [
-            "feicom_throughput.csv",
-            "ao_throughput.csv",
-            "feired_throughput.csv",
-            "fibred_throughput.csv",
-            "rspec_throughput.csv",
-            "tel_throughput.csv",
-        ]
-
-        throughput_files: list[str] = (
-            throughput_files_rspec
-            if spectrograph == "RSPEC"
-            else throughput_files_bspec
-        )
+        throughput_directory = importlib.resources.files('hispecdrp.data.throughput')
+        if mode == "NGS":
+            bspec_throughput_file = throughput_directory / 'transmission_total_BSPEC_endTOend_NGS_woBlaze.txt'
+            rspec_throughput_file = throughput_directory / 'transmission_total_RSPEC_endTOend_NGS_woBlaze.txt'
+        elif mode == "LGS":
+            bspec_throughput_file = throughput_directory / 'transmission_total_BSPEC_endTOend_LGS_woBlaze.txt'
+            rspec_throughput_file = throughput_directory / 'transmission_total_RSPEC_endTOend_LGS_woBlaze.txt'
 
         wavelengths = self.fibers[fiber_number]["wavelength"]
         total_throughput = np.ones_like(wavelengths.value)
 
-        for file in throughput_files:
-            file_path = os.path.join(simulations_directory, "throughput", file)
-            th_data = np.genfromtxt(file_path, delimiter=",", skip_header=1).T
-            th_wv = th_data[0] * u.micron
-            th_val = th_data[1]
+        # expecting csv files with two columns of wavelength (nm) and throughput (0-1)
+        bspec_th_data = np.genfromtxt(bspec_throughput_file, delimiter=",", skip_header=1).T
+        bspec_th_wv = (bspec_th_data[0] * u.nm).to(u.micron)
+        bspec_th_val = bspec_th_data[1]
+        rspec_th_data = np.genfromtxt(rspec_throughput_file, delimiter=",", skip_header=1).T
+        rspec_th_wv = (rspec_th_data[0] * u.nm).to(u.micron)
+        rspec_th_val = rspec_th_data[1]
 
-            interp_func = interp1d(th_wv, th_val, fill_value=0.0,
+        bspec_interp_func = interp1d(bspec_th_wv, bspec_th_val, fill_value=0.0,
+                                bounds_error=False)
+        rspec_interp_func = interp1d(rspec_th_wv, rspec_th_val, fill_value=0.0,
+                                bounds_error=False)
+        
+
+        total_throughput[wavelengths < 1.4*u.micron] *= bspec_interp_func(wavelengths[wavelengths < 1.4*u.micron])
+        total_throughput[wavelengths >= 1.4*u.micron] *= rspec_interp_func(wavelengths[wavelengths >= 1.4*u.micron])
+
+        if calculate_blaze:
+            raise NotImplementedError("Blaze calculation not yet implemented.")
+        else:
+            # expecting file with two columns of wavelength (micron) and blaze efficiency (0-1)
+            blaze_file = throughput_directory / 'echelle_blazeonly.csv'
+            blaze_data = np.genfromtxt(blaze_file, delimiter=",", skip_header=1).T
+            blaze_wv = blaze_data[0] *u.micron
+            blaze_val = blaze_data[1]
+
+            blaze_interp_func = interp1d(blaze_wv, blaze_val, fill_value=0.0,
                                     bounds_error=False)
-            total_throughput *= interp_func(wavelengths)
+            total_throughput *= blaze_interp_func(wavelengths)
 
-        total_throughput *= self.quantum_efficiency
+        total_throughput *= quantum_efficiency
         self.fibers[fiber_number]["flux"] *= total_throughput
 
         return wavelengths, self.fibers[fiber_number]["flux"]
