@@ -39,19 +39,18 @@ By default, testing data is downloaded to `~/.astropy/cache/download/url/`. To s
 
 In both cases, the testing data is persistent and **not deleted** after tests are finished.
 
-If you would like to run the pyechelle-based simulations, please install the `pyechelle`_ package as well. 
-If using pyechelle, the ``available_models.txt`` file in the ``simulations/hdf/`` directory should be copied to the ``pyechelle`` models directory.
-Modifying pyechelle may be necessary to ensure accurate simulations for HISPEC so it is recommended to clone the pyechelle repository directly from Gitlab:
+It is possible to run simulations without any additional packages, but if you would like to run the pyechelle-based simulations,
+please install the `pyechelle`_ package as well. Currently, HISPEC_DRP simulations depend
+on a modified `fork`_ of pyechelle, which should be cloned and installed directly. This fork is not guaranteed to work as expected for other spectrographs. 
+The ``available_models.txt`` in the ``pyechelle/models`` directory of pyechelle must contain the names of any .hdf files used for HISPEC simulations 
+(included in the fork).
 
+To install pyechelle from the fork, run:
 .. code-block:: bash
 
-   git clone https://gitlab.com/Stuermer/pyechelle.git
+   git clone https://gitlab.com/abgibbs/pyechelle.git
    cd pyechelle
    pip install -e .
 
-As of December 2025, the following modifications to pyechelle are necessary for HISPEC simulations:
-
-* In ``raytracing.py``, in the ``run()`` function, after ``slit_fun = self._get_slit_function(f)``, set ``slit_fun = None``. This will trigger raytracing for single mode fibers.
-* In ``raytracing.py``, in the ``run()`` function, after ``e = SystemEfficiency(...)``, set ``e = None``. This will disable the grating efficiency calculation which is not currently compatible with DRP simulations.
-
+.. _fork: https://gitlab.com/abgibbs/pyechelle
 .. _pyechelle: https://gitlab.com/Stuermer/pyechelle
