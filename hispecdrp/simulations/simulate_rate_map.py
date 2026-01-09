@@ -64,6 +64,10 @@ class SimulateRateMap:
         Name of the final rate map output file if saved. The spectrograph name is prepended when saving.
     telescope_primary_diameter : Quantity
         Effective diameter of the telescope primary mirror. Default is 9.96 m (Keck).
+    hispec_blaze_angle : Quantity
+        Blaze angle of the HISPEC echelle grating. Default is 76.5 degrees.
+    hispec_groove_spacing : Quantity
+        Groove spacing of the HISPEC echelle grating. Default is 1/(13.29999999/mm).
     fibers : dict
         Dictionary storing fiber spectra information set by `set_fiber_spectrum`.
     bspec_orders : list of int
@@ -83,10 +87,9 @@ class SimulateRateMap:
         self.pyechelle_outname: str = '_pyechelle_out.fits'
         self.rate_map_outname: str = 'rate_map_out.fits'
 
-        if os.path.isdir(self.output_directory) is False:
-            os.mkdir(self.output_directory)
-
         self.telescope_primary_diameter: Quantity = 9.96 * u.m
+        self.hispec_blaze_angle: Quantity = 76.5 * u.deg
+        self.hispec_groove_spacing: Quantity = 1.0 / (13.29999999 / u.mm)
         self.fibers: dict = {}
 
         self.bspec_orders: list[int] = list(range(110, 150))
@@ -136,18 +139,21 @@ class SimulateRateMap:
         fiber_number: int = 1,
         mode: str = "NGS",
         quantum_efficiency: float = 0.9,
-        calculate_blaze: bool = False
-    ) -> tuple[Quantity, Quantity]:
-        """Apply telescope + instrument throughput to fiber flux.
+        peak_blaze_efficiency: float = 1.0
+    ) -> tuple[Quantity, float]:
+        """Apply telescope + instrument throughput to fiber flux. This does NOT include the blaze efficiency which
+        is applied separately by pyechelle/native simulator.
         
+        Parameters 
+        ----------
         fiber_number: int
             should be either 1, 2, or 3. Must have been set with `set_fiber_spectrum` first.
         mode: str
             should be either "NGS" (Natural Guide Star) or "LGS" (Laser Guide Star).
         quantum_efficiency: float
             simple scalar multiplier applied to the total throughput.
-        calculate_blaze: bool
-            Calculate the blaze rather than applying tabulated blaze efficiency.
+        peak_blaze_efficiency: float
+            peak blaze efficiency to be used in the blaze calculation.
 
         Throughput should be applied AFTER any radial velocity shifts"""
 
@@ -166,7 +172,7 @@ class SimulateRateMap:
             rspec_throughput_file = throughput_directory / 'transmission_total_RSPEC_endTOend_LGS_woBlaze.txt'
 
         wavelengths = self.fibers[fiber_number]["wavelength"]
-        total_throughput = np.ones_like(wavelengths.value)
+        total_throughput_wo_blaze = np.ones_like(wavelengths.value)
 
         # expecting csv files with two columns of wavelength (nm) and throughput (0-1)
         bspec_th_data = np.genfromtxt(bspec_throughput_file, delimiter=",", skip_header=1).T
@@ -181,25 +187,11 @@ class SimulateRateMap:
         rspec_interp_func = interp1d(rspec_th_wv, rspec_th_val, fill_value=0.0,
                                 bounds_error=False)
         
+        total_throughput_wo_blaze[wavelengths < 1.4*u.micron] *= bspec_interp_func(wavelengths[wavelengths < 1.4*u.micron])
+        total_throughput_wo_blaze[wavelengths >= 1.4*u.micron] *= rspec_interp_func(wavelengths[wavelengths >= 1.4*u.micron])
+        total_throughput_wo_blaze *= quantum_efficiency
 
-        total_throughput[wavelengths < 1.4*u.micron] *= bspec_interp_func(wavelengths[wavelengths < 1.4*u.micron])
-        total_throughput[wavelengths >= 1.4*u.micron] *= rspec_interp_func(wavelengths[wavelengths >= 1.4*u.micron])
-
-        if calculate_blaze:
-            raise NotImplementedError("Blaze calculation not yet implemented.")
-        else:
-            # expecting file with two columns of wavelength (micron) and blaze efficiency (0-1)
-            blaze_file = throughput_directory / 'echelle_blazeonly.csv'
-            blaze_data = np.genfromtxt(blaze_file, delimiter=",", skip_header=1).T
-            blaze_wv = blaze_data[0] *u.micron
-            blaze_val = blaze_data[1]
-
-            blaze_interp_func = interp1d(blaze_wv, blaze_val, fill_value=0.0,
-                                    bounds_error=False)
-            total_throughput *= blaze_interp_func(wavelengths)
-
-        total_throughput *= quantum_efficiency
-        self.fibers[fiber_number]["flux"] *= total_throughput
+        self.fibers[fiber_number]["flux"] *= total_throughput_wo_blaze
 
         return wavelengths, self.fibers[fiber_number]["flux"]
 
@@ -235,9 +227,21 @@ class SimulateRateMap:
     ) -> np.ndarray[np.float64]:
         """Run pyechelle simulator to generate pixel-space rate map.
 
-        Exposure time is used to convert counts to rate map as pyechelle generates total counts.
-        Adjust exposure time to reflect the actual exposure time of the observation.
-        Temporary CSV files are created during this process to feed pyechelle custom spectra."""
+        Parameters
+        ----------
+        spectrograph : str
+            'BSPEC' for Blue (yJ) spectrograph, 'RSPEC' for Red (HK) spectrograph.
+        exposure_time : Quantity
+            Exposure time of the observation. Default is 300 seconds. Necessary for pyechelle simulation. Increase to improve SNR.
+        save : bool
+            If True, saves the resulting rate map to output_directory. Default is True.
+        Returns
+        -------
+        rate_map : ndarray[float64]
+            Simulated rate map in units of photons/s/pixel.
+
+        Temporary CSV files are created during this process to feed pyechelle custom spectra.
+        A sinc^2 blaze efficiency is applied internally by pyechelle, it cannot be turned off."""
 
         spectrograph = spectrograph.upper()
 
@@ -253,6 +257,9 @@ class SimulateRateMap:
 
         if os.path.isfile(model_path) is False:
             raise FileNotFoundError(f"ZEMAX model file not found at {model_path}!")
+        
+        if os.path.isdir(self.output_directory) is False:
+            os.mkdir(self.output_directory)
 
         sim = Simulator(ZEMAX(path=model_path))
         sim.set_ccd(1)
@@ -278,13 +285,12 @@ class SimulateRateMap:
                     flux_units="ph/s/micron",
                 )
             )
-
         sim.set_sources(fiber_sources)
-        #sim.set_efficiency(ConstantEfficiency(1.0))
 
         output_path = os.path.join(
             self.output_directory, f"{spectrograph}{self.pyechelle_outname}"
         )
+
         sim.set_output(output_path, overwrite=True)
         sim.run()
 
@@ -311,12 +317,25 @@ class SimulateRateMap:
         spectrograph: str = "BSPEC",
         save: bool = True,
         method: str = "prf_convolution",
+        apply_blaze: bool = True
     ) -> np.ndarray[np.float64]:
         """Create rate map using native model interpolation/convolution.
 
-        Likely faster than pyechelle for bright sources. Two methods are available:
-        'bilinear_weights' deposits oversampled PSFs using bilinear weighting.
-        'prf_convolution' convolves oversampled PSFs with the pixel response function (PRF).
+        Parameters
+        ----------
+        spectrograph : str
+            'BSPEC' for Blue (yJ) spectrograph, 'RSPEC' for Red (HK) spectrograph.
+        save : bool
+            If True, saves the resulting rate map to output_directory. Default is True.
+        method : str
+            Method to use for rate map generation. Options are 'bilinear_weights' or 'prf_convolution'. 'prf_convolution' is recommended.
+        apply_blaze : bool
+            If True, applies a sinc^2 blaze efficiency to the fiber flux to each order before simulation. Default is True.
+        Returns
+        -------
+        rate_map : ndarray[float64]
+            Simulated rate map in units of photons/s/pixel.
+
         The 'prf_convolution' method interpolates the PSFs, is faster, and is recommended as the default."""
 
         spectrograph = spectrograph.upper()
@@ -347,10 +366,10 @@ class SimulateRateMap:
         )
         order_list_str = [str(o) for o in order_list]
 
-
         detector_shape = (model_data["nx"], model_data["ny"])
         pixelsize = model_data["pixelsize"]
-
+        blaze_angle = model_data["blaze_angle"] * u.deg
+        groove_spacing = model_data["groove_spacing"] / u.mm
 
         rate_map_array = np.empty((len(self.fibers), detector_shape[1], detector_shape[0]), dtype=np.float64)
         for i, fiber in enumerate(self.fibers):
@@ -371,8 +390,6 @@ class SimulateRateMap:
                 equivalencies=u.spectral_density(wavelength),
             )
 
-
-
             if method == "bilinear_weights":
                 self.rate_map = bilinear_weights_rate_map(
                     wavelength,
@@ -380,6 +397,9 @@ class SimulateRateMap:
                     model_data[fiber_key],
                     detector_shape=detector_shape,
                     pixelsize=pixelsize,
+                    apply_blaze=apply_blaze,
+                    blaze_angle=blaze_angle,
+                    groove_spacing=groove_spacing
                 )
             else:
                 self.rate_map = psf_prf_convolution_rate_map(
@@ -388,6 +408,9 @@ class SimulateRateMap:
                     model_data[fiber_key],
                     detector_shape=detector_shape,
                     pixelsize=pixelsize,
+                    apply_blaze=apply_blaze,
+                    blaze_angle=blaze_angle,
+                    groove_spacing=groove_spacing
                 )
 
             rate_map_array[i, :, :] = self.rate_map
@@ -395,6 +418,9 @@ class SimulateRateMap:
         self.rate_map = np.sum(rate_map_array, axis=0)
 
         if save and self.rate_map is not None:
+            if os.path.isdir(self.output_directory) is False:
+                os.mkdir(self.output_directory)
+
             save_path = os.path.join(
                 self.output_directory, f"{spectrograph}_{self.rate_map_outname}"
             )
@@ -449,7 +475,10 @@ def bilinear_weights_rate_map(
     flux: Quantity,
     orders: dict[str, dict],
     detector_shape: tuple[int, int] = (4096, 4096),
-    pixelsize: float = 10.0
+    pixelsize: float = 10.0,
+    apply_blaze: bool = True,
+    blaze_angle: Quantity = None,
+    groove_spacing: Quantity = None
 ) -> np.ndarray[np.float64]:
     """
     Simulate detector rate map (photons/s/pixel) by depositing
@@ -491,19 +520,33 @@ def bilinear_weights_rate_map(
         fx = PchipInterpolator(ow, ox, extrapolate=True)
         fy = PchipInterpolator(ow, oy, extrapolate=True)
 
-        xc_arr = fx(wave)
-        yc_arr = fy(wave)
-        dws = np.gradient(wave)
+        order_wave_min = ow.min() * u.micron
+        order_wave_max = ow.max() * u.micron
+        order_wave = wave[(wave >= order_wave_min) & (wave <= order_wave_max)]   
+        order_flux = flux[(wave >= order_wave_min) & (wave <= order_wave_max)] 
 
-        for i in range(len(wave) - 1):
-            lam0 = wave[i]
+        xc_arr = fx(order_wave)
+        yc_arr = fy(order_wave)
+        dws = np.gradient(order_wave)
+
+        # apply blaze efficiency if requested
+        if apply_blaze and blaze_angle is not None and groove_spacing is not None:
+            if blaze_angle.value < 0:
+                blaze_angle *= -1
+            blaze_eff = _blaze_efficiency_sinc(
+                blaze_angle,
+                int(od),
+                1.0 / groove_spacing,
+                order_wave
+            )
+            order_flux *= blaze_eff
+
+        for i in range(len(order_wave) - 1):
+            lam0 = order_wave[i]
             dw = dws[i]
-            photons_per_s = flux[i] * dw
+            photons_per_s = order_flux[i] * dw
 
             if photons_per_s.value <= 0:
-                continue
-
-            if lam0.value < ow.min() or lam0.value > ow.max():
                 continue
 
             xc = float(xc_arr[i])
@@ -592,7 +635,10 @@ def psf_prf_convolution_rate_map(
     flux: Quantity,
     orders: dict[str, dict],
     detector_shape: tuple[int, int] = (4096, 4096),
-    pixelsize: float = 10.0
+    pixelsize: float = 10.0,
+    apply_blaze: bool = True,
+    blaze_angle: Quantity = None,
+    groove_spacing: Quantity = None
 ) -> np.ndarray[np.float64]:
     """
     Generate a detector rate map by convolving oversampled PSFs with
@@ -612,6 +658,12 @@ def psf_prf_convolution_rate_map(
         Detector pixels (ny, nx). Default = (4096, 4096).
     pixelsize : float, optional
         Pixel size in microns, used to determine oversampling.
+    apply_blaze : bool, optional
+        If True, applies a sinc^2 blaze efficiency to the flux for each order.
+    blaze_angle : Quantity, optional
+        Blaze angle of the echelle grating. Required if apply_blaze is True.
+    groove_spacing : Quantity, optional
+        Groove spacing of the echelle grating. Required if apply_blaze is True.
 
     Returns
     -------
@@ -651,6 +703,18 @@ def psf_prf_convolution_rate_map(
         order_wave_max = ow.max() * u.micron
         order_wave = wave[(wave >= order_wave_min) & (wave <= order_wave_max)]   
         order_flux = flux[(wave >= order_wave_min) & (wave <= order_wave_max)] 
+
+        # apply blaze efficiency if requested
+        if apply_blaze and blaze_angle is not None and groove_spacing is not None:
+            if blaze_angle.value < 0:
+                blaze_angle *= -1
+            blaze_eff = _blaze_efficiency_sinc(
+                blaze_angle,
+                int(od),
+                1.0 / groove_spacing,
+                order_wave
+            )
+            order_flux *= blaze_eff
 
         xc_arr = fx(order_wave)
         yc_arr = fy(order_wave)
@@ -773,8 +837,9 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
     Read pyechelle HDF model into nested dictionary structure for native simulation methods.
 
     Expected input HDF structure: 
+        CCD_1/Spectrograph with attributes: blaze, gpmm 
         CCD_1/fiber_#/order# and psf_order_# groups
-        CCD_1 attributes: Nx, Ny, pixelsize (microns)
+        CCD_1 with attributes: Nx, Ny, pixelsize (microns)
         order# groups: tuples with columns including x, y, wavelength of trace
         psf_order_# groups: datasets named wavelength_# with 2D PSF stamps with dataSpacing attribute for sampling in microns
 
@@ -783,6 +848,8 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
         "nx": int,
         "ny": int,
         "pixelsize": float,
+        "blaze_angle": float,
+        "groove_spacing": float,
         "fiber_1": {
             "59": {
                 "x": ndarray,
@@ -806,6 +873,8 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
             "nx": ccd1_data.attrs["Nx"],
             "ny": ccd1_data.attrs["Ny"],
             "pixelsize": ccd1_data.attrs["pixelsize"],
+            "blaze_angle": ccd1_data['Spectrograph'].attrs["blaze"],
+            'groove_spacing': ccd1_data['Spectrograph'].attrs["gpmm"]
         }
 
         for fiber_key in ccd1_data:
@@ -875,3 +944,26 @@ def _parse_order(
     fiber_dict[order]["xy_wavelengths"] = arr[:, -1]
     fiber_dict[order]["x"] = arr[:, 4]
     fiber_dict[order]["y"] = arr[:, 5]
+
+
+def _diffracted_angle(blaze_angle, order, groove_spacing, wavelength):
+    """Calculate diffracted angle using grating equation. Used for blaze efficiency calculation. Assume incidence angle = blaze angle."""
+    return np.arcsin(-np.sin(blaze_angle) + order * wavelength / groove_spacing)
+
+
+def _blaze_phase(blaze_angle, order, groove_spacing, wavelength):
+    """Calculate blaze phase for blaze efficiency calculation. Assume incidence angle = blaze angle."""
+    # assume blaze and incidence angles are equal
+    beta = _diffracted_angle(blaze_angle, order, groove_spacing, wavelength)
+    one = order * np.cos(blaze_angle)
+    two = np.cos(blaze_angle) - np.sin(blaze_angle) / np.tan((beta + blaze_angle)/2)
+    return one * two
+
+
+def _blaze_efficiency_sinc(blaze_angle, order, groove_spacing, wavelength):
+    """Calculate blaze efficiency using sinc^2 approximation. Assume incidence angle = blaze angle."""
+    # assume blaze and incidence angles are equal
+    bp = _blaze_phase(blaze_angle, order, groove_spacing, wavelength)
+    sinc = np.sinc(bp*u.rad)
+    sinc[np.abs(bp) > 1.0] = 0.0  # put all values outside +/- pi in sinc to zero
+    return sinc**2
