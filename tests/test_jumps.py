@@ -4,7 +4,7 @@ from hispecdrp import jump_detection_jwst
 import numpy as np
 import os
 
-if __name__ == "__main__":
+def test_jumps(tmp_path, datadir):
     slope = 10
     ny,nx = 10,10
     source = np.full((ny,nx), slope, dtype=np.float32)
