@@ -455,7 +455,7 @@ class DataModel:
                 if fits_keyword in header:
                     meta_dict[attr] = header[fits_keyword]
                 else:
-                    warnings.warn("Missing FITS keyword '{fits_keyword}' in HDU '{fits_hdu}' for metadata field '{attr}', using default value if available.")
+                    warnings.warn(f"Missing FITS keyword '{fits_keyword}' in HDU '{fits_hdu}' for metadata field '{attr}', using default value if available.")
         
         return meta_dict
 

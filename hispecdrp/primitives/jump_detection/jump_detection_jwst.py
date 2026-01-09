@@ -36,7 +36,7 @@ def _jump_detection_jwst_row(indata : tuple) -> tuple[int, np.ndarray]:
     jump_data = JumpData()
 
     # Set data arrays and parameters
-    jump_data.nframes = nframes
+    jump_data.nframes = 1 # This is not the same as number of reads but number of frames per read
     jump_data.data = ramp_data
     jump_data.gain_2d = gain
     jump_data.rnoise_2d = rdnoise
@@ -48,22 +48,20 @@ def _jump_detection_jwst_row(indata : tuple) -> tuple[int, np.ndarray]:
 
     # Tunable parameters - update to be able to tweak these:
     # https://github.com/spacetelescope/stcal/blob/main/src/stcal/jump/jump_class.py
-    jump_data.rejection_threshold = rejection_threshold
+    jump_data.rejection_thresh = rejection_threshold
+    jump_data.three_grp_thresh = rejection_threshold
+    jump_data.four_grp_thresh = rejection_threshold
 
     # If set to True (default is True), it will cause the four perpendicular
     # neighbors of all detected jumps to also be flagged as a jump.
     jump_data.flag_4_neighbors = False
 
-    # Value in units of sigma that sets the upper limit for flagging of neighbors.
-    # Any jump above this cutoff will not have its neighbors flagged.
-    jump_data.max_jump_to_flag_neighbors = np.inf
+    # Snowball information for near-IR
+    #  Turns on Snowball detector for NIR detectors
+    jump_data.expand_large_events = False
 
-    # Value in units of sigma that sets the lower limit for flagging of neighbors (marginal
-    # detections). Any primary jump below this value will not have its neighbors flagged.
-    jump_data.min_jump_to_flag_neighbors = np.inf
-
-    # The minimum contour area to trigger the creation of enclosing ellipses or circles.
-    jump_data.min_jump_area = (1,)
+    # The minimum number of groups required to use sigma clipping to find outliers.
+    jump_data.minimum_sigclip_groups = np.inf
 
     # The minimum area of saturated pixels at the center of a snowball. Only
     # contours with area above the minimum will create snowballs.
@@ -87,6 +85,34 @@ def _jump_detection_jwst_row(indata : tuple) -> tuple[int, np.ndarray]:
     # The distance from the edge of the detector where saturated cores are not
     # required for snowball detection
     jump_data.edge_size = 0
+
+    # Turns on the flagging of the faint extended emission of MIRI showers
+    jump_data.find_showers = False
+
+    # The minimum number of groups to switch to flagging all outliers in a single pass.
+    jump_data.min_diffs_single_pass = 0
+
+    # The maximum width for any extension of saturation or jump
+    jump_data.max_extended_width = np.inf
+
+    # Sigma clipping
+    # The minimum number of groups for jump detection
+    jump_data.minimum_groups = 3
+
+    # In sigma clipping, if True only differences between integrations are compared.
+    # If False, then all differences are processed at once.
+    jump_data.only_use_ints = False
+
+    # Internal state
+    # Number of groups after detected extended emission to flag as a jump for MIRI showers
+    jump_data.grps_masked_after_shower = 0
+
+    # The flag to turn on the extension of the flagging of the saturated cores of snowballs.
+    jump_data.mask_persist_grps_next_int = False
+
+    # How many groups to be flagged when the saturated cores are extended into
+    # subsequent integrations.
+    jump_data.persist_grps_flagged = 0
 
     # We are parallelizing at row level, so set max_cores=1
     jump_data.max_cores = "1"

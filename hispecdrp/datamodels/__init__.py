@@ -41,9 +41,11 @@ from .fiberflat import *
 # Instrument config
 from .parvi_config import *
 from .hispec_config import *
+from .kpic_config import *
 INSTRUMENT_CONFIGS = {
     'HISPEC' : HISPECConfig,
-    'PARVI'  : PARVIConfig
+    'PARVI'  : PARVIConfig,
+    'NIRSPAO' : KPICConfig
 }
 
 # Registry of models
