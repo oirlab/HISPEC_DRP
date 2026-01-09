@@ -1,20 +1,16 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
 
-from .extensions import create_L0_extensions
+from .extensions import IMAGE_FLOAT32_HDU, DQ_L0
 
-__all__ = ['DetectorFlatModel', 'HISPECDetectorFlatModel', 'PARVIDetectorFlatModel']
+__all__ = ['DetectorFlatModel']
 
 
 class DetectorFlatModel(CalibrationModel):
-    EXTENSIONS = create_L0_extensions(name='DATA')
+    EXTENSIONS = {
+        f'FLAT': IMAGE_FLOAT32_HDU,
+        f'FLAT_ERR': IMAGE_FLOAT32_HDU,
+        f'FLAT_VAR_RNOISE': IMAGE_FLOAT32_HDU,
+        f'FLAT_VAR_POISSON': IMAGE_FLOAT32_HDU,
+        **DQ_L0
+    }
     CAL_TYPE = 'detflat'
-
-
-class HISPECDetectorFlatModel(HISPECCalibrationModel, DetectorFlatModel):
-    pass
-
-
-class PARVIDetectorFlatModel(PARVICalibrationModel, DetectorFlatModel):
-    pass

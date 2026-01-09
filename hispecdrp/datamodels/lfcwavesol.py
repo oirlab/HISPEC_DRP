@@ -1,10 +1,7 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
-
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
-__all__ = ['LFCChebyshevWavesolModel', 'HISPECLFCWavesolModel', 'PARVILFCWavesolModel']
+__all__ = ['LFCWavesolModel']
 
 
 def _create_lfcwavesol_extensions(num_fibers: int):
@@ -18,13 +15,11 @@ def _create_lfcwavesol_extensions(num_fibers: int):
     return ext
 
 
-class LFCChebyshevWavesolModel(CalibrationModel):
+class LFCWavesolModel(CalibrationModel):
     CAL_TYPE = 'lfc_wavesol'
-
-
-class HISPECLFCWavesolModel(HISPECCalibrationModel, LFCChebyshevWavesolModel):
-    EXTENSIONS = _create_lfcwavesol_extensions(num_fibers=HISPECCalibrationModel.NUM_FIBERS)
-
-
-class PARVILFCWavesolModel(PARVICalibrationModel, LFCChebyshevWavesolModel):
-    EXTENSIONS = _create_lfcwavesol_extensions(num_fibers=PARVICalibrationModel.NUM_FIBERS)
+    def __init__(self, *args, **kwargs):
+        if 'config' in kwargs and kwargs['config'] is not None:
+            self.EXTENSIONS.update(_create_lfcwavesol_extensions(kwargs['config'].num_fibers))
+        else:
+            self.EXTENSIONS.update(_create_lfcwavesol_extensions(self.DEFAULT_CONFIG.num_fibers))
+        super().__init__(*args, **kwargs)

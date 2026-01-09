@@ -9,3 +9,4 @@ Pipelines
    stage1
    stage2
    process_lfc
+   process_fiberflats

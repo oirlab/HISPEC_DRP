@@ -8,6 +8,8 @@ from koa_middleware import CalibrationStore
 from .. import datamodels
 from .. import utils
 
+from typing import Any
+
 from koa_middleware import CalibrationORM
 
 from ..processing_component import ProcessingComponent
@@ -94,11 +96,11 @@ class BasePrimitive(ProcessingComponent):
         Args:
             input: The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
             **kwargs: Additional keyword arguments to set or override for this primitive. These will override any arguments set during initialization.
-        
+
         Returns:
             dict: The main output of the primitive (self._output['output']), which is typically a datamodel or a container of datamodels.
         """
-        
+
         # CURRENT PROCESSING TIME, USED FOR CONSISTENT LOGGING OF PROCESSING AT DIFFERENT PLACES.
         # NOTE: TBD IF THIS IS THE RIGHT APPROACH
         self._date_time = datetime.datetime.now().isoformat()
@@ -273,7 +275,7 @@ class BasePrimitive(ProcessingComponent):
                 pass
             if is_uuid:
                 input_model = datamodels.open(input, meta_only=True)
-                with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class(), use_cached=use_cached) as store:
+                with CalibrationStore(orm_class=input_model.get_calibration_orm_class(), use_cached=use_cached) as store:
                     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
                     if local_filepath is not None:
                         self._calibrations_used[cal_role] = calibration_orm
@@ -291,11 +293,7 @@ class BasePrimitive(ProcessingComponent):
             # Open to get cal id (open in full mode to return for processing)
             cal_model = datamodels.open(cal_value)
             assert isinstance(
-                cal_model,
-                (
-                    datamodels.HISPECCalibrationModel,
-                    datamodels.PARVICalibrationModel,
-                )
+                cal_model, datamodels.CalibrationModel
             ), "Input must be a valid CalibrationDataModel."
 
             cal_id = cal_model.meta.cal_id
@@ -307,7 +305,7 @@ class BasePrimitive(ProcessingComponent):
             return cal_model, None  # Return the cal model as is. Ignore ORM.
 
             # Check if the calibration is in the DB.
-            # with CalibrationStore(orm_class=cal_model.META_MODEL.get_orm_class(), use_cached=True) as store:
+            # with CalibrationStore(orm_class=cal_model.get_calibration_orm_class(), use_cached=True) as store:
             #     local_filepath, calibration_orm = store.get_calibration_by_id(calibration_id=cal_id)
             #     if local_filepath is not None:
             #         self._calibrations_used[cal_role] = calibration_orm
@@ -337,7 +335,7 @@ class BasePrimitive(ProcessingComponent):
             selector_kwargs = calibration_config.get('selector_kwargs', {})
             selector = selector_class(**selector_kwargs)
             input_model = datamodels.open(input, meta_only=True)
-            with CalibrationStore(orm_class=input_model.META_MODEL.get_orm_class()) as store:
+            with CalibrationStore(orm_class=input_model.get_calibration_orm_class()) as store:
                 local_filepath, calibration_orm = store.get_calibration(input_model.meta.model_dump(), selector=selector)
                 return local_filepath, calibration_orm
 
@@ -346,126 +344,8 @@ class BasePrimitive(ProcessingComponent):
         self.log.error(msg)
         raise ValueError(msg)
 
-    def get_output_model(
-        self,
-        input_model : datamodels.DataModel | None = None,
-        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
-    ) -> datamodels.DataModel:
-        """
-        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-        """
-        if output_model is None:
-            output_model = getattr(self, 'output_model', None)
-        return self._get_output_model(input_model, output_model)
-    
-    @staticmethod
-    def _get_output_model(
-        input_model : datamodels.DataModel | None = None,
-        output_model : str | datamodels.DataModel | type[datamodels.DataModel] = None
-        ) -> datamodels.DataModel:
-        """
-        Get the output model based on the input model and the specified output model type.
-        
-        Args:
-            input_model (datamodels.DataModel, optional): The input data model to base the output on.
-            output_model (str | datamodels.DataModel | type[datamodels.DataModel], optional): The desired output model type or specification. It can take on several values:
-                - DataModel instance (datamodels.DataModel): Returns `output_model` as is.
-                - 'input' (str): Returns `input_model` as is.
-                - 'input_copy' (str): Returns a copy of `input_model`.
-                - Valid filepath (str): Opens and returns the model from the specified file.
-                - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodel(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - None (default value): Raises an error.
-
-        Returns:
-            datamodels.DataModel: The instantiated output DataModel class.
-        """
-
-        ###################################
-        #### Return output model as is ####
-        ###################################
-        if isinstance(output_model, datamodels.DataModel):
-            return output_model
-
-        ##################################
-        #### Return input model as is ####
-        ##################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is 'input'."
-            return input_model
-                
-        ####################################
-        #### Return copy of input model ####
-        ####################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is 'input_copy'."
-            out_model = input_model.copy()
-            out_model._filepath = None # NOTE: Revisit if we want to keep the filepath.
-            out_model.meta.filename = None
-            return out_model
-
-        ##################
-        #### Filepath ####
-        ##################
-        if isinstance(output_model, str) and os.path.isfile(output_model):
-            out_model = datamodels.open(output_model)
-            return out_model
-
-        #####################################
-        #### DataModel class name (str) #####
-        #####################################
-        if isinstance(output_model, str):
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model)
-            else:
-                model_class = datamodels.model_type_from_name(output_model)
-            return model_class.from_datamodel(input_model)
-        
-        #################################
-        #### DataModel class (type) #####
-        #################################
-        if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
-            assert isinstance(
-                input_model, datamodels.DataModel
-            ), "Input model must be provided if output_model is a DataModel class."
-            instrument_name = input_model.meta.instrument_name.upper()
-            if instrument_name is not None:
-                model_class = datamodels.model_type_from_name(instrument_name.upper() + output_model.__class__.__name__)
-            else:
-                model_class = output_model
-            return output_model.from_datamodel(input_model)
-
-        #####################################
-        #### Everything else is an error ####
-        #####################################        
-        raise ValueError(f"Invalid output_model argument {output_model=}.")
-
-    @staticmethod
-    def get_do_traces(input_model : datamodels.DataModel, do_fibers : list[str] | None = None, do_orders : list[int] | None = None) -> tuple[list[str], list[int]]:
-        """
-        Helper to get the default fibers and orders to process. By default, all fibers and orders in the input model are processed if not provided.
-        This method may get updated depending on where the DRP determines which fibers to process.
-
-        Args:
-            input_model (datamodels.DataModel): The input data model.
-            do_fibers (list[str], optional): List of fiber numbers to process. If None, process all fibers.
-            do_orders (list[int], optional): List of order numbers to process. If None, process all orders.
-
-        Returns:
-            tuple[list[str], list[int]]: A tuple of (do_fibers, do_orders).
-        """
-        if do_fibers is None:
-            do_fibers = [str(f + 1) for f in range(input_model.NUM_FIBERS)]
-        if do_orders is None:
-            do_orders = input_model.make_order_vec()
-        return do_fibers, do_orders
-    
     def __getattr__(self, attr):
         if '_output' in self.__dict__ and attr in self._output:
             return self._output[attr]
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")
+    

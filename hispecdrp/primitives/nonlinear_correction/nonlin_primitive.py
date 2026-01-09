@@ -5,6 +5,7 @@ import numpy as np
 
 from .nonlincorr_numba import correct_nonlinearity
 
+
 __all__ = ['NonlinearCorrectionPrimitive']
 
 
@@ -13,6 +14,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'nonlincorr',
         'ouput_model' : 'input',
+        'max_cores' : 1,
     }
 
     CALIBRATIONS = {
@@ -23,12 +25,28 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
+
         input_model = datamodels.open(self.input)
+
         nonlin, _ = self.get_calibration(input_model, 'nonlin')
         nonlin_model = datamodels.open(nonlin)
+
         result = self.get_output_model(input_model)
         self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
-        data = result.data.astype(np.float64)
-        correct_nonlinearity(data, nonlin_model.coeffs)
-        result.data = data.astype(np.float32)
+
+        if result.data.dtype != np.float32:
+            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            result.data = result.data.astype(np.float32)
+        self.log.info(f"Polynomial coeffs dtype: {nonlin_model.coeffs.dtype}.")
+
+        correct_nonlinearity(
+            result.data,
+            result.dq_raw,
+            result.dq,
+            nonlin_model.coeffs,
+            nonlin_model.nonlin_max,
+            nonlin_model.dq,
+            max_cores=self.max_cores
+        )
+
         return dict(output=result, nonlin=nonlin)

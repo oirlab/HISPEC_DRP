@@ -3,11 +3,7 @@ Non Linearity
 
 Specifies the nonlinearity of the detector readout response with a unique polynomial for each pixel.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.nonlin.NonlinearCorrectionModel`
-* :py:class:`~hispecdrp.datamodels.nonlin.HISPECNonlinearCorrectionModel`
-* :py:class:`~hispecdrp.datamodels.nonlin.PARVINonlinearCorrectionModel`
+**Class:** :py:class:`~hispecdrp.datamodels.nonlin.NonlinearCorrectionModel`
 
 **Calibration type:** nonlin
 

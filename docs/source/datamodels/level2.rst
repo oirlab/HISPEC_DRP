@@ -3,11 +3,7 @@ Level 2 (Calibrated Spectra)
 
 HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements. Data products from BSPEC and RSPEC are still kept separate.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.level2.L2Model`
-* :py:class:`~hispecdrp.datamodels.level2.HISPECL2Model`
-* :py:class:`~hispecdrp.datamodels.level2.PARVIL2Model`
+**Class:** :py:class:`~hispecdrp.datamodels.level2.L2Model`
 
 **File suffix:** spec
 

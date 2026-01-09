@@ -1,10 +1,8 @@
 from .base_model import CalibrationModel
-from .hispec_base import HISPECCalibrationModel
-from .parvi_base import PARVICalibrationModel
 
 from astropy.io import fits
 
-__all__ = ['InstrumentParametersModel', 'HISPECInstrumentParametersModel', 'PARVIInstrumentParametersModel']
+__all__ = ['InstrumentParametersModel']
 
 
 class InstrumentParametersModel(CalibrationModel):
@@ -20,11 +18,3 @@ class InstrumentParametersModel(CalibrationModel):
         }
     }
     CAL_TYPE = 'instrument_params'
-
-
-class HISPECInstrumentParametersModel(HISPECCalibrationModel, InstrumentParametersModel):
-    pass
-
-
-class PARVIInstrumentParametersModel(PARVICalibrationModel, InstrumentParametersModel):
-    pass

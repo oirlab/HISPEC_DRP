@@ -3,11 +3,7 @@ Instrument Parameters
 
 Parameters that describe the instrument such as a laser frequency comb pump line and spacing.
 
-**Classes:**
-
-* :py:class:`~hispecdrp.datamodels.instrument_params.InstrumentParametersModel`
-* :py:class:`~hispecdrp.datamodels.instrument_params.HISPECInstrumentParametersModel`
-* :py:class:`~hispecdrp.datamodels.instrument_params.PARVIInstrumentParametersModel`
+**Class:** :py:class:`~hispecdrp.datamodels.instrument_params.InstrumentParametersModel`
 
 **Calibration type:** instrument_params
 

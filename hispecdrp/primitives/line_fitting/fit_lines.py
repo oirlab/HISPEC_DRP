@@ -2,8 +2,8 @@ import numpy as np
 import scipy
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import savgol_filter
-from ...utils.endian_utils import normalize_dtype_array
 from numba import njit
+import warnings
 
 
 def fit_lines(
@@ -117,11 +117,32 @@ def profile_background_fit(
         profile_func = _gaussian
     elif profile_type == 'lorentzian':
         profile_func = _lorentzian
+
+    # Select good data points
+    good = np.where(np.isfinite(y) & np.isfinite(yerr))[0]
+    if len(good) < 3:
+        warnings.warn("Not enough good data points to perform fit.")
+        return {
+            'amplitude': np.nan,
+            'amplitude_err': np.nan,
+            'mu': np.nan,
+            'mu_err': np.nan,
+            'fwhm': np.nan,
+            'fwhm_err': np.nan,
+            'b' : np.nan,
+            'b_err': np.nan,
+            'redchi2': np.nan,
+            'profile_type': profile_type,
+        }
+    
+    x = x[good]
+    y = y[good]
+    yerr = yerr[good]
     
     # Initial params
-    ymin = np.nanmin(y)
+    ymin = np.min(y)
     yy = y - ymin
-    ymax = np.nanmax(yy)
+    ymax = np.max(yy)
     yy /= ymax
     yyerr = yerr / ymax
     
@@ -148,12 +169,8 @@ def profile_background_fit(
         np.array([1.5, mu_bounds[1] + mu_guess, fwhm_bounds[1], 0.2]),
     )
     n_dof = len(x) - len(p0)
-
-    # Fit
-    x = normalize_dtype_array(x)
-    y = normalize_dtype_array(y)
-    yerr = normalize_dtype_array(yerr)
     
+    # Fit
     try:
         result = scipy.optimize.least_squares(
             _profile_background_chi2_residuals, 
@@ -163,10 +180,12 @@ def profile_background_fit(
             ftol=1E-10, 
             xtol=1E-10
         )
-    except:
-        breakpoint()
-        import matplotlib.pyplot as plt
-        plt.plot(x, yy, label='Data')
+    except Exception as e:
+        print(e)
+        
+        #breakpoint()
+        #import matplotlib.pyplot as plt
+        #plt.plot(x, yy, label='Data')
     
     pbest = result.x
     redchi2 = result.cost / n_dof
