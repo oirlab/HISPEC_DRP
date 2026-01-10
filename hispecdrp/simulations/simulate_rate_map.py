@@ -63,10 +63,6 @@ class SimulateRateMap:
         Name of the final rate map output file if saved. The spectrograph name is prepended when saving.
     telescope_primary_diameter : Quantity
         Effective diameter of the telescope primary mirror. Default is 9.96 m (Keck).
-    hispec_blaze_angle : Quantity
-        Blaze angle of the HISPEC echelle grating. Default is 76.5 degrees.
-    hispec_groove_spacing : Quantity
-        Groove spacing of the HISPEC echelle grating. Default is 1/(13.29999999/mm).
     fibers : dict
         Dictionary storing fiber spectra information set by `set_fiber_spectrum`.
     bspec_orders : list of int
@@ -87,8 +83,6 @@ class SimulateRateMap:
         self.rate_map_outname: str = 'rate_map_out.fits'
 
         self.telescope_primary_diameter: Quantity = 9.96 * u.m
-        self.hispec_blaze_angle: Quantity = 76.5 * u.deg
-        self.hispec_groove_spacing: Quantity = 1.0 / (13.29999999 / u.mm)
         self.fibers: dict = {}
 
         self.bspec_orders: list[int] = list(range(110, 150))
