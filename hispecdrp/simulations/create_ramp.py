@@ -3,7 +3,7 @@ import multiprocessing as mp
 import ctypes
 from tqdm import tqdm
 
-from ..utils.parallelization_utils import _arraytonumpy
+from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
 
 __all__ = ['create_ramp']
