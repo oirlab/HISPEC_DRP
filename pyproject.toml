@@ -58,7 +58,8 @@ dependencies = [
   "gdown",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing",
-  "pydantic>=2.11"
+  "pydantic>=2.11",
+  "h5py"
 ]
 
 

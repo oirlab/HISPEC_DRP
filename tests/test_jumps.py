@@ -1,4 +1,5 @@
 from hispecdrp import datamodels
+from hispecdrp import simulations
 from hispecdrp import jump_detection_difference
 from hispecdrp import jump_detection_jwst
 import numpy as np
@@ -8,7 +9,7 @@ def test_jumps(tmp_path):
     
     slope = 10
     source = np.full((4096, 4096), slope, dtype=np.float32)
-    ramp_data = datamodels.create_ramp(source, readtime=1.0, n_reads=16, bias=0, read_noise=None, kTC_noise=None, poisson_noise=False, nonlin_coeffs=None)
+    ramp_data = simulations.create_ramp(source, readtime=1.0, n_reads=16, bias=0, read_noise=None, kTC_noise=None, poisson_noise=False, nonlin_coeffs=None)
     ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']), meta=ramp_data['meta'])
 
     # Modify rows to insert a jump of 100 on specified reads in pixel at specified column
