@@ -27,10 +27,9 @@ from astropy.units import Quantity
 from astropy.io import fits
 import astropy.utils.data
 
-__all__ = ['SimulateRateMap', 'read_pyechelle_hdf', 'download_zemax_files']
+__all__ = ['SimulateRateMap', 'read_pyechelle_hdf']
 
 
-simulations_directory = os.path.dirname(os.path.abspath(__file__))
 default_bspec_hdf = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
 default_rspec_hdf = 'HISPEC_HK_20231006B-1_all_traces.hdf'
 
@@ -252,11 +251,11 @@ class SimulateRateMap:
         model_path = self.hdf_file_directory + model
 
         if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally. Downloading to ', model_path)
-            download_zemax_files()
+            print('Model file not found locally. Attemping to download to ', model_path)
+            download_gdrive_file(model, use_cached=True)
 
         if os.path.isfile(model_path) is False:
-            raise FileNotFoundError(f"ZEMAX model file not found at {model_path}!")
+            raise FileNotFoundError(f".hdf model file not found at {model_path}!")
         
         if os.path.isdir(self.output_directory) is False:
             os.mkdir(self.output_directory)
@@ -353,11 +352,11 @@ class SimulateRateMap:
         model_path = self.hdf_file_directory + model
 
         if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally. Downloading to ', model_path)
-            download_zemax_files()
+            print('Model file not found locally. Attemping to download to ', model_path)
+            download_gdrive_file(model, use_cached=True)
 
         if os.path.isfile(model_path) is False:
-            raise FileNotFoundError(f"ZEMAX model file not found at {model_path}!")
+            raise FileNotFoundError(f".hdf model file not found at {model_path}!")
 
         model_data = read_pyechelle_hdf(model_path)
 
@@ -457,18 +456,6 @@ class SimulateRateMap:
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
     
-
-def download_zemax_files() -> None:
-    """Download HISPEC ZEMAX model files from Google Drive."""
-
-    zemax_files = [
-        'HISPEC_HK_20231006B-1_all_traces.hdf',
-        'HISPEC_yJ_20231006A-1_all_traces.hdf'
-    ]
-
-    for zfile in zemax_files:
-        download_gdrive_file(zfile, use_cached=True)
-
 
 def bilinear_weights_rate_map(
     wave: Quantity,
