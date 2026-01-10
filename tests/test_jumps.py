@@ -16,7 +16,7 @@ def test_jumps(tmp_path, datadir):
     gain_data = np.ones((ny, nx), dtype=np.float32) * gain_val
     read_noise_data = np.ones((ny, nx), dtype=np.float32) * read_noise_val
 
-    ramp_data = datamodels.create_ramp(source, readtime=1.0, n_reads=16,
+    ramp_data = simulations.create_ramp(source, readtime=1.0, n_reads=16,
                                        gain=gain_val, flat = 1, dark = 0, bias = 1000,
                                        kTC_noise = 50, read_noise=read_noise_val, poisson_noise=True, convert_to_uint16 = True,
                                        nonlin_coeffs=None, clip_ramps = False)
@@ -50,6 +50,8 @@ def test_jumps(tmp_path, datadir):
 
     # Reinitialize the dq_raw array
     ramp_model.dq_raw = np.zeros(ramp_model.data.shape, dtype=np.uint8)
+
+    thresh = 4.0
 
     jump_detection_difference(ramp_model.data, 
                               ramp_model.dq_raw, 
