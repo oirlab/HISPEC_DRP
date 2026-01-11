@@ -3,7 +3,7 @@ from ... import datamodels
 
 from .jump_detection_jwst import jump_detection_jwst
 from .jump_detection_difference import jump_detection_difference
-from ...calibrations import DetectorGainSelector, ReadNoiseSelector
+from ...calibrations import GainSelector, ReadNoiseSelector
 
 __all__ = ['JumpDetectionPrimitive']
 
@@ -19,8 +19,8 @@ class JumpDetectionPrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {
-        'detgain': {
-            'selector': DetectorGainSelector,
+        'gain': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         },
         'rn': {
@@ -33,8 +33,8 @@ class JumpDetectionPrimitive(BasePrimitive):
         input_model = datamodels.open(self.input, copy=False)
         self.log.info(f"Finding jumps in {input_model} with method={self.method.lower()}")
 
-        detgain_cal, _ = self.get_calibration(input_model, 'detgain')
-        detgain_model = datamodels.open(detgain_cal)
+        gain_cal, _ = self.get_calibration(input_model, 'gain')
+        gain_model = datamodels.open(gain_cal)
         rn_cal, _ = self.get_calibration(input_model, 'rn')
         rn_model = datamodels.open(rn_cal)
 
@@ -70,7 +70,7 @@ class JumpDetectionPrimitive(BasePrimitive):
                 result.dq_raw,
                 result.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 max_cores=self.max_cores,
                 rejection_threshold=self.rejection_threshold
             )

@@ -1,22 +1,21 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector,ReadNoiseSelector
+from ...calibrations import GainSelector,ReadNoiseSelector
 import numpy as np
 from typing import Sequence
 from ...datamodels.dqflags import DQ_FLAGS
-from ..detector_gain.fit_detgain_primitive import fit_gain_and_readnoise
+from ..gain.make_gain_primitive import fit_gain_and_readnoise
 
 
-__all__ = ['FitDetectorReadnoisePrimitive']
+__all__ = ['MakeReadnoisePrimitive']
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
-class FitDetectorReadnoisePrimitive(BasePrimitive):
+class MakeReadnoisePrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detrn',
         'max_cores' : 1,
         'init_RN' : None,  # None | in,  Define the initial readnoise value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(1, 20, 101)).
@@ -35,8 +34,8 @@ class FitDetectorReadnoisePrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {
-        'detgain': {
-            'selector': DetectorGainSelector,
+        'gain': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         },
         'rn_init': {
@@ -61,9 +60,9 @@ class FitDetectorReadnoisePrimitive(BasePrimitive):
         datamodel0 = input_models[0]
         nreads, ny, nx = datamodel0.data.shape
 
-        detgain, _ = self.get_calibration(datamodel0, 'detgain')
-        detgain_model = datamodels.open(detgain)
-        detgain_arr = detgain_model.gain
+        gain, _ = self.get_calibration(datamodel0, 'gain')
+        gain_model = datamodels.open(gain)
+        gain_arr = gain_model.gain
 
         if self.init_RN is None:
             rn_cal_init, _ = self.get_calibration(datamodel0, 'rn_init')
@@ -105,7 +104,7 @@ class FitDetectorReadnoisePrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, detgain_arr, _init_center_RN,None,_init_delta_RNs,
+        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, gain_arr, _init_center_RN,None,_init_delta_RNs,
                                       countratesidentical=self.countratesidentical,
                                       mode = self.mode, method= self.method, max_cores =self.max_cores)
         _, bestfit_rn, cov = _out

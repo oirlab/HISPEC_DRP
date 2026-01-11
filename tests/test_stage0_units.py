@@ -9,7 +9,7 @@ from hispecdrp.primitives.dq_init.dqinit_primitive import apply_dq_mask
 from hispecdrp.primitives.saturation.saturation_primitive import check_saturation
 from hispecdrp.primitives.bias_subtraction.bias_primitive import bias_subtraction
 from hispecdrp.primitives.dark_subtraction.dark_primitive import dark_subtraction_rate
-from hispecdrp.primitives.detector_gain.detgain_primitive import detector_gain_correction
+from hispecdrp.primitives.gain.gain_primitive import gain_correction
 from hispecdrp.primitives.detector_flat.detflat_primitive import detector_flat_correction
 from hispecdrp.primitives.jump_detection.jump_detection_difference import jump_detection_difference
 
@@ -217,7 +217,7 @@ def test_stage0_units(tmp_path):
                             [2, 4]], dtype=np.uint32)
 
         # Run kernel
-        rate_out, err_out, dq_out = detector_gain_correction(
+        rate_out, err_out, dq_out = gain_correction(
             rate.copy(), err.copy(), dq.copy(),
             gain, gain_err, gain_dq
         )

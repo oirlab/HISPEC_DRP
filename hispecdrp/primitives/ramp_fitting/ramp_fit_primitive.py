@@ -1,6 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector,ReadNoiseSelector
+from ...calibrations import GainSelector,ReadNoiseSelector
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
@@ -23,8 +23,8 @@ class FitRampPrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {
-        'detgain': {
-            'selector': DetectorGainSelector,
+        'gain': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         },
         # 'dark': { # would need to be defined if we implement dark subtraction before ramp fitting.
@@ -45,8 +45,8 @@ class FitRampPrimitive(BasePrimitive):
         input_model = datamodels.open(self.input, copy=False)
         self.log.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 
-        detgain_cal, _ = self.get_calibration(input_model, 'detgain')
-        detgain_model = datamodels.open(detgain_cal)
+        gain_cal, _ = self.get_calibration(input_model, 'gain')
+        gain_model = datamodels.open(gain_cal)
         # Dark would need to be defined if we implement dark subtraction before ramp fitting.
         # dark_cal, _ = self.get_calibration(input_model, 'dark')
         # dark_model = datamodels.open(dark_cal)
@@ -65,7 +65,7 @@ class FitRampPrimitive(BasePrimitive):
                 dq_raw=input_model.dq_raw,
                 dq=input_model.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None,  # Not used because we assume dark subtraction is done in rate maps.
                 max_cores=self.max_cores
@@ -77,7 +77,7 @@ class FitRampPrimitive(BasePrimitive):
                 dq_raw=input_model.dq_raw,
                 dq=input_model.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                 num_coadd=1,
@@ -93,7 +93,7 @@ class FitRampPrimitive(BasePrimitive):
                 dq_raw=input_model.dq_raw,
                 dq=input_model.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                 num_coadd=_mcds_num_coadd,
@@ -106,7 +106,7 @@ class FitRampPrimitive(BasePrimitive):
                 dq_raw=input_model.dq_raw,
                 dq=input_model.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                 max_cores=self.max_cores,

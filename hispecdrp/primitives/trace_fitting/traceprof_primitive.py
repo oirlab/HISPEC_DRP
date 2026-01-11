@@ -32,6 +32,6 @@ class TraceProfilePrimitive(BasePrimitive):
             input_model = datamodels.open(input[fiber])
             setattr(output_model, f'PROF_FIB{fiber}', input_model.rate)
             setattr(output_model, f'PROF_ERR_FIB{fiber}', input_model.rate_err)
-            self.add_data_ancestors(output_model, input_model)
+            output_model.add_data_ancestors(input_model, primitive_name=self.__class__.__name__)
 
         return dict(output=output_model)

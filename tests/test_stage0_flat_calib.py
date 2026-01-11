@@ -83,10 +83,10 @@ def test_stage0_flat_calib(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -188,34 +188,30 @@ def test_stage0_flat_calib(tmp_path):
     # --- Specify the primitive arguments here ---
     prim_args = {
         'dq_init': {
-            'suffix': 'dqinit',
+            'run': True,
             'max_cores': pipe_max_cores,
         },
-        'saturation': {
-            'suffix': 'checksat',
+        'saturation_check': {
+            'run': True,
             'max_cores': pipe_max_cores,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': True,
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
-            'suffix': 'nonlin',
             'run': True,
             'max_cores': pipe_max_cores,
         },
         'jump_detec': {
-            'run': True,
-            'suffix': 'jumpdetec',
+            'run': False,
             'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
         },
-        'fit_det_gain': {
+        'make_gain': {
             'run': False,
-            'suffix': 'detgain',
             'max_cores': pipe_max_cores,
             'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
             'method': 'quad',
@@ -227,31 +223,27 @@ def test_stage0_flat_calib(tmp_path):
         },
         'ramp_fit' : {
             'run': True,
-            'suffix': 'rampfit',
             'method': 'jwst_ols', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
             'max_cores': pipe_max_cores,
             'jwst_jump_detection': False,
             'jwst_jump_rejection_threshold': 4.0,
         },
-        'dark': {
+        'dark_sub': {
             'run': True,
-            'suffix': 'dark',
             'max_cores': pipe_max_cores,
         },
-        'det_gain': {
+        'gain_corr': {
             'run': True,
-            'suffix': 'detgain',
             'max_cores': pipe_max_cores,
         },
         'coadd': {
             'run': True,
         },
-        'fit_det_flat': {
+        'make_detflat': {
             'run': True,
         },
-        'det_flat': {
+        'detflat_corr': {
             'run': False,
-            'suffix': 'detflat',
             'max_cores': pipe_max_cores,
         },
     }
@@ -262,18 +254,18 @@ def test_stage0_flat_calib(tmp_path):
     # Set any primitive args
 
     detflat_pipe.dq_init.dq = dqinit_model
-    detflat_pipe.saturation.saturation = saturation_model
-    detflat_pipe.bias.bias = bias_model
+    detflat_pipe.saturation_check.saturation = saturation_model
+    detflat_pipe.bias_sub.bias = bias_model
     detflat_pipe.nonlin_corr.nonlin = nonlin_model
-    detflat_pipe.jump_detec.detgain = detgain_model
+    detflat_pipe.jump_detec.gain = gain_model
     detflat_pipe.jump_detec.rn = rn_model
-    detflat_pipe.fit_det_gain.detgain_init = detgain_model
-    detflat_pipe.fit_det_gain.rn_init = rn_model
-    detflat_pipe.ramp_fit.detgain = detgain_model
+    detflat_pipe.make_gain.gain_init = gain_model
+    detflat_pipe.make_gain.rn_init = rn_model
+    detflat_pipe.ramp_fit.gain = gain_model
     detflat_pipe.ramp_fit.rn = rn_model
-    detflat_pipe.dark.dark = dark_model
-    detflat_pipe.det_gain.detgain = detgain_model
-    detflat_pipe.det_flat.detflat = detflat_model
+    detflat_pipe.dark_sub.dark = dark_model
+    detflat_pipe.gain_corr.gain = gain_model
+    detflat_pipe.detflat_corr.detflat = detflat_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")

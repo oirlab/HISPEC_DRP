@@ -1,4 +1,4 @@
-from hispecdrp import ProcessDetSatFlatsPipeline
+from hispecdrp import ProcessSatFlatsPipeline
 from hispecdrp import datamodels
 import numpy as np
 import os
@@ -77,10 +77,10 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     # --- Create random gain map ---
     gain = 1  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -169,25 +169,21 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     prim_args = {
         'dq_init': {
             'run': True,
-            'suffix': 'dqinit',
             'max_cores': pipe_max_cores,
         },
-        'fit_saturation': {
+        'make_saturation': {
             'run': True,
-            'suffix': 'checksat',
             'max_cores': pipe_max_cores,
         },
         'register_saturation_cal':{
             'run': False,
         },
-        'saturation': {
+        'saturation_check': {
             'run': True,
-            'suffix': 'checksat',
             'max_cores': pipe_max_cores,
         },
-        'fit_nonlin': {
+        'make_nonlin': {
             'run': True,
-            'suffix': 'nonlin',
             'mode': 'full_detector',
             'use_legendre': True,
             'order': 5,
@@ -200,22 +196,16 @@ def test_stage0_sat_nonlin_calib(tmp_path):
         'register_nonlin_cal':{
             'run': False,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': False,
-            # 'save_result':True,
-            # # 'output_path': os.path.join(tmp_path,"bias_subtracted2.fits"),
-            # 'output_dir': tmp_path,
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
             'run': False,
-            'suffix': 'nonlin',
             'max_cores': pipe_max_cores,
         },
         'jump_detec' : {
             'run': False,
-            'suffix' : 'jumpdetec',
             'ouput_model' : 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
@@ -223,47 +213,37 @@ def test_stage0_sat_nonlin_calib(tmp_path):
         },
         'ramp_fit' : {
             'run': False,
-            'suffix': 'rampfit',
             'method': 'cython_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely', 'cython_likely'
             'max_cores': pipe_max_cores,
             'jwst_jump_detection': False,
             'jwst_jump_rejection_threshold': 4.0,
         },
-        'dark': {
+        'dark_sub': {
             'run': False,
-            'suffix': 'dark',
             'max_cores': pipe_max_cores,
         },
-        'det_gain': {
+        'gain_corr': {
             'run': False,
-            'suffix': 'detgain',
             'max_cores': pipe_max_cores,
         },
-        'det_flat': {
+        'detflat_corr': {
             'run': False,
-            'suffix': 'detflat',
             'max_cores': pipe_max_cores,
         },
     }
 
     # Setup and call the stage 0 pipeline
-    satflats_pipe = ProcessDetSatFlatsPipeline()
+    satflats_pipe = ProcessSatFlatsPipeline()
 
     # Set any primitive args
 
     satflats_pipe.dq_init.dq = dqinit_model
-    satflats_pipe.saturation.saturation = saturation_model
-    satflats_pipe.bias.bias = bias_model
-    satflats_pipe.fit_nonlin.detgain = detgain_model
-    satflats_pipe.fit_nonlin.rn = rn_model
-    satflats_pipe.fit_nonlin.saturation = saturation_model
-    satflats_pipe.fit_nonlin.bias = bias_model
-    # satflats_pipe.nonlin_corr.nonlin = nonlin_model
-    # satflats_pipe.ramp_fit.detgain = detgain_model
-    # satflats_pipe.ramp_fit.rn = rn_model
-    # satflats_pipe.dark.dark = dark_model
-    # satflats_pipe.det_gain.detgain = detgain_model
-    # satflats_pipe.det_flat.detflat = detflat_model
+    satflats_pipe.saturation_check.saturation = saturation_model
+    satflats_pipe.bias_sub.bias = bias_model
+    satflats_pipe.make_nonlin.gain = gain_model
+    satflats_pipe.make_nonlin.rn = rn_model
+    satflats_pipe.make_nonlin.saturation = saturation_model
+    satflats_pipe.make_nonlin.bias = bias_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
@@ -291,7 +271,7 @@ def test_stage0_sat_nonlin_calib(tmp_path):
     assert abs(model_result['nonlin'].nonlin_max[0]-52600) < 500
 
     # Run pipeline
-    prim_args['fit_nonlin']['mode'] = 'per_pixel'
+    prim_args['make_nonlin']['mode'] = 'per_pixel'
     model_result = satflats_pipe.apply(ramp_model_sequence, prim_args=prim_args, output_dir=tmp_path)
 
     # print("nonlin per_pixel")

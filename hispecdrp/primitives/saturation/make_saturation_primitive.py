@@ -9,13 +9,12 @@ from ..jump_detection.jump_detection_difference import median_axis0_3d
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 
-__all__ = ['FitSaturationPrimitive', 'check_saturation']
+__all__ = ['MakeSaturationPrimitive', 'check_saturation']
 
 
-class FitSaturationPrimitive(BasePrimitive):
+class MakeSaturationPrimitive(BasePrimitive):
     
     ARGUMENTS = {
-        'suffix' : 'sat',
         'output_model' : 'SaturationModel',
         'offset' : 100, # subtract from last read to define saturation threshold in case read noise or other systematics are an issue.
         'max_cores' : 1,

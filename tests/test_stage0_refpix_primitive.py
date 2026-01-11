@@ -3,7 +3,7 @@ import os
 import time
 
 from hispecdrp import datamodels
-from hispecdrp.primitives.detector_refpix.refpix_primitive import RefPixelCorrectionPrimitive
+from hispecdrp.primitives.refpix.refpix_primitive import RefPixelCorrectionPrimitive
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
 def test_stage0_refpix_primitive(tmp_path):
@@ -76,10 +76,10 @@ def test_stage0_refpix_primitive(tmp_path):
     # --- Create random gain map ---
     gain = 1  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -169,7 +169,6 @@ def test_stage0_refpix_primitive(tmp_path):
     refpix_primitive = RefPixelCorrectionPrimitive()
 
     prim_args = {
-            'suffix': 'bias',
             'run': True,
             'method' : 'scales_drp',
             'max_cores' : 1,

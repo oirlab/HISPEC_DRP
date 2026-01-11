@@ -1,4 +1,4 @@
 from .nonlin_primitive import NonlinearCorrectionPrimitive
-from .fit_nonlin_primitive import FitNonLinPrimitive
+from .make_nonlin_primitive import MakeNonLinPrimitive
 
-__all__ = ['NonlinearCorrectionPrimitive','FitNonLinPrimitive']
+__all__ = ['NonlinearCorrectionPrimitive','MakeNonLinPrimitive']

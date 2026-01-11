@@ -4,7 +4,6 @@ from hispecdrp import simulations
 import numpy as np
 import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
-from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
 import time
 
 def test_stage0(tmp_path):
@@ -74,10 +73,10 @@ def test_stage0(tmp_path):
     # --- Create random gain map ---
     gain = 1.0  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -161,15 +160,12 @@ def test_stage0(tmp_path):
     # --- Specify the primitive arguments here ---
     prim_args = {
         'dq_init': {
-            'suffix': 'dqinit',
             'max_cores': pipe_max_cores,
         },
-        'saturation': {
-            'suffix': 'checksat',
+        'saturation_check': {
             'max_cores': pipe_max_cores,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': False,
             # 'save_result':True,
             # # 'output_path': os.path.join(tmp_path,"bias_subtracted2.fits"),
@@ -177,34 +173,28 @@ def test_stage0(tmp_path):
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
-            'suffix': 'nonlin',
             'max_cores': pipe_max_cores,
         },
         'jump_detec' : {
             'run': False,
-            'suffix' : 'jumpdetec',
             'ouput_model' : 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 4.0,
         },
         'ramp_fit' : {
-            'suffix': 'rampfit',
-            'method': 'jwst_ols', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
+            'method': 'jwst_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
             'max_cores': pipe_max_cores,
             'jwst_jump_detection': True,
             'jwst_jump_rejection_threshold': 4.0,
         },
-        'dark': {
-            'suffix': 'dark',
+        'dark_sub': {
             'max_cores': pipe_max_cores,
         },
-        'det_gain': {
-            'suffix': 'detgain',
+        'gain_corr': {
             'max_cores': pipe_max_cores,
         },
-        'det_flat': {
-            'suffix': 'detflat',
+        'detflat_corr': {
             'max_cores': pipe_max_cores,
         },
     }
@@ -215,14 +205,14 @@ def test_stage0(tmp_path):
     # Set any primitive args
 
     stage0_pipe.dq_init.dq = dqinit_model
-    stage0_pipe.saturation.saturation = saturation_model
-    stage0_pipe.bias.bias = bias_model
+    stage0_pipe.saturation_check.saturation = saturation_model
+    stage0_pipe.bias_sub.bias = bias_model
     stage0_pipe.nonlin_corr.nonlin = nonlin_model
-    stage0_pipe.ramp_fit.detgain = detgain_model
+    stage0_pipe.ramp_fit.gain = gain_model
     stage0_pipe.ramp_fit.rn = rn_model
-    stage0_pipe.dark.dark = dark_model
-    stage0_pipe.det_gain.detgain = detgain_model
-    stage0_pipe.det_flat.detflat = detflat_model
+    stage0_pipe.dark_sub.dark = dark_model
+    stage0_pipe.gain_corr.gain = gain_model
+    stage0_pipe.detflat_corr.detflat = detflat_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")

@@ -1,9 +1,9 @@
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
 from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearCorrectionPrimitive,
-                           JumpDetectionPrimitive,FitRampPrimitive, DarkSubtractionPrimitive,
-                           BiasSubtractionPrimitive,DetectorFlatPrimitive, DetectorGainPrimitive,
-                           FitDetectorGainPrimitive,FitDetectorFlatPrimitive, RegisterCalibrationPrimitive,
+                           JumpDetectionPrimitive, FitRampPrimitive, DarkSubtractionPrimitive,
+                           BiasSubtractionPrimitive, DetectorFlatCorrectionPrimitive, GainCorrectionPrimitive,
+                           MakeGainPrimitive, MakeDetectorFlatPrimitive, RegisterCalibrationPrimitive,
                            CoaddFramesPrimitive)
 from typing import Sequence
 
@@ -14,20 +14,19 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
 
     PRIMITIVES = {
         'dq_init': DQInitPrimitive,
-        'saturation': CheckSaturationPrimitive,
-        'bias': BiasSubtractionPrimitive,
+        'saturation_check': CheckSaturationPrimitive,
+        'bias_sub': BiasSubtractionPrimitive,
         'nonlin_corr': NonlinearCorrectionPrimitive,
         'jump_detec': JumpDetectionPrimitive,
-        'fit_det_gain': FitDetectorGainPrimitive,
-        'register_detgain_cal' : RegisterCalibrationPrimitive,
-        # todo: register read noise cal
+        'make_gain': MakeGainPrimitive,
+        'register_gain_cal' : RegisterCalibrationPrimitive,
         'ramp_fit': FitRampPrimitive,
-        'dark': DarkSubtractionPrimitive,
-        'det_gain': DetectorGainPrimitive,
+        'dark_sub': DarkSubtractionPrimitive,
+        'gain_corr': GainCorrectionPrimitive,
         'coadd': CoaddFramesPrimitive,
-        'fit_det_flat': FitDetectorFlatPrimitive,
-        # todo: register flat field cal
-        'det_flat': DetectorFlatPrimitive,
+        'make_detflat': MakeDetectorFlatPrimitive,
+        'register_det_flat_cal' : RegisterCalibrationPrimitive,
+        'detflat_corr': DetectorFlatCorrectionPrimitive,
     }
 
     def _perform(self):
@@ -45,37 +44,37 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
             self.log.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
             model_to_process = datamodels.open(_input)
             _result = self.dq_init.apply(model_to_process)
-            _result = self.saturation.apply(_result)
-            _result = self.bias.apply(_result)
+            _result = self.saturation_check.apply(_result)
+            _result = self.bias_sub.apply(_result)
             _result = self.nonlin_corr.apply(_result)
             _result = self.jump_detec.apply(_result)
             results.append(_result)
 
         # Fit gain using all processed inputs
-        detgain_result = self.fit_det_gain.apply(results)
+        gain_result = self.make_gain.apply(results)
 
         # Register the detector gain calibration to the calibration database
-        # self.register_detgain_cal.apply(detgain_result)
+        # self.register_gain_cal.apply(gain_result)
 
         self.log.info(f"Continue loop over inputs to apply ramp_fit, dark, and det_gain.")
         for k, _result in enumerate(results):
             self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.ramp_fit.apply(_result)
-            _result = self.dark.apply(_result)
-            _result = self.det_gain.apply(_result)
+            _result = self.dark_sub.apply(_result)
+            _result = self.gain_corr.apply(_result)
             results[k] = _result
 
         # Get the flat field using all processed inputs. Coadding first.
         coadded_rate = self.coadd.apply(results)[0]
-        detflat_result = self.fit_det_flat.apply(coadded_rate)
+        detflat_result = self.make_detflat.apply(coadded_rate)
 
         # Register the detector gain calibration to the calibration database
-        # self.register_detflat_cal.apply(detflat_result)
+        # self.register_det_flat_cal.apply(detflat_result)
 
         self.log.info(f"Continue loop over inputs to apply flat fielding.")
         for k, _result in enumerate(results):
             self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
-            _result = self.det_flat.apply(_result)
+            _result = self.detflat_corr.apply(_result)
             results[k] = _result
 
-        return dict(output=dict(results=results, detgain=detgain_result, detflat=detflat_result))
+        return dict(output=dict(results=results, gain=gain_result, detflat=detflat_result))

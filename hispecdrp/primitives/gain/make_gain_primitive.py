@@ -3,7 +3,7 @@ from ..ramp_fitting import fitramp_Brandt
 # from ..coadd.coadd_frames_primitive import CoaddFramesPrimitive
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector,ReadNoiseSelector
+from ...calibrations import GainSelector,ReadNoiseSelector
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence
@@ -17,16 +17,15 @@ from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
 
 
-__all__ = ['FitDetectorGainPrimitive']
+__all__ = ['MakeGainPrimitive']
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
-class FitDetectorGainPrimitive(BasePrimitive):
+class MakeGainPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detgain',
         'max_cores' : 1,
         'init_gain' : None, # None | int, Define the initial gain value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(0.1, 10, 101)).
@@ -51,8 +50,8 @@ class FitDetectorGainPrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {
-        'detgain_init': {
-            'selector': DetectorGainSelector,
+        'gain_init': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         },
         'rn_init': {
@@ -77,10 +76,10 @@ class FitDetectorGainPrimitive(BasePrimitive):
         nreads,ny,nx = datamodel0.data.shape
 
         if self.init_gain is None:
-            detgain_init, _ = self.get_calibration(datamodel0, 'detgain_init')
-            detgain_init_model = datamodels.open(detgain_init)
-            _init_center_gain = detgain_init_model.gain
-            self.log.info(f"Using {detgain_init} as initial detector gain values with median value {np.nanmedian(_init_center_gain)}.")
+            gain_init, _ = self.get_calibration(datamodel0, 'gain_init')
+            gain_init_model = datamodels.open(gain_init)
+            _init_center_gain = gain_init_model.gain
+            self.log.info(f"Using {gain_init} as initial detector gain values with median value {np.nanmedian(_init_center_gain)}.")
         elif isinstance(self.init_gain, float):
             _init_center_gain = self.init_gain
             self.log.info(f"Using user-defined initial detector gain values: {self.init_gain}.")
@@ -120,7 +119,7 @@ class FitDetectorGainPrimitive(BasePrimitive):
             self.log.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
             
         # Define output model from inputs
-        output_detgain = self.get_output_model(input_models,"DetectorGainModel")
+        output_gain = self.get_output_model(input_models,"GainModel")
 
         # Make all ramps from all files into a big cube
         ramp_arr = []
@@ -139,12 +138,12 @@ class FitDetectorGainPrimitive(BasePrimitive):
         bestfit_gain, bestfit_rn, cov = _out
 
         # Output
-        output_detgain.gain = bestfit_gain
-        output_detgain.rn = bestfit_rn
-        output_detgain.cov = cov
-        output_detgain.dq = np.zeros(bestfit_gain.shape, dtype=np.uint32)
+        output_gain.gain = bestfit_gain
+        output_gain.rn = bestfit_rn
+        output_gain.cov = cov
+        output_gain.dq = np.zeros(bestfit_gain.shape, dtype=np.uint32)
 
-        return dict(output=output_detgain)
+        return dict(output=output_gain)
 
 def fit_gain_and_readnoise(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray,

@@ -1,7 +1,7 @@
 import hispecdrp.primitives.nonlinear_correction.calc_nonlin_coefs_Brandt as nonlin_Brandt
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector, ReadNoiseSelector, SaturationSelector, BiasSelector
+from ...calibrations import GainSelector, ReadNoiseSelector, SaturationSelector, BiasSelector
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence
@@ -15,16 +15,15 @@ from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
 
 
-__all__ = ['FitNonLinPrimitive']
+__all__ = ['MakeNonLinPrimitive']
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
-class FitNonLinPrimitive(BasePrimitive):
+class MakeNonLinPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'nonlin',
         'output_model': 'NonlinearCorrectionModel',
         'max_cores' : 1,
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
@@ -42,8 +41,8 @@ class FitNonLinPrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {
-        'detgain': {
-            'selector': DetectorGainSelector,
+        'gain': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         },
         'rn': {
@@ -81,8 +80,8 @@ class FitNonLinPrimitive(BasePrimitive):
         datamodel0 = input_models[0]
         nreads,ny,nx = datamodel0.data.shape
 
-        detgain, _ = self.get_calibration(datamodel0, 'detgain')
-        detgain_model = datamodels.open(detgain)
+        gain, _ = self.get_calibration(datamodel0, 'gain')
+        gain_model = datamodels.open(gain)
 
         rn_cal, _ = self.get_calibration(datamodel0, 'rn')
         rn_model = datamodels.open(rn_cal)
@@ -109,7 +108,7 @@ class FitNonLinPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_nonlin_coefs(ramp_arr, dq_raw_arr, detgain_model.gain, rn_model.RN,
+        _out = fit_nonlin_coefs(ramp_arr, dq_raw_arr, gain_model.gain, rn_model.RN,
                                 order = self.order, satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias),
                                 mode = self.mode, use_legendre = self.use_legendre, readstart = self.readstart,
                                 criterion_for_nonlin_thresh = self.criterion_for_nonlin_thresh, criterion_for_nonlin_max = self.criterion_for_nonlin_max,
@@ -120,7 +119,7 @@ class FitNonLinPrimitive(BasePrimitive):
         output_nonlin.coeffs = nonlin_coeffs
         output_nonlin.nonlin_thresh = nonlin_thresh # in DN
         output_nonlin.nonlin_max = nonlin_max # in DN
-        output_nonlin.dq = np.zeros(detgain_model.gain.shape, dtype=np.uint32)
+        output_nonlin.dq = np.zeros(gain_model.gain.shape, dtype=np.uint32)
 
         return dict(output=output_nonlin)
 
@@ -502,8 +501,8 @@ def _fit_nonlin_coefs_worker(args : tuple) -> tuple:
     for row_id in range(block_start, block_end):
         args_row = (
                 row_id,
-                ramps[:, :, row_id, :],
-                dq_raw[:, :, row_id, :],
+                ramps_np[:, :, row_id, :],
+                dq_raw_np[:, :, row_id, :],
                 gains_np[row_id, :],
                 rns_np[row_id, :],
                 satval_np[row_id, :],

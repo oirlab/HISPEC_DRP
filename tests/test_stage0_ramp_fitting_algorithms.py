@@ -75,10 +75,10 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -157,8 +157,6 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
 
         ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
                                           meta=ramp_data['meta'])
-        ramp_model.meta.filename = "simulated_ramp.fits"
-        print(ramp_model.meta.clock_rate)
 
         step_time = time.time();
         print(f"Step: creating ramp, elapsed: {step_time - start_time:.2f}s")
@@ -169,16 +167,13 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
         prim_args = {
             'dq_init': {
                 'run': True,
-                'suffix': 'dqinit',
                 'max_cores': pipe_max_cores,
             },
-            'saturation': {
+            'saturation_check': {
                 'run': True,
-                'suffix': 'checksat',
                 'max_cores': pipe_max_cores,
             },
-            'bias': {
-                'suffix': 'bias',
+            'bias_sub': {
                 'run': True,
                 # 'save_result':True,
                 # # 'output_path': os.path.join(tmp_path,"bias_subtracted2.fits"),
@@ -187,12 +182,10 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
             },
             'nonlin_corr': {
                 'run': True,
-                'suffix': 'nonlin',
                 'max_cores': pipe_max_cores,
             },
             'jump_detec' : {
                 'run': False,
-                'suffix' : 'jumpdetec',
                 'ouput_model' : 'input',
                 'method': 'jwst',
                 'max_cores': pipe_max_cores,
@@ -200,25 +193,21 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
             },
             'ramp_fit' : {
                 'run': True,
-                'suffix': 'rampfit',
                 # 'method': method, # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely', 'cython_likely'
                 'max_cores': pipe_max_cores,
                 'jwst_jump_detection': False,
                 'jwst_jump_rejection_threshold': 4.0,
             },
-            'dark': {
+            'dark_sub': {
                 'run': True,
-                'suffix': 'dark',
                 'max_cores': pipe_max_cores,
             },
-            'det_gain': {
+            'gain_corr': {
                 'run': True,
-                'suffix': 'detgain',
                 'max_cores': pipe_max_cores,
             },
-            'det_flat': {
+            'detflat_corr': {
                 'run': True,
-                'suffix': 'detflat',
                 'max_cores': pipe_max_cores,
             },
         }
@@ -227,16 +216,15 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
         stage0_pipe = Stage0Pipeline()
 
         # Set any primitive args
-
         stage0_pipe.dq_init.dq = dqinit_model
-        stage0_pipe.saturation.saturation = saturation_model
-        stage0_pipe.bias.bias = bias_model
+        stage0_pipe.saturation_check.saturation = saturation_model
+        stage0_pipe.bias_sub.bias = bias_model
         stage0_pipe.nonlin_corr.nonlin = nonlin_model
-        stage0_pipe.ramp_fit.detgain = detgain_model
+        stage0_pipe.ramp_fit.gain = gain_model
         stage0_pipe.ramp_fit.rn = rn_model
-        stage0_pipe.dark.dark = dark_model
-        stage0_pipe.det_gain.detgain = detgain_model
-        stage0_pipe.det_flat.detflat = detflat_model
+        stage0_pipe.dark_sub.dark = dark_model
+        stage0_pipe.gain_corr.gain = gain_model
+        stage0_pipe.detflat_corr.detflat = detflat_model
 
         step_time = time.time();
         print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
@@ -328,10 +316,10 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -410,8 +398,6 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
 
         ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
                                           meta=ramp_data['meta'])
-        ramp_model.meta.filename = "simulated_ramp.fits"
-        print(ramp_model.meta.clock_rate)
 
         step_time = time.time();
         print(f"Step: creating ramp, elapsed: {step_time - start_time:.2f}s")
@@ -422,16 +408,13 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
         prim_args = {
             'dq_init': {
                 'run': True,
-                'suffix': 'dqinit',
                 'max_cores': pipe_max_cores,
             },
-            'saturation': {
+            'saturation_check': {
                 'run': True,
-                'suffix': 'checksat',
                 'max_cores': pipe_max_cores,
             },
-            'bias': {
-                'suffix': 'bias',
+            'bias_sub': {
                 'run': True,
                 # 'save_result':True,
                 # # 'output_path': os.path.join(tmp_path,"bias_subtracted2.fits"),
@@ -440,12 +423,10 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
             },
             'nonlin_corr': {
                 'run': True,
-                'suffix': 'nonlin',
                 'max_cores': pipe_max_cores,
             },
             'jump_detec' : {
                 'run': False,
-                'suffix' : 'jumpdetec',
                 'ouput_model' : 'input',
                 'method': 'jwst',
                 'max_cores': pipe_max_cores,
@@ -453,25 +434,21 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
             },
             'ramp_fit' : {
                 'run': True,
-                'suffix': 'rampfit',
                 # 'method': method, # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely', 'cython_likely'
                 'max_cores': pipe_max_cores,
                 'jwst_jump_detection': False,
                 'jwst_jump_rejection_threshold': 4.0,
             },
-            'dark': {
+            'dark_sub': {
                 'run': True,
-                'suffix': 'dark',
                 'max_cores': pipe_max_cores,
             },
-            'det_gain': {
+            'gain_corr': {
                 'run': True,
-                'suffix': 'detgain',
                 'max_cores': pipe_max_cores,
             },
-            'det_flat': {
+            'detflat_corr': {
                 'run': True,
-                'suffix': 'detflat',
                 'max_cores': pipe_max_cores,
             },
         }
@@ -480,16 +457,15 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
         stage0_pipe = Stage0Pipeline()
 
         # Set any primitive args
-
         stage0_pipe.dq_init.dq = dqinit_model
-        stage0_pipe.saturation.saturation = saturation_model
-        stage0_pipe.bias.bias = bias_model
+        stage0_pipe.saturation_check.saturation = saturation_model
+        stage0_pipe.bias_sub.bias = bias_model
         stage0_pipe.nonlin_corr.nonlin = nonlin_model
-        stage0_pipe.ramp_fit.detgain = detgain_model
+        stage0_pipe.ramp_fit.gain = gain_model
         stage0_pipe.ramp_fit.rn = rn_model
-        stage0_pipe.dark.dark = dark_model
-        stage0_pipe.det_gain.detgain = detgain_model
-        stage0_pipe.det_flat.detflat = detflat_model
+        stage0_pipe.dark_sub.dark = dark_model
+        stage0_pipe.gain_corr.gain = gain_model
+        stage0_pipe.detflat_corr.detflat = detflat_model
 
         step_time = time.time();
         print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")

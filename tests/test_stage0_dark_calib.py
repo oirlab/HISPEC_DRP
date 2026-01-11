@@ -1,4 +1,4 @@
-from hispecdrp import ProcessDetDarksPipeline
+from hispecdrp import ProcessDarksPipeline
 from hispecdrp import datamodels
 import numpy as np
 import os
@@ -71,10 +71,10 @@ def test_stage0_dark_calib(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -171,51 +171,49 @@ def test_stage0_dark_calib(tmp_path):
     start_time = time.time()
 
     pipe_max_cores = max_cores
-    # --- Specify the primitive arguments here ---
     prim_args = {
         'dq_init': {
             'run': True,
-            'suffix': 'dqinit',
             'max_cores': pipe_max_cores,
         },
-        'saturation': {
+        'make_bias': {
+            'run': False,
+        },
+        'register_bias_cal': {
+            'run': False,
+        },
+        'saturation_check': {
             'run': True,
-            'suffix': 'checksat',
             'max_cores': pipe_max_cores,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': True,
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
-            'suffix': 'nonlin',
             'run': True,
             'max_cores': pipe_max_cores,
         },
         'jump_detec': {
             'run': True,
-            'suffix': 'jumpdetec',
             'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
         },
-        'fit_det_rn': {
+        'make_rn': {
             'run': True,
-            'suffix': 'detrn',
             'max_cores': pipe_max_cores,
             'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
             'method': 'both',
             'init_delta_RNs': np.linspace(-2, 2, 100),
             'quad_delta_RN': 0.5
         },
-        'register_detrn_cal': {
+        'register_rn_cal': {
             'run': True,
         },
         'ramp_fit' : {
             'run': True,
-            'suffix': 'rampfit',
             'method': 'jwst_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
             'max_cores': pipe_max_cores,
             'jwst_jump_detection': False,
@@ -224,63 +222,60 @@ def test_stage0_dark_calib(tmp_path):
         'coadd': {
             'run': True,
         },
-        'fit_det_dark': {
+        'make_dark': {
             'run': True,
             'max_cores': pipe_max_cores,
         },
-        'register_detdark_cal': {
+        'register_dark_cal': {
             'run': False,
         },
-        'dark': {
+        'dark_sub': {
             'run': False,
-            'suffix': 'dark',
             'max_cores': pipe_max_cores,
         },
-        'det_gain': {
+        'gain_corr': {
             'run': False,
-            'suffix': 'detgain',
             'max_cores': pipe_max_cores,
         },
-        'det_flat': {
+        'detflat_corr': {
             'run': False,
-            'suffix': 'detflat',
             'max_cores': pipe_max_cores,
         },
     }
 
     # Setup and call the stage 0 pipeline
-    detdark_pipe = ProcessDetDarksPipeline()
+    dark_pipe = ProcessDarksPipeline()
 
     # Set any primitive args
 
-    detdark_pipe.dq_init.dq = dqinit_model
-    detdark_pipe.saturation.saturation = saturation_model
-    detdark_pipe.bias.bias = bias_model
-    detdark_pipe.nonlin_corr.nonlin = nonlin_model
-    detdark_pipe.jump_detec.detgain = detgain_model
-    detdark_pipe.jump_detec.rn = rn_model
-    detdark_pipe.fit_det_rn.detgain = detgain_model
-    detdark_pipe.fit_det_rn.rn_init = rn_model
-    detdark_pipe.ramp_fit.detgain = detgain_model
-    detdark_pipe.ramp_fit.rn = rn_model
-    detdark_pipe.dark.dark = dark_model
-    detdark_pipe.det_gain.detgain = detgain_model
-    detdark_pipe.det_flat.detflat = detflat_model
+    dark_pipe.dq_init.dq = dqinit_model
+    dark_pipe.saturation_check.saturation = saturation_model
+    dark_pipe.bias_sub.bias = bias_model
+    dark_pipe.nonlin_corr.nonlin = nonlin_model
+    dark_pipe.jump_detec.gain = gain_model
+    dark_pipe.jump_detec.rn = rn_model
+    dark_pipe.make_rn.gain = gain_model
+    dark_pipe.make_rn.rn_init = rn_model
+    dark_pipe.ramp_fit.gain = gain_model
+    dark_pipe.ramp_fit.rn = rn_model
+    dark_pipe.dark_sub.dark = dark_model
+    dark_pipe.gain_corr.gain = gain_model
+    dark_pipe.detflat_corr.detflat = detflat_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
     start_time = time.time()
 
     # Run pipeline
-    model_result = detdark_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    # dict(output=dict(results=results, detrn=detrn_result, detdark=detdark_result))
+    model_result = dark_pipe.apply(ramp_model_sequence, prim_args=prim_args)
+    # dict(output=dict(results=results, rn=rn_result, dark=dark_result))
 
     # print("RN")
-    # print(model_result['detrn'].rn)
+    # print(model_result['rn'].rn)
     # print("RN error")
-    # print(model_result['detrn'].rn_err)
+    # print(model_result['rn'].rn_err)
 
-    rel_residuals = np.abs(model_result['detrn'].rn - rn_model.rn) / model_result['detrn'].rn_err
+    rel_residuals = np.abs(model_result['rn'].rn - rn_model.rn) / model_result['rn'].rn_err
     # print("Relative residuals")
     # print(rel_residuals)
     assert np.sum(rel_residuals > 5) == 0
@@ -289,11 +284,11 @@ def test_stage0_dark_calib(tmp_path):
     assert abs(confidence_level-0.683)<0.1
 
     # print("rate dark")
-    # print(model_result['detdark'].rate)
+    # print(model_result['dark'].rate)
     # print("rate dark error")
-    # print(model_result['detdark'].rate_err)
+    # print(model_result['dark'].rate_err)
 
-    rel_residuals = np.abs(model_result['detdark'].rate - dark_model.rate) / model_result['detdark'].rate_err
+    rel_residuals = np.abs(model_result['dark'].rate - dark_model.rate) / model_result['dark'].rate_err
     # print("Relative residuals")
     # print(rel_residuals)
     assert np.sum(rel_residuals > 5) == 0

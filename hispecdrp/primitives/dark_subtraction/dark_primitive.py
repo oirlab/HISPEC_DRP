@@ -9,7 +9,9 @@ __all__ = ['DarkSubtractionPrimitive', 'dark_subtraction_rate']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
-    
+    """
+    My docstrings for DarkSubtractionPrimitive
+    """
     ARGUMENTS = {
         'suffix' : 'darksub',
         'output_model' : 'input',

@@ -70,10 +70,10 @@ def test_stage0_gain_calib(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -171,33 +171,27 @@ def test_stage0_gain_calib(tmp_path):
     # --- Specify the primitive arguments here ---
     prim_args = {
         'dq_init': {
-            'suffix': 'dqinit',
             'max_cores': pipe_max_cores,
         },
-        'saturation': {
-            'suffix': 'checksat',
+        'saturation_check': {
             'max_cores': pipe_max_cores,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': False,
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
-            'suffix': 'nonlin',
             'run': False,
             'max_cores': pipe_max_cores,
         },
         'jump_detec': {
             'run': True,
-            'suffix': 'jumpdetec',
             'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
         },
-        'fit_det_gain': {
-            'suffix': 'detgain',
+        'make_gain': {
             'max_cores': pipe_max_cores,
             'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
             'method': 'quad',
@@ -210,19 +204,19 @@ def test_stage0_gain_calib(tmp_path):
         'ramp_fit': {
             'run': False,
         },
-        'dark': {
+        'dark_sub': {
             'run': False,
         },
-        'det_gain': {
+        'gain_corr': {
             'run': False,
         },
         'coadd': {
             'run': False,
         },
-        'fit_det_flat': {
+        'make_detflat': {
             'run': False,
         },
-        'det_flat': {
+        'detflat_corr': {
             'run': False,
         },
     }
@@ -233,13 +227,13 @@ def test_stage0_gain_calib(tmp_path):
     # Set any primitive args
 
     detflat_pipe.dq_init.dq = dqinit_model
-    detflat_pipe.saturation.saturation = saturation_model
-    detflat_pipe.bias.bias = bias_model
+    detflat_pipe.saturation_check.saturation = saturation_model
+    detflat_pipe.bias_sub.bias = bias_model
     detflat_pipe.nonlin_corr.nonlin = nonlin_model
-    detflat_pipe.jump_detec.detgain = detgain_model
+    detflat_pipe.jump_detec.gain = gain_model
     detflat_pipe.jump_detec.rn = rn_model
-    detflat_pipe.fit_det_gain.detgain_init = detgain_model
-    detflat_pipe.fit_det_gain.rn_init = rn_model
+    detflat_pipe.make_gain.gain_init = gain_model
+    detflat_pipe.make_gain.rn_init = rn_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
@@ -247,47 +241,47 @@ def test_stage0_gain_calib(tmp_path):
 
     # Run pipeline
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain - detgain_model.gain) / np.sqrt(
-        model_result['detgain'].cov[0, 0, :, :])
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
+        model_result['gain'].cov[0, 0, :, :])
     assert np.sum(rel_residuals > 5) == 0
 
-    prim_args['fit_det_gain']['fix_RN'] = False
+    prim_args['make_gain']['fix_RN'] = False
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain - detgain_model.gain) / np.sqrt(
-        model_result['detgain'].cov[0, 0, :, :])
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
+        model_result['gain'].cov[0, 0, :, :])
     assert np.sum(rel_residuals > 5) == 0
 
-    prim_args['fit_det_gain']['fix_RN'] = False
-    prim_args['fit_det_gain']['mode'] = 'full_detector'
-    prim_args['fit_det_gain']['method'] = 'quad'
+    prim_args['make_gain']['fix_RN'] = False
+    prim_args['make_gain']['mode'] = 'full_detector'
+    prim_args['make_gain']['method'] = 'quad'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain[0] - detgain_model.gain[0, 0]) / np.sqrt(
-        model_result['detgain'].cov[0, 0])
+    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+        model_result['gain'].cov[0, 0])
     assert rel_residuals < 5
 
-    prim_args['fit_det_gain']['fix_RN'] = False
-    prim_args['fit_det_gain']['mode'] = 'full_detector'
-    prim_args['fit_det_gain']['method'] = 'grid'
+    prim_args['make_gain']['fix_RN'] = False
+    prim_args['make_gain']['mode'] = 'full_detector'
+    prim_args['make_gain']['method'] = 'grid'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain[0] - detgain_model.gain[0, 0]) / np.sqrt(
-        model_result['detgain'].cov[0, 0])
+    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+        model_result['gain'].cov[0, 0])
     assert rel_residuals < 5
 
-    prim_args['fit_det_gain']['fix_RN'] = False
-    prim_args['fit_det_gain']['mode'] = 'full_detector'
-    prim_args['fit_det_gain']['method'] = 'both'
+    prim_args['make_gain']['fix_RN'] = False
+    prim_args['make_gain']['mode'] = 'full_detector'
+    prim_args['make_gain']['method'] = 'both'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain[0] - detgain_model.gain[0, 0]) / np.sqrt(
-        model_result['detgain'].cov[0, 0])
+    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+        model_result['gain'].cov[0, 0])
     assert rel_residuals < 5
 
-    prim_args['fit_det_gain']['fix_RN'] = False
-    prim_args['fit_det_gain']['mode'] = 'per_pixel'
-    prim_args['fit_det_gain']['method'] = 'both'
-    prim_args['fit_det_gain']['max_cores'] = 2
+    prim_args['make_gain']['fix_RN'] = False
+    prim_args['make_gain']['mode'] = 'per_pixel'
+    prim_args['make_gain']['method'] = 'both'
+    prim_args['make_gain']['max_cores'] = 2
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain - detgain_model.gain) / np.sqrt(
-        model_result['detgain'].cov[0, 0, :, :])
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
+        model_result['gain'].cov[0, 0, :, :])
     assert np.sum(rel_residuals > 5) == 0
 
 
@@ -357,10 +351,10 @@ def test_stage0_gain_calib_stats(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    detgain_model = datamodels.DetectorGainModel(data={'GAIN': gain_map,
-                                                       "RN": np.full_like(gain_map, 0.0),
-                                                       "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                                       "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
+                                           "RN": np.full_like(gain_map, 0.0),
+                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
+                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -448,33 +442,27 @@ def test_stage0_gain_calib_stats(tmp_path):
     # --- Specify the primitive arguments here ---
     prim_args = {
         'dq_init': {
-            'suffix': 'dqinit',
             'max_cores': pipe_max_cores,
         },
-        'saturation': {
-            'suffix': 'checksat',
+        'saturation_check': {
             'max_cores': pipe_max_cores,
         },
-        'bias': {
-            'suffix': 'bias',
+        'bias_sub': {
             'run': False,
             'max_cores': pipe_max_cores,
         },
         'nonlin_corr': {
-            'suffix': 'nonlin',
             'run': False,
             'max_cores': pipe_max_cores,
         },
         'jump_detec': {
-            'run': True,
-            'suffix': 'jumpdetec',
+            'run': False,
             'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
         },
-        'fit_det_gain': {
-            'suffix': 'detgain',
+        'make_gain': {
             'max_cores': pipe_max_cores,
             'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
             'method': 'both',
@@ -487,19 +475,19 @@ def test_stage0_gain_calib_stats(tmp_path):
         'ramp_fit': {
             'run': False,
         },
-        'dark': {
+        'dark_sub': {
             'run': False,
         },
-        'det_gain': {
+        'gain_corr': {
             'run': False,
         },
         'coadd': {
             'run': False,
         },
-        'fit_det_flat': {
+        'make_detflat': {
             'run': False,
         },
-        'det_flat': {
+        'detflat_corr': {
             'run': False,
         },
     }
@@ -510,13 +498,13 @@ def test_stage0_gain_calib_stats(tmp_path):
     # Set any primitive args
 
     detflat_pipe.dq_init.dq = dqinit_model
-    detflat_pipe.saturation.saturation = saturation_model
-    detflat_pipe.bias.bias = bias_model
+    detflat_pipe.saturation_check.saturation = saturation_model
+    detflat_pipe.bias_sub.bias = bias_model
     detflat_pipe.nonlin_corr.nonlin = nonlin_model
-    detflat_pipe.jump_detec.detgain = detgain_model
+    detflat_pipe.jump_detec.gain = gain_model
     detflat_pipe.jump_detec.rn = rn_model
-    detflat_pipe.fit_det_gain.detgain_init = detgain_model
-    detflat_pipe.fit_det_gain.rn_init = rn_model
+    detflat_pipe.make_gain.gain_init = gain_model
+    detflat_pipe.make_gain.rn_init = rn_model
 
     step_time = time.time();
     print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
@@ -524,8 +512,8 @@ def test_stage0_gain_calib_stats(tmp_path):
 
     # Run pipeline
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['detgain'].gain - detgain_model.gain) / np.sqrt(
-        model_result['detgain'].cov[0, 0, :, :])
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
+        model_result['gain'].cov[0, 0, :, :])
     assert np.sum(rel_residuals > 5) == 0
 
     # Check 1 sigma statistics of the flat field residuals

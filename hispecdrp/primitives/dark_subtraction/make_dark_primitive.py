@@ -9,15 +9,14 @@ from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 
 
-__all__ = ['FitDetectorDarkPrimitive']
+__all__ = ['MakeDarkPrimitive']
 
 HOT_FLAG =  DQ_FLAGS['HOT']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
-class FitDetectorDarkPrimitive(BasePrimitive):
+class MakeDarkPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detdark',
         'output_model' : 'DarkModel',
         'max_cores' : 1,
         'hot_pixel_threshold' : 5,  # e-/s,  Threshold above which pixels are bad

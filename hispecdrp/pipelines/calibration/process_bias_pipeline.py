@@ -1,16 +1,16 @@
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
-from ...primitives import (DQInitPrimitive, FitDetectorBiasPrimitive, RegisterCalibrationPrimitive)
+from ...primitives import (DQInitPrimitive, MakeBiasPrimitive, RegisterCalibrationPrimitive)
 from typing import Sequence
 
-__all__ = ['ProcessDetBiasPipeline']
+__all__ = ['ProcessBiasPipeline']
 
 
-class ProcessDetBiasPipeline(CalibrationPipeline):
+class ProcessBiasPipeline(CalibrationPipeline):
 
     PRIMITIVES = {
         'dq_init': DQInitPrimitive,
-        'fit_bias': FitDetectorBiasPrimitive,
+        'make_bias': MakeBiasPrimitive,
         'register_bias_cal' : RegisterCalibrationPrimitive,
     }
 
@@ -32,9 +32,9 @@ class ProcessDetBiasPipeline(CalibrationPipeline):
             results.append(_result)
 
         # Fit gain using all processed inputs
-        detbias_result = self.fit_bias.apply(results)
+        bias_result = self.make_bias.apply(results)
 
         # Register the detector gain calibration to the calibration database
-        # self.register_bias_cal.apply(detbias_result)
+        # self.register_bias_cal.apply(bias_result)
 
-        return dict(output=dict(results=results, detbias=detbias_result))
+        return dict(output=dict(results=results, bias=bias_result))

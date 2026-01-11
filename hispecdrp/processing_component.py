@@ -326,14 +326,3 @@ class ProcessingComponent(_BasePrimitive):
         #### Everything else is an error ####
         #####################################
         raise ValueError(f"Invalid output_model argument {output_model=}.")
-    
-    def add_data_ancestors(self, input_model : datamodels.DataModel, sources : datamodels.DataModel | str | list[datamodels.DataModel | str]):
-        if not isinstance(sources, list):
-            sources = [sources]
-        for f in sources:
-            source_model = datamodels.open(f, meta_only=True)
-            input_model.data_ancestors.add_row({
-                'FILENAME' : str(source_model.meta.filename),
-                'DATETIME_OBS' : str(source_model.meta.datetime_obs),
-                'PRIMITIVE' : self.__class__.__name__
-            })

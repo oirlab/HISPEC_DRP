@@ -1,2 +1,2 @@
 from .saturation_primitive import CheckSaturationPrimitive
-from .fit_saturation_primitive import FitSaturationPrimitive
+from .make_saturation_primitive import MakeSaturationPrimitive

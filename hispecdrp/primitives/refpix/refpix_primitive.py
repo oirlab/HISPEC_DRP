@@ -3,7 +3,7 @@ from ...calibrations import NonlinearCorrectionSelector
 from ... import datamodels
 import numpy as np
 
-import hispecdrp.primitives.detector_refpix.reference_SCALES_DRP as scales_drp
+import hispecdrp.primitives.refpix.reference_SCALES_DRP as scales_drp
 
 __all__ = ['RefPixelCorrectionPrimitive']
 

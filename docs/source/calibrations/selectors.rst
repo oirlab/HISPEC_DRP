@@ -54,7 +54,7 @@ Detector Flat Selector
 Detector Gain Selector
 ++++++++++++++++++++++
 
-**Class**: :py:class:`~hispecdrp.calibrations.selectors.DetectorGainSelector`
+**Class**: :py:class:`~hispecdrp.calibrations.selectors.GainSelector`
 
 **Calibration Type**: ``'detgain'``
 

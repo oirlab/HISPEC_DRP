@@ -6,10 +6,10 @@ from ...utils.parallelization_utils import numba_thread_scope
 import numpy as np
 from numba import njit, prange
 
-__all__ = ['DetectorFlatPrimitive', 'detector_flat_correction']
+__all__ = ['DetectorFlatCorrectionPrimitive', 'detector_flat_correction']
 
 
-class DetectorFlatPrimitive(BasePrimitive):
+class DetectorFlatCorrectionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
         'suffix' : 'detflat',

@@ -7,7 +7,7 @@ Overview
 
 Corrects for the pixel to pixel response of the detector.
 
-**Class**: :py:class:`~hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatPrimitive`
+**Class**: :py:class:`~hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
 
 
 Algorithm

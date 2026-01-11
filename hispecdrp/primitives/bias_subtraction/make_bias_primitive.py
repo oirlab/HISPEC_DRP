@@ -9,14 +9,13 @@ from ..jump_detection.jump_detection_difference import median_axis0_3d
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 
-__all__ = ['FitDetectorBiasPrimitive']
+__all__ = ['MakeBiasPrimitive']
 
 UNRELIABLE_BIAS_FLAG =  DQ_FLAGS['UNRELIABLE_BIAS']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
-class FitDetectorBiasPrimitive(BasePrimitive):
+class MakeBiasPrimitive(BasePrimitive):
     ARGUMENTS = {
-        'suffix' : 'detbias',
         'output_model' : 'BiasModel',
         'max_cores' : 1,
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad

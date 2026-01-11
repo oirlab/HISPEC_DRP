@@ -459,6 +459,17 @@ class DataModel:
         
         return meta_dict
 
+    def add_data_ancestors(self,sources: datamodels.DataModel | str | list[datamodels.DataModel | str], primitive_name: str = "None"):
+        if not isinstance(sources, list):
+            sources = [sources]
+        for f in sources:
+            source_model = datamodel_open(f, meta_only=True)
+            self.data_ancestors.add_row({
+                'FILENAME': str(source_model.meta.filename),
+                'DATETIME_OBS': str(source_model.meta.datetime_obs),
+                'PRIMITIVE' : primitive_name
+            })
+
     def init_receipt(self):
         """
         Initialize the receipt.

@@ -9,15 +9,14 @@ from numba import njit, prange
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 
 
-__all__ = ['FitDetectorFlatPrimitive']
+__all__ = ['MakeDetectorFlatPrimitive']
 
 COLD_FLAG =  DQ_FLAGS['COLD']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
-class FitDetectorFlatPrimitive(BasePrimitive):
+class MakeDetectorFlatPrimitive(BasePrimitive):
 
     ARGUMENTS = {
-        'suffix' : 'detflat',
         'output_model' : 'DetectorFlatModel',
         'max_cores' : 1,
         'cold_pixel_threshold' : 0.9,  # Threshold below which pixels are
