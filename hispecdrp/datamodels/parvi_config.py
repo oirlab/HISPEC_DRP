@@ -71,7 +71,7 @@ class PARVIMetaModel(PARVIInstrumentMeta, PARVITargetMeta, MetaModel):
         if instance.clock_rate is None:
             object.__setattr__(instance, 'clock_rate', clock_rate)
         if instance.n_channels is None:
-            object.__setattr__(instance, 'n_channels', 4)
+            object.__setattr__(instance, 'n_channels', 32)
         if instance.n_refpixs is None:
             object.__setattr__(instance, 'n_refpixs', 4)
         if instance.n_refpixs is None:
