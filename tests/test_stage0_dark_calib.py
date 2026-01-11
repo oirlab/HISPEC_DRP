@@ -1,9 +1,8 @@
 from hispecdrp import ProcessDarksPipeline
 from hispecdrp import datamodels
 import numpy as np
-import os
 import time
-from hispecdrp.datamodels.dqflags import DQ_FLAGS
+from hispecdrp.primitives.dark_subtraction.master_dark_primitive import MakeMasterDarkPrimitive
 
 def test_stage0_dark_calib(tmp_path):
     start_time = time.time()
@@ -295,3 +294,33 @@ def test_stage0_dark_calib(tmp_path):
     # Check 1 sigma statistics
     confidence_level = np.sum(rel_residuals < 1) / np.size(rel_residuals)
     assert abs(confidence_level-0.683)<0.1
+
+
+def test_stage0_master_dark(tmp_path):
+
+    # --- Create random dark map ---
+    ny, nx = 10,10  # size of the detector
+    gain = 1  # e-/ADU
+    gain_map = np.full((ny, nx), gain, dtype=np.float32)
+    dark_map = np.ones((ny, nx), dtype=np.float32)
+    err_map = np.ones((ny, nx), dtype=np.float32)
+    dark_model1 = datamodels.DarkModel(data={'RATE': dark_map / gain_map,  # dark in DN/s
+                                            "RATE_ERR": err_map,
+                                            "RATE_VAR_RNOISE": err_map,
+                                            "RATE_VAR_POISSON": err_map,
+                                            "DQ": np.zeros_like(dark_map, dtype=np.uint32), })
+    dark_model2 = dark_model1.copy()
+    dark_model3 = dark_model1.copy()
+    dark_model4 = dark_model1.copy()
+
+    dark_list = [dark_model1,dark_model2,dark_model3,dark_model4]
+
+    make_master_primitive = MakeMasterDarkPrimitive()
+
+    prim_args = {}
+
+    output_master_dark = make_master_primitive.apply(dark_list, **prim_args)
+
+    assert  output_master_dark.meta.master_cal
+    np.testing.assert_array_equal(output_master_dark.rate, dark_map / gain_map)
+    np.testing.assert_array_equal(output_master_dark.rate_err, err_map/np.sqrt(len(dark_list)))  # error should reduce by sqrt(4)

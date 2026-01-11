@@ -56,7 +56,7 @@ def coadd_group(group : list[datamodels.DataModel],
         var_poisson_cube=frame_cubes[attrs['var_poisson_ext']],
         var_rnoise_cube=frame_cubes[attrs['var_rnoise_ext']],
         dq_cube=frame_cubes[attrs['dq_ext']],
-        mid_time_cube=frame_cubes[attrs['mid_time_ext']],
+        mid_time_cube=frame_cubes[attrs['mid_time_ext']] if 'mid_time_ext' in attrs else None,
         mean_calc=mean_calc,
         err_calc=err_calc
     )
@@ -65,9 +65,10 @@ def coadd_group(group : list[datamodels.DataModel],
         attrs['err_ext']: result['err'],
         attrs['var_poisson_ext']: result['var_poisson'],
         attrs['var_rnoise_ext']: result['var_rnoise'],
-        attrs['dq_ext']: result['dq'],
-        attrs['mid_time_ext']: result['mid_time']
+        attrs['dq_ext']: result['dq']
     }
+    if 'mid_time_ext' in attrs:
+        data[attrs['mid_time_ext']] = result['mid_time']
     meta_merged = datamodels.merge_meta(input_models)
     model_class_out = input_models[0].__class__
     model_out = model_class_out(data=data, meta=meta_merged, config=input_models[0].config)
@@ -123,12 +124,11 @@ def get_data_attrs(input_model : datamodels.DataModel) -> dict[str, str]:
         )
     elif isinstance(input_model, datamodels.DarkModel):
         return dict(
-            data_ext='dark',
-            err_ext='dark_err',
-            var_poisson_ext='dark_var_poisson',
-            var_rnoise_ext='dark_var_rnoise',
-            dq_ext='dq',
-            mid_time_ext='mid_time'
+            data_ext='rate',
+            err_ext='rate_err',
+            var_poisson_ext='rate_var_poisson',
+            var_rnoise_ext='rate_var_rnoise',
+            dq_ext='dq'
         )
     elif isinstance(input_model, datamodels.DetectorFlatModel):
         return dict(
@@ -136,8 +136,7 @@ def get_data_attrs(input_model : datamodels.DataModel) -> dict[str, str]:
             err_ext='flat_err',
             var_poisson_ext='flat_var_poisson',
             var_rnoise_ext='flat_var_rnoise',
-            dq_ext='dq',
-            mid_time_ext='mid_time'
+            dq_ext='dq'
         )
 
 def coadd_frames(
@@ -146,7 +145,7 @@ def coadd_frames(
     var_poisson_cube : np.ndarray,
     var_rnoise_cube : np.ndarray,
     dq_cube : np.ndarray,
-    mid_time_cube : np.ndarray,
+    mid_time_cube : np.ndarray = None,
     mean_calc : str = 'wmean', # TBD
     err_calc : str = 'wmean', # TBD
 ) -> dict:
@@ -184,7 +183,12 @@ def coadd_frames(
     var_poisson_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     var_rnoise_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     dq_out = np.full((ny, nx), np.nan, dtype=dq_cube.dtype)
-    mid_times_out = np.full((ny, nx), np.nan, dtype=mid_time_cube.dtype)
+    if mid_time_cube is not None:
+        mid_times_out = np.full((ny, nx), np.nan, dtype=mid_time_cube.dtype)
+    else:
+        mid_time_cube = np.full((n_frames,ny, nx), np.nan, dtype=data_cube.dtype)
+        mid_times_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
+
     _coadd_frames_numba(
         data_cube=data_cube, err_cube=err_cube,
         var_poisson_cube=var_poisson_cube, var_rnoise_cube=var_rnoise_cube,
