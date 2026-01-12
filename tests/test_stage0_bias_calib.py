@@ -3,7 +3,7 @@ from hispecdrp import datamodels
 import numpy as np
 import os
 import time
-from hispecdrp.datamodels.dqflags import DQ_FLAGS
+from hispecdrp.primitives.bias_subtraction.master_bias_primitive import MakeMasterBiasPrimitive
 
 def test_stage0_bias_calib(tmp_path):
     start_time = time.time()
@@ -212,3 +212,34 @@ def test_stage0_bias_calib(tmp_path):
     # Residuals (kTC - true kTC)
     residuals_kTC = np.abs(model_result['bias'].ktc - kTC_noise_map / gain_map) # in DN
     assert np.sum(residuals_kTC > 5) == 0
+
+def test_stage0_master_bias(tmp_path):
+    tmp_path = str(tmp_path)
+    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+
+    # --- Create bias map ---
+    ny, nx = 10,10  # size of the detector
+    gain = 1  # e-/ADU
+    gain_map = np.full((ny, nx), gain, dtype=np.float32)
+    bias = 1000  # e-/s
+    bias_map = np.full((ny, nx), bias, dtype=np.float32)
+    kTC_noise = 50  # e-/s
+    kTC_noise_map = np.full((ny, nx), kTC_noise, dtype=np.float32)
+    bias_model1 = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
+                                            "kTC": kTC_noise_map / gain_map,  # kTC in DN
+                                            "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
+    bias_model2 = bias_model1.copy()
+    bias_model3 = bias_model1.copy()
+    bias_model4 = bias_model1.copy()
+
+    bias_list = [bias_model1, bias_model2, bias_model3, bias_model4]
+
+    make_bias_primitive = MakeMasterBiasPrimitive()
+
+    prim_args = {}
+
+    output_master_bias = make_bias_primitive.apply(bias_list, **prim_args)
+
+    assert  output_master_bias.meta.master_cal
+    np.testing.assert_array_equal(output_master_bias.bias, bias_map / gain_map)
+    np.testing.assert_array_equal(output_master_bias.kTC, kTC_noise_map)  # error should reduce by sqrt(4)

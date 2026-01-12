@@ -35,7 +35,7 @@ class MakeBiasPrimitive(BasePrimitive):
         input_models = [datamodels.open(f) for f in _input_list_tmp]
 
         # Define output model from inputs
-        output_detbias = self.get_output_model(input_models)
+        output_bias = self.get_output_model(input_models)
 
         bias_arr = []
         for _input in input_models:
@@ -43,20 +43,20 @@ class MakeBiasPrimitive(BasePrimitive):
         bias_arr = np.array(bias_arr)
 
         with numba_thread_scope(self.max_cores):
-            output_detbias.bias = median_axis0_3d(bias_arr)
-            output_detbias.ktc = std_axis0_3d_sigclip(bias_arr,nsig=5,min_keep=10)
-            output_detbias.dq = copy(input_models[0].dq)
-            _find_bad_pixels_bias(output_detbias.bias, output_detbias.ktc , output_detbias.dq,
+            output_bias.bias = median_axis0_3d(bias_arr)
+            output_bias.ktc = std_axis0_3d_sigclip(bias_arr,nsig=5,min_keep=10)
+            output_bias.dq = copy(input_models[0].dq)
+            _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
                                     self.kTC_threshold, self.bias_threshold)
 
-        # median_bias_level = np.nanmedian(output_detbias.bias)
+        # median_bias_level = np.nanmedian(output_bias.bias)
         # Median bias for instrument monitoring
         # output_detdark.meta["MEDBIAS"] = median_bias_level
-        # median_kTC_level = np.nanmedian(output_detbias.ktc)
+        # median_kTC_level = np.nanmedian(output_bias.ktc)
         # Median kTC noise level for instrument monitoring
         # output_detdark.meta["MEDKTC"] = median_kTC_level
 
-        return dict(output=output_detbias)
+        return dict(output=output_bias)
 
 
 @njit(nogil=True, parallel=True, cache=True)
