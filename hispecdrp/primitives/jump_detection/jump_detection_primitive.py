@@ -15,7 +15,7 @@ class JumpDetectionPrimitive(BasePrimitive):
         'ouput_model' : 'input',
         'method': 'tpd',
         'max_cores': 1,
-        'rejection_threshold': 4.0,
+        'rejection_threshold': 6.0,
     }
 
     CALIBRATIONS = {
@@ -59,6 +59,8 @@ class JumpDetectionPrimitive(BasePrimitive):
                 result.data,
                 result.dq_raw,
                 result.dq,
+                rdnoise=rn_model.rn,
+                gain=detgain_model.gain,
                 max_cores=self.max_cores,
                 rejection_threshold=self.rejection_threshold
             )
