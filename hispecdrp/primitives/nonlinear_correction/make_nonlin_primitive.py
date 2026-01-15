@@ -15,13 +15,97 @@ from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
 
 
-__all__ = ['MakeNonLinPrimitive']
+__all__ = ['MakeNonLinPrimitive','fit_nonlin_coefs']
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 class MakeNonLinPrimitive(BasePrimitive):
+    """
+    This primitive computes the coefficients of a polynomial nonlinearity
+    correction model from raw up-the-ramp (UTR) detector data
+
+    Thresholds are also computed to characterize the onset and maximum extent
+    of correctable nonlinearity (eg, 1% and 10% deviation from linearity).
+
+    The primitive uses the algorithm described in Brandt (2025; PASP, 137, 125005). The fitted model
+    characterizes the deviation of the measured signal from an ideal linear
+    ramp and is intended to be applied later by the nonlinearity correction
+    step. No science data are modified by this primitive; instead, a
+    nonlinearity calibration model is produced.
+
+    Use saturated flat fields to derive the nonlinearity correction model.
+
+    The non-linearity correction is assumed to follow:
+        P(DN) = a0 + a1*DN + a2*DN^2 + ... + an*DN^n
+        where P(DN) is the corrected signal, DN is the measured signal, and
+    a0, a1, ..., an are the polynomial coefficients derived in this primitive.
+    Note that the ordering of the coefficients in the calibration file is from lowest
+    order to highest order, which is the reverse of the usual numpy.polyval ordering.
+
+    Polynomial fits may be carried out either in the standard power basis
+    or in a Legendre polynomial basis. Reads that exceed a specified fraction
+    of the saturation level are excluded from the fit.
+
+    The fitting may be performed on a per-pixel basis or using a single
+    model for the full detector. Although the full detector mode is only for
+    testing since there are too many pixels on a normal detector and the
+    matrix becomes too large with so many ramps.
+
+
+
+    Parameters
+    ----------
+    input : list of str or list of RampModel
+        List of input file paths or ramp models to process.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for the fitting. Default is 1.
+    mode : {'per_pixel', 'channel', 'full_detector'}, optional
+        Mode used to fit the nonlinearity parameters. ``'per_pixel'`` fits
+        an independent model for each pixel. ``'full_detector'`` fits a
+        single model to the entire detector. ``'channel'`` is reserved for
+        future implementation.
+    use_legendre : bool, optional
+        If True, perform the polynomial fit using a Legendre polynomial
+        basis. If False, use the standard power basis. Default is True.
+    order : int, optional
+        Order of the polynomial used to model the detector nonlinearity.
+        Default is 5.
+    readstart : int, optional
+        Index (zero-based) of the first read to include in the fit. Default
+        is 0.
+    satval_frac : float, optional
+        Fraction of the saturation level beyond which reads are excluded
+        from the fit. Default is 0.95.
+    criterion_for_nonlin_thresh : float, optional
+        Fractional deviation from a linear ramp used to define the
+        nonlinearity threshold, above which data are considered non-linear
+        but still correctable. Default is 0.01.
+    criterion_for_nonlin_max : float, optional
+        Fractional deviation from a linear ramp used to define the maximum
+        nonlinearity, above which data are considered too non-linear to be
+        corrected accurately. Default is 0.05.
+
+    Returns
+    -------
+    output : DataModel
+        Nonlinearity correction calibration model containing the fitted
+        polynomial coefficients and associated nonlinearity thresholds.
+
+    References
+    ----------
+    Brandt, T. D. (2025), *A Classic Nonlinearity Correction Algorithm for
+    Detectors Read Out Up-the-ramp*, PASP, 137, 125005.
+    https://ui.adsabs.harvard.edu/abs/2025PASP..137l5005B/abstract
+
+    Notes
+    -----
+    Relevant HISPEC DRP requirement:
+    REQ-3-DRP-183: The DRP shall correct for the detector non-linearity to better than 1% when deriving pixel fluxes.
+
+    """
+
 
     ARGUMENTS = {
         'output_model': 'NonlinearCorrectionModel',
@@ -199,7 +283,7 @@ def fit_nonlin_coefs(
     elif mode.lower() == 'per_pixel':
         n_files, n_reads, ny,nx = ramps.shape
 
-        _out = fit_nonlin_coefs_per_pixel(ramps, dq_raw,
+        _out = _fit_nonlin_coefs_per_pixel(ramps, dq_raw,
                                             gain, rn,
                                             order = order, satval = satval,
                                             use_legendre = use_legendre, readstart = readstart,
@@ -211,7 +295,7 @@ def fit_nonlin_coefs(
     return nonlin_coeffs, nonlin_thresh,nonlin_max
 
 
-def fit_nonlin_coefs_per_pixel(
+def _fit_nonlin_coefs_per_pixel(
     ramps : np.ndarray, dq_raw : np.ndarray, gain: np.ndarray, rn : np.ndarray,
     order : int = 5, satval : np.ndarray = None,
     use_legendre: bool = 'quad', readstart : int = 0,
@@ -462,8 +546,8 @@ def _fit_nonlin_coefs_row(indata : tuple) -> tuple:
     nonlin_coefs =np.insert(nonlin_coefs, 0, np.zeros((nx,)),axis=0) # add zero-th order term
 
     # figure out nonlin_thresh,nonlin_max
-    nonlin_thresh = find_first_valid_root_batch(nonlin_coefs[::-1,:],  criterion_for_nonlin_thresh,satval=satval_row)
-    nonlin_max = find_first_valid_root_batch(nonlin_coefs[::-1,:],  criterion_for_nonlin_max,satval=satval_row)
+    nonlin_thresh = _find_first_valid_root_batch(nonlin_coefs[::-1,:],  criterion_for_nonlin_thresh,satval=satval_row)
+    nonlin_max = _find_first_valid_root_batch(nonlin_coefs[::-1,:],  criterion_for_nonlin_max,satval=satval_row)
 
     return (row_id, nonlin_coefs, nonlin_thresh,nonlin_max)
 
@@ -524,7 +608,7 @@ def _fit_nonlin_coefs_worker(args : tuple) -> tuple:
     return (block_start, block_end)
 
 
-def find_first_valid_root_batch(
+def _find_first_valid_root_batch(
     nonlin_correction_coefs,
     my_threshold=0.01,
     satval=np.iinfo(np.uint16).max,

@@ -15,6 +15,27 @@ HOT_FLAG =  DQ_FLAGS['HOT']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
 class MakeDarkPrimitive(BasePrimitive):
+    """
+    Create a dark calibration model from a combined rate map.
+    This primitive expects the coadd primitive to have already been run on a list of darks exposures.
+
+    todo: add median dark level to metadata for instrument monitoring
+
+    Parameters
+    ----------
+    input : L0Model
+        Input dark rate map to converted to dark calibration. Do not input a list.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+    hot_pixel_threshold : float, optional
+        Threshold dark rate above which pixels are flagged as hot in the DQ array. Default is 5 e-/s.
+
+    Returns
+    -------
+    output : DarkModel
+        The derived dark calibration model containing the dark rate map and updated DQ array.
+
+    """
 
     ARGUMENTS = {
         'output_model' : 'DarkModel',

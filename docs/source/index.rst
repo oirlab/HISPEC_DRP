@@ -21,7 +21,7 @@ Examples
    examples/examples
 
 
-Primitives
+Primitives (Deprecated)
 ==========
 
 .. toctree::

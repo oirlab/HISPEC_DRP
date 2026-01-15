@@ -154,7 +154,7 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     ramp_data.flags_saturated = DQ_FLAGS['SATURATED']
     ramp_data.flags_no_gain_val = DQ_FLAGS['UNRELIABLE_FLAT'] # Check if this is best/optimal flag
     ramp_data.flags_unreliable_slope = DQ_FLAGS['UNRELIABLE_SLOPE']
-    ramp_data.flags_chargeloss = DQ_FLAGS['OUTLIER'] # Check if this is best/optimal flag - only required by OLS_C
+    ramp_data.flags_chargeloss = DQ_FLAGS['OUTLIER'] # Check if this is best/optimal flag - only required by FIXSEN_C
 
     # Explicitly set data arrays
     ramp_data.data = data_3d
@@ -172,7 +172,7 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     ramp_data.num_rows = ny
     ramp_data.nframes = 1 # this corresponds to nints instead of nframes as above
 
-    # Required by OLS_C for frame time
+    # Required by FIXSEN_C for frame time
     ramp_data.frame_time = 0.0
     ramp_data.group_time = group_time
     ramp_data.groupgap = 0
@@ -195,8 +195,8 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
         image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
             ramp_data, readnoise_2d, gain_2d
         )
-    elif algorithm == 'OLS_C':
-        # Call to C extension for OLS slope fitting
+    elif algorithm == 'FIXSEN_C':
+        # Call to C extension for FIXSEN slope fitting
         image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(
             ramp_data, gain_2d, readnoise_2d, weighting, save_opt)
 
@@ -362,7 +362,7 @@ def fit_ramps_jwst(
     max_cores : int, optional
         Number of cores for parallelization. Default is 1 (no parallelization).
     algorithm : str, optional
-        Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'. Default is 'JWST_LIKELY'.
+        Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_FOXSEN'. Default is 'JWST_LIKELY'.
     
     Returns
     -------
@@ -374,8 +374,8 @@ def fit_ramps_jwst(
 
     if algorithm.lower() in ('jwst_likely', 'jwst_like', 'jwst_likelihood'):
         algorithm = 'LIKELY'
-    elif algorithm.lower() in ('jwst_ols', 'jwst_ols_c'):
-        algorithm = 'OLS_C'
+    elif algorithm.lower() in ('jwst_fixsen', 'jwst_fixsen_c'):
+        algorithm = 'FIXSEN_C'
     elif algorithm.lower() in ('cython_likely', 'cython_like', 'cython_likelihood'):
         algorithm = 'CYTHON_LIKELY'
     else:

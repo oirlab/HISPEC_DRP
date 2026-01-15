@@ -1,6 +1,9 @@
 # Pixel-specific flags adapted from stdatamodels.jwst.datamodels.dqflags
 # See HISPEC documentation
 import numpy as np
+
+__all__ = ["DQ_FLAGS"]
+
 DQ_FLAGS = {
     'GOOD':             np.uint32(0),      # No bits set, all is good
     'DO_NOT_USE':       np.uint32(2**0),   # Bad pixel. Do not use.
@@ -38,3 +41,4 @@ DQ_FLAGS = {
     'OTHER_BAD_PIXEL':  np.uint32(2**30),  # A catch-all flag
     'REFERENCE_PIXEL':  np.uint32(2**31),  # Pixel is a reference pixel
 }
+"""Dictionary of HISPEC data-quality bit definitions."""

@@ -10,6 +10,48 @@ __all__ = ['NonlinearCorrectionPrimitive']
 
 
 class NonlinearCorrectionPrimitive(BasePrimitive):
+    """
+    Correct the detector non-linear response in the input data.
+
+    This primitive applies a polynomial transformation to convert the
+    measured non-linear detector signal into a linearized signal.
+
+    The non-linearity correction is applied using the following polynomial
+    equation:
+        P(DN) = a0 + a1*DN + a2*DN^2 + ... + an*DN^n
+        where P(DN) is the corrected signal, DN is the measured signal, and
+    [a0, a1, ..., an] are the polynomial coefficients provided in the
+    non-linearity calibration file.
+    Note that the ordering of the coefficients in the calibration file is from lowest
+    order to highest order, which is the reverse of the usual numpy.polyval ordering.
+
+    Data quality (DQ) flags are propagated to the output using a bitwise OR. No
+    error or variance attributes are modified or generated at this stage of
+    processing.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. This is expected to be a
+        raw up-the-ramp (UTR) ramp data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'nonlincorr'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+
+    Returns
+    -------
+    output : DataModel
+        Data model with the detector non-linearity corrected and updated DQ
+        flags.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **nonlin**: NonlinearityModel
+        The non-linearity calibration model used for correction.
+    """
 
     ARGUMENTS = {
         'suffix' : 'nonlincorr',

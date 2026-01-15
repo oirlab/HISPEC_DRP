@@ -24,12 +24,10 @@ class DarkSubtractionPrimitive(BasePrimitive):
         to be a level 0 (rate map) data product.
     suffix : str or None, optional
         Suffix to append to the output filename. Default is ``'darksub'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. Defaults to ``'input'``,
-        which preserves the input model type. See
-        ``BasePrimitive._get_output_model`` for details.
     max_cores : int, optional
         Maximum number of CPU cores to use for Numba parallel processing. Default is 1.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
 
     Returns
     -------

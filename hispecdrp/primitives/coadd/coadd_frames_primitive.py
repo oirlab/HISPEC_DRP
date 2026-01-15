@@ -4,18 +4,52 @@ import numpy as np
 from numba import njit, prange
 from ...utils.math import weighted_mean, bitwise_or_reduce_uint32
 
-__all__ = ['CoaddFramesPrimitive']
+__all__ = ['CoaddFramesPrimitive','coadd_frames']
 
 from ...datamodels.dqflags import DQ_FLAGS
 DO_NOT_USE = DQ_FLAGS['DO_NOT_USE']
 
 
 class CoaddFramesPrimitive(BasePrimitive):
+    """
+    Coadd multiple level 0 (rate maps) frames of the same kind to increase signal-to-noise.
+    Works on darks and flats calibration models too.
+
+    An ancestor FITS extension is created to include the list of filenames that were combined.
+
+    This primitive combines input data products using a weighted average (if mean_calc = 'wmean'),
+    where the weights are given by the inverse variances
+    (1 / ``model.err``²). The output error and variance arrays are computed
+    using the corresponding weighted standard error. Data quality (DQ)
+    flags from all inputs are propagated to the output using a bitwise OR.
+
+    Parameters
+    ----------
+    input : list[str or DataModel] or dict[str, str or DataModel] or L0Model
+        Input files or data models to coadd. Inputs may be provided as a list
+        or as a dictionary; when a dictionary is given, each group of inputs
+        is coadded separately.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'coadd'``.
+    mean_calc : str, optional
+        Method for calculating the output data values. Currently, only
+        ``'wmean'`` (weighted mean) is implemented.
+    err_calc : str, optional
+        Method for calculating the output error and variance. Currently,
+        only ``'wse'`` (weighted standard error) is implemented.
+
+    Returns
+    -------
+    output : DataModel or dict[str, DataModel]
+        Coadded data model(s) with propagated errors and data quality flags.
+        If the input was provided as a dictionary, a dictionary of coadded
+        models is returned.
+    """
 
     ARGUMENTS = {
         'suffix' : 'coadded',
         'mean_calc' : 'wmean',
-        'err_calc' : 'wmean',
+        'err_calc' : 'wse',
         'output_model' : None,
     }
 
@@ -44,8 +78,32 @@ class CoaddFramesPrimitive(BasePrimitive):
 def coadd_group(group : list[datamodels.DataModel],
                 primitive_name : str = 'None',
                 mean_calc : str = 'wmean', # TBD
-                err_calc : str = 'wmean', # TBD
+                err_calc : str = 'wse', # TBD
                 ) -> datamodels.DataModel:
+    """
+    Coadd multiple level 0 (rate maps) frames of the same kind to increase signal-to-noise.
+    Works on darks and flats calibration models too.
+
+    Parameters
+    ----------
+    group : list[str or DataModel]
+        Input files or data models to coadd.
+    primitive_name : str, optional
+        Name of the primitive calling this function which will be added to the ancestor extension metadata.
+    mean_calc : str, optional
+        Method for calculating the output data values. Currently, only
+        ``'wmean'`` (weighted mean) is implemented.
+    err_calc : str, optional
+        Method for calculating the output error and variance. Currently,
+        only ``'wse'`` (weighted standard error) is implemented.
+
+    Returns
+    -------
+    model_out : DataModel or dict[str, DataModel]
+        Coadded data model(s) with propagated errors and data quality flags.
+        If the input was provided as a dictionary, a dictionary of coadded
+        models is returned.
+    """
 
     input_models = [datamodels.open(f) for f in group]
     attrs = get_data_attrs(input_models[0])
@@ -147,7 +205,7 @@ def coadd_frames(
     dq_cube : np.ndarray,
     mid_time_cube : np.ndarray = None,
     mean_calc : str = 'wmean', # TBD
-    err_calc : str = 'wmean', # TBD
+    err_calc : str = 'wse', # TBD
 ) -> dict:
     """
     Coadd a cube of frames using a specified method.
@@ -169,10 +227,10 @@ def coadd_frames(
     mean_calc : str, optional
         Method to use for calculating the mean. Currently only 'wmean' (weighted mean) is implemented.
     err_calc : str, optional
-        Method to use for calculating the error. Currently only 'wmean' is implemented.
+        Method to use for calculating the error. Currently only 'wse' (Weighted Standard Error) is implemented.
     """
-    if mean_calc != 'wmean' and err_calc != 'wmean':
-        raise ValueError("Only 'wmean' is currently implemented for mean_calc and err_calc.")
+    if mean_calc != 'wmean' and err_calc != 'wse':
+        raise ValueError("Only 'wmean' is currently implemented for mean_calc and 'wse' for err_calc.")
 
     # Shape
     n_frames, ny, nx = data_cube.shape

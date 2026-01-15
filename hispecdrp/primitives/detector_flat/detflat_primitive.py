@@ -10,6 +10,40 @@ __all__ = ['DetectorFlatCorrectionPrimitive', 'detector_flat_correction']
 
 
 class DetectorFlatCorrectionPrimitive(BasePrimitive):
+    """
+    Apply detector flat-field correction to the input data.
+
+    This primitive corrects for pixel-to-pixel variations in detector
+    response by dividing the input rate map by the appropriate master
+    detector flat calibration. Uncertainties are propagated by combining
+    the input errors with the detector flat errors in quadrature using the
+    appropriate scaling. Data quality (DQ) flags from the flat calibration
+    are merged into the output using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or L0Model
+        Input file path or data model to process. This is expected to be a
+        level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is
+        ``'detflat'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+    Returns
+    -------
+    output : DataModel
+        Flat-field-corrected data model with updated error and data quality
+        arrays.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **detflat**: DetectorFlatModel
+        The detector flat calibration model used for correction.
+    """
 
     ARGUMENTS = {
         'suffix' : 'detflat',

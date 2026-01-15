@@ -17,6 +17,29 @@ DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
 class MakeMasterBiasPrimitive(BasePrimitive):
     """
+    Create a master bias calibration model from a list of bias calibrations (BiasModel).
+
+    A master calibration is identified by setting the `meta.master_cal` attribute to True.
+
+    todo: implement automatic selection of biases to be combined for making the master bias
+    todo: add median bias level and median kTC level to metadata for instrument monitoring
+
+    Parameters
+    ----------
+    input : list of str or list of BiasModel
+        List of input file paths or bias models to process.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+    kTC_threshold : float, optional
+        Threshold kTC above which pixels are flagged as bad in the DQ array. Default is 100 DN.
+    bias_threshold : float, optional
+        Threshold bias above which pixels are flagged as bad in the DQ array. Default is 1000 DN.
+
+    Returns
+    -------
+    output : BiasModel
+        The derived master bias calibration model containing the averaged bias frame,
+        averaged kTC noise map, and updated DQ array.
 
     """
 

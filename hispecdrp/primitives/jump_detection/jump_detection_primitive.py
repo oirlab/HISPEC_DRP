@@ -9,6 +9,48 @@ __all__ = ['JumpDetectionPrimitive']
 
 
 class JumpDetectionPrimitive(BasePrimitive):
+    """
+    Detect jumps in up-the-ramp (UTR) data and update DQ flags.
+
+    This primitive looks for large jumps between consecutive reads that are larger than the typical slope.
+    These jumps can be caused by cosmic rays or telegraph noise.
+    Jumps are flagged in the data quality (DQ) array.
+
+    todo: the slope will also be variable in time due to clouds, variable seeing and AO performance.
+    This might make real jump detection more difficult.
+    This UTR variability on the ground remains to be characterized,
+    but it could also be leveraged to partially mitigate the effect of the variable seeing.
+
+    JWST algorithm reference:
+    https://jwst-pipeline.readthedocs.io/en/stable/jwst/jump/description.html
+
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. This must be a raw
+        up-the-ramp (UTR) ramp data product in which jumps are to be detected.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'rampfit'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. Defaults to ``'RampModel'``.
+        See ``BasePrimitive._get_output_model`` for details.
+    method : {'tpd', 'jwst'}, optional
+        Jump detection algorithm to use. ``'tpd'`` selects a simple
+        two-point-difference-based method. ``'jwst'`` uses the two-point
+        difference jump detection algorithm implemented in ``stcal``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default
+        is 1 (no parallel execution).
+    rejection_threshold : float, optional
+        Rejection threshold (approximately in signal-to-noise) above which
+        discontinuities are flagged as jumps.
+
+    Returns
+    -------
+    output : DataModel
+        Ramp data model with updated DQ flags marking detected jumps.
+    """
 
     ARGUMENTS = {
         'suffix' : 'jumpdetec',

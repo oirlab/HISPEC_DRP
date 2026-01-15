@@ -223,7 +223,7 @@ def test_stage0_flat_calib(tmp_path):
         },
         'ramp_fit' : {
             'run': True,
-            'method': 'jwst_ols', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
+            'method': 'cython_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely', 'cython_likely'
             'max_cores': pipe_max_cores,
             'jwst_jump_detection': False,
             'jwst_jump_rejection_threshold': 4.0,

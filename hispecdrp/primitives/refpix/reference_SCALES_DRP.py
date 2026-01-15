@@ -1,6 +1,6 @@
 # From SCALES DRP: Reference Pixel Correction
 # Author: Athira Unni
-# Primitive copied from https://github.com/scalessim/SCALES-DRP on 2026-01-03
+# Primitive copied from https://github.com/scalessim/SCALES-DRP/blob/main/scalesdrp/primitives/reference.py on 2026-01-03
 
 # import pandas as pd
 import numpy as np

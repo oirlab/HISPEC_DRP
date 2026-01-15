@@ -371,7 +371,7 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
                                                "RN_ERR": np.ones_like(rn_map),
                                                "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
 
-    methods = ['ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely', 'cython_likely']
+    methods = ['ols', 'mcds', 'cds', 'jwst_fixsen', 'jwst_likely', 'cython_likely']
     for method in methods:
         # --- Create a fake UTR cube ---
         # electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)

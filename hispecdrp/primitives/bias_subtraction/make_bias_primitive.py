@@ -15,6 +15,33 @@ UNRELIABLE_BIAS_FLAG =  DQ_FLAGS['UNRELIABLE_BIAS']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
 class MakeBiasPrimitive(BasePrimitive):
+    """
+    Derive the detector bias and kTC noise from a set of dark exposures.
+    1) Median combine the first read to create the bias frame.
+    2) Compute the kTC noise as the standard deviation across the first reads,
+       using sigma-clipping to reject outliers.
+    3) Flag pixels with high bias level or high kTC noise in the DQ array.
+
+    todo: add median bias level and median kTC level to metadata for instrument monitoring
+
+    Parameters
+    ----------
+    input : list of str or list of RampModel
+        List of input file paths or ramp models to process.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+    kTC_threshold : float, optional
+        Threshold kTC above which pixels are flagged as bad in the DQ array. Default is 100 DN.
+    bias_threshold : float, optional
+        Threshold bias above which pixels are flagged as bad in the DQ array. Default is 1000 DN.
+
+    Returns
+    -------
+    output : BiasModel
+        The derived bias calibration model containing the bias frame, kTC noise map, and updated DQ array.
+
+    """
+
     ARGUMENTS = {
         'output_model' : 'BiasModel',
         'max_cores' : 1,

@@ -17,13 +17,92 @@ from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
 
 
-__all__ = ['MakeGainPrimitive']
+__all__ = ['MakeGainPrimitive', 'fit_gain_and_readnoise','plot_2d_posterior']
 
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 class MakeGainPrimitive(BasePrimitive):
+    """
+    Estimate the detector electronic gain (and optionally read noise) from up-the-ramp data.
+
+    This primitive fits detector gain and, optionally, read noise parameters
+    from raw up-the-ramp (UTR) ramps using the maximum-likelihood framework
+    described in Brandt (2025; PASP, 137, 125006). Three fitting strategies are
+    supported: a grid-based maximum-likelihood search, a local quadratic
+    approximation, or a hybrid approach that uses the grid search to locate
+    the optimum and then refines it with a quadratic approximation.
+
+    Initial gain and read-noise values may be provided explicitly (e.g., as
+    arrays defining a search grid). If not provided, the primitive is
+    expected to obtain appropriate defaults from the calibration database.
+    Optional arguments allow fixing the read noise while fitting only the
+    gain, and treating all ramps as having identical count rates.
+    
+    The fitting may be performed on a per-pixel basis or using a single
+    model for the full detector. Although the full detector mode is only for
+    testing.
+
+    Parameters
+    ----------
+    input : list of str or list of RampModel
+        List of input file paths or ramp models to process.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default
+        is 1.
+    init_gain : None or array-like, optional
+        Initial gain value(s) used to define the maximum-likelihood grid
+        search. If None, obtain an initial value from the calibration
+        database. If provided, this may be a scalar or an array defining the
+        gain sampling (e.g., ``np.linspace(0.1, 10, 101)``).
+    init_RN : None or array-like, optional
+        Initial read noise value(s) used to define the maximum-likelihood
+        grid search. If None, obtain an initial value from the calibration
+        database. If provided, this may be a scalar or an array defining the
+        read-noise sampling (e.g., ``np.linspace(1, 20, 101)``).
+    mode : {'per_pixel', 'channel', 'full_detector'}, optional
+        Mode used to fit the parameters. ``'per_pixel'`` fits independent
+        parameters for each pixel. ``'full_detector'`` fits a single set of
+        parameters for the detector. ``'channel'`` is reserved for future
+        implementation.
+    method : {'quad', 'grid', 'both'}, optional
+        Fitting strategy. ``'grid'`` performs a maximum-likelihood grid
+        search. ``'quad'`` uses a quadratic approximation around the initial
+        parameters. ``'both'`` runs a grid search first and then refines the
+        solution with a quadratic approximation.
+    init_delta_gains : array-like or None, optional
+        Gain grid offsets used for the maximum-likelihood grid search. The
+        gain sampling is defined as ``init_gain + init_delta_gains``.
+    init_delta_RNs : array-like or None, optional
+        Read-noise grid offsets used for the maximum-likelihood grid search.
+        The read-noise sampling is defined as ``init_RN + init_delta_RNs``.
+    quad_delta_gain : float, optional
+        Only used when ``method='quad'``. Defines the initial gain step size
+        around ``init_gain`` for the quadratic approximation. Default is 0.2.
+    quad_delta_RN : float, optional
+        Only used when ``method='quad'``. Defines the initial read-noise step
+        size around ``init_RN`` for the quadratic approximation. Default is
+        0.5.
+    fix_RN : bool, optional
+        If True, fix the read noise to ``init_RN`` and fit only the gain.
+        Default is False.
+    countratesidentical : bool, optional
+        If True, assume all ramps have identical count rates. Default is
+        False.
+
+    Returns
+    -------
+    output : DataModel
+        Data model containing the fitted gain (and, if applicable, read
+        noise) parameters and associated fit diagnostics.
+
+    References
+    ----------
+    Brandt, T. D. (2025), *Computing the Electronic Gain for Detectors Read
+    Out Up-the-ramp*, PASP, 137, 125006.
+    https://ui.adsabs.harvard.edu/abs/2025PASP..137l5006B/abstract
+    """
 
     ARGUMENTS = {
         'max_cores' : 1,
@@ -233,7 +312,7 @@ def fit_gain_and_readnoise(
             rns_init = np.array([_center_rn])
 
         if method == 'quad':
-            _out = fit_single_gain_readnoise_quad_approx(readtimes, ramps, dq_raw, C,
+            _out = _fit_single_gain_readnoise_quad_approx(readtimes, ramps, dq_raw, C,
                                                          gains_init, rns_init,
                                                          do_once=False, countratesidentical=countratesidentical)
         elif method == 'grid' or method == 'both':
@@ -241,7 +320,7 @@ def fit_gain_and_readnoise(
                 error_computation = 'posterior'
             elif method == 'both':
                 error_computation = 'quad'
-            _out = fit_single_gain_readnoise(readtimes, ramps, dq_raw, C,
+            _out = _fit_single_gain_readnoise(readtimes, ramps, dq_raw, C,
                                              gains_init, rns_init,
                                              error_computation=error_computation, countratesidentical=countratesidentical)
 
@@ -259,7 +338,7 @@ def fit_gain_and_readnoise(
         elif isinstance(center_rns, float):
             _center_rns = np.full((ny,nx), center_rns)
 
-        _out = fit_gain_and_readnoise_per_pixel(readtimes, ramps, dq_raw,
+        _out = _fit_gain_and_readnoise_per_pixel(readtimes, ramps, dq_raw,
                                                 _center_gains, _center_rns,
                                                 delta_gains, delta_RNs,
                                                 countratesidentical=countratesidentical,
@@ -269,7 +348,7 @@ def fit_gain_and_readnoise(
     return bestfit_gain, bestfit_rn, cov
 
 
-def fit_gain_and_readnoise_per_pixel(
+def _fit_gain_and_readnoise_per_pixel(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray,
     center_gains : np.ndarray, center_rns : np.ndarray,
     delta_gains: np.ndarray = None, delta_RNs : np.ndarray = None,
@@ -513,11 +592,11 @@ def _fit_gain_and_readnoise_row(indata : tuple) -> tuple:
             rns_init = np.array([center_rns_row[0,i]])
 
         if method == 'quad':
-            _out = fit_single_gain_readnoise_quad_approx(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
+            _out = _fit_single_gain_readnoise_quad_approx(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
                                                          gains_init, rns_init,
                                                          do_once=False,countratesidentical=countratesidentical)
         elif method == 'grid' or method == 'both':
-            _out = fit_single_gain_readnoise(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
+            _out = _fit_single_gain_readnoise(delta_readtimes, ramp_row[:,:,0,i], dq_raw_row[:,:,0,i], C,
                                              gains_init, rns_init,
                                              error_computation=error_computation,countratesidentical=countratesidentical)
 
@@ -583,7 +662,7 @@ def _fit_gain_and_readnoise_worker(args : tuple) -> tuple:
 
     return (block_start, block_end)
 
-def fit_single_gain_readnoise_quad_approx(
+def _fit_single_gain_readnoise_quad_approx(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray, covar : fitramp_Brandt.Covar,
     gains_init : np.ndarray, rns_init : np.ndarray, do_once : bool = False,
         countratesidentical: bool = False
@@ -670,13 +749,13 @@ def fit_single_gain_readnoise_quad_approx(
                 bestfit_rn_err = np.sqrt(cov[1,1])
                 sigs_short = [bestfit_rn- bestfit_rn_err,bestfit_rn, bestfit_rn + bestfit_rn_err]
 
-        bestfit_gain, bestfit_rn, cov = fitquad_gain_rn(diffs_lin, diffs_quad, covar,sigs_short, gains_short,
+        bestfit_gain, bestfit_rn, cov = _fitquad_gain_rn(diffs_lin, diffs_quad, covar,sigs_short, gains_short,
                                                         d2use=diffs2use,countratesidentical=countratesidentical)
 
     return bestfit_gain, bestfit_rn, cov
 
 
-def fitquad_gain_rn(
+def _fitquad_gain_rn(
     diffs_lin,
     diffs_quad,
     covar,
@@ -712,7 +791,7 @@ def fitquad_gain_rn(
         logL = fit_gain_Brandt.gen_likelihood_map(diffs_lin, diffs_quad, covar,
                                   sigs_short, gains_short, [0],
                                   countratesidentical=countratesidentical,d2use=d2use)
-        a,b,c = quad_1d_through_3pts(gains_short, logL[0,:,0])
+        a,b,c = _quad_1d_through_3pts(gains_short, logL[0,:,0])
         bestfit_gain = -b/(2*a)
         bestfit_rn = sigs_short[0]
         cov = np.full((2,2),np.nan)
@@ -721,7 +800,7 @@ def fitquad_gain_rn(
         logL = fit_gain_Brandt.gen_likelihood_map(diffs_lin, diffs_quad, covar,
                                   sigs_short, gains_short, [0],
                                   countratesidentical=countratesidentical,d2use=d2use)
-        a,b,c = quad_1d_through_3pts(sigs_short, logL[:,0,0])
+        a,b,c = _quad_1d_through_3pts(sigs_short, logL[:,0,0])
         bestfit_gain = gains_short[0]
         bestfit_rn = -b/(2*a)
         cov = np.full((2,2),np.nan)
@@ -729,7 +808,7 @@ def fitquad_gain_rn(
 
     return bestfit_gain, bestfit_rn, cov
 
-def fit_single_gain_readnoise(
+def _fit_single_gain_readnoise(
         readtimes: np.ndarray, ramps: np.ndarray, dq_raw: np.ndarray, covar: fitramp_Brandt.Covar,
         gains_init: np.ndarray, rns_init: np.ndarray, error_computation: str = 'quad',
         countratesidentical: bool = False, return_likelihood: bool = False
@@ -859,14 +938,14 @@ def fit_single_gain_readnoise(
                     bestfit_rn_err = np.sqrt(cov[1,1])
                     sigs_short = [bestfit_rn- bestfit_rn_err,bestfit_rn, bestfit_rn + bestfit_rn_err]
                 
-            bestfit_gain, bestfit_rn, cov = fitquad_gain_rn(diffs_lin, diffs_quad, covar,sigs_short, gains_short,
+            bestfit_gain, bestfit_rn, cov = _fitquad_gain_rn(diffs_lin, diffs_quad, covar,sigs_short, gains_short,
                                                             d2use=diffs2use,countratesidentical=countratesidentical)
 
         return bestfit_gain, bestfit_rn, cov
 
 
 
-def quad_1d_through_3pts(x, y):
+def _quad_1d_through_3pts(x, y):
     """
     Fit y = a*x^2 + b*x + c through exactly three points (xi, yi),
     without explicit matrix inversion.

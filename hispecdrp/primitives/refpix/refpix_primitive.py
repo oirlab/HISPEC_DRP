@@ -9,6 +9,66 @@ __all__ = ['RefPixelCorrectionPrimitive']
 
 
 class RefPixelCorrectionPrimitive(BasePrimitive):
+    """
+    This step subtracts the correlated read noise (i.e., 1/f noise) using reference pixels.
+    Reference pixels are insensitive to light, but they track drifts in the readout electronics.
+
+    For now: This primitive applies reference pixel correction to the input data
+    using the SCALES-DRP algorithm (Author: Athira Unni).
+    https://github.com/scalessim/SCALES-DRP/blob/main/scalesdrp/primitives/reference.py
+
+    todo: Eventually for HISPEC, the goal is to use 4 reference pixels on each edge of the detector as well as a 65th reference channel that is read concurrently with the 64 science channels.
+
+    todo: explore best 1/f noise correction algorithm.
+    We might even be able to optionally fit and subtract the 1/f noise during the spectral extraction step in stage 1.
+
+    todo: eveluate benefits of implementing a IRS2 readout pattern for HISPEC, which has more reference pixels interleaved with science pixels.
+
+    References:
+    Roman Roman-STScI-000673: Application and Characterization of IRRC on Roman/WFI TVAC1 Data
+    https://www.stsci.edu/files/live/sites/www/files/home/roman/documentation/technical-documentation/_documents/Roman-STScI-000673.pdf
+
+    JWST:
+    https://jwst-pipeline.readthedocs.io/en/stable/jwst/refpix/description.html
+
+
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. Currently, this is expected
+        to be a raw (ramp) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'refpix'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+    method : str, optional
+        The reference pixel correction method to use. Currently, only
+        ``'scales_drp'`` is supported. Default is ``'scales_drp'``.
+    n_channels : int or None, optional
+        Number of readout channels in the detector. If ``None``, the value is
+        taken from the input model metadata. Default is ``None``.
+    n_ref_left : int or None, optional
+        Number of reference pixels on the left side of each channel. If
+        ``None``, the value is taken from the input model metadata. Default is ``None``.
+    n_ref_right : int or None, optional
+        Number of reference pixels on the right side of each channel. If
+        ``None``, the value is taken from the input model metadata. Default is ``None``.
+    vertical : bool or None, optional
+        Whether the readout channels are oriented vertically. If ``None``, the
+        value is taken from the input model metadata. Default is ``None``.
+
+    Returns
+    -------
+    output : RampModel
+        Reference pixel-corrected data model.
+
+
+    References
+    ----------
+    Unni, A., Sallum, S., Benac, P., Fitzgerald, M. P., et al., "SCALES-DRP : A Data Reduction Pipeline for an Upcoming Keck Thermal Infrared Spectrograph", arXiv, arXiv:2509.15489 (2025)
+    https://ui.adsabs.harvard.edu/abs/2025arXiv250915489U/abstract
+    """
 
     ARGUMENTS = {
         'run' : False,

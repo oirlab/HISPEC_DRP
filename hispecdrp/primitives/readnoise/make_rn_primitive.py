@@ -14,6 +14,72 @@ DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 class MakeReadnoisePrimitive(BasePrimitive):
+    """
+    Estimate detector read noise from up-the-ramp data.
+
+    This primitive fits the detector read noise parameter from raw
+    **dark** up-the-ramp (UTR) ramps using the maximum-likelihood framework
+    described in Brandt (2025; PASP, 137, 125006). In this case, the gain is fixed and only the readnoise is fitted.
+    Three fitting strategies are supported: a grid-based maximum-likelihood search, a local quadratic
+    approximation, or a hybrid approach that uses the grid search to locate
+    the optimum and then refines it with a quadratic approximation.
+
+    An initial read-noise value may be provided explicitly (e.g., as an
+    array defining a search grid). If not provided, the primitive is
+    expected to obtain an appropriate default from the calibration database.
+    An optional argument allows treating all ramps for a given pixel as having identical count
+    rates.
+
+    The fitting may be performed on a per-pixel basis or using a single
+    model for the full detector. Although the full detector mode is only for
+    testing.
+
+
+    Parameters
+    ----------
+    input : list of str or list of RampModel
+        List of input file paths or ramp models to process. Use dark exposures.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default
+        is 1.
+    init_RN : None or array-like, optional
+        Initial read noise value(s) used to define the maximum-likelihood
+        grid search. If None, obtain an initial value from the calibration
+        database. If provided, this may be a scalar or an array defining the
+        read-noise sampling (e.g., ``np.linspace(1, 20, 101)``).
+    mode : {'per_pixel', 'channel', 'full_detector'}, optional
+        Mode used to fit the parameters. ``'per_pixel'`` fits an independent
+        read noise for each pixel. ``'full_detector'`` fits a single read
+        noise value for the detector. ``'channel'`` is reserved for future
+        implementation.
+    method : {'quad', 'grid', 'both'}, optional
+        Fitting strategy. ``'grid'`` performs a maximum-likelihood grid
+        search. ``'quad'`` uses a quadratic approximation around the initial
+        parameter. ``'both'`` runs a grid search first and then refines the
+        solution with a quadratic approximation.
+    init_delta_RNs : array-like or None, optional
+        Read-noise grid offsets used for the maximum-likelihood grid search.
+        The read-noise sampling is defined as ``init_RN + init_delta_RNs``.
+    quad_delta_RN : float, optional
+        Only used when ``method='quad'``. Defines the initial read-noise step
+        size around ``init_RN`` for the quadratic approximation. Default is
+        0.5.
+    countratesidentical : bool, optional
+        If True, assume all ramps have identical count rates. Default is
+        False.
+
+    Returns
+    -------
+    output : DataModel
+        Data model containing the fitted read noise parameter and associated
+        fit diagnostics.
+
+    References
+    ----------
+    Brandt, T. D. (2025), *Computing the Electronic Gain for Detectors Read
+    Out Up-the-ramp*, PASP, 137, 125006.
+    https://ui.adsabs.harvard.edu/abs/2025PASP..137l5006B/abstract
+    """
 
     ARGUMENTS = {
         'max_cores' : 1,

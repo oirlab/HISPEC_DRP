@@ -5,7 +5,7 @@ import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
 
-from hispecdrp.primitives.dq_init.dqinit_primitive import apply_dq_mask
+from hispecdrp.primitives.dq_init.dqinit_primitive import _apply_dq_mask
 from hispecdrp.primitives.saturation.saturation_primitive import check_saturation
 from hispecdrp.primitives.bias_subtraction.bias_primitive import bias_subtraction
 from hispecdrp.primitives.dark_subtraction.dark_primitive import dark_subtraction_rate
@@ -25,7 +25,7 @@ def test_stage0_units(tmp_path):
         dq_raw = np.zeros((3, 2, 2), dtype=np.uint8)
         dq_model = np.zeros((2, 2), dtype=np.uint32)
         dq_model[1, 1] |= DQ_FLAGS['DO_NOT_USE']
-        apply_dq_mask(dq_raw, dq_model)
+        _apply_dq_mask(dq_raw, dq_model)
         np.testing.assert_array_equal(np.sum(dq_raw & DQ_FLAGS["DO_NOT_USE"]), 3 * DQ_FLAGS["DO_NOT_USE"],
                                       err_msg='Error in DQ init check')
         # exit()

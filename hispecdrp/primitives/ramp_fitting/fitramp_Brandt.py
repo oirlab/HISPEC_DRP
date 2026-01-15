@@ -1,5 +1,9 @@
 # Author: Tim Brandt
 # Shared with HISPEC team in Aug 2025
+#
+# Reference:
+# Brandt, T. D., "Likelihood-based Jump Detection and Cosmic Ray Rejection for Detectors Read Out Up-the-ramp", PASP, 136, 045005 (2024)
+# https://ui.adsabs.harvard.edu/abs/2024PASP..136d5005B/abstract
 
 import numpy as np
 from scipy import special

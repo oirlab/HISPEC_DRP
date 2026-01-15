@@ -11,6 +11,36 @@ __all__ = ['GainCorrectionPrimitive', 'gain_correction']
 
 
 class GainCorrectionPrimitive(BasePrimitive):
+    """
+    Convert rate maps from DN/s to electrons/s using the gain calibration.
+
+    The conversion is performed by multiplying the input
+    data and error arrays by the per-pixel gain values provided in the gain
+    calibration file, which are expressed in units of e-/DN.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. This is expected to be a
+        level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'checksat'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+    Returns
+    -------
+    output : DataModel
+        Data model with values and uncertainties converted to units of
+        electrons.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **gain**: GainModel
+        The gain calibration model used for conversion.
+    """
 
     ARGUMENTS = {
         'suffix' : 'gain',

@@ -13,6 +13,27 @@ __all__ = ['MakeSaturationPrimitive', 'check_saturation']
 
 
 class MakeSaturationPrimitive(BasePrimitive):
+    """
+    Create a saturation calibration model from a list of raw ramp exposures.
+    This primitive derives the per-pixel saturation threshold by taking the median of the last reads
+    of a list of raw ramp exposures.
+
+    Parameters
+    ----------
+    input : list of str or list of RampModel
+        List of input file paths or ramp models to process.
+    offset : float, optional
+        Value to subtract from the last read median to define the saturation threshold. This can help account for read noise or other systematics.
+        Default is 100.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+
+    Returns
+    -------
+    output : SaturationModel
+        The derived saturation calibration model containing the per-pixel saturation thresholds.
+
+    """
     
     ARGUMENTS = {
         'output_model' : 'SaturationModel',

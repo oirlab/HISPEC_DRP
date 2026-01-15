@@ -18,13 +18,37 @@ DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
 class MakeMasterDarkPrimitive(BasePrimitive):
     """
+    Create a master dark calibration model from a list of dark calibrations (DarkModel).
 
+    A master calibration is identified by setting the `meta.master_cal` attribute to True.
+
+    todo: implement automatic selection of darks to be combined for making the master dark
+    todo: add median dark level to metadata for instrument monitoring
+
+    Parameters
+    ----------
+    input : list of str or list of DarkModel
+        List of input file paths or dark models to process.
+    mean_calc : str, optional
+        Method for calculating the mean when combining darks. Default is 'wmean' (weighted mean).
+    err_calc : str, optional
+        Method for calculating the error when combining darks. Default is 'wse' (weighted standard error).
+    hot_pixel_threshold : float, optional
+        Threshold dark rate above which pixels are flagged as hot in the DQ array. Default is 5 e-/s.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+
+    Returns
+    -------
+    output : DarkModel
+        The derived master dark calibration model containing the combined dark rate map,
+        combined error map, and updated DQ array.
     """
 
     ARGUMENTS = {
         'output_model' : 'DarkModel',
         'mean_calc' : 'wmean',
-        'err_calc' : 'wmean',
+        'err_calc' : 'wse',
         'hot_pixel_threshold' : 5,  # e-/s,  Threshold above which pixels are bad
         'max_cores' : 1,
     }

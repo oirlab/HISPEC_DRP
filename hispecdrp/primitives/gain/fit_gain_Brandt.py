@@ -2,6 +2,10 @@
 
 # Author: Tim Brandt
 # Shared with HISPEC team in Aug 2025
+#
+# Reference:
+# Brandt, T. D., "Computing the Electronic Gain for Detectors Read Out Up-the-ramp", PASP, 137, 125006 (2025)
+# https://ui.adsabs.harvard.edu/abs/2025PASP..137l5006B/abstract
 
 import numpy as np
 import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp

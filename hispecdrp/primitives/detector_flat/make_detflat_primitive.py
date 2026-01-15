@@ -15,6 +15,28 @@ COLD_FLAG =  DQ_FLAGS['COLD']
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
 
 class MakeDetectorFlatPrimitive(BasePrimitive):
+    """
+    Create a detector flat calibration model from a combined rate map.
+    This primitive expects the coadd primitive to have already been run on a list of flat field exposures.
+
+    todo: add median white lamp intensity to metadata for instrument monitoring
+
+    Parameters
+    ----------
+    input : L0Model
+        Input flat field rate map to converted to detector flat calibration. Do not input a list.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+    cold_pixel_threshold : float, optional
+        Threshold normalized flat value below which pixels are flagged as cold in the DQ array. Default is 0.9.
+
+    Returns
+    -------
+    output : DetectorFlatModel
+        The derived detector flat calibration model containing the normalized flat field map and updated DQ array.
+
+
+    """
 
     ARGUMENTS = {
         'output_model' : 'DetectorFlatModel',

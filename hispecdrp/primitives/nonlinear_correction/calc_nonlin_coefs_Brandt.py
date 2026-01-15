@@ -1,6 +1,10 @@
 # Author: Tim Brandt
 # Shared with HISPEC team in Aug 2025
 # Modified by JB Ruffio on 2026-01-01 to fix compatibility with newer numpy versions.
+#
+# Reference:
+# Brandt, T. D., "A Classic Nonlinearity Correction Algorithm for Detectors Read Out Up-the-ramp", PASP, 137, 125005 (2025)
+# https://ui.adsabs.harvard.edu/abs/2025PASP..137l5005B/abstract
 
 import numpy as np
 from scipy import special
