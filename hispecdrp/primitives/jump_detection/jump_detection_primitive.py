@@ -102,7 +102,7 @@ class JumpDetectionPrimitive(BasePrimitive):
                 result.dq_raw,
                 result.dq,
                 rdnoise=rn_model.rn,
-                gain=detgain_model.gain,
+                gain=gain_model.gain,
                 max_cores=self.max_cores,
                 rejection_threshold=self.rejection_threshold
             )
