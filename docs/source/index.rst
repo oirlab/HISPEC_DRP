@@ -34,7 +34,7 @@ Pipelines
 =========
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    pipelines/pipelines
 
