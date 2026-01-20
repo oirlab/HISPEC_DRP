@@ -1,5 +1,6 @@
 from hispecdrp import ProcessDetFlatsPipeline
 from hispecdrp import datamodels
+import hispecdrp.simulations as simu
 import numpy as np
 import os
 import time
@@ -146,7 +147,7 @@ def test_stage0_flat_calib(tmp_path):
     start_time = time.time()
     ramp_model_sequence = []
     for k in range(N_files):
-        ramp_data = datamodels.create_ramp(electron_rate_map,  # in e-/s
+        ramp_data = simu.create_ramp(electron_rate_map,  # in e-/s
                                            readtime=readtime, n_reads=n_reads,
                                            nonlin_coeffs=nonlin_coeffs,
                                            gain=gain_map,  # in e-/s

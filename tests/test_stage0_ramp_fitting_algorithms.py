@@ -1,5 +1,6 @@
 from hispecdrp import Stage0Pipeline
 from hispecdrp import datamodels
+import hispecdrp.simulations as simu
 import numpy as np
 import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
@@ -136,7 +137,7 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
         # electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
         electron_rate_map = np.full((ny, nx), max_slope, dtype=np.float32)
         start_time = time.time()
-        ramp_data = datamodels.create_ramp(electron_rate_map,  # in e-/s
+        ramp_data = simu.create_ramp(electron_rate_map,  # in e-/s
                                            readtime=readtime, n_reads=n_reads,
                                            nonlin_coeffs=nonlin_coeffs,
                                            gain=gain_map,  # in e-/s
@@ -377,7 +378,7 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
         # electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
         electron_rate_map = np.full((ny, nx), max_slope, dtype=np.float32)
         start_time = time.time()
-        ramp_data = datamodels.create_ramp(electron_rate_map,  # in e-/s
+        ramp_data = simu.create_ramp(electron_rate_map,  # in e-/s
                                            readtime=readtime, n_reads=n_reads,
                                            nonlin_coeffs=nonlin_coeffs,
                                            gain=gain_map,  # in e-/s

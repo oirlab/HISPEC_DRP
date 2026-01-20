@@ -3,6 +3,7 @@ import os
 import time
 
 from hispecdrp import datamodels
+import hispecdrp.simulations as simu
 from hispecdrp.primitives.refpix.refpix_primitive import RefPixelCorrectionPrimitive
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
@@ -134,7 +135,7 @@ def test_stage0_refpix_primitive(tmp_path):
     # --- Create a fake UTR cube ---
     electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
     start_time = time.time()
-    ramp_data = datamodels.create_ramp(electron_rate_map,  # in e-/s
+    ramp_data = simu.create_ramp(electron_rate_map,  # in e-/s
                                        readtime=readtime, n_reads=n_reads,
                                        nonlin_coeffs=nonlin_coeffs,
                                        gain=gain_map,  # in e-/s
