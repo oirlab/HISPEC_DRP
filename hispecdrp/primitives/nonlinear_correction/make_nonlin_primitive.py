@@ -99,6 +99,9 @@ class MakeNonLinPrimitive(BasePrimitive):
     Detectors Read Out Up-the-ramp*, PASP, 137, 125005.
     https://ui.adsabs.harvard.edu/abs/2025PASP..137l5005B/abstract
 
+    Roman calibration pipeline reference:
+    https://github.com/spacetelescope/romancal
+
     Notes
     -----
     Relevant HISPEC DRP requirement:

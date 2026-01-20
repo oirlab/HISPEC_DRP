@@ -79,6 +79,9 @@ class MakeReadnoisePrimitive(BasePrimitive):
     Brandt, T. D. (2025), *Computing the Electronic Gain for Detectors Read
     Out Up-the-ramp*, PASP, 137, 125006.
     https://ui.adsabs.harvard.edu/abs/2025PASP..137l5006B/abstract
+
+    Roman calibration pipeline reference:
+    https://github.com/spacetelescope/romancal
     """
 
     ARGUMENTS = {

@@ -4,6 +4,9 @@
 # Reference:
 # Brandt, T. D., "Likelihood-based Jump Detection and Cosmic Ray Rejection for Detectors Read Out Up-the-ramp", PASP, 136, 045005 (2024)
 # https://ui.adsabs.harvard.edu/abs/2024PASP..136d5005B/abstract
+#
+# Roman calibration pipeline reference:
+# https://github.com/spacetelescope/romancal
 
 import numpy as np
 from scipy import special
