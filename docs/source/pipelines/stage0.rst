@@ -15,7 +15,7 @@ E.g. https://jwst-docs.stsci.edu/jwst-science-calibration-pipeline/stages-of-jws
 Documentation
 --------
 Link to class documentation:
-:class:`hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline`
+:class:`~hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline`
 
 .. autoclass:: hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline
    :members:

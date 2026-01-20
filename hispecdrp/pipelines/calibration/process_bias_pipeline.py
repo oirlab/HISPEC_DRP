@@ -11,9 +11,10 @@ class ProcessBiasPipeline(CalibrationPipeline):
     Pipeline to process bias frames and create a master bias calibration.
 
     This pipeline applies the following primitives in order:
-    - :class:`hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
-    - :class:`hispecdrp.primitives.bias_subtraction.make_bias_primitive.MakeBiasPrimitive`
-    - :class:`hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
+
+    - :class:`~hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
+    - :class:`~hispecdrp.primitives.bias_subtraction.make_bias_primitive.MakeBiasPrimitive`
+    - :class:`~hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
 
     Any primitive can be skipped by setting its ``run`` argument to ``False`` when initializing the pipeline.
     """

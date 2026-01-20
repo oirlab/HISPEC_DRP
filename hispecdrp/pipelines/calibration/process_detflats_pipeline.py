@@ -15,20 +15,21 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
     Pipeline to process detector flat frames and create master calibrations for detector gain and detector flat.
 
     This pipeline applies the following primitives in order:
-    - :class:`hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
-    - :class:`hispecdrp.primitives.saturation.saturation_primitive.CheckSaturationPrimitive`
-    - :class:`hispecdrp.primitives.bias_subtraction.bias_primitive.BiasSubtractionPrimitive`
-    - :class:`hispecdrp.primitives.nonlinear_correction.nonlin_primitive.NonlinearCorrectionPrimitive`
-    - :class:`hispecdrp.primitives.jump_detection.jump_detection_primitive.JumpDetectionPrimitive`
-    - :class:`hispecdrp.primitives.gain.make_gain_primitive.MakeGainPrimitive`
-    - :class:`hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
-    - :class:`hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive`
-    - :class:`hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive`
-    - :class:`hispecdrp.primitives.gain.gain_primitive.GainCorrectionPrimitive`
-    - :class:`hispecdrp.primitives.coadd.coadd_frames_primitive.CoaddFramesPrimitive`
-    - :class:`hispecdrp.primitives.detector_flat.make_detflat_primitive.MakeDetectorFlatPrimitive`
-    - :class:`hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
-    - :class:`hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
+
+    - :class:`~hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
+    - :class:`~hispecdrp.primitives.saturation.saturation_primitive.CheckSaturationPrimitive`
+    - :class:`~hispecdrp.primitives.bias_subtraction.bias_primitive.BiasSubtractionPrimitive`
+    - :class:`~hispecdrp.primitives.nonlinear_correction.nonlin_primitive.NonlinearCorrectionPrimitive`
+    - :class:`~hispecdrp.primitives.jump_detection.jump_detection_primitive.JumpDetectionPrimitive`
+    - :class:`~hispecdrp.primitives.gain.make_gain_primitive.MakeGainPrimitive`
+    - :class:`~hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
+    - :class:`~hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive`
+    - :class:`~hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive`
+    - :class:`~hispecdrp.primitives.gain.gain_primitive.GainCorrectionPrimitive`
+    - :class:`~hispecdrp.primitives.coadd.coadd_frames_primitive.CoaddFramesPrimitive`
+    - :class:`~hispecdrp.primitives.detector_flat.make_detflat_primitive.MakeDetectorFlatPrimitive`
+    - :class:`~hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
+    - :class:`~hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
 
     Any primitive can be skipped by setting its ``run`` argument to ``False`` when initializing the pipeline.
     """

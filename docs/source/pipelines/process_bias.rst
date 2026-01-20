@@ -12,7 +12,7 @@ Calibration pipeline to generate bias and kTC calibration files from raw bias UT
 Documentation
 --------
 Link to class documentation:
-:class:`hispecdrp.pipelines.calibration.process_bias_pipeline.ProcessBiasPipeline`
+:class:`~hispecdrp.pipelines.calibration.process_bias_pipeline.ProcessBiasPipeline`
 
 .. autoclass:: hispecdrp.pipelines.calibration.process_bias_pipeline.ProcessBiasPipeline
    :members:

@@ -15,7 +15,7 @@ Also creates level 0 rate map data products for each flat exposure processed.
 Documentation
 --------
 Link to class documentation:
-:class:`hispecdrp.pipelines.calibration.process_satflats_pipeline.ProcessSatFlatsPipeline`
+:class:`~hispecdrp.pipelines.calibration.process_satflats_pipeline.ProcessSatFlatsPipeline`
 
 .. autoclass:: hispecdrp.pipelines.calibration.process_satflats_pipeline.ProcessSatFlatsPipeline
    :members:

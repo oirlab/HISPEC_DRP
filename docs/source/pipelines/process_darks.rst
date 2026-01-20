@@ -15,7 +15,7 @@ Also creates level 0 rate map data products for each dark exposure processed.
 Documentation
 --------
 Link to class documentation:
-:class:`hispecdrp.pipelines.calibration.process_darks_pipeline.ProcessDarksPipeline`
+:class:`~hispecdrp.pipelines.calibration.process_darks_pipeline.ProcessDarksPipeline`
 
 .. autoclass:: hispecdrp.pipelines.calibration.process_darks_pipeline.ProcessDarksPipeline
    :members:

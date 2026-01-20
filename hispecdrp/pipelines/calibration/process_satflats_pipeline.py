@@ -16,19 +16,20 @@ class ProcessSatFlatsPipeline(CalibrationPipeline):
     Pipeline to process saturation flat frames and create master calibrations for nonlinearity and saturation levels.
 
     This pipeline applies the following primitives in order:
-    - :class:`hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
-    - :class:`hispecdrp.primitives.saturation.make_saturation_primitive.MakeSaturationPrimitive`
-    - :class:`hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
-    - :class:`hispecdrp.primitives.saturation.saturation_primitive.CheckSaturationPrimitive`
-    - :class:`hispecdrp.primitives.bias_subtraction.bias_primitive.BiasSubtractionPrimitive`
-    - :class:`hispecdrp.primitives.nonlinear_correction.make_nonlin_primitive.MakeNonLinPrimitive`
-    - :class:`hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
-    - :class:`hispecdrp.primitives.nonlinear_correction.nonlin_primitive.NonlinearCorrectionPrimitive`
-    - :class:`hispecdrp.primitives.jump_detection.jump_detection_primitive.JumpDetectionPrimitive`
-    - :class:`hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive`
-    - :class:`hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive`
-    - :class:`hispecdrp.primitives.gain.gain_primitive.GainCorrectionPrimitive`
-    - :class:`hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
+
+    - :class:`~hispecdrp.primitives.dq_init.dqinit_primitive.DQInitPrimitive`
+    - :class:`~hispecdrp.primitives.saturation.make_saturation_primitive.MakeSaturationPrimitive`
+    - :class:`~hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
+    - :class:`~hispecdrp.primitives.saturation.saturation_primitive.CheckSaturationPrimitive`
+    - :class:`~hispecdrp.primitives.bias_subtraction.bias_primitive.BiasSubtractionPrimitive`
+    - :class:`~hispecdrp.primitives.nonlinear_correction.make_nonlin_primitive.MakeNonLinPrimitive`
+    - :class:`~hispecdrp.primitives.register_calibration.register_cal_primitive.RegisterCalibrationPrimitive`
+    - :class:`~hispecdrp.primitives.nonlinear_correction.nonlin_primitive.NonlinearCorrectionPrimitive`
+    - :class:`~hispecdrp.primitives.jump_detection.jump_detection_primitive.JumpDetectionPrimitive`
+    - :class:`~hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive`
+    - :class:`~hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive`
+    - :class:`~hispecdrp.primitives.gain.gain_primitive.GainCorrectionPrimitive`
+    - :class:`~hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
 
     Any primitive can be skipped by setting its ``run`` argument to ``False`` when initializing the pipeline.
     """
