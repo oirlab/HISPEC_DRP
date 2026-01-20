@@ -8,6 +8,7 @@ from hispecdrp.primitives.refpix.refpix_primitive import RefPixelCorrectionPrimi
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
 def test_stage0_refpix_primitive(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'

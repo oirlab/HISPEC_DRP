@@ -7,6 +7,7 @@ from hispecdrp.datamodels.dqflags import DQ_FLAGS
 import time
 
 def test_stage0_sat_nonlin_calib(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---

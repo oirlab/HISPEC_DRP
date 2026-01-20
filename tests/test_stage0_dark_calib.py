@@ -6,6 +6,7 @@ import time
 from hispecdrp.primitives.dark_subtraction.master_dark_primitive import MakeMasterDarkPrimitive
 
 def test_stage0_dark_calib(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---

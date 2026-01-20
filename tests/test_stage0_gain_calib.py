@@ -6,6 +6,7 @@ import os
 import time
 
 def test_stage0_gain_calib(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---

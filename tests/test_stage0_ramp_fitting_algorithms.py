@@ -8,6 +8,7 @@ from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get
 import time
 
 def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'

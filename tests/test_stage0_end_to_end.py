@@ -7,6 +7,7 @@ from hispecdrp.datamodels.dqflags import DQ_FLAGS
 import time
 
 def test_stage0(tmp_path):
+    np.random.seed(12345)
     start_time = time.time()
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
