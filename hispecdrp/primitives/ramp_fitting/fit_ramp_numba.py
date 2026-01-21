@@ -74,7 +74,7 @@ def _fit_ramp_slope_pedestal(
         b = (times2_tot * ramp_tot - times_tot * timesramp_tot) / deno
 
         var_rnoise = n / deno
-        var_poisson = np.abs((slope + dark_current) * gain) / (_times[-1] - _times[0])
+        var_poisson = np.abs((slope + dark_current)) / ((_times[-1] - _times[0])* gain)
         b_var = times2_tot / deno
 
         if var_rnoise + var_poisson > 0:
@@ -297,11 +297,11 @@ def _fit_ramp_mcds(
         d2md1 = (d2 - d1)
         slope = (n2 - n1) / d2md1
 
-        var_rnoise = (2 * num_coadd) * rdnoise**2 / d2md1**2
+        var_rnoise = (2 * num_coadd) * (rdnoise/num_coadd)**2 / d2md1**2
         if dark_current is not None:
-            var_poisson = np.abs((slope + dark_current) * gain) / d2md1
+            var_poisson = np.abs((slope + dark_current)) / (d2md1*gain)
         else:
-            var_poisson = np.abs(slope * gain) / d2md1
+            var_poisson = np.abs(slope) / (d2md1*gain)
 
         var_sum = var_rnoise + var_poisson
         if var_sum > 0:

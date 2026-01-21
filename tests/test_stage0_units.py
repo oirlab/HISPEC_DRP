@@ -1,15 +1,13 @@
-from hispecdrp import Stage0Pipeline
-from hispecdrp import datamodels
 import numpy as np
 import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
 
-from hispecdrp.primitives.dq_init.dqinit_primitive import apply_dq_mask
+from hispecdrp.primitives.dq_init.dqinit_primitive import _apply_dq_mask
 from hispecdrp.primitives.saturation.saturation_primitive import check_saturation
 from hispecdrp.primitives.bias_subtraction.bias_primitive import bias_subtraction
 from hispecdrp.primitives.dark_subtraction.dark_primitive import dark_subtraction_rate
-from hispecdrp.primitives.detector_gain.detgain_primitive import detector_gain_correction
+from hispecdrp.primitives.gain.gain_primitive import gain_correction
 from hispecdrp.primitives.detector_flat.detflat_primitive import detector_flat_correction
 from hispecdrp.primitives.jump_detection.jump_detection_difference import jump_detection_difference
 
@@ -18,6 +16,7 @@ DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
 def test_stage0_units(tmp_path):
+    np.random.seed(12345)
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
@@ -25,7 +24,7 @@ def test_stage0_units(tmp_path):
         dq_raw = np.zeros((3, 2, 2), dtype=np.uint8)
         dq_model = np.zeros((2, 2), dtype=np.uint32)
         dq_model[1, 1] |= DQ_FLAGS['DO_NOT_USE']
-        apply_dq_mask(dq_raw, dq_model)
+        _apply_dq_mask(dq_raw, dq_model)
         np.testing.assert_array_equal(np.sum(dq_raw & DQ_FLAGS["DO_NOT_USE"]), 3 * DQ_FLAGS["DO_NOT_USE"],
                                       err_msg='Error in DQ init check')
         # exit()
@@ -217,7 +216,7 @@ def test_stage0_units(tmp_path):
                             [2, 4]], dtype=np.uint32)
 
         # Run kernel
-        rate_out, err_out, dq_out = detector_gain_correction(
+        rate_out, err_out, dq_out = gain_correction(
             rate.copy(), err.copy(), dq.copy(),
             gain, gain_err, gain_dq
         )

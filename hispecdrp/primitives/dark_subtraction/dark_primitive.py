@@ -9,7 +9,39 @@ __all__ = ['DarkSubtractionPrimitive', 'dark_subtraction_rate']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
-    
+    """
+    Subtract the dark current from the input data.
+
+    This primitive applies the appropriate master dark calibration to the
+    input data product. The dark frame is subtracted from the science data,
+    the associated uncertainties are propagated by adding errors in
+    quadrature, and data quality (DQ) flags are combined using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or L0Model
+        Input file path or data model to process. Currently, this is expected
+        to be a level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'darksub'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for Numba parallel processing. Default is 1.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+    Returns
+    -------
+    output : DataModel
+        The dark-subtracted data model with updated error and data quality
+        arrays.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **dark**: DarkModel
+        The dark calibration model used for subtraction.
+    """
     ARGUMENTS = {
         'suffix' : 'darksub',
         'output_model' : 'input',

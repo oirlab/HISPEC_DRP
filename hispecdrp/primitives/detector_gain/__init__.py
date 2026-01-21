@@ -1,1 +1,0 @@
-from .detgain_primitive import *

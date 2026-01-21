@@ -1,4 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
+import warnings
 
 try:
     from pyechelle.simulator import Simulator
@@ -6,7 +7,7 @@ try:
     from pyechelle.sources import CSVSource
     from pyechelle.spectrograph import ZEMAX
 except ImportError:
-    print("pyechelle package not found. pyechelle simulations will not run.")
+    warnings.warn("pyechelle package not found in imports in hispec.simulations.simulate_rate_map.py. This is not a problem unless you need it. pyechelle simulations will simply not run. ")
 
 import os
 import warnings

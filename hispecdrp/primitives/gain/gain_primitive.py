@@ -1,26 +1,56 @@
 
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...calibrations import DetectorGainSelector
+from ...calibrations import GainSelector
 from ...utils.parallelization_utils import numba_thread_scope
 import numpy as np
 from numba import njit, prange
 
 
-__all__ = ['DetectorGainPrimitive', 'detector_gain_correction']
+__all__ = ['GainCorrectionPrimitive', 'gain_correction']
 
 
-class DetectorGainPrimitive(BasePrimitive):
+class GainCorrectionPrimitive(BasePrimitive):
+    """
+    Convert rate maps from DN/s to electrons/s using the gain calibration.
+
+    The conversion is performed by multiplying the input
+    data and error arrays by the per-pixel gain values provided in the gain
+    calibration file, which are expressed in units of e-/DN.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. This is expected to be a
+        level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'checksat'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+    Returns
+    -------
+    output : DataModel
+        Data model with values and uncertainties converted to units of
+        electrons.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **gain**: GainModel
+        The gain calibration model used for conversion.
+    """
 
     ARGUMENTS = {
-        'suffix' : 'detgain',
+        'suffix' : 'gain',
         'output_model' : 'input',
         'max_cores' : 1,
     }
 
     CALIBRATIONS = {
-        'detgain': {
-            'selector': DetectorGainSelector,
+        'gain': {
+            'selector': GainSelector,
             'selector_kwargs': {}
         }
     }
@@ -30,9 +60,9 @@ class DetectorGainPrimitive(BasePrimitive):
         # Load the input model
         input_model = datamodels.open(self.input)
 
-        # Get the detgain model
-        detgain, _ = self.get_calibration(input_model, 'detgain')
-        detgain_model = datamodels.open(detgain)
+        # Get the gain model
+        gain, _ = self.get_calibration(input_model, 'gain')
+        gain_model = datamodels.open(gain)
 
         # Output
         result = self.get_output_model(input_model)
@@ -43,28 +73,26 @@ class DetectorGainPrimitive(BasePrimitive):
             raise Exception("RATE_ERR extension not found in input model for detector gain correction.")
         if not hasattr(input_model, 'DQ'):
             raise Exception("DQ extension not found in input model for detector gain correction.")
-        if not hasattr(detgain_model, 'GAIN'):
+        if not hasattr(gain_model, 'GAIN'):
             raise Exception("GAIN extension not found in gain model for dark subtraction.")
-        if not hasattr(detgain_model, 'GAIN_ERR'):
-            raise Exception("GAIN_ERR extension not found in gain model for dark subtraction.")
-        if not hasattr(detgain_model, 'DQ'):
+        if not hasattr(gain_model, 'DQ'):
             raise Exception("DQ extension not found in gain model for dark subtraction.")
 
         # Log
-        self.log.info(f"Applying detector gain correction with {detgain} to {input_model}")
+        self.log.info(f"Applying detector gain correction with {gain} to {input_model}")
 
         # Perform detector flat correction
-        detector_gain_correction(
+        gain_correction(
             result.rate, result.rate_err, result.dq,
-            detgain_model.gain, detgain_model.gain_err, detgain_model.dq,
+            gain_model.gain, np.sqrt(gain_model.cov[0,0]), gain_model.dq,
             max_cores=self.max_cores
         )
 
         # Output
-        return dict(output=result, detgain=detgain)
+        return dict(output=result, gain=gain)
 
 
-def detector_gain_correction(
+def gain_correction(
     input_rate : np.ndarray, input_err : np.ndarray, input_dq : np.ndarray,
     gain : np.ndarray, gain_err : np.ndarray, gain_dq : np.ndarray,
     max_cores : int = 1
@@ -99,14 +127,14 @@ def detector_gain_correction(
         Updated data quality flags array.
     """
     with numba_thread_scope(max_cores):
-        _detector_gain_correction_numba(
+        _gain_correction_numba(
             input_rate, input_err, input_dq,
             gain, gain_err, gain_dq
         )
     return input_rate, input_err, input_dq
 
 @njit(nogil=True, parallel=True, cache=True)
-def _detector_gain_correction_numba(
+def _gain_correction_numba(
     input_rate : np.ndarray, input_err : np.ndarray, input_dq : np.ndarray,
     gain : np.ndarray, gain_err : np.ndarray, gain_dq : np.ndarray
 ):

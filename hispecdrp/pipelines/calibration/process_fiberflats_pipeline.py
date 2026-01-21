@@ -67,7 +67,7 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
             setattr(ff_output_model, f'MID_TIME_FIB{fiber}', getattr(ff_coadded_models_extracted[fiber], f'MID_TIME_FIB{fiber}'))
 
             # Add ancestors
-            self.add_data_ancestors(ff_output_model, ff_model)
+            ff_output_model.add_data_ancestors(ff_model, primitive_name=self.__class__.__name__)
 
         # Get the wavelength solution
         # TODO: NEED TO INPUT WAVELENGTH SOLUTION HERE

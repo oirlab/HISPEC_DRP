@@ -5,11 +5,45 @@ from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
 
-__all__ = ['BiasSubtractionPrimitive']
+__all__ = ['BiasSubtractionPrimitive','bias_subtraction']
 
 
 class BiasSubtractionPrimitive(BasePrimitive):
-    
+    """
+    Subtract the bias level from the input data.
+
+    This is the base signal from which accumulated charges are measured. The bias voltage is to prevent negative values to be read given the unsigned nature of the values produced by the ADC. Bias subtraction is useful to set the y-intercept term of the UTR data close to 0.
+
+    This primitive applies the appropriate master bias calibration to the
+    input data product. The bias frame is subtracted from the science data,
+    the associated uncertainties are propagated by adding errors in
+    quadrature, and data quality (DQ) flags are combined using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. Currently, this is expected
+        to be a raw (ramp) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'biassub'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+
+    Returns
+    -------
+    output : DataModel
+        Bias-subtracted data model with updated error and data quality
+        arrays.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **bias**: BiasModel
+        The bias calibration model used for subtraction.
+    """
+
     ARGUMENTS = {
         'suffix' : 'biassub',
         'output_model' : 'input',
@@ -50,7 +84,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Perform bias subtraction
         bias_subtraction(
             result.data, result.dq,
-            bias_model.data, bias_model.dq,
+            bias_model.bias, bias_model.dq,
             max_cores=self.max_cores
         )
 

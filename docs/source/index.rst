@@ -21,7 +21,7 @@ Examples
    examples/examples
 
 
-Primitives
+Primitives (Deprecated)
 ==========
 
 .. toctree::
@@ -34,7 +34,7 @@ Pipelines
 =========
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    pipelines/pipelines
 

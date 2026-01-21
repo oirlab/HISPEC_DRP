@@ -14,7 +14,38 @@ SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 
 class CheckSaturationPrimitive(BasePrimitive):
-    
+    """
+    Flag saturated reads in the input data.
+
+    This primitive identifies pixels that exceed their per-pixel saturation
+    threshold, as defined in the saturation calibration reference file. For
+    any read in which a pixel is saturated, the corresponding ``SATURATED``
+    flag is set in the data quality (DQ) array.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. Currently, this is expected
+        to be a raw (ramp) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'saturation'``.
+    output_model : str or type[DataModel] or None, optional
+        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+
+    Returns
+    -------
+    output : DataModel
+        Data model with the ``SATURATED`` DQ flags set for affected pixels and
+        reads.
+
+    Notes
+    -----
+    Additional outputs accessible as ``primitive._output[<key>]``
+
+    - **saturation**: SaturationModel
+        The saturation calibration model used for flagging.
+    """
+
     ARGUMENTS = {
         'suffix' : 'checksat',
         'output_model' : 'input',

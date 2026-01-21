@@ -27,7 +27,7 @@ from .dark import *
 from .bias import *
 from .read_noise import *
 from .detector_flat import *
-from .detector_gain import *
+from .gain import *
 from .nonlin import *
 from .lfcfitparams import *
 from .lfcwavesol import *

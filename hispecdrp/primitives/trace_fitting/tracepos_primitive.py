@@ -85,7 +85,7 @@ class TracePositionPrimitive(BasePrimitive):
             setattr(output_model, f'FWHM_FIB{fiber}', fwhm)
 
             # Add individual fiberflats as data ancestors
-            self.add_data_ancestors(output_model, input[fiber])
+            output_model.add_data_ancestors(input[fiber],self.__class__.__name__)
 
         # Return
         return dict(output=output_model, trace_results=trace_results)
