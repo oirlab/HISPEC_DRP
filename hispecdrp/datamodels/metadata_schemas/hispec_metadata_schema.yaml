@@ -1,0 +1,10 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+properties:
+- $ref: "core.yaml"
+- $ref: "calibration.yaml"
+- $ref: "exposure.yaml"
+- $ref: "target.yaml"
+- $ref: "instrument.yaml"
+- $ref: "koa.yaml"
+- $ref: "program.yaml"

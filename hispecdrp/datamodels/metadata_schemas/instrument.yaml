@@ -1,0 +1,47 @@
+type: object
+properties:
+  instrument_name:
+    title: "Instrument name"
+    fits_keyword: INSTRUME
+    enum: ["HISPEC", "PARVI"]
+
+  instrument_era:
+    title: "Instrument era specified with semver"
+    fits_keyword: INSTERA
+    default: "0.0.1"
+    include_calibration_db: true
+
+  instrument_mode:
+    title: "Instrument mode"
+    fits_keyword: INSTMODE
+    default: YJHK
+    include_calibration_db: true
+
+  lfc_nu0:
+    title: "LFC nu0"
+    fits_keyword: LFCNU0
+    type: number
+    unit: GHz
+
+  lfc_delta_nu:
+    title: "LFC delta nu"
+    fits_keyword: LFCDELNU
+    type: number
+    unit: GHz
+
+  order_start:
+    title: "Starting echelle order of the data array"
+    fits_keyword: ORDERST
+    type: integer
+
+  order_end:
+    title: "End echelle order of the data array"
+    fits_keyword: ORDEREND
+    type: integer
+
+  spectrograph:
+    title: "Spectrograph name"
+    fits_keyword: SPECTROG
+    default: BSPEC
+    enum: ["BSPEC", "NSPEC"]
+    include_calibration_db: true

@@ -1,0 +1,19 @@
+type: object
+properties:
+  koa_id:
+    title: "KOA ID"
+    fits_keyword: KOAID
+    include_calibration_db: true
+
+  koa_filehandle:
+    title: "KOA file path"
+    fits_keyword: KOAPATH
+    include_calibration_db: true
+
+  koa_date_obs:
+    title: "KOA observation date YYYY-MM-DD"
+    fits_keyword: DATE-OBS
+
+  koa_utc_obs:
+    title: "KOA observation UTC HH:MM:SS.S"
+    fits_keyword: UT

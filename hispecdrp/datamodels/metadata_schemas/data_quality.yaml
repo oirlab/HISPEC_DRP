@@ -1,0 +1,14 @@
+type: object
+properties:
+  
+  data_quality:
+    title: "Data quality flag at the exposure level"
+    fits_keyword: DATAQUAL
+    default: GOOD
+
+  median_dark_current:
+    title: "Median dark current"
+    unit: 'e/s'
+    fits_keyword: MEDDARK
+    type: number
+  

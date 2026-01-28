@@ -1,0 +1,40 @@
+type: object
+properties:
+  last_updated:
+    title: "ISO 8601 datetime file was last updated YYYY-MM-DDTHH:MM:SS.SSS"
+    fits_keyword: LASTUPD
+
+  datetime_obs:
+    title: "Exposure observation datetime in format YYYY-MM-DDTHH:MM:SS.SSS"
+    fits_keyword: DATETOBS
+    include_calibration_db: true
+
+  filename:
+    title: "Name of the file"
+    fits_keyword: FILENAME
+    include_calibration_db: true
+
+  file_type:
+    title: "Type of file"
+    fits_keyword: FILETYPE
+    default: FITS
+
+  telescope:
+    title: "Telescope used to acquire the data"
+    fits_keyword: TELESCOP
+    default: Keck-II
+    enum: ["Keck-II", "Palomar"]
+
+  model_type:
+    title: "Type of data model"
+    fits_keyword: DATAMODL
+
+  drp_version:
+    title: "DRP version used to create this file"
+    fits_keyword: DRPVER
+    include_calibration_db: true
+
+  note:
+    title: "Custom note"
+    fits_keyword: NOTE
+    include_calibration_db: true

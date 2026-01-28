@@ -1,0 +1,5 @@
+type: object
+properties:
+  program_name:
+    title: "Program name"
+    fits_keyword: PROGNAME

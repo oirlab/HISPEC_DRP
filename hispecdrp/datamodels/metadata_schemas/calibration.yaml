@@ -1,0 +1,19 @@
+type: object
+properties:
+  cal_id:
+    title: "Unique calibration identifier"
+    fits_keyword: CALID
+    include_calibration_db: true
+    db_column: id
+
+  cal_type:
+    title: "Type of calibration"
+    fits_keyword: CALTYPE
+    include_calibration_db: true
+
+  master_cal:
+    title: "Appropriate for calibrating data?"
+    fits_keyword: MASTCAL
+    type: boolean
+    default: true
+    include_calibration_db: true
