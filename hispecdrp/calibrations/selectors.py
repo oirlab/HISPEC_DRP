@@ -1,6 +1,4 @@
-from koa_middleware import CalibrationDB
-from sqlalchemy import func
-
+from koa_middleware import LocalCalibrationDB
 from koa_middleware.selector_base import CalibrationSelector
 
 __all__ = [
@@ -19,178 +17,352 @@ __all__ = [
 ]
 
 class DQSelector(CalibrationSelector):
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'dq',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'dq',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "dq",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="datetime_obs"
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "dq",
+                    "era": meta["instrument_era"]
+                },
+                order_by="datetime_obs"
+            )
+
+        return list(rows)
+
+        
 
 class SaturationSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'saturation',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'saturation',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "saturation",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "saturation",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class DarkSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'dark',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'dark',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "dark",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "dark",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class TracePosSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'tracepos',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'tracepos',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "tracepos",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec
+                """,
+                {
+                    "cal_type": "tracepos",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class TraceProfSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'traceprof',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'traceprof',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "traceprof",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec
+                """,
+                {
+                    "cal_type": "traceprof",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class BiasSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'bias',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'bias',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "bias",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "bias",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class ReadNoiseSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'rn',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'rn',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "rn",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "rn",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class NonlinearCorrectionSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'nonlin',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'nonlin',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "nonlin",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "nonlin",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class DetectorFlatSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'detflat',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'detflat',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "detflat",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "detflat",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class GainSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'gain',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'gain',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.master_cal == True,
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "gain",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                master_cal = 1
+                """,
+                {
+                    "cal_type": "gain",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class WavelengthSolutionSelector(CalibrationSelector):
 
@@ -198,32 +370,66 @@ class WavelengthSolutionSelector(CalibrationSelector):
         super().__init__()
         self.cal_type = cal_type
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == self.cal_type,
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == self.cal_type,
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec
+                """,
+                {
+                    "cal_type": self.cal_type,
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": self.cal_type,
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
 
 class ReferenceEtalonSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'ref_etalon',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'ref_etalon',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
+        instrument = meta['instrument_name'].lower()
+        if instrument == 'hispec':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era AND
+                spectrograph = :spec
+                """,
+                {
+                    "cal_type": "ref_etalon",
+                    "era": meta["instrument_era"],
+                    "spec": meta["spectrograph"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+        elif instrument == 'parvi':
+            rows = db.rows_where(
+                """
+                cal_type = :cal_type AND
+                instrument_era = :era
+                """,
+                {
+                    "cal_type": "ref_etalon",
+                    "era": meta["instrument_era"]
+                },
+                order_by="abs(mjd_start - {})".format(meta["mjd_start"])
+            )
+
+        return list(rows)
