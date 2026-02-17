@@ -1175,7 +1175,9 @@ class CalibrationModel(DataModel):
 
         # Strings for master and origin
         if master_cal:
-            cal_type = f"master-{cal_type}"
+            cal_type = f"mastercal-{cal_type}"
+        else:
+            cal_type = f"cal-{cal_type}"
 
         # Construct starting filename
         filename = f"{instrument_alias}.{datetime_str}.{cal_type}"
