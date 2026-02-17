@@ -29,16 +29,15 @@ class Covar:
         the covariance matrix of the resultant differences, and the time 
         intervals between the resultant midpoints.
 
-        Arguments:
-        1. readtimes [list of values or lists for the times of reads.  If 
-                      a list of lists, times for reads that are averaged
-                      together to produce a resultant.]
+        Parameters
+        ----------
+        readtimes : list of float or list of list of float
+            Times of reads. If a list of lists, each sublist gives times for reads 
+            that are averaged together to produce a resultant.
+        pedestal : bool, default False
+            Whether the covariance matrix includes terms for the first resultant. 
+            Needed if fitting for the pedestal (i.e., the reset value).
 
-        Optional arguments:
-        2. pedestal  [boolean: does the covariance matrix include the terms
-                      for the first resultant?  This is needed if fitting
-                      for the pedestal (i.e. the reset value).  Default
-                      False. ]
 
         """
         mean_t = []   # mean time of the resultant as defined in the paper
@@ -94,20 +93,25 @@ class Covar:
         Calculate the bias in the best-fit count rate from estimating the
         covariance matrix.  This calculation is derived in the paper.
 
-        Arguments:
-        1. countrates [array of count rates at which the bias is desired]
-        2. sig [float, single read noise]
-        3. cvec [weight vector on resultant differences for initial
-                 estimation of count rate for the covariance matrix.
-                 Will be renormalized inside this function.]
-        Optional argument:
-        4. da [float, fraction of the count rate plus sig**2 to use for finite
-               difference estimate of the derivative.  Default 1e-7.]
+        Parameters
+        ----------
+        countrates : array_like
+            Array of count rates at which the bias is desired.
+        sig : float
+            Single read noise.
+        cvec : array_like
+            Weight vector on resultant differences for initial estimation of count rate 
+            for the covariance matrix. Will be renormalized inside this function.
+        da : float, default 1e-7
+            Fraction of the count rate plus sig**2 to use for finite difference estimate 
+            of the derivative.
 
-        Returns:
-        1. bias [array, bias of the best-fit count rate from using cvec
-                 plus the observed resultants to estimate the covariance
-                 matrix]
+        Returns
+        -------
+        bias : array_like
+            Bias of the best-fit count rate from using `cvec` plus the observed resultants 
+            to estimate the covariance matrix.
+
         
         """
         
@@ -187,12 +191,16 @@ class Ramp_Result:
         fewer omitted resultant differences to get the correct values
         without double-coundint omissions.
 
-        Arguments:
-        1. diffs2use [a 2D array matching self.countrate_oneomit in 
-                      shape with zero for resultant differences that 
-                      were masked and one for differences that were 
-                      not masked]
-        
+        Parameters
+        ----------
+        diffs2use : array_like
+            A 2D array matching self.countrate_oneomit in 
+            shape with zero for resultant differences that 
+            were masked and one for differences that were 
+            not masked.
+
+        Notes
+        -----
         This function replaces the relevant entries of
         self.countrate_twoomit, self.chisq_twoomit,
         self.uncert_twoomit, self.countrate_oneomit, and
@@ -232,36 +240,32 @@ def fit_ramps(diffs, Cov, sig, countrateguess=None, diffs2use=None,
     covariance matrix for the read differences as given by the diagonal
     elements and the off-diagonal elements.
 
-    Arguments:
-    1. diffs [resultant differences, shape (ndiffs, npix)]
-    2. Cov [class Covar, holds the covariance matrix information]
-    3. sig [read noise, 1D array, shape (npix)]
+    Parameters
+    ----------
+    diffs : array_like, shape (ndiffs, npix)
+        Resultant differences.
+    Cov : Covar
+        Class holding the covariance matrix information.
+    sig : array_like, shape (npix)
+        Read noise.
+    countrateguess : array_like, shape (npix), optional
+        Count rates to be used to estimate the covariance matrix. Default is None.
+    diffs2use : array_like, shape (ndiffs, npix), optional
+        Boolean mask of whether to use each resultant difference for each pixel. Default is None.
+    detect_jumps : bool, optional
+        Run the jump detection machinery. Default is False.
+    resetval : float or array_like, shape (npix), optional
+        Priors on the reset values. Default is 0.
+    resetsig : float or array_like, shape (npix), optional
+        Uncertainties on the reset values. Default is np.inf.
+    rescale : bool, optional
+        Scale the covariance matrix internally. Default is True.
 
-    Optional Arguments:
-    4. countrateguess [array of shape (npix): count rates to be used
-                     to estimate the covariance matrix.  Default None, 
-                     in which case the average difference will be used, 
-                     replacing negative means with zeros.]
-    5. diffs2use [shape (ndiffs, npix), boolean mask of whether to use
-                     each resultant difference for each pixel.  Default
-                     None]
-    6. detect_jumps [run the jump detection machinery leaving out 
-                     single and consecutive resultant differences.
-                     Default False]
-    7. resetval [float or array of shape (npix): priors on the reset
-                     values.  Default 0.  Irrelevant unless 
-                     Cov.pedestal is True.]
-    8. resetsig [float or array of shape (npix): uncertainties on the 
-                     reset values.  Default np.inf, i.e., reset values
-                     have flat priors.  Irrelevant unless Cov.pedestal
-                     is True.]
-    9. rescale [boolean, scale the covariance matrix internally to avoid
-                     possible overflow/underflow problems for long ramps.
-                     Slightly increases computational cost.  Default
-                     True. ]
+    Returns
+    -------
+    Ramp_Result
+        Class holding detailed ramp information.
 
-    Returns:
-    Class Ramp_Result holding lots of information
 
     """
 
@@ -542,31 +546,28 @@ def mask_jumps(diffs, Cov, sig, threshold_oneomit=20.25,
     Function mask_jumps implements a likelihood-based, iterative jump
     detection algorithm.
 
-    Arguments:
-    1. diffs [resultant differences]
-    2. Cov [class Covar, holds the covariance matrix information.  Must
-            be based on differences alone (i.e. without the pedestal)]
-    3. sig [read noise, 1D array]
-    Optional arguments:
-    4. threshold_oneomit [float, minimum chisq improvement to exclude 
-                          a single resultant difference.  Default 20.25,
-                          i.e., 4.5 sigma]
-    5. threshold_twoomit [float, minimum chisq improvement to exclude 
-                          two sequential resultant differences.  
-                          Default 23.8, i.e., 4.5 sigma]
-    6. diffs2use [a 2D array of the same shape as d, one for resultant
-                  differences that appear ok and zero for resultant
-                  differences flagged as contaminated.  These flagged
-                  differences will be ignored throughout jump detection,
-                  which will only flag additional differences and
-                  overwrite the data in this array. Default None]
+    Parameters
+    ----------
+    diffs : array_like
+        Resultant differences.
+    Cov : Covar
+        Class holding the covariance matrix information. Must be based on differences alone (without the pedestal).
+    sig : array_like, shape (npix)
+        Read noise.
+    threshold_oneomit : float, optional
+        Minimum chi-squared improvement to exclude a single resultant difference. Default is 20.25.
+    threshold_twoomit : float, optional
+        Minimum chi-squared improvement to exclude two sequential resultant differences. Default is 23.8.
+    diffs2use : array_like, shape same as diffs, optional
+        Mask array indicating which resultant differences are okay (1) or contaminated (0). Default is None.
 
-    Returns:
-    1. diffs2use [a 2D array of the same shape as d, one for resultant
-                  differences that appear ok and zero for resultant
-                  differences flagged as contaminated.]
-    2. countrates [a 1D array of the count rates after masking the pixels
-                  and resultants in diffs2use.]
+    Returns
+    -------
+    diffs2use : array_like, shape same as diffs
+        Mask array of resultant differences after jump detection.
+    countrates : array_like
+        Count rates after masking pixels and resultants in diffs2use.
+
 
     """
 
@@ -708,17 +709,23 @@ def getramps(countrate, sig, readtimes, nramps=10):
 
     """
     Function getramps: make some synthetic ramps
-    Arguments:
-    1. countrate [electrons/time]
-    2. sig [single read read noise, electrons]
-    3. readtimes [list of values or lists for the times of reads.  If 
-                  a list of lists, times for reads that are averaged
-                  together to produce a resultant.]
-    Optional Arguments:
-    4. nramps [number of ramps desired, default 10]
+    
+    Parameters
+    ----------
+    countrate : float or array_like
+        Electrons per unit time.
+    sig : float
+        Single-read read noise in electrons.
+    readtimes : list or list of lists
+        Times of reads. If a list of lists, times are averaged together to produce a resultant.
+    nramps : int, optional
+        Number of ramps desired. Default is 10.
 
-    Returns:
-    1. counts [electrons in each read, shape (nreads, nramps)]
+    Returns
+    -------
+    counts : ndarray, shape (nreads, nramps)
+        Electrons in each read.
+
     """
 
     t_last = 0

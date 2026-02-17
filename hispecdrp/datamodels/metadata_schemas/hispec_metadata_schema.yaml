@@ -1,6 +1,7 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/hispec_metadata_schema.schema
 type: object
-properties:
+allOf:
 - $ref: "core.yaml"
 - $ref: "calibration.yaml"
 - $ref: "exposure.yaml"
@@ -8,3 +9,5 @@ properties:
 - $ref: "instrument.yaml"
 - $ref: "koa.yaml"
 - $ref: "program.yaml"
+- $ref: "data_quality.yaml"
+additionalProperties: true

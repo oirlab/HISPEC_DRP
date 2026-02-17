@@ -1,3 +1,5 @@
+import logging
+
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
 from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearCorrectionPrimitive,
@@ -6,6 +8,8 @@ from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearC
                            MakeGainPrimitive, MakeDetectorFlatPrimitive, RegisterCalibrationPrimitive,
                            CoaddFramesPrimitive)
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['ProcessDetFlatsPipeline']
 
@@ -61,9 +65,9 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
 
         # First, loop over all inputs to apply DQ init, saturation check, and bias subtraction
         results = []
-        self.log.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init, saturation, bias subtraction, and nonlin_corr.")
+        logger.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init, saturation, bias subtraction, and nonlin_corr.")
         for k, _input in enumerate(_input_list):
-            self.log.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
+            logger.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
             model_to_process = datamodels.open(_input)
             _result = self.dq_init.apply(model_to_process)
             _result = self.saturation_check.apply(_result)
@@ -78,9 +82,9 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
         # Register the detector gain calibration to the calibration database
         # self.register_gain_cal.apply(gain_result)
 
-        self.log.info(f"Continue loop over inputs to apply ramp_fit, dark, and det_gain.")
+        logger.info(f"Continue loop over inputs to apply ramp_fit, dark, and det_gain.")
         for k, _result in enumerate(results):
-            self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
+            logger.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.ramp_fit.apply(_result)
             _result = self.dark_sub.apply(_result)
             _result = self.gain_corr.apply(_result)
@@ -93,9 +97,9 @@ class ProcessDetFlatsPipeline(CalibrationPipeline):
         # Register the detector gain calibration to the calibration database
         # self.register_det_flat_cal.apply(detflat_result)
 
-        self.log.info(f"Continue loop over inputs to apply flat fielding.")
+        logger.info(f"Continue loop over inputs to apply flat fielding.")
         for k, _result in enumerate(results):
-            self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
+            logger.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.detflat_corr.apply(_result)
             results[k] = _result
 

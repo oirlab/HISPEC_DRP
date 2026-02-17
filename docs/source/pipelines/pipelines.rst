@@ -2,7 +2,7 @@ Pipelines
 =========
 
 Science Pipelines
----------
+-----------------
 
 .. toctree::
    :maxdepth: 1
@@ -13,7 +13,7 @@ Science Pipelines
    stage2
 
 Stage 0 Calibration Pipelines
----------
+-----------------------------
 
 .. toctree::
    :maxdepth: 1
@@ -25,7 +25,7 @@ Stage 0 Calibration Pipelines
    process_satflats
 
 Stage 1 Calibration Pipelines
----------
+-----------------------------
 
 .. toctree::
    :maxdepth: 1

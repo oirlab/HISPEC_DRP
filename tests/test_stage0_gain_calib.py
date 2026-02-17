@@ -188,7 +188,6 @@ def test_stage0_gain_calib(tmp_path):
         },
         'jump_detec': {
             'run': True,
-            'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
@@ -257,25 +256,25 @@ def test_stage0_gain_calib(tmp_path):
     prim_args['make_gain']['mode'] = 'full_detector'
     prim_args['make_gain']['method'] = 'quad'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert rel_residuals < 5
+    assert np.sum(rel_residuals > 5) == 0
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'full_detector'
     prim_args['make_gain']['method'] = 'grid'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert rel_residuals < 5
+    assert np.sum(rel_residuals > 5) == 0
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'full_detector'
     prim_args['make_gain']['method'] = 'both'
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
-    rel_residuals = np.abs(model_result['gain'].gain[0] - gain_model.gain[0, 0]) / np.sqrt(
+    rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert rel_residuals < 5
+    assert np.sum(rel_residuals > 5) == 0
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'per_pixel'
@@ -459,7 +458,6 @@ def test_stage0_gain_calib_stats(tmp_path):
         },
         'jump_detec': {
             'run': False,
-            'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,

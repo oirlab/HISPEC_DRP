@@ -1,4 +1,4 @@
-from .config import *
+from . import config
 from . import logging
 from .endian_utils import *
 from . import math

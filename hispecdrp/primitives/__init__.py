@@ -1,4 +1,6 @@
-from .base_primitive import *
+from hispecdrp.datamodels.base_model import CalibrationModel
+
+from .base_primitive import BasePrimitive
 from .dq_init import *
 from .saturation import *
 from .dark_subtraction import *
@@ -17,3 +19,13 @@ from .register_calibration import *
 from .jump_detection import *
 from .spectral_extraction import *
 from .refpix import *
+
+# Registry of primitives
+_local_dict = locals()
+PRIMITIVE_REGISTER = {
+    name : _local_dict[name]
+    for name in _local_dict 
+        if isinstance(_local_dict[name], type)
+            and issubclass(_local_dict[name], BasePrimitive)
+            and _local_dict[name] not in (BasePrimitive,)
+}

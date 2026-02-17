@@ -33,7 +33,10 @@ extensions = [
     'nbsphinx',
 ]
 
-napoleon_custom_sections = [('Returns', 'params_style')]
+napoleon_custom_sections = [
+    ('Calibrations', 'params_style'),
+    ('Returns', 'params_style')
+]
 
 autosummary_generate = True  # Generate autosummary stubs automatically
 autodoc_default_options = {
@@ -64,6 +67,8 @@ html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
 html_css_files = ["custom.css"]
 
+add_module_names = False
+
 # Version
 version = hispecdrp.__version__
 # The full version, including alpha/beta/rc tags.
@@ -71,3 +76,17 @@ version = hispecdrp.__version__
 
 # URL
 html_baseurl = 'https://oirlab.github.io/HISPEC_DRP/'
+
+#### Sphinx custom formatting ####
+
+
+# Skip primitive and pipeline calibrations and arguments variables since we explicitly document those.
+def autodoc_skip_member(app, what, name, obj, skip, options):
+    """Skip ARGUMENTS and CALIBRATIONS class variables from documentation."""
+    # if what == "class" and name in ("ARGUMENTS", "CALIBRATIONS", "_perform") and issubclass(obj.__class__, hispecdrp.primitives.base_primitive.BasePrimitive) and obj is not hispecdrp.primitives.base_primitive.BasePrimitive:
+    if what == "class" and name in ("ARGUMENTS", "CALIBRATIONS", "_perform", "PRIMITIVES"):
+        return True
+    return skip
+
+def setup(app):
+    app.connect("autodoc-skip-member", autodoc_skip_member)

@@ -6,6 +6,16 @@ __all__ = ['RampModel']
 
 
 class RampModel(DataModel):
+    """
+    The Teledyne Hawaii HXRG detectors use up-the-ramp (UTR) non-destructive reads, so raw data is a cube where each 2D slice is a single read.
+
+    .. csv-table::
+        :header: "HDU Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
+
+        DATA, Image, UInt16, "Nreads x 4096 x 4160", DN, Raw UTR data.
+        DQ_RAW, Image, UInt32, "4096 x 4160", None, Data quality flags for all reads.
+        DQ, Image, UInt32, "Nreads x 4096 x 4160", None, Combined data quality flags for individual reads.
+    """
     EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW, **DQ_L0}
 
     @property

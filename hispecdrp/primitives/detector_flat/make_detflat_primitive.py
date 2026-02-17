@@ -34,8 +34,6 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
     -------
     output : DetectorFlatModel
         The derived detector flat calibration model containing the normalized flat field map and updated DQ array.
-
-
     """
 
     ARGUMENTS = {
@@ -43,8 +41,6 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
         'max_cores' : 1,
         'cold_pixel_threshold' : 0.9,  # Threshold below which pixels are
     }
-
-    # CALIBRATIONS = {}
 
     def _perform(self):
         if  isinstance(self.input, Sequence):
@@ -57,7 +53,7 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
         median_flat_whitelamp_intensity = np.nanmedian(input_model.rate)
 
         # Median white lamp intensity for instrument monitoring
-        # output_detflat.meta["MEDWLAMP"] = median_flat_whitelamp_intensity
+        output_detflat.meta.median_flat_whitelamp_intensity = median_flat_whitelamp_intensity
 
         output_detflat.flat = input_model.rate/median_flat_whitelamp_intensity
         output_detflat.flat_err = input_model.rate_err/median_flat_whitelamp_intensity

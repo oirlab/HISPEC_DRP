@@ -5,7 +5,9 @@ import numpy as np
 from typing import Sequence
 from ...datamodels.dqflags import DQ_FLAGS
 from ..gain.make_gain_primitive import fit_gain_and_readnoise
+import logging
 
+logger = logging.getLogger(__name__)
 
 __all__ = ['MakeReadnoisePrimitive']
 
@@ -68,6 +70,13 @@ class MakeReadnoisePrimitive(BasePrimitive):
         If True, assume all ramps have identical count rates. Default is
         False.
 
+    Calibrations
+    ------------
+    gain : GainModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`
+    rn_init : ReadNoiseModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`
+
     Returns
     -------
     output : DataModel
@@ -123,7 +132,7 @@ class MakeReadnoisePrimitive(BasePrimitive):
         if isinstance(self.input, Sequence):
             _input_list_tmp = self.input
         nfiles = len(_input_list_tmp)
-        self.log.info(f"Deriving the detector readnoise from a list of {nfiles} inputs.")
+        logger.info(f"Deriving the detector readnoise from a list of {nfiles} inputs.")
 
         input_models = [datamodels.open(f) for f in _input_list_tmp]
         datamodel0 = input_models[0]
@@ -137,10 +146,10 @@ class MakeReadnoisePrimitive(BasePrimitive):
             rn_cal_init, _ = self.get_calibration(datamodel0, 'rn_init')
             rn_model_init = datamodels.open(rn_cal_init)
             _init_center_RN = rn_model_init.RN
-            self.log.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(_init_center_RN)} DN.")
+            logger.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(_init_center_RN)} DN.")
         elif isinstance(self.init_RN, float):
             _init_center_RN = self.init_RN
-            self.log.info(f"Using user-defined initial read noise values: {self.init_RN}.")
+            logger.info(f"Using user-defined initial read noise values: {self.init_RN}.")
 
         delta_readtimes = datamodel0.get_delta_readtimes()
 
@@ -153,10 +162,10 @@ class MakeReadnoisePrimitive(BasePrimitive):
                 _init_delta_RNs = self.init_delta_RNs
 
         if self.mode.lower() == 'full_detector':
-            self.log.info(
+            logger.info(
                 f"Running in full_detector mode. All detector pixels will be fitted jointly and a single gain and/or readnoise value will be returned for the entire chip.")
         elif self.mode.lower() == 'per_pixel':
-            self.log.info(
+            logger.info(
                 f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
 
         # Define output model from inputs

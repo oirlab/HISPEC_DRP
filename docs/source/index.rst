@@ -2,7 +2,7 @@
 HISPEC DRP Documentation
 ************************
 
-The HISPEC Data Reduction Pipeline is designed to process data from the HISPEC instrument at W.M. Keck Observatory. This site will be under active development as the pipeline is created.
+The HISPEC Data Reduction Pipeline processes data from the HISPEC instrument at W.M. Keck Observatory. This site will be under active development as the pipeline is created.
 
 Installation
 ============
@@ -12,22 +12,13 @@ Installation
    installation
 
 
-Examples
-========
-
-.. toctree::
-   :maxdepth: 2
-
-   examples/examples
-
-
-Primitives (Deprecated)
+Quickstart
 ==========
 
 .. toctree::
    :maxdepth: 2
 
-   primitives/primitives
+   quickstart/quickstart
 
 
 Pipelines
@@ -39,15 +30,6 @@ Pipelines
    pipelines/pipelines
 
 
-Data Models
-===========
-
-.. toctree::
-   :maxdepth: 2
-
-   datamodels/datamodels
-
-
 Calibrations
 ============
 
@@ -55,6 +37,14 @@ Calibrations
    :maxdepth: 2
 
    calibrations/calibrations
+
+Algorithms
+==========
+
+.. toctree::
+   :maxdepth: 2
+
+   algorithms/algorithms
 
 
 Development

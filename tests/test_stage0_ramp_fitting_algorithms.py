@@ -188,7 +188,6 @@ def test_stage0_ramp_fitting_readnoise_dominated(tmp_path):
             },
             'jump_detec' : {
                 'run': False,
-                'ouput_model' : 'input',
                 'method': 'jwst',
                 'max_cores': pipe_max_cores,
                 'rejection_threshold': 4.0,
@@ -429,7 +428,6 @@ def test_stage0_ramp_fitting_photon_dominated(tmp_path):
             },
             'jump_detec' : {
                 'run': False,
-                'ouput_model' : 'input',
                 'method': 'jwst',
                 'max_cores': pipe_max_cores,
                 'rejection_threshold': 4.0,

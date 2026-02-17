@@ -1,3 +1,4 @@
+import os
 from hispecdrp import ProcessDarksPipeline
 from hispecdrp import datamodels
 import hispecdrp.simulations as simu
@@ -8,6 +9,8 @@ from hispecdrp.primitives.dark_subtraction.master_dark_primitive import MakeMast
 def test_stage0_dark_calib(tmp_path):
     np.random.seed(12345)
     start_time = time.time()
+
+    #os.environ["KOA_CALIBRATION_CACHE"] = str(tmp_path) + os.sep
 
     # --- Define parameters for the simulated ramp ---
     max_cores = 1
@@ -197,7 +200,6 @@ def test_stage0_dark_calib(tmp_path):
         },
         'jump_detec': {
             'run': True,
-            'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,
@@ -248,7 +250,6 @@ def test_stage0_dark_calib(tmp_path):
     dark_pipe = ProcessDarksPipeline()
 
     # Set any primitive args
-
     dark_pipe.dq_init.dq = dqinit_model
     dark_pipe.saturation_check.saturation = saturation_model
     dark_pipe.bias_sub.bias = bias_model
@@ -299,6 +300,8 @@ def test_stage0_dark_calib(tmp_path):
 
 
 def test_stage0_master_dark(tmp_path):
+
+    #os.environ["KOA_CALIBRATION_CACHE"] = str(tmp_path) + os.sep
 
     # --- Create random dark map ---
     ny, nx = 10,10  # size of the detector

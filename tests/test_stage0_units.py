@@ -5,7 +5,7 @@ from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get
 
 from hispecdrp.primitives.dq_init.dqinit_primitive import _apply_dq_mask
 from hispecdrp.primitives.saturation.saturation_primitive import check_saturation
-from hispecdrp.primitives.bias_subtraction.bias_primitive import bias_subtraction
+from hispecdrp.primitives.bias_subtraction.bias_primitive import _bias_subtraction
 from hispecdrp.primitives.dark_subtraction.dark_primitive import dark_subtraction_rate
 from hispecdrp.primitives.gain.gain_primitive import gain_correction
 from hispecdrp.primitives.detector_flat.detflat_primitive import detector_flat_correction
@@ -75,7 +75,7 @@ def test_stage0_units(tmp_path):
                                 [2, 4]], dtype=np.uint32)
 
             # Run the numba kernel
-            bias_subtraction(
+            _bias_subtraction(
                 data_raw,
                 dq,
                 bias_map,

@@ -1,7 +1,11 @@
+import logging
+
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
 from ...primitives import (DQInitPrimitive, MakeBiasPrimitive, RegisterCalibrationPrimitive)
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['ProcessBiasPipeline']
 
@@ -35,9 +39,9 @@ class ProcessBiasPipeline(CalibrationPipeline):
 
         # First, loop over all inputs to apply DQ init
         results = []
-        self.log.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init.")
+        logger.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init.")
         for k, _input in enumerate(_input_list):
-            self.log.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
+            logger.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
             model_to_process = datamodels.open(_input)
             _result = self.dq_init.apply(model_to_process)
             results.append(_result)

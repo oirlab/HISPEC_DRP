@@ -2,8 +2,11 @@ from ..base_primitive import BasePrimitive
 from ...calibrations import NonlinearCorrectionSelector
 from ... import datamodels
 import numpy as np
+import logging
 
 import hispecdrp.primitives.refpix.reference_SCALES_DRP as scales_drp
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['RefPixelCorrectionPrimitive']
 
@@ -17,12 +20,12 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
     using the SCALES-DRP algorithm (Author: Athira Unni).
     https://github.com/scalessim/SCALES-DRP/blob/main/scalesdrp/primitives/reference.py
 
-    todo: Eventually for HISPEC, the goal is to use 4 reference pixels on each edge of the detector as well as a 65th reference channel that is read concurrently with the 64 science channels.
+    TODO: Eventually for HISPEC, the goal is to use 4 reference pixels on each edge of the detector as well as a 65th reference channel that is read concurrently with the 64 science channels.
 
-    todo: explore best 1/f noise correction algorithm.
+    TODO: explore best 1/f noise correction algorithm.
     We might even be able to optionally fit and subtract the 1/f noise during the spectral extraction step in stage 1.
 
-    todo: eveluate benefits of implementing a IRS2 readout pattern for HISPEC, which has more reference pixels interleaved with science pixels.
+    TODO: eveluate benefits of implementing a IRS2 readout pattern for HISPEC, which has more reference pixels interleaved with science pixels.
 
     References:
     Roman Roman-STScI-000673: Application and Characterization of IRRC on Roman/WFI TVAC1 Data
@@ -31,8 +34,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
     JWST:
     https://jwst-pipeline.readthedocs.io/en/stable/jwst/refpix/description.html
 
-
-
     Parameters
     ----------
     input : str or RampModel
@@ -40,8 +41,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
         to be a raw (ramp) data product.
     suffix : str or None, optional
         Suffix to append to the output filename. Default is ``'refpix'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
     method : str, optional
         The reference pixel correction method to use. Currently, only
         ``'scales_drp'`` is supported. Default is ``'scales_drp'``.
@@ -63,7 +62,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
     output : RampModel
         Reference pixel-corrected data model.
 
-
     References
     ----------
     Unni, A., Sallum, S., Benac, P., Fitzgerald, M. P., et al., "SCALES-DRP : A Data Reduction Pipeline for an Upcoming Keck Thermal Infrared Spectrograph", arXiv, arXiv:2509.15489 (2025)
@@ -73,7 +71,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'run' : False,
         'suffix' : 'refpix',
-        'ouput_model' : 'input',
         'method' : 'scales_drp',
         'max_cores' : 1,
         'n_channels' : None,
@@ -81,8 +78,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
         'n_ref_right' : None,
         'vertical' : None,
     }
-
-    CALIBRATIONS = {}
 
     def _perform(self):
 
@@ -106,10 +101,10 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
             _n_ref_right = self.n_ref_right
 
         result = self.get_output_model(input_model)
-        self.log.info(f"Applying reference pixel correction to {input_model}")
+        logger.info(f"Applying reference pixel correction to {input_model}")
 
         if result.data.dtype != np.float32:
-            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            logger.info(f"Converting UTR data from {result.data.dtype} to float32")
             result.data = result.data.astype(np.float32)
 
         if not _vertical:

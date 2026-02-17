@@ -1,18 +1,27 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/core.schema
 type: object
 properties:
-  last_updated:
-    title: "ISO 8601 datetime file was last updated YYYY-MM-DDTHH:MM:SS.SSS"
-    fits_keyword: LASTUPD
-
   datetime_obs:
     title: "Exposure observation datetime in format YYYY-MM-DDTHH:MM:SS.SSS"
     fits_keyword: DATETOBS
-    include_calibration_db: true
+    cal_db: true
+    include_ancestors: true
+    merge_rule: min
 
+  last_processed:
+    title: "ISO 8601 datetime file was last processed YYYY-MM-DDTHH:MM:SS.SSS"
+    fits_keyword: LASTPROC
+    merge_rule: drop
+    include_ancestors: true
+    cal_db: true
+    
   filename:
     title: "Name of the file"
     fits_keyword: FILENAME
-    include_calibration_db: true
+    cal_db: true
+    merge_rule: drop
+    include_ancestors: true
 
   file_type:
     title: "Type of file"
@@ -23,18 +32,21 @@ properties:
     title: "Telescope used to acquire the data"
     fits_keyword: TELESCOP
     default: Keck-II
-    enum: ["Keck-II", "Palomar"]
+    enum: ["Keck-II"]
 
   model_type:
     title: "Type of data model"
     fits_keyword: DATAMODL
+    merge_rule: drop
 
   drp_version:
     title: "DRP version used to create this file"
     fits_keyword: DRPVER
-    include_calibration_db: true
+    cal_db: true
+    merge_rule: drop
 
   note:
     title: "Custom note"
     fits_keyword: NOTE
-    include_calibration_db: true
+    cal_db: true
+    merge_rule: drop

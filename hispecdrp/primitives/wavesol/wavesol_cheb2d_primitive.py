@@ -1,14 +1,47 @@
 from ... import datamodels
 from ..base_primitive import BasePrimitive
+import logging
 
 from ...utils.math import delta_wave_to_delta_vel, solve_chebyshev2d_ols
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
 __all__ = ['CalculateChebyshev2DWLSPrimitive']
 
 
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
+
+    """
+    Fit a 2D Chebyshev polynomial to a set of data points (pixel, order, wavelength) to derive the wavelength solution.
+
+    The unstructured set of points {pixel_i, order_i, wave_i} is fit with a 2D Chebyshev polynomial to obtain the wavelength solution. Specifically, the data fit is {pixel_i, order_i, wave_i} where the 2D polynomial represents an expansion of the grating equation.
+
+    Parameters
+    ----------
+    deg_intra_order : int or 'auto'
+        Degree of the polynomial within an order.
+    deg_inter_order : int or 'auto'
+        Degree of the polynomial between orders. If 'auto', it will be set based on the number of orders being fit.
+    max_iters : int
+        Maximum number of iterations for the 2D fitting process.
+    sigma_cut : float
+        Sigma clipping cutoff in units of standard deviation of the residuals.
+    max_vel_cut : float
+        Maximum velocity cutoff for the residuals. Points with velocity residuals larger than this cutoff will be excluded from the fit in the next iteration. Units = m/s.
+    opt_weights : bool
+        Whether to use optimized weights based on the input model's wavelength errors. If False, uniform weights will be used. Default is True.
+    fit_orders : list of int or None
+        List of orders to fit. If None, all orders will be fit.
+    do_fibers : list of int or None
+        List of fibers to fit. If None, all fibers will be fit (separately in series).
+
+    Returns
+    -------
+    output : LFCWavesolModel
+        The wavelength solution model.
+    
+    """
 
     ARGUMENTS = {
         'deg_intra_order' : 'auto',
@@ -16,10 +49,9 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         'max_iters' : 100,
         'sigma_cut' : 4,
         'max_vel_cut' : 1E3,
-        'opt_weights' : False,
+        'opt_weights' : True,
         'fit_orders' : None,
         'do_fibers' : None,
-        'output_model' : 'LFCWavesolModel',
     }
 
     def _perform(self):
@@ -41,14 +73,16 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                 anchor_orders = 10
                 max_degree = 10
                 deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
-            self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
+            logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
 
         fit_results = []
 
         # Get the output model type
-        output_model = self.get_output_model(input_model)
+        output_model = datamodels.LFCWavesolModel.from_datamodels(
+            input_model, data=input_model._data,
+        )
 
         for fiber in do_fibers:
 
@@ -103,7 +137,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             # Set unreliable WLS in DQ
             bad_orders = np.setdiff1d(order_vec, fit_orders)
             dq = getattr(output_model, f'spec_dq_fib{fiber}')
-            flag_value = output_model.DQ_FLAGS['UNRELIABLE_WS']
+            flag_value = datamodels.DQ_FLAGS['UNRELIABLE_WS']
             for order in bad_orders:
                 oi = np.abs(order - output_model.meta.order_start)
                 dq[oi, :] |= flag_value

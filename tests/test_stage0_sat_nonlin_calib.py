@@ -2,8 +2,6 @@ from hispecdrp import ProcessSatFlatsPipeline
 from hispecdrp import datamodels
 import hispecdrp.simulations as simu
 import numpy as np
-import os
-from hispecdrp.datamodels.dqflags import DQ_FLAGS
 import time
 
 def test_stage0_sat_nonlin_calib(tmp_path):
@@ -208,7 +206,6 @@ def test_stage0_sat_nonlin_calib(tmp_path):
         },
         'jump_detec' : {
             'run': False,
-            'ouput_model' : 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 4.0,

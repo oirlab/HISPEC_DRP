@@ -238,9 +238,7 @@ def test_stage0_master_bias(tmp_path):
 
     make_bias_primitive = MakeMasterBiasPrimitive()
 
-    prim_args = {}
-
-    output_master_bias = make_bias_primitive.apply(bias_list, **prim_args)
+    output_master_bias = make_bias_primitive.apply(bias_list)
 
     assert  output_master_bias.meta.master_cal
     np.testing.assert_array_equal(output_master_bias.bias, bias_map / gain_map)

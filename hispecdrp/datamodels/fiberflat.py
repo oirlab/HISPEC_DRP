@@ -16,10 +16,32 @@ def _create_fiberflat_extensions(num_fibers: int):
 
 
 class FiberflatModel(CalibrationModel):
+    """
+    The fiber flat model contains the relative transmission of each fiber as a function of wavelength.
+
+    .. csv-table::
+        :header: "HDU Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
+
+        SPEC_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Extracted fiber spectrum."
+        SPEC_ERR_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Extracted fiber spectrum errors (all sources)."
+        SPEC_VAR_POISSON_FIB#, Image, Float32, "Nord x 4096", "(e-/s)²", "Extracted fiber spectrum variance (Poisson)."
+        SPEC_VAR_RNOISE_FIB#, Image, Float32, "Nord x 4096", "(e-/s)²", "Extracted fiber spectrum variance (read noise)."
+        SPEC_DQ_FIB#, Image, UInt32, "Nord x 4096", None, "Data quality."
+        WAVE_FIB#, Image, Float64, "Nord x 4096", "micron", "Wavelength solution."
+        MID_TIME_FIB#, Image, Float64, "Nord x 4096", "MJD", "Exposure mid-point times."
+        TRANS_FIB#, Image, Float32, "Nord x 4096", None, "Normalized transmission."
+        TRANS_ERR_FIB#, Image, Float32, "Nord x 4096", None, "Transmission error."
+    """
     CAL_TYPE = 'fiberflat'
+    
     def __init__(self, *args, **kwargs):
-        if 'config' in kwargs and kwargs['config'] is not None:
-            self.EXTENSIONS.update(_create_fiberflat_extensions(kwargs['config'].num_fibers))
-        else:
-            self.EXTENSIONS.update(_create_fiberflat_extensions(self.DEFAULT_CONFIG.num_fibers))
+        config = kwargs.get('config', None)
+        if config is None:
+            config = self._get_instrument_config(
+                meta=kwargs.get('meta', None),
+                filepath=kwargs.get('filepath', None),
+                instrument_name=kwargs.get('instrument_name', None),
+            )
+        self.EXTENSIONS = self.EXTENSIONS.copy()
+        self.EXTENSIONS.update(_create_fiberflat_extensions(config.num_fibers))
         super().__init__(*args, **kwargs)

@@ -7,9 +7,12 @@ import matplotlib.pyplot as plt
 from typing import Sequence
 from ...utils.math import get_err_from_posterior
 from ...datamodels.dqflags import DQ_FLAGS
+import logging
 
 import multiprocessing as mp
 import ctypes
+
+logger = logging.getLogger(__name__)
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
@@ -38,8 +41,10 @@ class MakeNonLinPrimitive(BasePrimitive):
     Use saturated flat fields to derive the nonlinearity correction model.
 
     The non-linearity correction is assumed to follow:
+
         P(DN) = a0 + a1*DN + a2*DN^2 + ... + an*DN^n
         where P(DN) is the corrected signal, DN is the measured signal, and
+        
     a0, a1, ..., an are the polynomial coefficients derived in this primitive.
     Note that the ordering of the coefficients in the calibration file is from lowest
     order to highest order, which is the reverse of the usual numpy.polyval ordering.
@@ -52,8 +57,6 @@ class MakeNonLinPrimitive(BasePrimitive):
     model for the full detector. Although the full detector mode is only for
     testing since there are too many pixels on a normal detector and the
     matrix becomes too large with so many ramps.
-
-
 
     Parameters
     ----------
@@ -86,6 +89,17 @@ class MakeNonLinPrimitive(BasePrimitive):
         Fractional deviation from a linear ramp used to define the maximum
         nonlinearity, above which data are considered too non-linear to be
         corrected accurately. Default is 0.05.
+
+    Calibrations
+    ------------
+    gain : GainModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`
+    rn : ReadNoiseModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`
+    saturation : SaturationModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.SaturationSelector`
+    bias : BiasModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.BiasSelector`
 
     Returns
     -------
@@ -151,9 +165,9 @@ class MakeNonLinPrimitive(BasePrimitive):
             raise NotImplementedError(f"Only 'full_detector' and 'per_pixel' modes are implemented currently. Not {self.mode}")
 
         if self.mode.lower() == 'full_detector':
-            self.log.info(f"Running in full_detector mode. All detector pixels will be fitted jointly and a single gain and/or readnoise value will be returned for the entire chip.")
+            logger.info(f"Running in full_detector mode. All detector pixels will be fitted jointly and a single gain and/or readnoise value will be returned for the entire chip.")
         elif self.mode.lower() == 'per_pixel':
-            self.log.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
+            logger.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
 
 
         if isinstance(self.input, (datamodels.DataModel, str)):
@@ -161,7 +175,7 @@ class MakeNonLinPrimitive(BasePrimitive):
         if  isinstance(self.input, Sequence):
             _input_list_tmp = self.input
         nfiles = len(_input_list_tmp)
-        self.log.info(f"Deriving the detector non linearity polynomial coefficients from a list of {nfiles} inputs.")
+        logger.info(f"Deriving the detector non linearity polynomial coefficients from a list of {nfiles} inputs.")
 
         input_models = [datamodels.open(f) for f in _input_list_tmp]
         datamodel0 = input_models[0]

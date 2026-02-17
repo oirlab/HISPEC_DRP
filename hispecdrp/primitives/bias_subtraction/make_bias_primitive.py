@@ -5,9 +5,12 @@ from copy import copy
 from typing import Sequence
 from ... import datamodels
 from ..jump_detection.jump_detection_difference import median_axis0_3d
+import logging
 
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['MakeBiasPrimitive']
 
@@ -18,11 +21,8 @@ class MakeBiasPrimitive(BasePrimitive):
     """
     Derive the detector bias and kTC noise from a set of dark exposures.
     1) Median combine the first read to create the bias frame.
-    2) Compute the kTC noise as the standard deviation across the first reads,
-       using sigma-clipping to reject outliers.
+    2) Compute the kTC noise as the standard deviation across the first reads, using sigma-clipping to reject outliers.
     3) Flag pixels with high bias level or high kTC noise in the DQ array.
-
-    todo: add median bias level and median kTC level to metadata for instrument monitoring
 
     Parameters
     ----------
@@ -49,15 +49,13 @@ class MakeBiasPrimitive(BasePrimitive):
         'bias_threshold' : 1000,  # DN,  Threshold bias above which pixels are bad
     }
 
-    # CALIBRATIONS = {}
-
     def _perform(self):
         if isinstance(self.input, (datamodels.DataModel, str)):
             _input_list_tmp = [self.input]
         if  isinstance(self.input, Sequence):
             _input_list_tmp = self.input
         nfiles = len(_input_list_tmp)
-        self.log.info(f"Deriving the detector bias and kTC noise from a list of {nfiles} inputs.")
+        logger.info(f"Deriving the detector bias and kTC noise from a list of {nfiles} inputs.")
 
         input_models = [datamodels.open(f) for f in _input_list_tmp]
 
@@ -76,12 +74,10 @@ class MakeBiasPrimitive(BasePrimitive):
             _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
                                     self.kTC_threshold, self.bias_threshold)
 
-        # median_bias_level = np.nanmedian(output_bias.bias)
-        # Median bias for instrument monitoring
-        # output_detdark.meta["MEDBIAS"] = median_bias_level
-        # median_kTC_level = np.nanmedian(output_bias.ktc)
-        # Median kTC noise level for instrument monitoring
-        # output_detdark.meta["MEDKTC"] = median_kTC_level
+        median_bias_level = np.nanmedian(output_bias.bias)
+        output_bias.meta.median_bias_level = median_bias_level
+        median_kTC_level = np.nanmedian(output_bias.ktc)
+        output_bias.meta.median_kTC_level = median_kTC_level
 
         return dict(output=output_bias)
 

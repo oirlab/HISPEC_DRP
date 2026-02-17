@@ -4,10 +4,12 @@ import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
 from typing import Sequence
 from copy import copy
+import logging
 
-from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 from ..coadd.coadd_frames_primitive import coadd_group
+
+logger = logging.getLogger(__name__)
 from .make_bias_primitive import _find_bad_pixels_bias
 
 __all__ = ['MakeMasterBiasPrimitive']
@@ -21,8 +23,7 @@ class MakeMasterBiasPrimitive(BasePrimitive):
 
     A master calibration is identified by setting the `meta.master_cal` attribute to True.
 
-    todo: implement automatic selection of biases to be combined for making the master bias
-    todo: add median bias level and median kTC level to metadata for instrument monitoring
+    TODO: implement automatic selection of biases to be combined for making the master bias
 
     Parameters
     ----------
@@ -50,15 +51,6 @@ class MakeMasterBiasPrimitive(BasePrimitive):
         'max_cores' : 1,
     }
 
-    CALIBRATIONS = {
-        # Todo to implement for automatic selection of darks to be combined for making the master dark
-        # 'bias': {
-        #     'selector': BiasSelector,
-        #     'selector_kwargs': {}
-        # }
-    }
-
-
     def _perform(self):
 
         if self.input is not None: # How do you call a primitive without input?
@@ -72,7 +64,7 @@ class MakeMasterBiasPrimitive(BasePrimitive):
 
         # Make sure input is a list of models
         if input_type in (str, datamodels.DataModel):
-            self.log.warning("Input is a single model or path, returning without coadding.")
+            logger.warning("Input is a single model or path, returning without coadding.")
             output_bias = _inputs.copy()
         if input_type in (list, tuple):
             input_models = [datamodels.open(f) for f in _inputs]
@@ -87,7 +79,7 @@ class MakeMasterBiasPrimitive(BasePrimitive):
 
             output_bias = self.get_output_model(input_models)
 
-            output_bias.bias =_bias / len(input_models)
+            output_bias.bias = _bias / len(input_models)
             output_bias.ktc = np.sqrt(_kTC2 / len(input_models))
             output_bias.dq = _dq
 
@@ -98,12 +90,10 @@ class MakeMasterBiasPrimitive(BasePrimitive):
             _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
                                     self.kTC_threshold, self.bias_threshold)
 
-        # median_bias_level = np.nanmedian(output_bias.bias)
-        # Median bias for instrument monitoring
-        # output_detdark.meta["MEDBIAS"] = median_bias_level
-        # median_kTC_level = np.nanmedian(output_bias.ktc)
-        # Median kTC noise level for instrument monitoring
-        # output_detdark.meta["MEDKTC"] = median_kTC_level
+        median_bias_level = np.nanmedian(output_bias.bias)
+        output_bias.meta.median_bias_level = median_bias_level
+        median_kTC_level = np.nanmedian(output_bias.ktc)
+        output_bias.meta.median_kTC_level = median_kTC_level
 
         return dict(output=output_bias)
 

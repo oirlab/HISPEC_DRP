@@ -5,6 +5,9 @@ from ...datamodels.dqflags import DQ_FLAGS
 from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['CheckSaturationPrimitive', 'check_saturation']
 
@@ -28,9 +31,9 @@ class CheckSaturationPrimitive(BasePrimitive):
         Input file path or data model to process. Currently, this is expected
         to be a raw (ramp) data product.
     suffix : str or None, optional
-        Suffix to append to the output filename. Default is ``'saturation'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+        Suffix to append to the output filename. Default is ``'satcheck'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for processing. Default is 1 (no parallelization).
 
     Returns
     -------
@@ -38,17 +41,17 @@ class CheckSaturationPrimitive(BasePrimitive):
         Data model with the ``SATURATED`` DQ flags set for affected pixels and
         reads.
 
-    Notes
-    -----
-    Additional outputs accessible as ``primitive._output[<key>]``
+    Calibrations
+    ------------
+    saturation : SaturationModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.SaturationSelector`
 
     - **saturation**: SaturationModel
         The saturation calibration model used for flagging.
     """
 
     ARGUMENTS = {
-        'suffix' : 'checksat',
-        'output_model' : 'input',
+        'suffix' : 'satcheck',
         'max_cores' : 1,
     }
 
@@ -72,7 +75,7 @@ class CheckSaturationPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying saturation check with {saturation_model} to {input_model}")
+        logger.info(f"Applying saturation check with {saturation_model} to {input_model}")
 
         if not hasattr(input_model, "DQ_RAW"):
             raise AttributeError("Input model has no DQ_RAW array to flag saturation.")

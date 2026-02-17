@@ -30,10 +30,26 @@ def _create_tracepos_extensions(num_fibers: int):
 
 
 class TracePosModel(CalibrationModel):
+    """
+    The trace positions are determined from the fiber flat data. They are stored as polynomial coeffs and evaluated positions for each order/fiber.
+
+    .. csv-table::
+        :header: "Hdu Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
+
+        COEFF_POS_FIB#, Image, Float64, "Nord x Ncoeff", "None", "Polynomial coefficients for the trace positions of fiber #."
+        COEFF_FWHM_FIB#, Image, Float64, "Nord x Ncoeff", "None", "Polynomial coefficients for the trace widths (FWHM) of fiber #."
+        POS_FIB#, Image, Float64, "Nord x Ncoeff", "Pixels", "Evaluated positions for fiber #."
+        FWHM_FIB#, Image, Float64, "Nord x Ncoeff", "Pixels", "Evaluated fwhm for fiber #."
+    """
     CAL_TYPE = 'tracepos'
     def __init__(self, *args, **kwargs):
-        if 'config' in kwargs and kwargs['config'] is not None:
-            self.EXTENSIONS.update(_create_tracepos_extensions(kwargs['config'].num_fibers))
-        else:
-            self.EXTENSIONS.update(_create_tracepos_extensions(self.DEFAULT_CONFIG.num_fibers))
+        config = kwargs.get('config', None)
+        if config is None:
+            config = self._get_instrument_config(
+                meta=kwargs.get('meta', None),
+                filepath=kwargs.get('filepath', None),
+                instrument_name=kwargs.get('instrument_name', None),
+            )
+        self.EXTENSIONS = self.EXTENSIONS.copy()
+        self.EXTENSIONS.update(_create_tracepos_extensions(config.num_fibers))
         super().__init__(*args, **kwargs)

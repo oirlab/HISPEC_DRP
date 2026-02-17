@@ -1,5 +1,5 @@
 from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
-from hispecdrp.utils import initialize_from_config
+from hispecdrp.utils.config import initialize_from_config
 
 import os
 import textwrap

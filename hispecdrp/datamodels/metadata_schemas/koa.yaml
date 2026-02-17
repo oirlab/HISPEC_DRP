@@ -1,14 +1,18 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/koa.schema
 type: object
 properties:
   koa_id:
     title: "KOA ID"
     fits_keyword: KOAID
-    include_calibration_db: true
+    cal_db: true
+    merge_rule: drop
 
-  koa_filehandle:
-    title: "KOA file path"
-    fits_keyword: KOAPATH
-    include_calibration_db: true
+  koa_filepath:
+    title: "KOA file handle"
+    fits_keyword: KOAFILEP
+    cal_db: true
+    merge_rule: drop
 
   koa_date_obs:
     title: "KOA observation date YYYY-MM-DD"

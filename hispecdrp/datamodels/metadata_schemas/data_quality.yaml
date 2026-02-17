@@ -1,3 +1,5 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/data_quality.schema
 type: object
 properties:
   
@@ -5,10 +7,38 @@ properties:
     title: "Data quality flag at the exposure level"
     fits_keyword: DATAQUAL
     default: GOOD
+    enum: [GOOD, BAD]
+    cal_db: true
 
   median_dark_current:
     title: "Median dark current"
-    unit: 'e/s'
+    unit: 'DN/s'
     fits_keyword: MEDDARK
     type: number
+    merge_rule: mean
+    include_ancestors: true
+
+  median_bias_level:
+    title: "Median bias level"
+    unit: 'DN'
+    fits_keyword: MEDBIAS
+    type: number
+    merge_rule: mean
+    include_ancestors: true
+
+  median_kTC_level:
+    title: "Median kTC noise level"
+    unit: 'DN'
+    fits_keyword: MEDKTC
+    type: number
+    merge_rule: mean
+    include_ancestors: true
+
+  median_flat_whitelamp_intensity:
+    title: "Median flat white lamp intensity"
+    unit: 'DN/s'
+    fits_keyword: MEDFLAT
+    type: number
+    merge_rule: mean
+    include_ancestors: true
   

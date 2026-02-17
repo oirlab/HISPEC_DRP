@@ -11,8 +11,40 @@ __all__ = ['FitEtalonLinesPrimitive']
 
 
 class FitEtalonLinesPrimitive(BasePrimitive):
+    """
+    Fit each Fabry-Pérot etalon line with a Gaussian or Lorentzian (default) profile.
+
+    Each etalon line is first identified with `scipy.signal.find_peaks <https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.find_peaks.html>`_ then refined with a centroid. Then each line is fit with a Gaussian or Lorentzian (default) profile using `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`_. The fit parameters are stored in a table in the output data model's attribute ``etalon_fitparams_fib#``.
+
+    Parameters
+    ----------
+    input : str or L2Model
+        Input level 2 model or path to a level 2 file.
+    fwhm_bounds : tuple, optional
+        Bounds on the full width at half maximum (FWHM) of the etalon lines in pixels, given as a tuple (min, max).
+    suffix : str, optional
+        Suffix to add to the output filename when saving the result. Default is 'etalon_fit'.
+    mu_bounds : tuple, optional
+        Bounds on the mean (mu) of the etalon lines in pixels relative to the centroid, given as a tuple (min, max) in units of pixels.
+    fsr_estimate : float, optional
+        An estimate of the free spectral range (fsr) of the etalon in GHz.
+    max_fit_window : int, optional
+        Maximum number of pixels to include in the fit for each line.
+    do_fibers : list of int, optional
+        List of fiber numbers to process. If None, all fibers will be processed.
+    do_orders : list of int, optional
+        List of echelle orders to process. If None, all orders will be processed.
+    profile_type : str, optional
+        The profile type to use for fitting the etalon lines. Options are 'gaussian' or 'lorentzian'. Default is 'lorentzian'.
+    
+    Returns
+    -------
+    output_model
+        The input model with the Table attribute ``etalon_fitparams_fib#`` populated.
+    """
 
     ARGUMENTS = {
+        'suffix' : 'etalon_fit',
         'fwhm_bounds' : None,
         'mu_bounds' : (-1, 1),
         'fsr_estimate' : None,  # GHz
@@ -20,7 +52,6 @@ class FitEtalonLinesPrimitive(BasePrimitive):
         'do_fibers' : None,
         'do_orders' : None,
         'profile_type' : 'lorentzian',
-        'output_model' : 'input',
     }
 
     def _perform(self):

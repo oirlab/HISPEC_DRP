@@ -12,6 +12,43 @@ __all__ = ['FitLFCLinesPrimitive']
 
 class FitLFCLinesPrimitive(BasePrimitive):
 
+    """
+    NOTE: *Under development*
+    
+    Fit each laser frequency comb (LFC) line with a Gaussian profile. This is useful for calculating the wavelength solution and the the line spread function (LSF).
+
+    Each LFC line is first identified with `scipy.signal.find_peaks <https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.find_peaks.html>`_ then refined with a centroid. Then each line is fit with a Gaussian profile using `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`_. The fit parameters are stored in a table in the output data model's attribute ``lfc_fitparams_fib#``.
+
+    Parameters
+    ----------
+    input
+        A level 1 or 2 data product.
+    fwhm_bounds : Sequence[float, float]
+        The bounds for the FWHM of the fit. Default is (0.2, 8) pixels.
+    mu_bounds : Sequence[float, float]
+        The bounds for the mean of the fit (in pixels) relative the centroid.
+        Default is (-1, 1) pixels.
+    max_fit_window : float
+        The maximum number of pixels to fit for a mode.
+        Default is 14 pixels.
+    do_orders : Sequence[int] | None
+        Which order(s) to fit. If None, fit all available orders.
+    do_fibers : Sequence[int] | None
+        Which fiber(s) to fit. If None, fit all available fibers.
+    lfc_nu0 : float
+        The central frequency (pump line) of the LFC in GHz.
+    lfc_delta_nu : float
+        The frequency spacing of the LFC modes in GHz.
+    profile_type : str
+        The profile type to use for fitting. Options are 'gaussian' or 'lorentzian'. Default is 'gaussian'.
+
+    Returns
+    -------
+    output : LFCFitParamsModel
+        A data model containing the fit parameters for each LFC line.
+
+    """
+
     ARGUMENTS = {
         'fwhm_bounds' : (0.2, 8),
         'mu_bounds' : (-1, 1),
@@ -21,12 +58,13 @@ class FitLFCLinesPrimitive(BasePrimitive):
         'lfc_nu0' : None,
         'lfc_delta_nu' : None,
         'profile_type' : 'gaussian',
-        'output_model' : 'LFCFitParamsModel',
     }
 
     def _perform(self):
         input_model = datamodels.open(self.input)
-        output_model = self.get_output_model(input_model)
+        output_model = datamodels.LFCFitParamsModel.from_datamodels(
+            input_model, data=input_model._data,
+        )
 
         # Which traces to process
         do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)

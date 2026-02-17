@@ -31,39 +31,33 @@ def gen_likelihood_map(diffs_lin, diffs_quad, covar, sigs, gains, alphas,
     coefficient.  Chi squared is equal to this returned array times
     -2.
 
-    Arguments:
-    1. diffs_lin : 2D array of floats
-           Size nreads-1 x nramps.  Differences between consecutive reads.
-    2. diffs_quad : 2D array of floats
-           Size nreads-1 x nramps.  Differences between the squares of 
-           the values (from a designated pedestal) in consecutive reads
-    3. covar : fitramp.Covar class
-           Should be appropriate for diffs_lin
-    4. sigs : list of floats
-           Trial read noise values
-    5. gains : list of floats
-           Trial gain values
-    6. alphas : list of floats
-           Trial nonlinearity coefficient values
-    7. asig : float, optional
-           Standard deviation of the read noise from other constraints.
-           If the best-fit read noise from this other constraint is
-           sigs[1], asig will incorporate this constraint to the
-           likelihood.
-    8. countratesidentical : boolean, optional
-           Assume that the count rate is the same for all ramps?  Default
-           False.
-    9. cguess : 1D array of floats or None, optional
-           Count rates for the purposes of computing a covariance matrix.
-           Default None.  If None, compute cguess from the nonlinearity-
-           corrected ramps.
-    10. d2use : 2D array of bools or None, optional
-           Boolean mask of differences between reads to use for computing
-           a likelihood.  If None, use all read differences.
+    Parameters
+    ----------
+    diffs_lin : 2D array of floats
+        Size nreads-1 x nramps. Differences between consecutive reads.
+    diffs_quad : 2D array of floats
+        Size nreads-1 x nramps. Differences between the squares of the values (from a designated pedestal) in consecutive reads
+    covar : fitramp.Covar class
+        Should be appropriate for diffs_lin
+    sigs : list of floats
+        Trial read noise values
+    gains : list of floats
+        Trial gain values
+    alphas : list of floats
+        Trial nonlinearity coefficient values
+    asig : float, optional
+        Standard deviation of the read noise from other constraints. If the best-fit read noise from this other constraint is sigs[1], asig will incorporate this constraint to the likelihood.
+    countratesidentical : boolean, optional
+        Assume that the count rate is the same for all ramps? Default False.
+    cguess : 1D array of floats or None, optional
+        Count rates for the purposes of computing a covariance matrix. Default None. If None, compute cguess from the nonlinearity-corrected ramps.
+    d2use : 2D array of bools or None, optional
+        Boolean mask of differences between reads to use for computing a likelihood. If None, use all read differences.
 
-    Returns:
+    Returns
+    -------
     logL : 3D array of floats
-           log likelihood, shape (len(sigs), len(gains), len(alphas))
+        log likelihood, shape (len(sigs), len(gains), len(alphas))
 
     """
 
@@ -139,50 +133,46 @@ def fitquad(diffs_lin, diffs_quad, covar, sigs, gains, alphas=[0], asig=0,
     marginalizing the ramps over the count rates.  This function
     will return the vertex of the fit, the covariance matrix
     implied by the coefficients, and the coefficients themselves.
+    
+    Parameters
+    ----------
+    diffs_lin : 2D array of float
+        Size (nreads-1, nramps). Differences between consecutive reads.
+    diffs_quad : 2D array of float
+        Size (nreads-1, nramps). Differences between the squares of the values 
+        (from a designated pedestal) in consecutive reads.
+    covar : fitramp.Covar
+        Should be appropriate for diffs_lin.
+    sigs : list of float
+        Trial read noise values.
+    gains : list of float
+        Trial gain values.
+    alphas : list of float
+        Trial nonlinearity coefficient values.
+    asig : float, optional
+        Standard deviation of the read noise from other constraints. If the best-fit read noise
+        from this other constraint is sigs[1], asig will incorporate this constraint into the likelihood.
+    countratesidentical : bool, optional
+        Assume that the count rate is the same for all ramps. Default is False.
+    cguess : 1D array of float or None, optional
+        Count rates for computing a covariance matrix. Default is None. If None, compute cguess
+        from the nonlinearity-corrected ramps.
+    d2use : 2D array of bool or None, optional
+        Boolean mask of differences between reads to use for computing a likelihood. If None,
+        use all read differences.
+    log : bool, optional
+        Use logarithmic coordinates for the quadratic form. Default is True.
 
-    Arguments:
-    1. diffs_lin : 2D array of floats
-           Size nreads-1 x nramps.  Differences between consecutive reads.
-    2. diffs_quad : 2D array of floats
-           Size nreads-1 x nramps.  Differences between the squares of 
-           the values (from a designated pedestal) in consecutive reads
-    3. covar : fitramp.Covar class
-           Should be appropriate for diffs_lin
-    4. sigs : list of floats
-           Trial read noise values
-    5. gains : list of floats
-           Trial gain values
-    6. alphas : list of floats
-           Trial nonlinearity coefficient values
-    7. asig : float, optional
-           Standard deviation of the read noise from other constraints.
-           If the best-fit read noise from this other constraint is
-           sigs[1], asig will incorporate this constraint to the
-           likelihood.
-    8. countratesidentical : boolean, optional
-           Assume that the count rate is the same for all ramps?  Default
-           False.
-    9. cguess : 1D array of floats or None, optional
-           Count rates for the purposes of computing a covariance matrix.
-           Default None.  If None, compute cguess from the nonlinearity-
-           corrected ramps.
-    10. d2use : 2D array of bools or None, optional
-           Boolean mask of differences between reads to use for computing
-           a likelihood.  If None, use all read differences.
-    11. log : bool, optional
-           Use logarithmic coordinates for the quadratic form?
-           Default True
+    Returns
+    -------
+    center : tuple of float
+        Center of the quadratic form in gain, read noise, nonlinearity. The coordinates
+        are given in log(gain) and log(readnoise) if log is True.
+    cov : 2D array of float
+        Covariance matrix of the log likelihood as estimated by the quadratic form fit.
+    c_2d : list of float
+        Coefficients describing the quadratic form.
 
-    Returns:
-    center : tuple of two or three floats
-           Center of the quadratic form in gain, read noise, nonlinearity
-           The coordinates will be given in log(gain) and log(readnoise)
-           if the argument log is True.
-    cov : 2D array of floats
-           The covariance matrix of the log likelihood as estimated by
-           the quadratic form fit
-    c_2d : list of floats
-           The coefficients describing the quadratic form
 
     """
     
@@ -248,47 +238,43 @@ def get_best_nonlinearity(diffs_lin, diffs_quad, covar, sigs, gains,
     and the nonlinearity coefficient corresponding to this highest
     gain.
 
-    Arguments:
-    1. diffs_lin : 2D array of floats
-           Size nreads-1 x nramps.  Differences between consecutive reads.
-    2. diffs_quad : 2D array of floats
-           Size nreads-1 x nramps.  Differences between the squares of 
-           the values (from a designated pedestal) in consecutive reads
-    3. covar : fitramp.Covar class
-           Should be appropriate for diffs_lin
-    4. sigs : list of floats
-           Trial read noise values
-    5. gains : list of floats
-           Trial gain values
-    6. alpha_offset : float
-           Trial nonlinearity coefficient value
-    7. dalpha : float
-           Offset in nonlinearity coefficient to try to fit a parabola
-           to maximize the gain
-    8. asig : float, optional
-           Standard deviation of the read noise from other constraints.
-           If the best-fit read noise from this other constraint is
-           sigs[1], asig will incorporate this constraint to the
-           likelihood.
-    9. cguess : 1D array of floats or None, optional
-           Count rates for the purposes of computing a covariance matrix.
-           Default None.  If None, compute cguess from the nonlinearity-
-           corrected ramps.
-    10. d2use : 2D array of bools or None, optional
-           Boolean mask of differences between reads to use for computing
-           a likelihood.  If None, use all read differences.
+    Parameters
+    ----------
+    diffs_lin : 2D array of float
+        Size (nreads-1, nramps). Differences between consecutive reads.
+    diffs_quad : 2D array of float
+        Size (nreads-1, nramps). Differences between the squares of the values 
+        (from a designated pedestal) in consecutive reads.
+    covar : fitramp.Covar
+        Should be appropriate for diffs_lin.
+    sigs : list of float
+        Trial read noise values.
+    gains : list of float
+        Trial gain values.
+    alpha_offset : float
+        Trial nonlinearity coefficient value.
+    dalpha : float
+        Offset in nonlinearity coefficient to try to fit a parabola to maximize the gain.
+    asig : float, optional
+        Standard deviation of the read noise from other constraints. If the best-fit read noise
+        from this other constraint is sigs[1], asig will incorporate this constraint into the likelihood.
+    cguess : 1D array of float or None, optional
+        Count rates for computing a covariance matrix. Default is None. If None, compute cguess
+        from the nonlinearity-corrected ramps.
+    d2use : 2D array of bool or None, optional
+        Boolean mask of differences between reads to use for computing a likelihood. If None,
+        use all read differences.
 
-    Returns:
-    1. bestloggain : float
-           Best-fit log gain
-    2. alphabest : float
-           Best nonlinearity coefficient (the one that yields the highest
-           best-fit gain
-    3. alpha_inc : float
-           Offset between alphabest and the input alpha_offset.  Can be
-           used to assess convergence.
-    
+    Returns
+    -------
+    bestloggain : float
+        Best-fit log gain.
+    alphabest : float
+        Best nonlinearity coefficient (the one that yields the highest best-fit gain).
+    alpha_inc : float
+        Offset between alphabest and the input alpha_offset. Can be used to assess convergence.
     """
+
     
     alphalist = [alpha_offset + i*dalpha for i in [-1, 0, 1]]
 
@@ -317,41 +303,39 @@ def fit_gain_linearity(ramps_dark, ramps_illum, fit_nonlin=True,
     """
     Main function: fit gain, read noise, nonlinearity.
 
-    1. ramps_dark : 2D array of floats
-          Shape (nreads, nramps)
-    2. ramps_illum : 2D array of floats
-          Shape (nreads, nramps).  Need not match the shape of ramps_dark.
-    3. fit_nonlin : bool, optional
-          Fit for a nonlinearity correction?  Default True
-    4. alpha_offset : float, optional
-          Trial value for a nonlinearity correction coefficient.  Default
-          2e-6 (i.e. linearized counts = counts + counts**2*2e-6)
-    5. dalpha : float, optional
-          Initial increment of nonlinearity correction coefficient.
-          Default 2e-6.
-    6. dalpha2 : float, optional
-          Follow-up increment of nonlinearity correction coefficient.
-          Default 5e-7
-    7. gainguess : float, optional
-          Initial guess of the electronic gain.  Default 1.85.
-    8. maxiter_nonlin: int, optional
-          Maximum number of iterations of the nonlinearity optimization.
-          Default 10.  If this is exceeded a warning will be raised.
-    9. snrscalefac : float, optional
-          Scaling factor for the spacing used in fitting a quadratic
-          form.  Default 1 (use settings arrived at empirically).  If a
-          different value is supplied, the internal values will be
-          scaled.
-        
-    Returns:
-    1. xc : float
-          Best-fit log(gain)
-    2. yc : float
-          Best-fit log(readnoise)
-    3. zc : float
-          Best-fit nonlinearity coefficient
-    4. cov : 2D array of floats
-          Covariance matrix of xc, yc, zc
+    Parameters
+    ----------
+    diffs_lin : 2D array of floats
+        Size nreads-1 x nramps. Differences between consecutive reads.
+    diffs_quad : 2D array of floats
+        Size nreads-1 x nramps. Differences between the squares of the values (from a designated pedestal) in consecutive reads
+    covar : fitramp.Covar class
+        Should be appropriate for diffs_lin
+    sigs : list of floats
+        Trial read noise values
+    gains : list of floats
+        Trial gain values
+    alphas : list of floats
+        Trial nonlinearity coefficient values
+    asig : float, optional
+        Standard deviation of the read noise from other constraints. If the best-fit read noise from this other constraint is sigs[1], asig will incorporate this constraint to the likelihood.
+    countratesidentical : boolean, optional
+        Assume that the count rate is the same for all ramps? Default False.
+    cguess : 1D array of floats or None, optional
+        Count rates for the purposes of computing a covariance matrix. Default None. If None, compute cguess from the nonlinearity-corrected ramps.
+    d2use : 2D array of bools or None, optional
+        Boolean mask of differences between reads to use for computing a likelihood. If None, use all read differences.
+    log : bool, optional
+        Use logarithmic coordinates for the quadratic form? Default True.
+
+    Returns
+    -------
+    center : tuple of two or three floats
+        Center of the quadratic form in gain, read noise, nonlinearity. The coordinates will be given in log(gain) and log(readnoise) if the argument log is True.
+    cov : 2D array of floats
+        The covariance matrix of the log likelihood as estimated by the quadratic form fit
+    c_2d : list of floats
+        The coefficients describing the quadratic form
     
     """
     

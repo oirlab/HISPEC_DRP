@@ -1,22 +1,22 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/exposure.schema
 type: object
 properties:
   exposure_type:
     title: "Type of exposure"
     fits_keyword: IMTYPE
     enum: ["DARK", "BIAS", "DETFLAT", "SPEC", "NONE"]
-    default: NONE
 
   mjd_start:
     title: "Exposure start Modified Julian Date of first read"
     fits_keyword: EXPMJDST
     type: number
-    include_calibration_db: true
+    cal_db: true
 
   read_mode:
     title: "Readout mode"
     fits_keyword: READMODE
-    default: DEFAULT
-    include_calibration_db: true
+    cal_db: true
 
   exposure_time:
     title: "Effective exposure time"
@@ -24,9 +24,11 @@ properties:
     type: number
     unit: sec
     default: 0
+    merge_rule: sum
+    include_ancestors: true
 
   clock_rate:
-    title: "Clock rate of the readout of the detector."
+    title: "Clock rate of the readout of the detector"
     fits_keyword: CLOCKRAT
     type: number
     unit: Hz

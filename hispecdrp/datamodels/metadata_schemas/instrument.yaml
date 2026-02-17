@@ -1,21 +1,23 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/instrument.schema
 type: object
 properties:
   instrument_name:
     title: "Instrument name"
     fits_keyword: INSTRUME
-    enum: ["HISPEC", "PARVI"]
+    default: HISPEC
+    enum: ["HISPEC"]
 
   instrument_era:
     title: "Instrument era specified with semver"
     fits_keyword: INSTERA
-    default: "0.0.1"
-    include_calibration_db: true
+    cal_db: true
 
   instrument_mode:
     title: "Instrument mode"
     fits_keyword: INSTMODE
-    default: YJHK
-    include_calibration_db: true
+    enum: ["YJHK", "YJ", "HK"]
+    cal_db: true
 
   lfc_nu0:
     title: "LFC nu0"
@@ -42,6 +44,35 @@ properties:
   spectrograph:
     title: "Spectrograph name"
     fits_keyword: SPECTROG
-    default: BSPEC
-    enum: ["BSPEC", "NSPEC"]
-    include_calibration_db: true
+    enum: ["BSPEC", "RSPEC"]
+    cal_db: true
+
+  n_channels:
+    title: "Number of spectral channels"
+    fits_keyword: NCHANLS
+    default: 64 # Sensitive to light
+    type: integer
+
+  n_refpixs:
+    title: "Number of reference pixels on each side of the detector"
+    fits_keyword: NREFPXS
+    default: 4
+    type: integer
+
+  ref_channel_position:
+    title: "Position of the reference channel in the data array"
+    fits_keyword: REFCHPOS
+    default: RIGHT
+    enum: [TOP, BOTTOM, LEFT, RIGHT, NONE]
+
+  channels_are_vertical:
+    title: "Are the spectral channels aligned vertically in the data array?"
+    fits_keyword: CHANVERT
+    default: true
+    type: boolean
+
+  orders_are_vertical:
+    title: "Are the echelle orders aligned vertically in the data array?"
+    fits_keyword: ORDVERT
+    default: true
+    type: boolean

@@ -2,83 +2,75 @@
 Pipelines
 =========
 
-Overview
---------
+Pipelines are a collection of :doc:`Primitives <primitives>`. that are executed in a specified order. The base class :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines which inherits from :py:class:`~hispecdrp.processing_component.ProcessingComponent`. The pipeline interface is similar to primitives.
 
-Pipelines are a collection of :doc:`Primitives <primitives>`. that are executed in a specified order. The base class :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline` specifies the interface for all pipelines which inherits from :py:class:`~hispecdrp.processing_component.ProcessingComponent`. The pipeline level interface largely matches the primitive interface.
+Implement New Pipeline
+----------------------
 
+1. Subclass BasePipeline
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-Pipeline Primitives
--------------------
+To implement a new pipeline (``NewPipeline``), create a new Python class that inherits from :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline`. If formally part of the HISPEC DRP, this class should be added to the `pipelines` module in the code base, following the structure of existing pipelines.
 
-Every pipeline must define a PRIMITIVE table as a class attribute ``PRIMITIVES`` which is a dictionary of primitive alias (key; ``str``) and their associated classes (value; ``type[BasePrimitive]``). The order of the primitives in this dictionary defines the order in which they are executed. Each primitive can also have its own configuration file and/or additional arguments that override the default arguments or those set in the configuration file.
+2. Primitives Table
+~~~~~~~~~~~~~~~~~~~
 
+Every pipeline must define the class attribute ``PRIMITIVES`` which is a dictionary of primitives used by the pipeline. Keys are an alias for the primitive (strings) and are chosen by the user but should reflect the primitive's role. Values are the associated primitive classes (types derived from ``BasePrimitive``). The order of the primitives in this dictionary should reflect the order in which they are executed, although this is not enforced.
 
+.. code-block:: python
 
-Pipeline Arguments
-------------------
+    class NewPipeline(BasePipeline):
 
-Pipelines arguments behave identical to :doc:`Primitives <primitives>`. The base pipeline defines no new arguments.
+        PRIMITIVES = {
+            'dark_sub': DarkSubtractionPrimitive,
+            'detflat': DetectorFlatPrimitive,
+            ... # Additional primitives as needed.
+        }
 
+3. Arguments
+~~~~~~~~~~~~
 
-Pipeline Configuration Files
-----------------------------
+By default, ``NewPipeline`` will inherit the same arguments as :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline`, which shares the same arguments as :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. It can specify any additional arguments in the class attribute ``ARGUMENTS``. These arguments are only relevant for the pipeline itself and are not passed to the primitives it uses.
 
-Pipelines can also use configuration files. An example configuration for the stage 1 pipeline is below. Some values are redundant with the default ``ARGUMENTS``, but are included here to be explicit.
+.. code-block:: python
 
-.. code-block:: yaml
-    
-    %YAML 1.2
-    ---
+    class NewPipeline(BasePipeline):
 
-    logging:
-      level: info
-      log_path: None
-
-    arguments:
-      # Can specify pipeline level arguments here.
-
-    primitives:
-      dark_sub:
-        config_file: 'dark_config.yaml' # Optional
-        arguments: # Additional arguments will override those in 'dark_config.yaml'
-          suffix: 'darksub'
-      flat_field:
-        arguments:
-          run: True
-          save_result: True
-          suffix: 'flat_field'
+        ARGUMENTS = {
+            'arg_name': ... # <default_value>
+        }
 
 
-Logging
--------
+4. Perform Method
+~~~~~~~~~~~~~~~~~
 
-Pipelines will pass any logging-specific config to each primitive it uses.
+The pipeline must implement the required method :py:meth:`~hispecdrp.pipelines.base_pipeline.BasePipeline._perform`. This method contains the main processing code for the pipeline. It takes in no arguments and returns a dictionary, which must contain at least one key - ``output``. If additional / ancillary outputs are needed, they can be found with either ``pipeline._output[<key>]`` or simply ``pipeline.<key>`` if there is no collision with the explicit attributes.
 
+.. code-block:: python
 
-Saving Results
---------------
+    class NewPipeline(BasePipeline):
 
-The argument ``save_result`` behaves the same as in primitives and will save whatever output is returned from a pipeline's ``_perform`` method. This will typically be the output of the last primitive called (including a skipped primitive), but this is not enforced and a Pipeline can choose to return what is needs to just like primitives.
+        def _perform(self):
+            # Main processing code here
+            # Primary input is accessed with ``self.input``
+            # Access arguments with ``self.<arg_name>``
+            # Call primitives with ``result = self.prim_alias.apply(<input>, **kwargs)``
+            ...
+            return dict(output=result, extra1=<extra_output1>, extra2=<extra_output2>)
 
-A primitive will also use the pipeline's ``output_dir`` argument if none is specified in the primitive's arguments and that primitive's ``save_result`` argument is ``True``.
+5. Previews
+~~~~~~~~~~~
 
+(Optional) The pipeline can optionally implement the method :py:meth:`~hispecdrp.pipelines.base_pipeline.BasePipeline._create_preview` to generate a preview of the results if either of the arguments ``save_preview`` or ``show_preview`` is True.
 
-Pipeline Methods
-----------------
+6. Unit tests
+~~~~~~~~~~~~~
 
-Every pipeline must implement the following method:
+After implementing a pipeline, please also create corresponding tests in the testing suite `tests <https://github.com/oirlab/HISPEC_DRP/blob/main/tests>`_ to at minimum validate the basic processing steps within the pipeline.
 
-* .. automethod:: hispecdrp.pipelines.base_pipeline.BasePipeline._perform
-    :noindex:
+7. Documentation
+~~~~~~~~~~~~~~~~
 
+Implement appropriate docstrings following the structure for other primitives.
 
-Implementing a Pipeline
------------------------
-
-Pipelines must extend from :py:class:`hispecdrp.pipelines.base_pipeline.BasePipeline`.
-
-Below is the implementation of the LFC processing pipeline.
-
-.. literalinclude:: ../../../hispecdrp/pipelines/calibration/process_lfc_pipeline.py
-   :language: python
+For pipelines, also create a new page in the documentation under `docs/source/pipelines/`. Populate this page according to the structure of existing pipeline documentation, and include a link to this page in the `pipelines/index.rst` file.

@@ -2,6 +2,7 @@ import numpy as np
 import multiprocessing as mp
 import ctypes
 from tqdm import tqdm
+from .utils import add_refchan_ramp
 
 from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
@@ -154,7 +155,8 @@ def create_ramp(
     n_channels: int | None = None,
     vertical: bool = True,
     flux_scaling: np.ndarray | None = None,
-    flux_scaling_times: np.ndarray | None = None
+    flux_scaling_times: np.ndarray | None = None,
+    add_ref_channel: bool = False
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -205,6 +207,8 @@ def create_ramp(
         Timeseries of flux to model variability centered on unity (default: None). Should match length of flux_scaling_times.
     flux_scaling_times : np.ndarray or None, optional
         Times corresponding to flux_scaling array (seconds) (default: None).
+    add_ref_channel : bool, optional
+        If True, add a reference channel to the ramp data (default: False).
 
     Returns
     -------
@@ -402,6 +406,9 @@ def create_ramp(
 
     _outputs = dict(data=data_np, dq_raw=dq_raw_np)
 
+    if add_ref_channel:
+        _outputs['data'] = add_refchan_ramp(_outputs['data'], position='right')
+        _outputs['dq_raw'] = add_refchan_ramp(_outputs['dq_raw'], position='right')
 
     _outputs['meta'] = _meta
     return _outputs
