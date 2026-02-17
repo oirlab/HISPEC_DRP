@@ -207,7 +207,6 @@ def test_stage0_flat_calib(tmp_path):
         },
         'jump_detec': {
             'run': False,
-            'ouput_model': 'input',
             'method': 'tpd',
             'max_cores': pipe_max_cores,
             'rejection_threshold': 40.0,

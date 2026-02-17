@@ -7,6 +7,9 @@ from ...primitives import (DQInitPrimitive, CheckSaturationPrimitive, NonlinearC
                            RegisterCalibrationPrimitive,
                            CoaddFramesPrimitive)
 from typing import Sequence
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['ProcessSatFlatsPipeline']
 
@@ -60,9 +63,9 @@ class ProcessSatFlatsPipeline(CalibrationPipeline):
 
         # First, loop over all inputs to apply DQ init, saturation check, and bias subtraction
         results = []
-        self.log.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init.")
+        logger.info(f"Looping over a list of {len(_input_list)} inputs to apply dq_init.")
         for k, _input in enumerate(_input_list):
-            self.log.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
+            logger.info(f"Processing input {k+1}/{len(_input_list)}: {_input}")
             model_to_process = datamodels.open(_input)
             _result = self.dq_init.apply(model_to_process)
             results.append(_result)
@@ -73,9 +76,9 @@ class ProcessSatFlatsPipeline(CalibrationPipeline):
         # Register the nonlinear correction calibration to the calibration database
         # self.register_nonlin_cal.apply(nonlin_result)
 
-        self.log.info(f"Continue loop over inputs to apply saturation check.")
+        logger.info(f"Continue loop over inputs to apply saturation check.")
         for k, _result in enumerate(results):
-            self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
+            logger.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.saturation_check.apply(_result)
             _result = self.bias_sub.apply(_result)
             results[k] = _result
@@ -86,9 +89,9 @@ class ProcessSatFlatsPipeline(CalibrationPipeline):
         # Register the nonlinear correction calibration to the calibration database
         # self.register_nonlin_cal.apply(nonlin_result)
 
-        self.log.info(f"Continue loop over inputs to apply bias, nonlin_corr, jump_detec, ramp_fit, dark_sub, gain_corr, and detflat_corr.")
+        logger.info(f"Continue loop over inputs to apply bias, nonlin_corr, jump_detec, ramp_fit, dark_sub, gain_corr, and detflat_corr.")
         for k, _result in enumerate(results):
-            self.log.info(f"Processing input {k+1}/{len(results)}: {_result}")
+            logger.info(f"Processing input {k+1}/{len(results)}: {_result}")
             _result = self.nonlin_corr.apply(_result)
             _result = self.jump_detec.apply(_result)
             _result = self.ramp_fit.apply(_result)

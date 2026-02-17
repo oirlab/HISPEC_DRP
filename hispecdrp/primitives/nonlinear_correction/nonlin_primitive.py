@@ -2,9 +2,11 @@ from ..base_primitive import BasePrimitive
 from ...calibrations import NonlinearCorrectionSelector
 from ... import datamodels
 import numpy as np
+import logging
 
 from .nonlincorr_numba import correct_nonlinearity
 
+logger = logging.getLogger(__name__)
 
 __all__ = ['NonlinearCorrectionPrimitive']
 
@@ -18,8 +20,10 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     The non-linearity correction is applied using the following polynomial
     equation:
+
         P(DN) = a0 + a1*DN + a2*DN^2 + ... + an*DN^n
         where P(DN) is the corrected signal, DN is the measured signal, and
+        
     [a0, a1, ..., an] are the polynomial coefficients provided in the
     non-linearity calibration file.
     Note that the ordering of the coefficients in the calibration file is from lowest
@@ -39,6 +43,11 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     max_cores : int, optional
         Maximum number of CPU cores to use for parallel processing. Default is 1.
 
+    Calibrations
+    ------------
+    nonlin : NonlinearCorrectionModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
+
     Returns
     -------
     output : DataModel
@@ -49,13 +58,10 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
     -----
     Additional outputs accessible as ``primitive._output[<key>]``
 
-    - **nonlin**: NonlinearityModel
-        The non-linearity calibration model used for correction.
     """
 
     ARGUMENTS = {
         'suffix' : 'nonlincorr',
-        'ouput_model' : 'input',
         'max_cores' : 1,
     }
 
@@ -74,12 +80,12 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
         nonlin_model = datamodels.open(nonlin)
 
         result = self.get_output_model(input_model)
-        self.log.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
+        logger.info(f"Applying linearity correction with {nonlin_model} to {input_model}")
 
         if result.data.dtype != np.float32:
-            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            logger.info(f"Converting UTR data from {result.data.dtype} to float32")
             result.data = result.data.astype(np.float32)
-        self.log.info(f"Polynomial coeffs dtype: {nonlin_model.coeffs.dtype}.")
+        logger.info(f"Polynomial coeffs dtype: {nonlin_model.coeffs.dtype}.")
 
         correct_nonlinearity(
             result.data,

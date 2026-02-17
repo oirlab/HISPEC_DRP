@@ -1,5 +1,6 @@
+=================================================
 Saturated detector Flatfield Calibration Pipeline
-=======
+=================================================
 
 Overview
 --------
@@ -13,7 +14,7 @@ Calibration pipeline to generate saturation and non-linearity correction calibra
 Also creates level 0 rate map data products for each flat exposure processed.
 
 Documentation
---------
+-------------
 Link to class documentation:
 :class:`~hispecdrp.pipelines.calibration.process_satflats_pipeline.ProcessSatFlatsPipeline`
 
@@ -21,3 +22,4 @@ Link to class documentation:
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:

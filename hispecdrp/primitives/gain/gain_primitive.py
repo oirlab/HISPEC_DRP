@@ -5,7 +5,9 @@ from ...calibrations import GainSelector
 from ...utils.parallelization_utils import numba_thread_scope
 import numpy as np
 from numba import njit, prange
+import logging
 
+logger = logging.getLogger(__name__)
 
 __all__ = ['GainCorrectionPrimitive', 'gain_correction']
 
@@ -24,27 +26,22 @@ class GainCorrectionPrimitive(BasePrimitive):
         Input file path or data model to process. This is expected to be a
         level 0 (rate map) data product.
     suffix : str or None, optional
-        Suffix to append to the output filename. Default is ``'checksat'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+        Suffix to append to the output filename. Default is ``'gaincorr'``.
+
+    Calibrations
+    ------------
+    gain : GainModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`
 
     Returns
     -------
     output : DataModel
         Data model with values and uncertainties converted to units of
         electrons.
-
-    Notes
-    -----
-    Additional outputs accessible as ``primitive._output[<key>]``
-
-    - **gain**: GainModel
-        The gain calibration model used for conversion.
     """
 
     ARGUMENTS = {
-        'suffix' : 'gain',
-        'output_model' : 'input',
+        'suffix' : 'gaincorr',
         'max_cores' : 1,
     }
 
@@ -79,7 +76,7 @@ class GainCorrectionPrimitive(BasePrimitive):
             raise Exception("DQ extension not found in gain model for dark subtraction.")
 
         # Log
-        self.log.info(f"Applying detector gain correction with {gain} to {input_model}")
+        logger.info(f"Applying detector gain correction with {gain} to {input_model}")
 
         # Perform detector flat correction
         gain_correction(

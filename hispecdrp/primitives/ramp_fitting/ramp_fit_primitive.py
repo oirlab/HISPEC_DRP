@@ -1,11 +1,14 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...calibrations import GainSelector,ReadNoiseSelector
+import logging
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
 from .fit_ramp_jwst import fit_ramps_jwst
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['FitRampPrimitive']
 
@@ -48,9 +51,6 @@ class FitRampPrimitive(BasePrimitive):
     max_cores : int, optional
         Maximum number of CPU cores to use for parallel processing. Default
         is 1 (no parallel execution).
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. Defaults to ``'L0Model'``.
-        See ``BasePrimitive._get_output_model`` for details.
     jwst_jump_detection : bool, optional
         If True, use shared memory optimization for jump detection in combination with JWST ramp fitting methods.
         Default is False.
@@ -58,6 +58,13 @@ class FitRampPrimitive(BasePrimitive):
         Rejection threshold (approximately in signal-to-noise) above which
         discontinuities are flagged as jumps when using JWST ramp fitting methods.
         Default is 4.0.
+
+    Calibrations
+    ------------
+    gain : GainModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`
+    rn : ReadNoiseModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`
 
     Returns
     -------
@@ -115,7 +122,7 @@ class FitRampPrimitive(BasePrimitive):
                              "Please set jwst_jump_detection to False or change ramp fitting algorithm.")
 
         input_model = datamodels.open(self.input, copy=False)
-        self.log.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
+        logger.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 
         gain_cal, _ = self.get_calibration(input_model, 'gain')
         gain_model = datamodels.open(gain_cal)
@@ -187,7 +194,7 @@ class FitRampPrimitive(BasePrimitive):
                 jump_rejection_threshold = self.jwst_jump_rejection_threshold
             )
         else:
-            self.log.error(f"Invalid ramp fit method {self.method.lower()}")
+            logger.error(f"Invalid ramp fit method {self.method.lower()}")
             raise ValueError(f"Invalid ramp fit method {self.method.lower()}")
 
         output_model = self.get_output_model(input_model)

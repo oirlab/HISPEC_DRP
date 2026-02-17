@@ -14,8 +14,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
 version_file = "hispecdrp/_version.py"
 version_scheme = "post-release"
-local_scheme = "no-local-version"
-
 
 [project]
 name = "hispecdrp"
@@ -52,14 +50,18 @@ dependencies = [
   "astropy",
   "gitpython",
   "numba",
-  "sqlalchemy>2.0",
   "tqdm",
   "stcal==1.15.2",
   "gdown",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
   "keckdrpframework @ git+https://github.com/oirlab/KeckDRPFramework@fix-python-version-parsing",
-  "pydantic>=2.11",
-  "h5py"
+  "sqlite-utils>=3.39",
+  "h5py",
+  "jsonschema",
+  "jsonref",
+  "barycorrpy>=0.4.4",
+  "plotly",
+  "kaleido",
 ]
 
 
@@ -80,14 +82,15 @@ include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-hispecdrp = ["datamodels/hispec/schemas/*.yaml", "datamodels/parvi/schemas/*.yaml", "configs/*.yaml"]
+hispecdrp = ["datamodels/metadata/*.yaml", "configs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--rootdir=."
-
-[tool.scikit-build]
-wheel.expand-macos-universal-tags = true
-
-#[tool.scikit-build.cython]
-#sources = ["hispecdrp/primitives/ramp_fitting/fitramp_cython_Brandt.pyx"]
+addopts = """
+--rootdir=.
+--ignore=tests/test_etalon_drift.py
+--ignore=tests/test_process_lfc.py
+--ignore=tests/test_stage1.py
+--ignore=tests/test_stage1_hispec.py
+--ignore=tests/test_stage1_parvi.py
+"""

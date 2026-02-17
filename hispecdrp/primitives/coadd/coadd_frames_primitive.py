@@ -3,6 +3,9 @@ from ... import datamodels
 import numpy as np
 from numba import njit, prange
 from ...utils.math import weighted_mean, bitwise_or_reduce_uint32
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['CoaddFramesPrimitive','coadd_frames']
 
@@ -19,7 +22,7 @@ class CoaddFramesPrimitive(BasePrimitive):
 
     This primitive combines input data products using a weighted average (if mean_calc = 'wmean'),
     where the weights are given by the inverse variances
-    (1 / ``model.err``²). The output error and variance arrays are computed
+    (1 / model.err^2). The output error and variance arrays are computed
     using the corresponding weighted standard error. Data quality (DQ)
     flags from all inputs are propagated to the output using a bitwise OR.
 
@@ -30,7 +33,7 @@ class CoaddFramesPrimitive(BasePrimitive):
         or as a dictionary; when a dictionary is given, each group of inputs
         is coadded separately.
     suffix : str or None, optional
-        Suffix to append to the output filename. Default is ``'coadd'``.
+        Suffix to append to the output filename. Default is ``'coadded'``.
     mean_calc : str, optional
         Method for calculating the output data values. Currently, only
         ``'wmean'`` (weighted mean) is implemented.
@@ -59,38 +62,39 @@ class CoaddFramesPrimitive(BasePrimitive):
 
         # Make sure input is a list of models
         if input_type in (str, datamodels.DataModel):
-            self.log.warning("Input is a single model or path, returning without coadding.")
+            logger.warning("Input is a single model or path, returning without coadding.")
             return dict(output=self.input)
         if input_type in (list, tuple):
-            input_grouped = datamodels.group_input_by_fiber_object(self.input)
+            input_grouped = datamodels.group_by_fiber_combination(self.input)
             output = []
             for key, group in input_grouped.items():
-                self.log.info(f"Coadding group with objects {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
-                output.append(coadd_group(group, self.__class__.__name__))
+                logger.info(f"Coadding group with objects {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
+                output.append(coadd_group(group, primitive=self))
         elif input_type is dict:
             output = {}
             for key, group in self.input.items():
-                self.log.info(f"Coadding group {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
-                output[key] = coadd_group(group, self.__class__.__name__)
+                logger.info(f"Coadding group {key} ({len(group)} frames):\n" + "\n".join([str(i) for i in group]))
+                output[key] = coadd_group(group, primitive=self)
+
         return dict(output=output)
 
 
-def coadd_group(group : list[datamodels.DataModel],
-                primitive_name : str = 'None',
-                mean_calc : str = 'wmean', # TBD
-                err_calc : str = 'wse', # TBD
-                ) -> datamodels.DataModel:
+# Several functions below are used by other primitives
+def coadd_group(
+    models : list[datamodels.DataModel],
+    model_class_out : type[datamodels.DataModel] | None = None,
+    mean_calc : str = 'wmean', # TBD
+    err_calc : str = 'wse', # TBD
+    primitive : BasePrimitive | None = None,
+) -> datamodels.DataModel:
     """
     Coadd multiple level 0 (rate maps) frames of the same kind to increase signal-to-noise.
     Works on darks and flats calibration models too.
 
     Parameters
     ----------
-    group : list[str or DataModel]
+    models : list[str or DataModel]
         Input files or data models to coadd.
-    primitive_name : str, optional
-        Name of the primitive calling this function which will be added to the ancestor extension metadata.
-    mean_calc : str, optional
         Method for calculating the output data values. Currently, only
         ``'wmean'`` (weighted mean) is implemented.
     err_calc : str, optional
@@ -105,7 +109,7 @@ def coadd_group(group : list[datamodels.DataModel],
         models is returned.
     """
 
-    input_models = [datamodels.open(f) for f in group]
+    input_models = [datamodels.open(f) for f in models]
     attrs = get_data_attrs(input_models[0])
     frame_cubes = make_frame_cube(input_models, tuple(attrs.values()), copy=False)
     result = coadd_frames(
@@ -127,10 +131,18 @@ def coadd_group(group : list[datamodels.DataModel],
     }
     if 'mid_time_ext' in attrs:
         data[attrs['mid_time_ext']] = result['mid_time']
-    meta_merged = datamodels.merge_meta(input_models)
+
+    if model_class_out is None:
+        model_class_out = input_models[0].__class__
     model_class_out = input_models[0].__class__
-    model_out = model_class_out(data=data, meta=meta_merged, config=input_models[0].config)
-    model_out.add_data_ancestors(input_models,primitive_name=primitive_name)
+    model_out = model_class_out.from_datamodels(
+        input=input_models,
+        data=data,
+        append_ancestors=False,
+    )
+    if primitive is not None:
+        primitive.add_data_ancestors(model_out, input_models)
+
     return model_out
 
 def make_frame_cube(
@@ -264,7 +276,6 @@ def coadd_frames(
         dq=dq_out,
         mid_time=mid_times_out
     )
-
 
 @njit(nogil=True, parallel=True, cache=True)
 def _coadd_frames_numba(

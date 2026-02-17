@@ -15,12 +15,13 @@ def extract_spectra_cross_talk(
     trace_positions : list[np.ndarray],
     profile : list[np.ndarray],
     extraction_aperture : float,
-    xrange : tuple | None = None,
+    pix_range : tuple | None = None,
     spec_output : dict[str, np.ndarray] = None,
     err_output : dict[str, np.ndarray] = None,
     var_rnoise_output : dict[str, np.ndarray] = None,
     var_poisson_output : dict[str, np.ndarray] = None,
     dq_output : dict[str, np.ndarray] = None,
+    orders_are_vertical : bool = True,
 ) -> dict:
     """
     Extract spectra for all fibers for a given order accounting for cross-talk between fibers.
@@ -43,8 +44,8 @@ def extract_spectra_cross_talk(
         2D array of profiles for each fiber. Shape = (n_fibers, ny, nx).
     extraction_aperture : float
         Width of the aperture to use for extraction.
-    xrange : tuple
-        Range of x-coordinates to extract (xmin, xmax). Defaults to the full range.
+    pix_range : tuple
+        Range of pixel-coordinates to extract (min, max) in the spectral direction. Defaults to the full range.
     spec_output : np.ndarray
         2D array to store extracted spectrum. Shape = (n_fibers, nx).
     err_output : np.ndarray
@@ -55,6 +56,8 @@ def extract_spectra_cross_talk(
         2D array to store extracted Poisson noise variance. Shape = (n_fibers, nx).
     dq_output : np.ndarray
         2D array to store extracted data quality flags. Shape = (n_fibers, nx).
+    orders_are_vertical : bool
+        Whether the orders are oriented vertically.
 
     Returns
     -------
@@ -64,8 +67,13 @@ def extract_spectra_cross_talk(
 
     # Default X range
     ny, nx = input_data.shape
-    if xrange is None:
-        xrange = (0, nx - 1)
+    if pix_range is None:
+        if orders_are_vertical:
+            pix_range = (0, ny - 1)
+            npix = ny
+        else:
+            pix_range = (0, nx - 1)
+            npix = nx
 
     # Sanity check
     n_fibers = trace_positions.shape[0]
@@ -73,15 +81,15 @@ def extract_spectra_cross_talk(
 
     # Default outputs
     if spec_output is None:
-        spec_output = np.full((n_fibers, nx), np.nan, dtype=input_data.dtype)
+        spec_output = np.full((n_fibers, npix), np.nan, dtype=input_data.dtype)
     if err_output is None:
-        err_output = np.full((n_fibers, nx), np.nan, dtype=input_err.dtype)
+        err_output = np.full((n_fibers, npix), np.nan, dtype=input_err.dtype)
     if var_rnoise_output is None:
-        var_rnoise_output = np.full((n_fibers, nx), np.nan, dtype=input_var_rnoise.dtype)
+        var_rnoise_output = np.full((n_fibers, npix), np.nan, dtype=input_var_rnoise.dtype)
     if var_poisson_output is None:
-        var_poisson_output = np.full((n_fibers, nx), np.nan, dtype=input_var_poisson.dtype)
+        var_poisson_output = np.full((n_fibers, npix), np.nan, dtype=input_var_poisson.dtype)
     if dq_output is None:
-        dq_output = np.full((n_fibers, nx), 0, dtype=input_dq.dtype)
+        dq_output = np.full((n_fibers, npix), 0, dtype=input_dq.dtype)
 
     # Call numba extraction routine
     _extract_cross_talk_numba(
@@ -93,12 +101,13 @@ def extract_spectra_cross_talk(
         trace_positions=trace_positions,
         profile=profile,
         extraction_aperture=extraction_aperture,
-        xrange=xrange,
+        pix_range=pix_range,
         spec_output=spec_output,
         err_output=err_output,
         var_rnoise_output=var_rnoise_output,
         var_poisson_output=var_poisson_output,
         dq_output=dq_output,
+        orders_are_vertical=orders_are_vertical,
     )
 
     # Return
@@ -120,30 +129,39 @@ def _extract_cross_talk_numba(
     trace_positions : np.ndarray,
     profile : np.ndarray,
     extraction_aperture : float,
-    xrange : tuple,
+    pix_range : tuple,
     spec_output : np.ndarray,
     err_output : np.ndarray,
     var_rnoise_output : np.ndarray,
     var_poisson_output : np.ndarray,
     dq_output : np.ndarray,
+    orders_are_vertical : bool = True,
 ):
     n_fibers = trace_positions.shape[0]
-    for x in range(xrange[0], xrange[1] + 1):
+    for x in range(pix_range[0], pix_range[1] + 1):
 
         trace_positions_x = trace_positions[:, x]
         profiles_x = profile[:, :, x]
 
-        # Build the profile matrix P for this column
+        # Build the profile matrix P for this column or row
         P, W, window_full = get_design_matrix(
             trace_positions_x=trace_positions_x,
             profiles_x=profiles_x,
             extraction_aperture=extraction_aperture,
+            orders_are_vertical=orders_are_vertical,
         )
-        D = input_data[window_full, x].copy()
-        D_var = input_err[window_full, x]**2
-        D_var_poisson = input_var_poisson[window_full, x].copy()
-        D_var_rnoise = input_var_rnoise[window_full, x].copy()
-        D_dq = input_dq[window_full, x].copy()
+        if orders_are_vertical:
+            D = input_data[x, window_full].copy()
+            D_var = input_err[x, window_full]**2
+            D_var_poisson = input_var_poisson[x, window_full].copy()
+            D_var_rnoise = input_var_rnoise[x, window_full].copy()
+            D_dq = input_dq[x, window_full].copy()
+        else:
+            D = input_data[window_full, x].copy()
+            D_var = input_err[window_full, x]**2
+            D_var_poisson = input_var_poisson[window_full, x].copy()
+            D_var_rnoise = input_var_rnoise[window_full, x].copy()
+            D_dq = input_dq[window_full, x].copy()
 
         # Mask bad pixels
         # NOTE: Ignore column if any profile value is bad, keep eye on this behavior
@@ -195,6 +213,7 @@ def get_design_matrix(
     trace_positions_x : np.ndarray,
     profiles_x : np.ndarray,
     extraction_aperture : float,
+    orders_are_vertical : bool = True,
 ) -> np.ndarray:
     """
     Build the profile matrix P for cross-talk extraction.
@@ -222,8 +241,12 @@ def get_design_matrix(
             window_size=extraction_aperture
         )
         window_sub = window_i - window_full[0]
-        P[window_sub, i] = profiles_x[i, window_i]
-        W[window_sub, i] = W_i
+        if orders_are_vertical: # NOTE: Confirm this is correct
+            P[window_sub, i] = profiles_x[window_i, i]
+            W[window_sub, i] = W_i
+        else:
+            P[window_sub, i] = profiles_x[i, window_i]
+            W[window_sub, i] = W_i
     return P, W, window_full
 
 

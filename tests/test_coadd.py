@@ -18,6 +18,7 @@ def test_coadd_frames(tmp_path, datadir):
         model.rate_err = np.sqrt(model.rate_var_rnoise + model.rate_var_poisson)
         model.dq = np.zeros(shape, dtype=np.uint32)
         model.mid_time = np.ones(shape, dtype=np.float64)
+        model.generate_filename()
         input_models.append(model)
 
     # Setup and call the coadd primitive
@@ -27,3 +28,6 @@ def test_coadd_frames(tmp_path, datadir):
     # Test values are reasonable
     for m in input_models:
         np.testing.assert_allclose(model_coadded.rate, m.rate, rtol=1E-3, atol=0)
+
+    # Test meta data and data ancestors
+    assert len(model_coadded.data_ancestors) == n

@@ -1,9 +1,12 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
+import logging
 
 from .jump_detection_jwst import jump_detection_jwst
 from .jump_detection_difference import jump_detection_difference
 from ...calibrations import GainSelector, ReadNoiseSelector
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['JumpDetectionPrimitive']
 
@@ -31,10 +34,7 @@ class JumpDetectionPrimitive(BasePrimitive):
         Input file path or data model to process. This must be a raw
         up-the-ramp (UTR) ramp data product in which jumps are to be detected.
     suffix : str or None, optional
-        Suffix to append to the output filename. Default is ``'rampfit'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. Defaults to ``'RampModel'``.
-        See ``BasePrimitive._get_output_model`` for details.
+        Suffix to append to the output filename. Default is ``'jump_detec'``.
     method : {'tpd', 'jwst'}, optional
         Jump detection algorithm to use. ``'tpd'`` selects a simple
         two-point-difference-based method. ``'jwst'`` uses the two-point
@@ -46,6 +46,14 @@ class JumpDetectionPrimitive(BasePrimitive):
         Rejection threshold (approximately in signal-to-noise) above which
         discontinuities are flagged as jumps.
 
+        
+    Calibrations
+    ------------
+    gain : GainModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`
+    rn : ReadNoiseModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`
+
     Returns
     -------
     output : DataModel
@@ -54,7 +62,6 @@ class JumpDetectionPrimitive(BasePrimitive):
 
     ARGUMENTS = {
         'suffix' : 'jumpdetec',
-        'ouput_model' : 'input',
         'method': 'tpd',
         'max_cores': 1,
         'rejection_threshold': 6.0,
@@ -73,7 +80,7 @@ class JumpDetectionPrimitive(BasePrimitive):
     def _perform(self):
         # Input and output data model should be RampData similar to ramp fitting
         input_model = datamodels.open(self.input, copy=False)
-        self.log.info(f"Finding jumps in {input_model} with method={self.method.lower()}")
+        logger.info(f"Finding jumps in {input_model} with method={self.method.lower()}")
 
         gain_cal, _ = self.get_calibration(input_model, 'gain')
         gain_model = datamodels.open(gain_cal)
@@ -85,13 +92,13 @@ class JumpDetectionPrimitive(BasePrimitive):
 
         n_reads = result.data.shape[0]
         if n_reads <= 2:
-            self.log.warning("Not enough reads for jump detection, skipping.")
+            logger.warning("Not enough reads for jump detection, skipping.")
             self.status = 'SKIPPED'
             return dict(output=result, method=self.method.lower())
 
         # Perform jump detection - this only modifies the DQ mask
         if self.method.lower() == 'jwst':
-            self.log.info(
+            logger.info(
                 "JWST jump detection is not optimized with shared memory here.",
                 "For a shared memory execution, "
                 "set the flag jwst_jump_detection=True in the ramp fitting primitive and run jump detection from there."
@@ -117,7 +124,7 @@ class JumpDetectionPrimitive(BasePrimitive):
                 rejection_threshold=self.rejection_threshold
             )
         else:
-            self.log.error(f"Invalid jump detection method {self.method.lower()}")
+            logger.error(f"Invalid jump detection method {self.method.lower()}")
             raise ValueError(f"Invalid jump detection method {self.method.lower()}")
 
         # Output

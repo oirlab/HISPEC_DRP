@@ -4,6 +4,9 @@ from ... import datamodels
 from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['DQInitPrimitive']
 
@@ -24,25 +27,22 @@ class DQInitPrimitive(BasePrimitive):
         to be a raw (ramp) data product.
     suffix : str or None, optional
         Suffix to append to the output filename. Default is ``'dqinit'``.
-    output_model : str or type[DataModel] or None, optional
-        The DataModel class or instance to return. ``'input'`` overwrite the input (default), while ``'input_copy'`` returns a copy.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1 (no parallelization).
+
+    Calibrations
+    ------------
+    dq : DQModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.DQSelector`
 
     Returns
     -------
     output : DataModel
         Data model with the DQ array initialized from the DQ reference file.
-
-    Notes
-    -----
-    Additional outputs accessible as ``primitive._output[<key>]``
-
-    - **dq**: DQModel
-        The DQ calibration model used for initialization.
     """
 
     ARGUMENTS = {
         'suffix' : 'dqinit',
-        'output_model' : 'input',
         'max_cores' : 1
     }
 
@@ -66,8 +66,8 @@ class DQInitPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying DQ initialization with {dq} to {input_model}")
-        self.log.info(f"Note: UTR data type is {result.data.dtype}")
+        logger.info(f"Applying DQ initialization with {dq} to {input_model}")
+        logger.info(f"Note: UTR data type is {result.data.dtype}")
 
         if not hasattr(input_model, 'DQ_RAW') or  input_model.dq_raw is None:
             result.dq_raw = np.zeros_like(result.data, dtype=np.uint8)

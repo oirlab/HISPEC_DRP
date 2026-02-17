@@ -11,8 +11,6 @@ def test_stage0_refpix_primitive(tmp_path):
     np.random.seed(12345)
     start_time = time.time()
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-
     # --- Define parameters for the simulated ramp ---
     max_cores = 1
     max_slope = 0  # e-/s

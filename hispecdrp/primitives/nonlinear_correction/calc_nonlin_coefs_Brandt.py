@@ -29,8 +29,9 @@ class Covar:
         the covariance matrix of the resultant differences, and the time 
         intervals between the resultant midpoints.
 
-        Arguments:
-        1. readtimes [list of values or lists for the times of reads.  If 
+        Parameters
+        ----------
+        1. read_times [list of values or lists for the times of reads.  If 
                       a list of lists, times for reads that are averaged
                       together to produce a resultant.]
         """
@@ -92,30 +93,34 @@ def calc_A_matrix(diffs, diffs_pow, Cov, sig, gain, countrateguess=None,
     """
     Calculate the matrix elements needed to compute a nonlinearity correction 
 
-    Arguments:
-    1. diffs [resultant differences, shape (ndiffs, npix)]
-    2. diff_pow [templates for nonlinearity fit, shape (order+1, ndiffs, npix)
-    3. Cov [class Covar, holds the covariance matrix information]
-    4. sig [read noise, 1D array, shape (npix)]
-    5. gain [gain, 1D array, shape (npix)]
+    Parameters
+    ----------
+    diffs : ndarray, shape (ndiffs, npix)
+        Resultant differences.
+    diff_pow : ndarray, shape (order+1, ndiffs, npix)
+        Templates for nonlinearity fit.
+    Cov : Covar
+        Class holding the covariance matrix information.
+    sig : ndarray, shape (npix,)
+        Read noise.
+    gain : ndarray, shape (npix,)
+        Gain.
+    countrateguess : ndarray, shape (npix,), default None
+        Count rates to be used to estimate the covariance matrix. 
+        If None, the average difference is used, replacing negative means with zeros.
+    diffs2use : ndarray of bool, shape (ndiffs, npix), default None
+        Boolean mask of whether to use each resultant difference for each pixel.
+    rescale : bool, default True
+        Scale the covariance matrix internally to avoid possible overflow/underflow 
+        problems for long ramps. Slightly increases computational cost.
+    dn_scale : int
+        How often to keep tallies of the scale factor.
 
-    Optional Arguments:
-    6. countrateguess [array of shape (npix): count rates to be used
-                     to estimate the covariance matrix.  Default None, 
-                     in which case the average difference will be used, 
-                     replacing negative means with zeros.]
-    7. diffs2use [shape (ndiffs, npix), boolean mask of whether to use
-                     each resultant difference for each pixel.  Default
-                     None]
-    8. rescale [boolean, scale the covariance matrix internally to avoid
-                     possible overflow/underflow problems for long ramps.
-                     Slightly increases computational cost.  Default
-                     True. ]
-    9. dn_scale [int, how often to keep tallies of the scale factor. ]
 
-    Returns:
+    Returns
+    -------
     A_all : ndarray, shape (order, order)
-          order is the first dimension of diffs_pow
+        order is the first dimension of diffs_pow
 
     """
 
@@ -247,43 +252,43 @@ def get_nonlin_coefs(data_list, sig, gain, order, intercepts, nsamples_est=5,
     """
     Use many ramps to fit for nonlinearity correction coefficients
     
-    Arguments
-    ---------
+    Parameters
+    ----------
     data_list : list of ndarrays
-         list of 2D ndarrays for ramps, each of shape (nreads, npixels)
+        list of 2D ndarrays for ramps, each of shape (nreads, npixels)
     sig : ndarray
-         1D array for read noise, shape (npixels)
+        1D array for read noise, shape (npixels)
     gain : ndarray
-         1D array for read noise, shape (npixels)
+        1D array for read noise, shape (npixels)
     order : int
-         order of polynomial to fit for the nonlinearity correction
+        order of polynomial to fit for the nonlinearity correction
     intercepts :  ndarray
-         bias levels to anchor nonlinearity fit, shape (npixels)
+        bias levels to anchor nonlinearity fit, shape (npixels)
     nsamples_est : int, default 5
-         number of initial samples whose median provides an estimate of
-         the count rate for the total slope target and for getting a
-         baseline to reject egregious jumps.  
+        number of initial samples whose median provides an estimate of
+        the count rate for the total slope target and for getting a
+        baseline to reject egregious jumps.  
     d2u_list : list of ndarrays or None, default None
-         list of uint8 ndarrays, same length/shapes as data_list, =1 for
-         the read differences that we should use.  If None, use all
-         reads. Arrays will be further flagged in this routine for
-         saturation and for egregious jumps
+        list of uint8 ndarrays, same length/shapes as data_list, =1 for
+        the read differences that we should use.  If None, use all
+        reads. Arrays will be further flagged in this routine for
+        saturation and for egregious jumps
     satval : float or ndarray, default 6e4
-         saturation value.  If an ndarray, should be of shape (npixels)
+        saturation value.  If an ndarray, should be of shape (npixels)
     use_legendre : boolean, default True
-         fit in the Legendre polynomial basis?
+        fit in the Legendre polynomial basis?
     calc_cond : boolean, default False
-         compute the condition number of the matrix for each pixel?
+        compute the condition number of the matrix for each pixel?
     last_pars : Nonlin_Result or None, default None
-         output of a previous run of get_nonlin_coefs to set the
+        output of a previous run of get_nonlin_coefs to set the
          covariance matrix from the previously estimated count rates
     rescale_domain : boolean, default True
-         rescale the domain to [-1, 1] for better numerical behavior?
+        rescale the domain to [-1, 1] for better numerical behavior?
     
     Returns
     -------
     Nonlin_Result
-         result structure with lots of information
+        result structure with lots of information
     
     """
     nramps = len(data_list)

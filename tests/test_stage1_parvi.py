@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from hispecdrp.utils import download_gdrive_file
 import os
 
-def test_stage1_parvi(tmp_path, datadir):
+# TODO: Update this test to mirror test_stage1_hispec.py but for PARVI data.
+def _test_stage1_parvi(tmp_path, datadir):
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 

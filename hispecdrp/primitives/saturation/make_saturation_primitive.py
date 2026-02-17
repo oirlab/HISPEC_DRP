@@ -5,9 +5,12 @@ from copy import copy
 from typing import Sequence
 from ... import datamodels
 from ..jump_detection.jump_detection_difference import median_axis0_3d
+import logging
 
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['MakeSaturationPrimitive', 'check_saturation']
 
@@ -47,7 +50,7 @@ class MakeSaturationPrimitive(BasePrimitive):
         if  isinstance(self.input, Sequence):
             _input_list_tmp = self.input
         nfiles = len(_input_list_tmp)
-        self.log.info(f"Deriving the detector saturation threshold by taking the median of the last reads of a list of {nfiles} inputs.")
+        logger.info(f"Deriving the detector saturation threshold by taking the median of the last reads of a list of {nfiles} inputs.")
 
         input_models = [datamodels.open(f) for f in _input_list_tmp]
 

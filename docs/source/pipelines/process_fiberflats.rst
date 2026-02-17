@@ -1,28 +1,24 @@
+==================
 Process Fiberflats
 ==================
 
 Overview
 --------
 
-Process the 2D fiberflat echellograms to generate the trace position and trace profile calibration files.
+**Input:** Level 0 fiberflat data (2D rate maps). Each fiberflat must have only a single fiber illuminated within an exposure. Different fibers are grouped together and coadded.
 
-**Class**: :py:class:`~hispecdrp.pipelines.calibration.process_fiberflats_pipeline.ProcessFiberflatsPipeline`
+**Cal. Outputs:** Trace positions calibration, trace profile calibraiton, and 1D fiberflat calibration for blaze correction.
 
+**Other Output:** Rate map in e-/s (Level 0).
 
-Primitives
-----------
+Calibration pipeline to generate detector flatfield and gain calibration files from raw detector flat UTR data.
+Also creates level 0 rate map data products for each flat exposure processed.
 
-1. ``coadd_frames`` : :doc:`Coadd Frames <../primitives/coadd_frames>`
-2. ``trace_pos`` : :doc:`Trace Position <../primitives/trace_finding>`
-3. ``trace_prof`` : :doc:`Trace Profile <../primitives/trace_profile>`
-4. ``register_tracepos_cal`` : :doc:`Register Trace Position Calibration <../primitives/register_cal>`
-5. ``register_traceprof_cal`` : :doc:`Register Trace Profile Calibration <../primitives/register_cal>`
-6. ``spec_extract`` : :doc:`Spectral Extraction <../primitives/spectral_extraction>`
-7. ``set_wavesol`` : :doc:`Set Initial Wavelength Solution <../primitives/set_wavesol>`
-8. ``register_fiberflat_cal`` : :doc:`Register Fiberflat Calibration <../primitives/register_cal>`
+Documentation
+-------------
 
-
-Arguments
----------
-
-None.
+.. autoclass:: hispecdrp.pipelines.calibration.process_fiberflats_pipeline.ProcessFiberflatsPipeline
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:

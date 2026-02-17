@@ -48,12 +48,14 @@ def reffix_hxrg(cube, nchans=4, in_place=False, fixcol=True, **kwargs):
 
 ############ ACN & CHANNEL BIAS OLD #########################
 def reffix_amps_old(cube, nchans=4, in_place=True, altcol=True, supermean=False,
-	top_ref=True, bot_ref=True, ntop=4, nbot=4, **kwargs):
+    top_ref=True, bot_ref=True, ntop=4, nbot=4, **kwargs):
 
-    """Correct amplifier offsets
+    """
+    Correct amplifier offsets
     Matches all amplifier outputs of the detector to a common level.
     This routine subtracts the average of the top and bottom reference rows
     for each amplifier and frame individually.
+    
     Parameters
     ----------
     cube : ndarray
@@ -74,8 +76,6 @@ def reffix_amps_old(cube, nchans=4, in_place=True, altcol=True, supermean=False,
         Specify the number of top reference rows.
     nbot : int
         Specify the number of bottom reference rows.
-    Keyword Args
-    ------------
     mean_func : func
         Function used to calculate averages.
     """
@@ -84,16 +84,16 @@ def reffix_amps_old(cube, nchans=4, in_place=True, altcol=True, supermean=False,
         in_place = True
 
     if not in_place:
-    	cube = np.copy(cube)
+        cube = np.copy(cube)
     ndim = len(cube.shape)
     if ndim==2:
-    	ny,nx = cube.shape
-    	nz = 1
-    	cube = cube.reshape((nz,ny,nx))
+        ny,nx = cube.shape
+        nz = 1
+        cube = cube.reshape((nz,ny,nx))
     elif ndim==3:
-    	nz, ny, nx = cube.shape
+        nz, ny, nx = cube.shape
     else:
-    	raise ValueError('Input data can only have 2 or 3 dimensions.Found {} dimensions.'.format(ndim))
+        raise ValueError('Input data can only have 2 or 3 dimensions.Found {} dimensions.'.format(ndim))
 
     chsize = int(nx / nchans)
     # Number of reference rows to use
@@ -101,17 +101,17 @@ def reffix_amps_old(cube, nchans=4, in_place=True, altcol=True, supermean=False,
     nt = ntop if top_ref else 0
     nb = nbot if bot_ref else 0
     if (nt+nb)==0:
-    	print("No reference pixels available for use. Returning...")
-    	return
+        print("No reference pixels available for use. Returning...")
+        return
     # Slice out reference pixels
     refs_bot = cube[:,:nb,:]
     refs_top = cube[:,-nt:,:]
     if nt==0:
-    	refs_all = refs_bot
+        refs_all = refs_bot
     elif nb==0:
-    	refs_all = refs_top
+        refs_all = refs_top
     else:
-    	refs_all = np.hstack((refs_bot, refs_top))
+        refs_all = np.hstack((refs_bot, refs_top))
     assert refs_all.shape[1] == (nb+nt)
 
     # Supermean
@@ -123,21 +123,21 @@ def reffix_amps_old(cube, nchans=4, in_place=True, altcol=True, supermean=False,
     #(4,2, 1, 1) ==> altcol=False (channel, reads,1,1)
     #(2,2,4) ==> altcol=True [odd/even][channel,reads)
     for ch in range(nchans):
-    	# Channel indices
-    	ich1 = ch*chsize
-    	ich2 = ich1 + chsize
-    	#print(ich1)
-    	# In-place subtraction of channel medians
-    	if altcol:
-    		for i in range(nz):
-    			cube[i,:,ich1:ich2-1:2] -= refs_amps_avg[0][ch,i]
-    			cube[i,:,ich1+1:ich2:2] -= refs_amps_avg[1][ch,i]
-    	else:
-    		for i in range(nz):
-    			cube[i,:,ich1:ich2] -= refs_amps_avg[ch,i]
+        # Channel indices
+        ich1 = ch*chsize
+        ich2 = ich1 + chsize
+        #print(ich1)
+        # In-place subtraction of channel medians
+        if altcol:
+            for i in range(nz):
+                cube[i,:,ich1:ich2-1:2] -= refs_amps_avg[0][ch,i]
+                cube[i,:,ich1+1:ich2:2] -= refs_amps_avg[1][ch,i]
+        else:
+            for i in range(nz):
+                cube[i,:,ich1:ich2] -= refs_amps_avg[ch,i]
     # Add back supermean
     if supermean:
-    	cube += smean
+        cube += smean
     cube = cube.squeeze()
     return cube
 
@@ -179,6 +179,7 @@ def reffix_amps(cube, nchans=4, in_place=True, altcol=False, supermean=False,
     Matches all amplifier outputs of the detector to a common level.
     This routine subtracts the average of the top and bottom reference rows
     for each amplifier and frame individually.
+    
     Parameters
     ----------
     cube : ndarray
@@ -199,8 +200,6 @@ def reffix_amps(cube, nchans=4, in_place=True, altcol=False, supermean=False,
         Specify the number of top reference rows.
     nbot : int
         Specify the number of bottom reference rows.
-    Keyword Args
-    ------------
     mean_func : func
         Function used to calculate averages.
     """
@@ -369,9 +368,9 @@ def acn_filter(cube,
         If False, the input array will be copied.
     avg_type : {'pix', 'frame', 'int'}
         Baseline removal mode for reference pixels:
-          - 'pix'   : remove per-pixel mean over integration (best for many frames).
-          - 'frame' : remove per-frame global mean of refs.
-          - 'int'   : remove a single global mean over the whole ramp.
+            - 'pix'   : remove per-pixel mean over integration (best for many frames).
+            - 'frame' : remove per-frame global mean of refs.
+            - 'int'   : remove a single global mean over the whole ramp.
     perint : bool
         Passed to `calc_col_smooth`: smooth per integration instead of per frame.
     edge_wrap : bool
@@ -609,8 +608,9 @@ def acn_filter_nobaserm(
     ----------
     cube : ndarray
         Input data:
-          - (H, W)  single frame, or
-          - (N, H, W) stack of frames.
+            - (H, W)  single frame, or
+            - (N, H, W) stack of frames.
+
     in_place : bool
         If False, the input array will be copied.
     perint : bool
@@ -759,12 +759,14 @@ def acn_filter_nobaserm(
 ############################# 1/f ################################################
 
 def ref_filter(cube, nchans=4, in_place=True, avg_type='pix', perint=False,
-	edge_wrap=False, left_ref=True, right_ref=True, nleft=4, nright=4, **kwargs):
-    """Optimal Smoothing
+    edge_wrap=False, left_ref=True, right_ref=True, nleft=4, nright=4, **kwargs):
+    """
+    Optimal Smoothing
     Performs an optimal filtering of the vertical reference pixel to
     reduce 1/f noise (horizontal stripes).
     FFT method adapted from M. Robberto IDL code:
     http://www.stsci.edu/~robberto/Main/Software/IDL4pipeline/
+
     Parameters
     ----------
     cube : ndarray
@@ -787,8 +789,6 @@ def ref_filter(cube, nchans=4, in_place=True, avg_type='pix', perint=False,
         Specify the number of left reference columns.
     nright : int
         Specify the number of right reference columns.
-    Keyword Arguments
-    =================
     savgol : bool
         Using Savitsky-Golay filter method rather than FFT.
     winsize : int
@@ -799,16 +799,16 @@ def ref_filter(cube, nchans=4, in_place=True, avg_type='pix', perint=False,
         Function to use to calculate averages of reference columns.
     """
     if not in_place:
-    	cube = np.copy(cube)
+        cube = np.copy(cube)
     ndim = len(cube.shape)
     if ndim==2:
-    	ny,nx = cube.shape
-    	nz = 1
-    	cube = cube.reshape((nz,ny,nx))
+        ny,nx = cube.shape
+        nz = 1
+        cube = cube.reshape((nz,ny,nx))
     elif ndim==3:
-    	nz, ny, nx = cube.shape
+        nz, ny, nx = cube.shape
     else:
-    	raise ValueError('Input data can only have 2 or 3 dimensions. Found {} dimensions.'.format(ndim))
+        raise ValueError('Input data can only have 2 or 3 dimensions. Found {} dimensions.'.format(ndim))
 
     # Number of reference rows to use
     # Set nt or nb equal to 0 if we don't want to use either
@@ -817,8 +817,8 @@ def ref_filter(cube, nchans=4, in_place=True, avg_type='pix', perint=False,
     assert nl>=0, 'Number of left reference pixels must not be negative.'
     assert nr>=0, 'Number of right reference pixels must not be negative.'
     if (nl+nr)==0:
-    	print("No reference pixels available for use. Returning...")
-    	return
+        print("No reference pixels available for use. Returning...")
+        return
     # Slice out reference pixel columns
     refs_left  = cube[:,:,:nl]  if nl>0 else None
     refs_right = cube[:,:,-nr:] if nr>0 else None
@@ -827,7 +827,7 @@ def ref_filter(cube, nchans=4, in_place=True, avg_type='pix', perint=False,
     # approximate x axis for smoothening
     delt = 10E-6 * (nx/nchans + 12.)
     refvals_smoothed = calc_col_smooth(refvals, cube.shape, perint=perint,
-    	edge_wrap=edge_wrap, delt=delt, **kwargs)
+        edge_wrap=edge_wrap, delt=delt, **kwargs)
     # Final correction
     #for i,im in enumerate(cube): im -= refvals_smoothed[i].reshape([ny,1])
     cube -= refvals_smoothed.reshape([nz,ny,1])
@@ -883,10 +883,12 @@ def calc_avg_cols_no_baseline(refs_left=None, refs_right=None):
 
 
 def calc_avg_cols(refs_left=None, refs_right=None, avg_type='pix',
-	mean_func=np.median, **kwargs):
-    """Calculate average of column references
+    mean_func=np.median, **kwargs):
+    """
+    Calculate average of column references
     Determine the average values for the column references, which
     is subsequently used to estimate the 1/f noise contribution.
+    
     Parameters
     ----------
     refs_left : ndarray
@@ -895,10 +897,12 @@ def calc_avg_cols(refs_left=None, refs_right=None, avg_type='pix',
         Right reference columns.
     avg_type : str
         Type of ref column averaging to perform to determine ref pixel variation.
-        Allowed values are 'pix', 'frame', or 'int'.
-        'pixel' : For each ref pixel, subtract its avg value from all frames.
-        'frame' : For each frame, get avg ref pixel values and subtract framewise.
-        'int'   : Calculate avg of all ref pixels within the ramp and subtract.
+        Allowed values are 'pixel', 'frame', or 'int'.
+
+            - 'pixel' : For each ref pixel, subtract its avg value from all frames.
+            - 'frame' : For each frame, get avg ref pixel values and subtract framewise.
+            - 'int'   : Calculate avg of all ref pixels within the ramp and subtract.
+
     mean_func : func
         Function to use to calculate averages of reference columns
     """
@@ -919,65 +923,65 @@ def calc_avg_cols(refs_left=None, refs_right=None, avg_type='pix',
     # By default, pixel averaging is best for large groups
 
     if avg_type is None:
-    	avg_type = 'frame'
+        avg_type = 'frame'
     if refs_left is not None:
-    	nz, ny, nchan = refs_left.shape
+        nz, ny, nchan = refs_left.shape
     else:
-    	nz, ny, nchan = refs_right.shape
-    	# If there is only 1 frame, then we have to do "per frame" averaging.
-    	# Set to "per int", which produces the same result as "per frame" for nz=1.
+        nz, ny, nchan = refs_right.shape
+        # If there is only 1 frame, then we have to do "per frame" averaging.
+        # Set to "per int", which produces the same result as "per frame" for nz=1.
     if nz==1:
-    	avg_type = 'int'
-    	# Remove average ref pixel values
-    	# Average over entire integration
+        avg_type = 'int'
+        # Remove average ref pixel values
+        # Average over entire integration
     if 'int' in avg_type:
-    	if nl>0: refs_left  -= mean_func(refs_left) #refs_left now contains only deviations from that global mean.
-    	if nr>0: refs_right -= mean_func(refs_right)
+        if nl>0: refs_left  -= mean_func(refs_left) #refs_left now contains only deviations from that global mean.
+        if nr>0: refs_right -= mean_func(refs_right)
     # Average over each frame
     #'frame' mode remove a frame-by-frame DC offset,
     #leaving row-dependent fluctuations within each frame.
     #
     elif 'frame' in avg_type:
-    	if nl>0: refs_left_mean  = mean_func(refs_left.reshape((nz,-1)), axis=1)#flatten each frame’s ref pixels to 1D, one scalar per frame.
-    	if nr>0: refs_right_mean = mean_func(refs_right.reshape((nz,-1)), axis=1)
-    	# Subtract estimate of each ref pixel "intrinsic" value
-    	for i in range(nz):
-    		if nl>0: refs_left[i]  -= refs_left_mean[i]
-    		if nr>0: refs_right[i] -= refs_right_mean[i]
+        if nl>0: refs_left_mean  = mean_func(refs_left.reshape((nz,-1)), axis=1)#flatten each frame’s ref pixels to 1D, one scalar per frame.
+        if nr>0: refs_right_mean = mean_func(refs_right.reshape((nz,-1)), axis=1)
+        # Subtract estimate of each ref pixel "intrinsic" value
+        for i in range(nz):
+            if nl>0: refs_left[i]  -= refs_left_mean[i]
+            if nr>0: refs_right[i] -= refs_right_mean[i]
     # Take the average of each reference pixel
     #gives an average for each reference pixel position over all frames
     #Subtracting this from each frame removes each pixel’s own intrinsic bias pattern.
     elif 'pix' in avg_type:
-    	if nl>0:
+        if nl>0:
             refs_left_mean  = mean_func(refs_left, axis=0) #(2048, 4)
-    	if nr>0:
+        if nr>0:
             refs_right_mean = mean_func(refs_right, axis=0)
-    	# Subtract estimate of each ref pixel "intrinsic" value
-    	for i in range(nz):
-    		if nl>0: refs_left[i]  -= refs_left_mean
-    		if nr>0: refs_right[i] -= refs_right_mean
+        # Subtract estimate of each ref pixel "intrinsic" value
+        for i in range(nz):
+            if nl>0: refs_left[i]  -= refs_left_mean
+            if nr>0: refs_right[i] -= refs_right_mean
 
     if nl==0: #ref_left is none
-    	refs_side_avg = refs_right.mean(axis=2)#averages over all left reference columns
+        refs_side_avg = refs_right.mean(axis=2)#averages over all left reference columns
     elif nr==0: #ref_right is none
-    	refs_side_avg = refs_left.mean(axis=2)
+        refs_side_avg = refs_left.mean(axis=2)
     else:
-    	refs_side_avg = (refs_right.mean(axis=2) + refs_left.mean(axis=2)) / 2
+        refs_side_avg = (refs_right.mean(axis=2) + refs_left.mean(axis=2)) / 2
     return refs_side_avg #(2, 2048)
 
 def calc_col_smooth(refvals, data_shape, perint=False, edge_wrap=False,
-	delt=5.24E-4, savgol=False, winsize=31, order=3, **kwargs):
-    """Perform optimal smoothing of side ref pix
+    delt=5.24E-4, savgol=False, winsize=31, order=3, **kwargs):
+    """
+    Perform optimal smoothing of side ref pix
     Generates smoothed version of column reference values.
     Smooths values from calc_avg_cols() via FFT.
+    
     Parameters
     ----------
     refvals : ndarray
         Averaged column reference pixels
     data_shape : tuple
         Shape of original data (nz,ny,nx)
-    Keyword Arguments
-    =================
     perint : bool
         Smooth side reference pixel per int, otherwise per frame.
     edge_wrap : bool
@@ -996,41 +1000,41 @@ def calc_col_smooth(refvals, data_shape, perint=False, edge_wrap=False,
     #like treating the entire cube’s ref signal as one long time-series.
     nz,ny,nx = data_shape
     if perint: # per integration, treats the entire (nz, ny) array as one flattened 1D series
-    	if edge_wrap: # Wrap around to avoid edge effects, "mirror" the first and last frames to reduce edge ringing:
+        if edge_wrap: # Wrap around to avoid edge effects, "mirror" the first and last frames to reduce edge ringing:
             #These are stacked above and below refvals
             #After smoothing, will strip off these mirrored sections and reshape.
-    		refvals2 = np.vstack((refvals[0][::-1], refvals, refvals[-1][::-1]))
-    		if savgol: # SavGol filter
-    			refvals_smoothed2 = savgol_filter(refvals2.ravel(), winsize, order, delta=1)
-    		else: # Or "optimal" smoothing algorithm
-    			refvals_smoothed2 = smooth_fft(refvals2, delt)
-    		refvals_smoothed = refvals_smoothed2[ny:-ny].reshape(refvals.shape)
-    	else:
-    		if savgol:
-    			refvals_smoothed = savgol_filter(refvals.ravel(), winsize, order, delta=1)
-    		else:
-    			refvals_smoothed = smooth_fft(refvals, delt)
-    		refvals_smoothed = refvals_smoothed.reshape(refvals.shape)
+            refvals2 = np.vstack((refvals[0][::-1], refvals, refvals[-1][::-1]))
+            if savgol: # SavGol filter
+                refvals_smoothed2 = savgol_filter(refvals2.ravel(), winsize, order, delta=1)
+            else: # Or "optimal" smoothing algorithm
+                refvals_smoothed2 = smooth_fft(refvals2, delt)
+            refvals_smoothed = refvals_smoothed2[ny:-ny].reshape(refvals.shape)
+        else:
+            if savgol:
+                refvals_smoothed = savgol_filter(refvals.ravel(), winsize, order, delta=1)
+            else:
+                refvals_smoothed = smooth_fft(refvals, delt)
+            refvals_smoothed = refvals_smoothed.reshape(refvals.shape)
     else: #smooth each frame’s row-series separately
-    	refvals_smoothed = []
-    	if edge_wrap: # Wrap around to avoid edge effects
-    		for ref in refvals: #(ny,)
+        refvals_smoothed = []
+        if edge_wrap: # Wrap around to avoid edge effects
+            for ref in refvals: #(ny,)
                 #mirror to handle FFT more gently on edges
-    			ref2 = np.concatenate((ref[:ny//2][::-1], ref, ref[ny//2:][::-1]))
-    			if savgol:
-    				ref_smth = savgol_filter(ref2, winsize, order, delta=1)
-    			else:
-    				ref_smth = smooth_fft(ref2, delt)
-    			refvals_smoothed.append(ref_smth[ny//2:ny//2+ny])
-    		refvals_smoothed = np.array(refvals_smoothed)
-    	else:
-    		for ref in refvals:
-    			if savgol:
-    				ref_smth = savgol_filter(ref, winsize, order, delta=1)
-    			else:
-    				ref_smth = smooth_fft(ref, delt)
-    			refvals_smoothed.append(ref_smth)
-    		refvals_smoothed = np.array(refvals_smoothed)
+                ref2 = np.concatenate((ref[:ny//2][::-1], ref, ref[ny//2:][::-1]))
+                if savgol:
+                    ref_smth = savgol_filter(ref2, winsize, order, delta=1)
+                else:
+                    ref_smth = smooth_fft(ref2, delt)
+                refvals_smoothed.append(ref_smth[ny//2:ny//2+ny])
+            refvals_smoothed = np.array(refvals_smoothed)
+        else:
+            for ref in refvals:
+                if savgol:
+                    ref_smth = savgol_filter(ref, winsize, order, delta=1)
+                else:
+                    ref_smth = smooth_fft(ref, delt)
+                refvals_smoothed.append(ref_smth)
+            refvals_smoothed = np.array(refvals_smoothed)
     return refvals_smoothed
 
 def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
@@ -1043,6 +1047,7 @@ def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
     if second_deriv is set, then returns three results.
     Adapted from M. Robberto IDL code:
     http://www.stsci.edu/~robberto/Main/Software/IDL4pipeline/
+    
     Parameters
     ----------
     data : ndarray
@@ -1054,6 +1059,7 @@ def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
     second_deriv : bool
         Return the second derivative (along with first).
     """
+
     Dat = data.flatten()
     N = Dat.size
     Pi2 = 2*np.pi
@@ -1087,10 +1093,10 @@ def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
     ##------------------------------------------------
     J0 = 2
     for i in np.arange(1, int(N/4)+1):
-    	sig0, sig1, sig2, sig3 = Dat_P[i:i+4]
-    	if (sig0<Noise) and ((sig1<Noise) or (sig2<Noise) or (sig3<Noise)):
-    		J0 = i
-    		break
+        sig0, sig1, sig2, sig3 = Dat_P[i:i+4]
+        if (sig0<Noise) and ((sig1<Noise) or (sig2<Noise) or (sig3<Noise)):
+            J0 = i
+            break
     ##------------------------------------------------
     ## Compute straight line extrapolation to log(Dat_P)
     ##------------------------------------------------
@@ -1108,7 +1114,7 @@ def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
     # line extrapolation drops 20dB below noise
     J1 = int(np.ceil((np.log(0.01*Noise) - B1) / A1 ))
     if J1<J0:
-    	J1 = J0+1
+        J1 = J0+1
     ##------------------------------------------------
     ## Compute the Kosarev-Pantos filter windows
     ## Frequency-ranges: 0 -- J0 | J0+1 -- J1 | J1+1 -- N2
@@ -1126,40 +1132,40 @@ def smooth_fft(data, delt, first_deriv=False, second_deriv=False):
     # second loop produces first derivative
     # third loop produces second derivative
     if second_deriv:
-    	ndiff = 3
+        ndiff = 3
     elif first_deriv:
-    	ndiff = 2
+        ndiff = 2
     else:
-    	ndiff = 1
+        ndiff = 1
 
     for diff in range(ndiff):
-    	Fltr_Spectrum = np.zeros_like(Dat_P,dtype=complex)
-    	# make the filter complex
-    	i1 = 1; n2 = int((N-1)/2)+1; i2 = i1+n2
-    	FltrCoef = LOPT[i1:].astype(np.complex128)
-    	# differentitation in frequency domain
-    	iW = ((np.arange(n2)+i1)*OMEGA*1j)**diff
-    	# multiply spectrum with filter coefficient
-    	Fltr_Spectrum[i1:] = Dat_F[i1:] * FltrCoef * iW
-    	# Fltr_Spectrum[0] values
-    	# The derivatives of Fltr_Spectrum[0] are 0
-    	# Mean if diff = 0
-    	Fltr_Spectrum[0] = 0 if diff>0 else Dat_F[0]
-    	# Inverse fourier transform back in time domain
-    	Dat_T = np.fft.irfft(Fltr_Spectrum)
-    	#Dat_T[-1] = np.real(Dat_T[0]) + 1j*np.imag(Dat_T[-1])
-    	# This ist the smoothed time series (baseline added)
-    	if diff==0:
-    		Smoothed_Data = np.real(Dat_T) + Dat[0] + SLOPE * X / delt
-    	elif diff==1:
-    		First_Diff = np.real(Dat_T) + SLOPE / delt
-    	elif diff==2:
-    		Secnd_Diff = np.real(Dat_T)
+        Fltr_Spectrum = np.zeros_like(Dat_P,dtype=complex)
+        # make the filter complex
+        i1 = 1; n2 = int((N-1)/2)+1; i2 = i1+n2
+        FltrCoef = LOPT[i1:].astype(np.complex128)
+        # differentitation in frequency domain
+        iW = ((np.arange(n2)+i1)*OMEGA*1j)**diff
+        # multiply spectrum with filter coefficient
+        Fltr_Spectrum[i1:] = Dat_F[i1:] * FltrCoef * iW
+        # Fltr_Spectrum[0] values
+        # The derivatives of Fltr_Spectrum[0] are 0
+        # Mean if diff = 0
+        Fltr_Spectrum[0] = 0 if diff>0 else Dat_F[0]
+        # Inverse fourier transform back in time domain
+        Dat_T = np.fft.irfft(Fltr_Spectrum)
+        #Dat_T[-1] = np.real(Dat_T[0]) + 1j*np.imag(Dat_T[-1])
+        # This ist the smoothed time series (baseline added)
+        if diff==0:
+            Smoothed_Data = np.real(Dat_T) + Dat[0] + SLOPE * X / delt
+        elif diff==1:
+            First_Diff = np.real(Dat_T) + SLOPE / delt
+        elif diff==2:
+            Secnd_Diff = np.real(Dat_T)
     if second_deriv:
-    	return Smoothed_Data, First_Diff, Secnd_Diff
+        return Smoothed_Data, First_Diff, Secnd_Diff
     elif first_deriv:
-    	return Smoothed_Data, First_Diff
+        return Smoothed_Data, First_Diff
     else:
-    	return Smoothed_Data  #return the original data, but with high-frequency noise stripped out,
+        return Smoothed_Data  #return the original data, but with high-frequency noise stripped out,
                               #and only the low-frequency “shape” left, plus the original mean/trend.
 

@@ -1,5 +1,6 @@
-Stage 0
-=======
+================
+Stage 0 Pipeline
+================
 
 Overview
 --------
@@ -13,7 +14,7 @@ Significant heritage from JWST and Roman was leveraged.
 E.g. https://jwst-docs.stsci.edu/jwst-science-calibration-pipeline/stages-of-jwst-data-processing/calwebb_detector1#gsc.tab=0
 
 Documentation
---------
+-------------
 Link to class documentation:
 :class:`~hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline`
 
@@ -21,3 +22,4 @@ Link to class documentation:
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:

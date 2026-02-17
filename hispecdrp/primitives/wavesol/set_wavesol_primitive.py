@@ -9,10 +9,37 @@ __all__ = ['SetInitialWLSPrimitive']
 
 class SetInitialWLSPrimitive(BasePrimitive):
 
+    """
+    Set the initial wavelength solution for each fiber/order. This should be accurate to ~ < 10% of a resolution element.
+
+    Parameters
+    ----------
+    input : str or L1Model
+        Input L1 model or file name.
+    suffix : str
+        Suffix to add to the output file name. Default is 'wavesolinit'.
+    do_fibers : list of int, optional
+        List of fibers to process. If None, all fibers will be processed. Default is None.
+
+    Calibrations
+    ------------
+    wavesol : str or CalibrationModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector`
+
+    Notes
+    -----
+    *This depends on the type of wavelength solution and is under development*
+
+    Returns
+    -------
+    output : L2Model
+        The output model with the initial wavelength solution set.
+    
+    """
+
     ARGUMENTS = {
         'suffix' : 'wavesolinit',
         'do_fibers' : None,
-        'output_model' : 'input',
     }
 
     CALIBRATIONS = {

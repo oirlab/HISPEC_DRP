@@ -4,10 +4,13 @@ import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
 from typing import Sequence
 from copy import copy
+import logging
 
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 from ..coadd.coadd_frames_primitive import coadd_group
+
+logger = logging.getLogger(__name__)
 from .make_dark_primitive import _detect_hot_pixels
 
 
@@ -22,8 +25,7 @@ class MakeMasterDarkPrimitive(BasePrimitive):
 
     A master calibration is identified by setting the `meta.master_cal` attribute to True.
 
-    todo: implement automatic selection of darks to be combined for making the master dark
-    todo: add median dark level to metadata for instrument monitoring
+    TODO: implement automatic selection of darks to be combined for making the master dark
 
     Parameters
     ----------
@@ -53,14 +55,6 @@ class MakeMasterDarkPrimitive(BasePrimitive):
         'max_cores' : 1,
     }
 
-    CALIBRATIONS = {
-        # Todo to implement for automatic selection of darks to be combined for making the master dark
-        # 'dark': {
-        #     'selector': DarkSelector,
-        #     'selector_kwargs': {}
-        # }
-    }
-
 
     def _perform(self):
 
@@ -75,10 +69,10 @@ class MakeMasterDarkPrimitive(BasePrimitive):
 
         # Make sure input is a list of models
         if input_type in (str, datamodels.DataModel):
-            self.log.warning("Input is a single model or path, returning without coadding.")
+            logger.warning("Input is a single model or path, returning without coadding.")
             output_dark = _inputs.copy()
         if input_type in (list, tuple):
-            output_dark = coadd_group(_inputs, self.__class__.__name__,self.mean_calc,self.err_calc)
+            output_dark = coadd_group(_inputs, self, self.mean_calc, self.err_calc)
 
         # Flag this calibration as a master calibration
         output_dark.meta.master_cal = True

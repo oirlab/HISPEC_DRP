@@ -1,8 +1,10 @@
+=======================================
 Dark and Readnoise Calibration Pipeline
-=======
+=======================================
 
 Overview
 --------
+
 **Input:** Raw UTR data.
 
 **Cal. Outputs:** Dark and readnoise calibrations. Also optionally bias calibration TBD.
@@ -13,11 +15,10 @@ Calibration pipeline to generate dark and readnoise calibration files from raw d
 Also creates level 0 rate map data products for each dark exposure processed.
 
 Documentation
---------
-Link to class documentation:
-:class:`~hispecdrp.pipelines.calibration.process_darks_pipeline.ProcessDarksPipeline`
+-------------
 
 .. autoclass:: hispecdrp.pipelines.calibration.process_darks_pipeline.ProcessDarksPipeline
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
