@@ -4,15 +4,51 @@ from ... import datamodels
 from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['BiasSubtractionPrimitive']
 
 
 class BiasSubtractionPrimitive(BasePrimitive):
-    
+    """
+    Subtract the bias level from the input data.
+
+    This is the base signal from which accumulated charges are measured.
+    The bias voltage is to prevent negative values to be read given the
+    unsigned nature of the values produced by the ADC. Bias subtraction
+    is useful to set the y-intercept term of the UTR data close to 0.
+
+    This primitive applies the appropriate bias calibration to the
+    input data product. The bias frame is subtracted from the science data,
+    the associated uncertainties are propagated by adding errors in
+    quadrature, and data quality (DQ) flags are combined using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. Currently, this is expected
+        to be a raw (ramp) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'biassub'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1 (no parallelization).
+
+    Calibrations
+    ------------
+    bias : BiasModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.BiasSelector`
+
+    Returns
+    -------
+    output : DataModel
+        Bias-subtracted data model with updated error and data quality
+        arrays.
+    """
+
     ARGUMENTS = {
         'suffix' : 'biassub',
-        'output_model' : 'input',
         'max_cores' : 1
     }
 
@@ -41,16 +77,16 @@ class BiasSubtractionPrimitive(BasePrimitive):
             raise Exception("DQ extension not found in input model for bias subtraction.")
 
         # Log
-        self.log.info(f"Applying bias correction with {bias} to {input_model}")
+        logger.info(f"Applying bias correction with {bias} to {input_model}")
 
         if result.data.dtype != np.float32:
-            self.log.info(f"Converting UTR data from {result.data.dtype} to float32")
+            logger.info(f"Converting UTR data from {result.data.dtype} to float32")
             result.data = result.data.astype(np.float32)
 
         # Perform bias subtraction
-        bias_subtraction(
+        _bias_subtraction(
             result.data, result.dq,
-            bias_model.data, bias_model.dq,
+            bias_model.bias, bias_model.dq,
             max_cores=self.max_cores
         )
 
@@ -58,7 +94,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         return dict(output=result, bias=bias)
 
 
-def bias_subtraction(
+def _bias_subtraction(
     input_data : np.ndarray,
     input_dq : np.ndarray,
     bias_data : np.ndarray,

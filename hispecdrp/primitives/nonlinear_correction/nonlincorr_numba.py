@@ -7,6 +7,7 @@ from ...utils.parallelization_utils import numba_thread_scope
 __all__ = ['correct_nonlinearity']
 
 NON_LINEAR_FLAG_uint8 = np.uint8(DQ_FLAGS["NON_LINEAR"])
+DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 
 @njit(nogil=True, parallel=True, cache=True)
 def _correct_nonlinearity_numba(
@@ -25,7 +26,7 @@ def _correct_nonlinearity_numba(
             ramps[:, i, j] = nl_corr_ramp
             for k in range(n_reads):
                 if ramps[k, i, j] > nonlin_max[i, j]:
-                    dq_raw[k, i, j] |= NON_LINEAR_FLAG_uint8
+                    dq_raw[k, i, j] |= (NON_LINEAR_FLAG_uint8 | DO_NOT_USE_FLAG_uint8)
             dq[i, j] |= nonlin_dq[i, j]
 
 

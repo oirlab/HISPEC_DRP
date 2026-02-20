@@ -1,0 +1,124 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/target.schema
+$defs:
+  object_fiber_enum:
+    type: string
+    enum: [
+      "SCIENCE",
+      "FIBERFLAT-R", "FIBERFLAT-B",
+      "LFC-R", "LFC-B",
+      "ETALON-R", "ETALON-B",
+      "UNe", "GASCELL",
+      "SKY", "SPECKLE",
+      "BLOCKED", "NONE"
+    ]
+
+type: object
+properties:
+  target_name:
+    title: "Target or object name, internal or on-sky"
+    fits_keyword: OBJECT
+    default: NONE
+    cal_db: true
+    include_ancestors: true
+
+  target_ra:
+    title: "Target Right Ascension"
+    fits_keyword: RA
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  target_dec:
+    title: "Target Declination"
+    fits_keyword: DEC
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  target_ra_uncertainty:
+    title: "Target RA uncertainty"
+    fits_keyword: URA
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  target_dec_uncertainty:
+    title: "Target Dec uncertainty"
+    fits_keyword: UDEC
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  target_mu_ra:
+    title: "Target proper motion in RA"
+    fits_keyword: MURA
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  target_mu_dec:
+    title: "Target proper motion in Dec"
+    fits_keyword: MUDEC
+    type: number
+    unit: degrees
+    merge_rule: mean
+
+  airmass_start:
+    title: "Airmass at start of exposure"
+    fits_keyword: AIRMAST
+    type: number
+
+  airmass_end:
+    title: "Airmass at end of exposure"
+    fits_keyword: AIRMAEND
+    type: number
+
+  azimuth_start:
+    title: "Azimuth at start of exposure"
+    fits_keyword: AZST
+    type: number
+
+  azimuth_end:
+    title: "Azimuth at end of exposure"
+    fits_keyword: AZEND
+    type: number
+
+  elevation_start:
+    title: "Elevation at start of exposure"
+    fits_keyword: ELSTART
+    type: number
+
+  elevation_end:
+    title: "Elevation at end of exposure"
+    fits_keyword: ELEND
+    type: number
+
+  equinox:
+    title: "Equinox of coordinates"
+    fits_keyword: EQUINOX
+    default: "2000"
+
+  object_fiber1:
+    allOf:
+    - $ref: '#/$defs/object_fiber_enum'
+    - title: "Object name in fiber 1"
+      fits_keyword: OBJFIB1
+      cal_db: true
+      include_ancestors: true
+
+  object_fiber2:
+    allOf:
+    - $ref: '#/$defs/object_fiber_enum'
+    - title: "Object name in fiber 2"
+      fits_keyword: OBJFIB2
+      cal_db: true
+      include_ancestors: true
+
+  object_fiber3:
+    allOf:
+    - $ref: '#/$defs/object_fiber_enum'
+    - title: "Object name in fiber 3"
+      fits_keyword: OBJFIB3
+      cal_db: true
+      include_ancestors: true

@@ -1,13 +1,49 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
+import logging
 
 import numpy as np
 from ...utils.math import solve_chebyshev2d_ols
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['CalculateGaussianLSFPrimitive']
 
 
 class CalculateGaussianLSFPrimitive(BasePrimitive):
+
+    """
+    NOTE: *Under development*
+
+    Calculate a Gaussian LSF model by fitting a 2D Chebyshev polynomial to the Gaussian FWHMs as a function of pixel and echelle order.
+
+    The unstructured set of points {x_i, m_i, sigma_i} is fit with a 2D Chebyshev polynomial and then evaluated at each detecor pixel to determine the appropriate Gaussian LSF width at that pixel and wavelength. The LSF width is never updated according to any drifts. The LSF can then be calculated at any sub-pixel or wavelength by interpolating the resulting sigmas at each pixel.
+
+    Parameters
+    ----------
+    input : str or DataModel
+        Input data model or path to input data model. The input data model must contain the attribute ``lfc_fitparams_fib#`` for each fiber, where # is the fiber number.
+    do_fibers : list[int] | None
+        List of fibers to fit. If None, fit all fibers.
+    fit_orders : list[int] | None
+        List of echelle orders to fit. If None, fit all orders.
+    deg_intra_order : int
+        Degree of the polynomial within an order.
+    deg_inter_order : int | 'auto'
+        Degree of the polynomial between orders. If 'auto', the degree is determined based on the number of orders being fit.
+    opt_weights : bool
+        Whether to use the inverse variance of the FWHM measurements as weights in the fit. Default is True.
+    max_iters : int
+        Maximum number of iterations for the fitting process.
+    sigma_cut : float
+        Cutoff for the residuals in terms of standard deviation for iterative outlier rejection. If None, no outlier rejection is performed.
+
+    Returns
+    -------
+    output_model : GaussianLSFModel
+        Output data model containing the fitted Gaussian LSF parameters.
+
+    """
 
     ARGUMENTS = {
         'do_fibers' : None,
@@ -17,7 +53,6 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
         'opt_weights' : True,
         'max_iters' : 100,
         'sigma_cut' : 4.0,
-        'output_model' : None,
         'output_model': 'GaussianLSFModel',
     }
 
@@ -39,14 +74,16 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
                 anchor_orders = 10
                 max_degree = 6
                 deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
-            self.logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
+            logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
 
         fit_results = []
 
         # Get the target output model
-        output_model = self.get_output_model(input_model)
+        output_model = datamodels.GaussianLSFModel.from_datamodels(
+            input_model, data=input_model._data,
+        )
 
         for fiber in do_fibers:
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
@@ -109,20 +146,33 @@ def fit_gausslsf_chebyshev2d(
     """
     Fit a 2D Chebyshev polynomial to the Gaussian sigmas (units microns) as a function of pixel and echelle order.
 
-    Args:
-        pixels (np.ndarray): Pixel values.
-        orders (np.ndarray): Echelle order values.
-        fwhms (np.ndarray): Gaussian FWHMs in units of wavelength.
-        deg_intra_order (int): Degree of the polynomial within an order.
-        deg_inter_order (int): Degree of the polynomial between orders.
-        pixel_bounds (tuple[float] | None): Bounds for pixel values for normalization of the data.
-        order_bounds (tuple[float] | None): Bounds for order values for normalization of the data.
-        max_iters (int | None): Maximum number of iterations for the fitting process.
-        sigma_cut (float | None): Cutoff for the residuals in terms of standard deviation.
-        weights (np.ndarray | None): Fit weights. Defaults to uniform weights.
+    Parameters
+    ----------
+    pixels : np.ndarray
+        Pixel values.
+    orders : np.ndarray
+        Echelle order values.
+    fwhms : np.ndarray
+        Gaussian FWHMs in units of wavelength.
+    deg_intra_order : int
+        Degree of the polynomial within an order.
+    deg_inter_order : int
+        Degree of the polynomial between orders.
+    pixel_bounds : tuple[float] or None
+        Bounds for pixel values for normalization of the data.
+    order_bounds : tuple[float] or None
+        Bounds for order values for normalization of the data.
+    max_iters : int or None
+        Maximum number of iterations for the fitting process.
+    sigma_cut : float or None
+        Cutoff for the residuals in terms of standard deviation.
+    weights : np.ndarray or None
+        Fit weights. Defaults to uniform weights.
 
-    Returns:
-        dict : Dictionary containing the results of the fit.
+    Returns
+    -------
+    dict
+        Dictionary containing the results of the fit.
     """
 
     # Copy to not modify original data

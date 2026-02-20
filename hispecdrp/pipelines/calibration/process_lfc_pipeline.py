@@ -7,6 +7,18 @@ __all__ = ['ProcessLFCPipeline']
 
 class ProcessLFCPipeline(CalibrationPipeline):
 
+    """
+    Pipeline to process 1D laser frequency comb (LFC) data to generate a wavelength calibration model and line spread function (LSF) model.
+
+    This pipeline performs the following steps:
+
+    - :class:`~hispecdrp.primitives.lfc_line_fitting.FitLFCLinesPrimitive`
+    - :class:`~hispecdrp.primitives.lfc_wavesol.CalculateChebyshev2DWLSPrimitive`
+    - :class:`~hispecdrp.primitives.gauss_lsf.CalculateGaussianLSFPrimitive`
+    - :class:`~hispecdrp.primitives.register_cal.RegisterCalibrationPrimitive` (for wavelength solution and LSF)
+    
+    """
+
     PRIMITIVES = {
         'fit_lfc_lines': FitLFCLinesPrimitive,
         'lfc_wavesol': CalculateChebyshev2DWLSPrimitive,

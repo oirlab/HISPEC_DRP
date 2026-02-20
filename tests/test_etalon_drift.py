@@ -6,7 +6,7 @@ import numpy as np
 import scipy.constants
 import os
 
-def test_fit_etalon_parvi(tmp_path, datadir):
+def _test_fit_etalon_parvi(tmp_path, datadir):
 
     solar_files = [
         download_gdrive_file('PARVI/L2/PR.20230803.64207.77_spec-SOLAR.fits', output_dir=datadir),

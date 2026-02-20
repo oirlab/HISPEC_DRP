@@ -1,6 +1,9 @@
 # Pixel-specific flags adapted from stdatamodels.jwst.datamodels.dqflags
 # See HISPEC documentation
 import numpy as np
+
+__all__ = ["DQ_FLAGS"]
+
 DQ_FLAGS = {
     'GOOD':             np.uint32(0),      # No bits set, all is good
     'DO_NOT_USE':       np.uint32(2**0),   # Bad pixel. Do not use.
@@ -9,16 +12,16 @@ DQ_FLAGS = {
     'OUTLIER_MID_TIME': np.uint32(2**3),   # Mid exposure time is outlier in spectral order
     'OUTLIER':          np.uint32(2**4),   # Flagged by outlier detection
     'PERSISTENCE':      np.uint32(2**5),   # High persistence
-    'RESERVED_1':       np.uint32(2**6),   # RESERVED_1/TBD
-    'RESERVED_2':       np.uint32(2**7),   # RESERVED_2/TBD
-    'NON_LINEAR': np.uint32(2**8),   # Non linear. None linearity correction might be worse than 1%.
+    'NON_LINEAR': np.uint32(2**6),   # Non linear. None linearity correction might be worse than 1%.
+    'RESERVED_1':       np.uint32(2**7),   # RESERVED_1/TBD
+    'RESERVED_2':       np.uint32(2**8),   # RESERVED_2/TBD
     # 'UNRELIABLE_ERROR': np.uint32(2**8),   # Uncertainty exceeds quoted error
     'NON_SCIENCE':      np.uint32(2**9),   # Pixel not on science portion of detector
     'DEAD':             np.uint32(2**10),  # Dead pixel
     'HOT':              np.uint32(2**11),  # Hot pixel
     'WARM':             np.uint32(2**12),  # Warm pixel
     'LOW_QE':           np.uint32(2**13),  # Low quantum efficiency
-    'RESERVED_3':       np.uint32(2**14),  # RESERVED_3/TBD
+    'COLD':             np.uint32(2**14),  # Cold pixel
     'TELEGRAPH':        np.uint32(2**15),  # Telegraph pixel
     # 'NONLINEAR':        np.uint32(2**16),  # Pixel highly nonlinear
     'RESERVED_6':        np.uint32(2**16),  #
@@ -38,3 +41,4 @@ DQ_FLAGS = {
     'OTHER_BAD_PIXEL':  np.uint32(2**30),  # A catch-all flag
     'REFERENCE_PIXEL':  np.uint32(2**31),  # Pixel is a reference pixel
 }
+"""Dictionary of HISPEC data-quality bit definitions."""

@@ -16,6 +16,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Specific .c files (this allows for manual C files to be kept if needed)
+hispecdrp/primitives/ramp_fitting/fitramp_cython_Brandt.c
+
+
 # Distribution / packaging
 .Python
 env/

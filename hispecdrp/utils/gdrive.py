@@ -20,7 +20,9 @@ def download_gdrive_file(
     
     file_id = get_id_from_path(filepath)
     if output_dir is None:
-        output_dir = astropy.utils.data._get_download_cache_loc()
+        output_dir = os.getenv('HISPECDRP_TEST_DATA_DIR')
+        if output_dir is None:
+            output_dir = str(astropy.utils.data._get_download_cache_loc())
     
     download_url = f"https://drive.google.com/uc?id={file_id}"
 

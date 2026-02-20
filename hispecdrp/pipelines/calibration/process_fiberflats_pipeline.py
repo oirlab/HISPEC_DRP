@@ -1,7 +1,11 @@
+import logging
+
 from hispecdrp import datamodels
 from ..calibration_pipeline_base import CalibrationPipeline
 from ...primitives import CoaddFramesPrimitive, TracePositionPrimitive, TraceProfilePrimitive, RegisterCalibrationPrimitive, SpectralExtractionPrimitive, SetInitialWLSPrimitive
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['ProcessFiberflatsPipeline']
 
@@ -34,24 +38,24 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         
         # Set the trace pos and prof cals in the spectral extraction primitive
         if self.spec_extract.tracepos is not None:
-            self.log.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
+            logger.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
         self.spec_extract.tracepos = trace_pos_reg
         if self.spec_extract.traceprof is not None:
-            self.log.warning(f"Overriding spec_extract.traceprof with {trace_prof_reg}.")
+            logger.warning(f"Overriding spec_extract.traceprof with {trace_prof_reg}.")
         self.spec_extract.traceprof = trace_prof_reg
 
         # Extract the coadded fiberflats
         ff_coadded_models_extracted = self.spec_extract.apply(ff_coadded_models)
 
         # Associate L1 by fiber
-        ff_coadded_models_extracted = datamodels.associate_fibers(ff_coadded_models_extracted)
+        ff_coadded_models_extracted = datamodels.group_by_illuminated_fiber(ff_coadded_models_extracted)
 
         # Set wavelength solutions
         #for fiber in ff_coadded_models_extracted.keys():
         #    self.set_wavesol.apply(ff_coadded_models_extracted[fiber], do_fibers=[fiber])
 
         # Prepare output fiberflat model
-        ff_output_model = self.get_output_model(ff_coadded_models_extracted, output_model='FiberflatModel', include_data=False)
+        ff_output_model = datamodels.FiberflatModel.from_datamodels(ff_coadded_models_extracted)
 
         for fiber, ff_model in ff_coadded_models_extracted.items():
             #output_model FiberFlat data keys = dict_keys(['PRIMARY', 'SPEC_FIB1', 'SPEC_ERR_FIB1', 'SPEC_VAR_POISSON_FIB1', 'SPEC_VAR_RNOISE_FIB1', 'SPEC_DQ_FIB1', 'WAVE_FIB1', 'MID_TIME_FIB1', 'TRANS_FIB1', 'TRANS_ERR_FIB1', 'SPEC_FIB2', 'SPEC_ERR_FIB2', 'SPEC_VAR_POISSON_FIB2', 'SPEC_VAR_RNOISE_FIB2', 'SPEC_DQ_FIB2', 'WAVE_FIB2', 'MID_TIME_FIB2', 'TRANS_FIB2', 'TRANS_ERR_FIB2', 'CALIBRATIONS', 'DATA_ANCESTORS', 'RECEIPT'])
@@ -67,7 +71,7 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
             setattr(ff_output_model, f'MID_TIME_FIB{fiber}', getattr(ff_coadded_models_extracted[fiber], f'MID_TIME_FIB{fiber}'))
 
             # Add ancestors
-            self.add_data_ancestors(ff_output_model, ff_model)
+            #ff_output_model.add_data_ancestors(ff_model, primitive_name=self.__class__.__name__)
 
         # Get the wavelength solution
         # TODO: NEED TO INPUT WAVELENGTH SOLUTION HERE

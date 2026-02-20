@@ -1,0 +1,23 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: https://oirlab.github.io/schemas/koa.schema
+type: object
+properties:
+  koa_id:
+    title: "KOA ID"
+    fits_keyword: KOAID
+    cal_db: true
+    merge_rule: drop
+
+  koa_filepath:
+    title: "KOA file handle"
+    fits_keyword: KOAFILEP
+    cal_db: true
+    merge_rule: drop
+
+  koa_date_obs:
+    title: "KOA observation date YYYY-MM-DD"
+    fits_keyword: DATE-OBS
+
+  koa_utc_obs:
+    title: "KOA observation UTC HH:MM:SS.S"
+    fits_keyword: UT

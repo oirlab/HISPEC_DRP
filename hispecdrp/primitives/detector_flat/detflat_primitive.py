@@ -5,15 +5,48 @@ from ...calibrations import DetectorFlatSelector
 from ...utils.parallelization_utils import numba_thread_scope
 import numpy as np
 from numba import njit, prange
+import logging
 
-__all__ = ['DetectorFlatPrimitive', 'detector_flat_correction']
+logger = logging.getLogger(__name__)
+
+__all__ = ['DetectorFlatCorrectionPrimitive', 'detector_flat_correction']
 
 
-class DetectorFlatPrimitive(BasePrimitive):
+class DetectorFlatCorrectionPrimitive(BasePrimitive):
+    """
+    Apply detector flat-field correction to the input data.
+
+    This primitive corrects for pixel-to-pixel variations in detector
+    response by dividing the input rate map by the appropriate master
+    detector flat calibration. Uncertainties are propagated by combining
+    the input errors with the detector flat errors in quadrature using the
+    appropriate scaling. Data quality (DQ) flags from the flat calibration
+    are merged into the output using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or L0Model
+        Input file path or data model to process. This is expected to be a
+        level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'detflatcorr'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for parallel processing. Default is 1.
+
+    Calibrations
+    ------------
+    detflat : DetectorFlatModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.DetectorFlatSelector`
+
+    Returns
+    -------
+    output : DataModel
+        Flat-field-corrected data model with updated error and data quality
+        arrays.
+    """
 
     ARGUMENTS = {
-        'suffix' : 'detflat',
-        'output_model' : 'input',
+        'suffix' : 'detflatcorr',
         'max_cores' : 1,
     }
 
@@ -50,7 +83,7 @@ class DetectorFlatPrimitive(BasePrimitive):
             raise Exception("DQ extension not found in flat model for dark subtraction.")
 
         # Log
-        self.log.info(f"Applying detector flat correction with {detflat} to {input_model}")
+        logger.info(f"Applying detector flat correction with {detflat} to {input_model}")
 
         # Perform detector flat correction in place
         detector_flat_correction(
@@ -115,14 +148,16 @@ def _detector_flat_correction_numba(
         for i in range(nx):
             f = flat[j, i]
             r = input_rate[j, i]
-            input_rate[j, i] = r / f
+            if f > 0:
+                input_rate[j, i] = r / f
             z = np.abs(input_rate[j, i])
             _input_err = input_err[j, i]
             _flat_err = flat_err[j, i]
 
             # approximate error propagation for division of random variables
             # https://en.wikipedia.org/wiki/Propagation_of_uncertainty
-            input_err[j, i] = z * np.sqrt((_input_err / r) ** 2 + (_flat_err / f) ** 2)
+            if r > 0 and f > 0:
+                input_err[j, i] = z * np.sqrt((_input_err / r) ** 2 + (_flat_err / f) ** 2)
 
             # Update DQ
             input_dq[j, i] |= flat_dq[j, i]

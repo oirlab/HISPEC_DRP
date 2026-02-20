@@ -1,4 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
+import warnings
 
 try:
     from pyechelle.simulator import Simulator
@@ -6,7 +7,7 @@ try:
     from pyechelle.sources import CSVSource
     from pyechelle.spectrograph import ZEMAX
 except ImportError:
-    print("pyechelle package not found. pyechelle simulations will not run.")
+    warnings.warn("pyechelle package not found in imports in hispec.simulations.simulate_rate_map.py. This is not a problem unless you need it. pyechelle simulations will simply not run. ")
 
 import os
 import warnings
@@ -75,7 +76,10 @@ class SimulateRateMap:
     """
 
     def __init__(self) -> None:
-        self.hdf_file_directory: str = str(astropy.utils.data._get_download_cache_loc()) + '/'
+        self.hdf_file_directory : str = os.getenv(
+            'HISPEC_TEST_DATA_DIR',
+            str(astropy.utils.data._get_download_cache_loc()) + os.sep
+        )
         self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
         self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
         self.output_directory: str = os.getcwd()
