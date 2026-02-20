@@ -210,6 +210,55 @@ class SimulateRateMap:
             self.fibers[fiber_number]["wavelength"],
             self.fibers[fiber_number]["flux"],
         )
+    
+
+    def get_wavelength_solution(self,
+                                spectrograph: str = "BSPEC",
+                                ) -> dict[int, dict[str, np.ndarray]]:
+        """Get wavelength solution from HDF model file as a nested dictionary of the form:
+        {order_number: {'wavelengths': np.ndarray, 'x': np.ndarray, 'y': np.ndarray}}
+        where the wavelength, x, and y arrays are all 1D and correspond to each other.
+        """
+        spectrograph = spectrograph.upper()
+
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
+        
+        model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        model_path = self.hdf_file_directory + model
+
+        if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally. Attemping to download to ', model_path)
+            download_gdrive_file(model, use_cached=True)
+
+        if os.path.isfile(model_path) is False:
+            raise FileNotFoundError(f".hdf model file not found at {model_path}!")
+
+        model_data = read_pyechelle_hdf(model_path)
+
+        order_list = (
+            self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
+        )
+        order_list_str = [str(o) for o in order_list]
+
+        self.wavelength_solution = {}
+        for fiber in [*range(1,4)]:
+            self.wavelength_solution[fiber] = {}
+            fiber_key = f"fiber_{fiber}"
+            for od in order_list_str:
+                self.wavelength_solution[fiber][int(od)] = {}
+                ow = model_data[fiber_key][od]['xy_wavelengths'][::-1]
+                ox = model_data[fiber_key][od]["x"][::-1]
+
+                # Interpolate detector trace positions
+                fx = PchipInterpolator(ox, ow, extrapolate=True)
+
+                self.wavelength_solution[fiber][int(od)] = {
+                    "x": np.arange(4096),
+                    "wavelength": fx(np.arange(4096))
+                }
+
+        return self.wavelength_solution
 
 
     def create_pyechelle_rate_map(
