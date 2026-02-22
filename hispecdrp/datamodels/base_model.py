@@ -410,6 +410,7 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
+        _set_koa_meta(self)
         self.meta.model_type = self.__class__.__name__
 
     def make_hdu(

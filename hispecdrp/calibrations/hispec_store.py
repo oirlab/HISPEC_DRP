@@ -66,31 +66,6 @@ class HISPECCalibrationStore(CalibrationStore):
 
         return cals_added
 
-    def get_missing_records(self) -> list[dict]:
-        """
-        Identifies calibration files that exist in the local cache directory
-        but are missing from the sqlite DB.
-
-        Returns
-        -------
-        list[dict]
-            A list of calibration metadata dictionaries for calibrations
-            are not found in the local cache.
-        """
-        instrument_alias = datamodels.utils.get_instrument_alias(
-            instrument_name=self.instrument_name,
-        )
-        missing_files = []
-        all_files = glob.glob(os.path.join(
-            self.cache_dir,
-            f'{instrument_alias}*.fits'
-        ))
-        for filepath in all_files:
-            if not self.calibration_in_cache(filepath, mode='id'):
-                missing_files.append(filepath)
-            
-        return missing_files
-    
     def generate_calibration_version(
         self,
         cal : DataModel | str,
@@ -149,7 +124,7 @@ class HISPECCalibrationStore(CalibrationStore):
         model = datamodels.open(cal)
 
         if self.calibration_in_cache(model, mode='id'):
-            msg = f"Calibration already exists in cache: {cal}! Skipping registration."
+            msg = f"Calibration already exists in cache: {cal}. Skipping registration."
             logger.warning(msg)
             return None, None
         
