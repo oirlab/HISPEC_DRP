@@ -75,6 +75,7 @@ class DataModel:
         config : type | None = None,
         validate_meta : bool = True,
         instrument_name : str | None = None,
+        **kwargs
     ):
         """
         Initialize a DataModel object.
@@ -97,6 +98,8 @@ class DataModel:
             The instrument config class. If None, it will be determined based on the filepath and instrument name.
         validate_meta : bool, optional
             Whether to validate the metadata against the schema. Defaults to True.
+        kwargs
+            Any valid data attributes.
         """
 
         # Resolve instrument config and name
@@ -133,6 +136,20 @@ class DataModel:
                 self.init_data(data=data, correct_dtypes=correct_dtypes)
             else:
                 self._data = {}
+
+        # User input data via kwargs
+        for key in kwargs:
+            keyu = key.upper()
+            if keyu in self.EXTENSIONS:
+                if isinstance(kwargs[key], astropy.table.Table):
+                    self._data[keyu] = kwargs[key]
+                elif isinstance(kwargs[key], np.ndarray):
+                    if correct_dtypes:
+                        self._data[keyu] = kwargs[key].astype(self.EXTENSIONS[keyu]['dtype'])
+                    else:
+                        self._data[keyu] = kwargs[key]
+            else:
+                raise ValueError(f"Unknown extension: {keyu}")
 
         # Hook
         self.on_init()
