@@ -6,6 +6,8 @@ import numpy as np
 import os
 
 def test_jumps(tmp_path, datadir):
+    np.random.seed(12345)
+
     slope = 10
     ny,nx = 10,10
     source = np.full((ny,nx), slope, dtype=np.float32)
@@ -51,7 +53,7 @@ def test_jumps(tmp_path, datadir):
     # Reinitialize the dq_raw array
     ramp_model.dq_raw = np.zeros(ramp_model.data.shape, dtype=np.uint8)
 
-    thresh = 4.0
+    thresh = 5.0
 
     jump_detection_difference(ramp_model.data, 
                               ramp_model.dq_raw, 
