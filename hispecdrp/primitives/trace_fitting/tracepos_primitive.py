@@ -49,8 +49,6 @@ class TracePositionPrimitive(BasePrimitive):
         'xrange' : None,
         'yrange' : None,
         'output_model' : 'TracePosModel',
-        'save_preview' : True,
-        'show_preview' : False,
     }
 
     def _perform(self):

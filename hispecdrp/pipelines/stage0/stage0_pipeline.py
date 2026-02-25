@@ -25,7 +25,6 @@ class Stage0Pipeline(BasePipeline):
     - :class:`~hispecdrp.primitives.dark_subtraction.dark_primitive.DarkSubtractionPrimitive`
     - :class:`~hispecdrp.primitives.gain.gain_primitive.GainCorrectionPrimitive`
     - :class:`~hispecdrp.primitives.detector_flat.detflat_primitive.DetectorFlatCorrectionPrimitive`
-
     """
 
     PRIMITIVES = {

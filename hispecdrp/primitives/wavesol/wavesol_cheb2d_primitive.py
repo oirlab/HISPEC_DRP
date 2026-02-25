@@ -81,7 +81,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
         # Get the output model type
         output_model = datamodels.LFCWavesolModel.from_datamodels(
-            input_model, data=input_model._data,
+            input_model, include_data=True,
         )
 
         for fiber in do_fibers:
