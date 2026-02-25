@@ -59,7 +59,7 @@ class HISPECCalibrationStore(CalibrationStore):
         for filepath in local_files:
             model = datamodels.open(filepath, meta_only=True)
             cal_id = model.meta.cal_id
-            if not self.calibration_in_cache(cal_id, mode='id'):
+            if not self.calibration_record_in_cache(cal_id, mode='id'):
                 _, cal_record_added = self.register_calibration(model, origin=origin)
                 cals_added.append(cal_record_added)
                 logger.info(f"Added calibration to local DB: {cal_record_added['filename']}")
@@ -123,12 +123,12 @@ class HISPECCalibrationStore(CalibrationStore):
         # Open model
         model = datamodels.open(cal)
 
-        if self.calibration_in_cache(model, mode='id'):
+        if self.calibration_record_in_cache(model, mode='id'):
             msg = f"Calibration already exists in cache: {cal}. Skipping registration."
             logger.warning(msg)
             return None, None
         
-        if not new_version and self.calibration_in_cache(cal, mode='version-family'):
+        if not new_version and self.calibration_record_in_cache(cal, mode='version-family'):
             msg = f"Calibration already exists in cache: {cal}! Skipping registration."
             logger.warning(msg)
             return None, None
@@ -160,7 +160,7 @@ class HISPECCalibrationStore(CalibrationStore):
 
         return local_filepath, cal_record_added
 
-    def calibration_in_cache(
+    def calibration_record_in_cache(
         self,
         cal: dict | str | 'CalibrationModel',
         mode: str = 'id'
@@ -189,9 +189,9 @@ class HISPECCalibrationStore(CalibrationStore):
         """
         if isinstance(cal, str) and os.path.isfile(cal):
             model = datamodels.open(cal, meta_only=True)
-            return super().calibration_in_cache(model, mode=mode)
+            return super().calibration_record_in_cache(model, mode=mode)
         
-        return super().calibration_in_cache(cal, mode=mode)
+        return super().calibration_record_in_cache(cal, mode=mode)
     
     def get_version_family_column_names(self, cal_type : str):
         """
@@ -211,6 +211,8 @@ class HISPECCalibrationStore(CalibrationStore):
         Convert an existing calibration file's origin (record and file) to a new origin.
         This creates a new file and record.
         This does not modify the input file or record.
+
+        TODO: Need to generate new claibration ID.
 
         Parameters
         ----------
