@@ -156,7 +156,6 @@ def create_ramp(
     vertical: bool = True,
     flux_scaling: np.ndarray | None = None,
     flux_scaling_times: np.ndarray | None = None,
-    add_ref_channel: bool = False
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -207,8 +206,6 @@ def create_ramp(
         Timeseries of flux to model variability centered on unity (default: None). Should match length of flux_scaling_times.
     flux_scaling_times : np.ndarray or None, optional
         Times corresponding to flux_scaling array (seconds) (default: None).
-    add_ref_channel : bool, optional
-        If True, add a reference channel to the ramp data (default: False).
 
     Returns
     -------
@@ -403,17 +400,9 @@ def create_ramp(
         noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, clock_rate, std_1overf)
         data_np += noise_1overf
 
+    _outputs = dict(data=data_np, dq_raw=dq_raw_np, meta=_meta)
 
-    _outputs = dict(data=data_np, dq_raw=dq_raw_np)
-
-    if add_ref_channel:
-        _outputs['data'] = add_refchan_ramp(_outputs['data'], position='right')
-        _outputs['dq_raw'] = add_refchan_ramp(_outputs['dq_raw'], position='right')
-
-    _outputs['meta'] = _meta
     return _outputs
-
-
 
 def _tpool_init(data, data_shape,
                 dq_raw, dq_raw_shape,
