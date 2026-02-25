@@ -32,28 +32,41 @@ The primary object for handling calibrations in the DRP is the :py:class:`~hispe
      ) + os.sep
 
     # Open dark model
-    dark_path = 'HB.20240924.0000.00.master-dark.fits'
+    dark_path = download_gdrive_file('HB.20260212.00000.00.mastercal-dark.001.fits')
     dark_model = datamodels.open(dark_path)
 
     # Store the dark model in the local cache
     prim = RegisterCalibrationPrimitive()
     prim.apply(dark_model)
 
-**2. Select and Retrieve a calibration.**
+**2. Select and Retrieve a calibration with a Primitive.**
+
+This will use the default calibration selector associated with the primitive (see primitive class).
 
 .. code-block:: python
 
     from hispecdrp import DarkSubtractionPrimitive
-    from hispecdrp.calibrations import HISPECCalibrationStore, DarkSelector
-
 
     # Open science model
-    sci_model = datamodels.open('HB.20240924.00000.00.fits')
+    sci_path = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits')
+    sci_model = datamodels.open(sci_path)
 
     # Automatically select and retrieve a dark calibration using the DarkSubtractionPrimitive
     dark_prim = DarkSubtractionPrimitive()
-    dark_path, dark_record = dark_prim.get_calibration(sci_model)
+    dark_path, dark_record = dark_prim.get_calibration(sci_model, 'dark')
+
+**2. Select and Retrieve a calibration with the Calibration Store.**
+
+This will specify the calibration selector to use. See `Calibration Selectors Documentation <https://oirlab.github.io/KOA_Middleware/selectors.html>`_ for more details.
+
+.. code-block:: python
+
+    from hispecdrp.calibrations import HISPECCalibrationStore, DarkSelector
+
+    # Open science model
+    sci_path = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits')
+    sci_model = datamodels.open(sci_path)
     
     # Alternatively, query for a dark calibration using the CalibrationStore directly using a custom selector
-    with HISPECCalibrationStore(instrument_name='HISPEC') as store:
+    with HISPECCalibrationStore() as store:
         dark_path = store.get_calibration(sci_model, selector=DarkSelector())

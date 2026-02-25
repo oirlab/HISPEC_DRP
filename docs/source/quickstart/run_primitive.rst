@@ -17,8 +17,8 @@ This example subtracts a dark frame from an input frame at level L0 (rate map) u
     from hispecdrp import datamodels
 
     # Input files
-    sci_path = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits')
-    dark_path = download_gdrive_file('HISPEC/Cals/HB.20240924.0000.00.master-dark.fits')
+    sci_path = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits')
+    dark_path = download_gdrive_file('HB.20260212.00000.00.mastercal-dark.001.fits')
     dark_model = datamodels.open(dark_path)
 
     # Use default behavior
@@ -47,10 +47,8 @@ Passed in as keyword arguments to the class constructor:
 
     dark_prim = DarkSubtractionPrimitive(
         dark=dark_path,
-        save_result=True,
         output_dir='/path/to/output/dir/',
     )
-    dark_prim.save_result = True # Redundant, but can also be set directly as a class attribute.
     model_result = dark_prim.apply(sci_path)
 
 Passed in as keyword arguments to the class constructor or ``apply`` method, set directly as class attributes:
