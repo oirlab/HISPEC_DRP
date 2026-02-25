@@ -251,15 +251,15 @@ class SimulateRateMap:
             fiber_key = f"fiber_{fiber}"
             for od in order_list_str:
                 self.wavelength_solution[fiber][int(od)] = {}
-                ow = model_data[fiber_key][od]['xy_wavelengths'][::-1]
-                ox = model_data[fiber_key][od]["x"][::-1]
+                ow = model_data[fiber_key][od]['xy_wavelengths']
+                ox = model_data[fiber_key][od]["x"]
 
                 # Interpolate detector trace positions
                 fx = PchipInterpolator(ox, ow, extrapolate=True)
 
                 self.wavelength_solution[fiber][int(od)] = {
-                    "x": np.arange(4096),
-                    "wavelength": fx(np.arange(4096))
+                    "pixel": np.arange(4096),
+                    "wavelength": fx(np.arange(4096))[::-1] # reversed to account for mirrored hdf file
                 }
 
         return self.wavelength_solution
@@ -343,6 +343,11 @@ class SimulateRateMap:
         self.rate_map = (
             fits.getdata(output_path) / exposure_time.to(u.s).value
         )
+
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
 
         if save:
             save_path = os.path.join(
@@ -463,6 +468,11 @@ class SimulateRateMap:
 
         self.rate_map = np.sum(rate_map_array, axis=0)
 
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
+
         if save and self.rate_map is not None:
             if os.path.isdir(self.output_directory) is False:
                 os.mkdir(self.output_directory)
@@ -502,7 +512,36 @@ class SimulateRateMap:
 
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
+
     
+    def flip_rate_map_horizontal(self):
+        """Flip the rate map horizontally to correct for backwards hdf file"""
+        if self.rate_map is not None:
+            self.rate_map = np.flip(self.rate_map, axis=1)
+        return self.rate_map
+
+    def rotate_rate_map_vertical(self):
+        """Rotate the rate map so orders are vertical"""
+        if self.rate_map is not None:
+            self.rate_map = np.rot90(self.rate_map, 3)
+        return self.rate_map
+    
+    def add_channel_rate_map(self, where='right'):
+        """Add extra channel to rate map at left or right."""
+        if self.rate_map is None:
+            raise ValueError("Rate map must be generated before adding channel!")
+        
+        new_channel = np.zeros((4096, 64))
+
+        if where == 'left':
+            self.rate_map = np.hstack((new_channel, self.rate_map))
+        elif where == 'right':
+            self.rate_map = np.hstack((self.rate_map, new_channel))
+        else:
+            raise ValueError("where must be 'left' or 'right'!")
+        
+        return self.rate_map
+
 
 def bilinear_weights_rate_map(
     wave: Quantity,

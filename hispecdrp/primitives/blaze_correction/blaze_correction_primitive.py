@@ -19,8 +19,9 @@ class BlazeCorrectionPrimitive(BasePrimitive):
         'max_cores' : 1,
         'do_fibers' : None,
         'do_orders' : None,
-        'remove_lamp_blackbody' : True,
-        'normalize_blaze' : True,
+        'remove_lamp_blackbody' : False,
+        'normalize_for_stitching' : False,
+        'pixels_per_spline_knot' : 16,
         'output_model' : 'L2Model',
     }
 
@@ -51,7 +52,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             fiberflat_model = datamodels.open(fiberflat)
 
             # Init output model
-            output_model = self.get_output_model(input_model)
+            output_model = self.get_output_model(input_model, data=input_model._data)
             
             # Which fibers and orders to process
             do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
@@ -71,35 +72,63 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                             np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_var_rnoise'].dtype))
                     setattr(output_model, f'SPEC_DQ_FIB{fiber}', 
                             np.zeros((n_orders, npx), dtype=input_model.traces[int(fiber)]['spec_dq'].dtype))
-                    #TODO do we need to set an attribute to carry the fiber flat data used for blaze correction?
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
                 blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],
                                               fiberflat_model.traces[int(fiber)]['spec_err'],
                                               fiberflat_model.traces[int(fiber)]['spec_dq'],
-                                              order_vec, do_orders,
-                                              clipping_filter_size=15)
+                                              order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
                 blaze_std_array = fiberflat_model.traces[int(fiber)]['spec_err']
                 
                 # remove lamp blackbody from blaze array
                 if self.remove_lamp_blackbody:
-                    pass #TODO
-
-                # normalize blaze array across orders with spline fit to order peaks
-                if self.normalize_blaze:
+                    #TODO
+                    raise NotImplementedError('remove_lamp_blackbody=True is not yet') 
+                
+                # normalize blaze array, either with simple median, or fitting spline to wavelength/blaze peaks
+                if self.normalize_for_stitching:
+                    # only necessary if stitching
                     blaze_array, blaze_std_array = normalize_blaze_array(blaze_array, 
                                                                 blaze_std_array,  
                                                                 fiberflat_model.traces[int(fiber)]['wave'], 
                                                                 order_vec, do_orders)
-                    pass #TODO
+                else:
+                    blaze_array /= np.nanmax(blaze_array, axis=1)[:, np.newaxis]
+                    blaze_std_array /= np.nanmax(blaze_array, axis=1)[:, np.newaxis]
 
                 # apply blaze correction to science spectrum using blaze array, and propagate errors
-                apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, do_orders)
+                apply_blaze_array(output_model, blaze_array, blaze_std_array,
+                                fiber, order_vec, do_orders,
+                                pixels_per_spline_knot=self.pixels_per_spline_knot)
 
         return dict(output=output_model)
     
 
-def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_orders, clipping_filter_size=15):
+def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_orders, pixels_per_spline_knot=16):
+    """
+    Collect smoothed blaze function (not normalized) for each order and return in 2D array
+
+    Parameters
+    ----------
+    fibarflat_flux : ndarray
+        Fiber flat flux for all orders.
+    fiberflat_std : ndarray
+        Fiber flat standard deviation for all orders.
+    fiberflat_dq : ndarray
+        Data quality flags for all orders
+    order_vec : list
+        Contains all orders
+    do_orders: List
+        Which orders to get blaze function 
+    pixels_per_spline_knot : int
+        Number of pixels between spline nodes, used to adjust smoothing
+
+    Returns
+    -------
+    smooth_flux : ndarray
+        Smoothed fiber flat spectrum
+
+    """
 
     blaze_array = np.ones((len(order_vec), len(fiberflat_flux[0])), dtype=fiberflat_flux[0].dtype)
     for o, order in enumerate(order_vec):
@@ -109,8 +138,8 @@ def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_
         flat_std = fiberflat_std[o]
         dq_flags = fiberflat_dq[o]
 
-        smooth_blaze = estimate_blaze_spline(flat_flux, flat_std, dq_flags, clipping_filter_size)
-        blaze_array[o] = smooth_blaze
+        smooth_blaze = estimate_blaze_spline(flat_flux, flat_std, dq_flags, pixels_per_spline_knot=pixels_per_spline_knot)
+        blaze_array[o] = smooth_blaze 
 
     return blaze_array
     
@@ -119,10 +148,10 @@ def estimate_blaze_spline(
     flat_flux,
     flat_std,
     dq_flags,
-    clipping_filter_size=15
+    pixels_per_spline_knot=16,
 ):
     """
-    Estimate blaze using weighted cubic smoothing spline.
+    Estimate blaze using weighted cubic lsq smoothing spline.
 
     Parameters
     ----------
@@ -130,28 +159,23 @@ def estimate_blaze_spline(
         Fiber flat flux.
     flat_std : ndarray
         Fiber flat standard deviation.
-    filter_size : int
-        Size of the median and Gaussian filters to use.
-
+    dq_flags : ndarray
+        Data quality flags
+    pixels_per_spline_knot : int
+        Number of pixels between spline nodes, used to adjust smoothing
 
     Returns
     -------
-    blaze : ndarray
-    blaze_std : ndarray
+    smooth_flux : ndarray
+        Smoothed fiber flat spectrum
     """
+    #TODO make smoothing resistant to lines in the lamp spectrum
     px = np.arange(len(flat_flux))
-    weights = 1 / flat_std**2
+    weights = 1 / flat_std
 
     mask = (flat_flux > 0) & (flat_std > 0) & (dq_flags == 0) 
 
-    # trend = gaussian_filter(median_filter(flat_flux[mask], size=clipping_filter_size), clipping_filter_size)
-    # sigma_cut = 20.0
-    # try:
-    #     mask[~mask] = np.abs(flat_flux[~mask]-trend)/mad_std(flat_flux[~mask]-trend) > sigma_cut
-    # except RuntimeWarning:
-    #     mask[~mask] = np.abs(flat_flux[~mask]-trend)/np.std(flat_flux[~mask]-trend) > sigma_cut
-
-    num_knots = max(10, len(px[mask]) // 16)  # heuristic: one knot per ~16 pixels, with a minimum of 10
+    num_knots = len(px[mask]) // pixels_per_spline_knot  
     knots = np.linspace(px[mask].min(), px[mask].max(), num_knots)[1:-1]
 
     spline = LSQUnivariateSpline(
@@ -169,40 +193,103 @@ def estimate_blaze_spline(
 
 
 def normalize_blaze_array(blaze_array, blaze_std, wavelengths, order_vec, do_orders):
-    """Normalize blaze array across orders."""
+    """Normalize blaze array across orders using a CubicSpline fit to wavelength/blaze peak.
+    Necessary for stitching order by order spectra.
+    
+    Parameters
+    ----------
+    blaze_array : ndarray
+        Array of blaze functions per order, not yet normalized.
+    blaze_std : ndarray
+        Array of standard deviation per order from the fiber flats.
+    wavelengths : ndarray
+        Wavelength solution per order for blaze function.
+    order_vec : List
+        Contains all orders
+    do_orders:
+        Which orders to perform normalization
+
+    Returns
+    -------
+    normalized_blaze : ndarray
+        Normalized blaze per order ready to be used to correct science spectra
+    blaze_std_normalized : ndarray
+        Normalized fiber flat std per order to be used when correcting science spectra
+    """
+    #TODO fix to perform the normalization in flux density (per wavelength) space instead of pixel rate
     do_orders_idx = [i for i, x in enumerate(order_vec) if x in do_orders]
+
+    # calculate blaze function max and corresponding wavelength
     px_max = np.argmax(blaze_array[do_orders_idx], axis=1)
     blaze_max = np.max(blaze_array[do_orders_idx], axis=1)
     wave_max = wavelengths[do_orders_idx,px_max]
-    spline = CubicSpline(wave_max, blaze_max, bc_type='natural')
+
+    # sort and interpolate
+    wv_sort_idx = np.argsort(wave_max)
+    spline = CubicSpline(wave_max[wv_sort_idx], blaze_max[wv_sort_idx], bc_type='natural')
+
+    # normalize blaze functions
     normalized_blaze = blaze_array / spline(wavelengths)
     blaze_std_normalized = blaze_std / spline(wavelengths)
     return normalized_blaze, blaze_std_normalized
 
 
-
-def apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, do_orders):
-    """Apply blaze correction to science spectrum and propagate errors."""
+def apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, order_vec, do_orders, pixels_per_spline_knot=16):
+    """Apply blaze correction to science spectrum and propagate errors for all orders, then add to output model.
+    
+    Parameters
+    ----------
+    output_model : datamodels.DataModel
+        Output model to insert calibrated spectra, should already contain uncalibrated science spectra
+    blaze_array : ndarray
+        Normalized blaze functions per order ready to use for blaze correction
+    blaze_std_array : ndarray
+        Normalized blaze function stds per order ready to be used for error propagation
+    fiber : int
+        Current fiber
+    do_orders: List
+        Which orders to perform blaze correction
+    pixels_per_spline_knot : int
+        Number of pixels between spline nodes, used here to set dq flags for edges where smoothing works poorly
+    """
     
     spec_blaze_cal_array = np.full_like(getattr(output_model, f'SPEC_UNCAL_FIB{fiber}'), np.nan)
     spec_blaze_cal_err_array = np.full_like(getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}'), np.nan)
-    for o, order in enumerate(do_orders):
-        spec_uncal = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')[o]
-        spec_uncal_err = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')[o]
-        blaze = blaze_array[o]
-        blaze_std = blaze_std_array[o]
+    for o, order in enumerate(order_vec):
+        if order in do_orders:
+            spec_uncal = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')[o]
+            spec_uncal_err = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')[o]
+            blaze = blaze_array[o]
+            blaze_std = blaze_std_array[o]
 
-        spec_blaze_cal, spec_blaze_cal_err = apply_blaze(spec_uncal, spec_uncal_err, blaze, blaze_std)
-        spec_blaze_cal_array[o] = spec_blaze_cal
-        spec_blaze_cal_err_array[o] = spec_blaze_cal_err
+            spec_blaze_cal, spec_blaze_cal_err = apply_blaze(spec_uncal, spec_uncal_err, blaze, blaze_std)
+            spec_blaze_cal_array[o] = spec_blaze_cal
+            spec_blaze_cal_err_array[o] = spec_blaze_cal_err
+
+    output_dq = output_model.traces[int(fiber)]['spec_dq']
+    # array edges cannot be smoothed properly with spline
+    output_dq[:int(pixels_per_spline_knot*10)] = 1 
+    output_dq[-int(pixels_per_spline_knot*10):] = 1 
 
     setattr(output_model, f'SPEC_FIB{fiber}', spec_blaze_cal_array)
     setattr(output_model, f'SPEC_ERR_FIB{fiber}', spec_blaze_cal_err_array)
-        #TODO propagate DQ flags
-
+    setattr(output_model, f'SPEC_DQ_FIB{fiber}', output_dq )
 
     
 def apply_blaze(science_flux, science_std, blaze, blaze_std):
+    """Apply blaze correction to science spectrum and propagate errors for all orders, then add to output model.
+    
+    Parameters
+    ----------
+    science_flux : ndarray
+        science flux for single order
+    science_std : ndarray
+        science error for single order
+    blaze : ndarray
+        Normalized blaze function to be removed from science_flux
+    blaze_std : ndarray
+        Normalized blaze error used in error propagation
+    """
 
     flux_corr = science_flux / blaze
 

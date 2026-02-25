@@ -488,7 +488,7 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
             
 class FiberFlatSelector(CalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : CalibrationDB):
+    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
         with db.session_manager() as session:
             if meta['instrument_name'].lower() == 'hispec':
                 return session.query(db.orm_class).filter(

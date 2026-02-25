@@ -29,12 +29,12 @@ class HISPECConfig:
 
     echelle_orders : dict[str, dict[str, int]] = {
         'BSPEC': {
-            'order_start' : 148,
-            'order_end' : 110
+            'order_start' : 110,
+            'order_end' : 148
         },
         'RSPEC': {
-            'order_start' : 97,
-            'order_end' : 60
+            'order_start' : 60,
+            'order_end' : 97
         }
     }
 
