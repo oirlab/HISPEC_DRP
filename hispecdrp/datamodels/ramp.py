@@ -13,8 +13,8 @@ class RampModel(DataModel):
         :header: "HDU Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
 
         DATA, Image, UInt16, "Nreads x 4096 x 4160", DN, Raw UTR data.
-        DQ_RAW, Image, UInt32, "4096 x 4160", None, Data quality flags for all reads.
-        DQ, Image, UInt32, "Nreads x 4096 x 4160", None, Combined data quality flags for individual reads.
+        DQ_RAW, Image, UInt8, "4096 x 4160", None, Data quality flags unique to each pixel and read.
+        DQ, Image, UInt32, "Nreads x 4096 x 4160", None, Data quality flags that apply to all reads.
     """
     EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW, **DQ_L0}
 
@@ -112,6 +112,8 @@ class RampModel(DataModel):
                         + np.arange(ny_chan*nx_chan, dtype=np.float32).reshape(ny_chan, nx_chan) \
                         / self.meta.clock_rate
 
+        # TODO: Are adjacent channels flipped in the direction of readout?
+        # TODO:   (i.e. channel 1 reads left to right, channel 2 reads right to left, etc.)
         first_read_mjd = np.tile(first_read_mjd_channel, (1, n_channels))
 
         if vertical:

@@ -3,9 +3,6 @@ import os
 import astropy.table
 from astropy.io import fits
 from copy import deepcopy
-from datetime import datetime
-import io
-import hashlib
 
 from hispecdrp import __version__
 import numpy as np
@@ -56,8 +53,7 @@ class DataModel:
     }
 
     _ALLOWED_ATTRIBUTES = [
-        'meta', 'config', '_filepath', '_validate_meta', '_data',
-        '_ALLOWED_ATTRIBUTES', 'EXTENSIONS',
+        'meta', 'config', 'EXTENSIONS',
     ]
 
     _INHERIT_EXTENSIONS = True
@@ -67,7 +63,6 @@ class DataModel:
     def __init__(
         self,
         filepath : str | None = None,
-        data : dict | None = None,
         meta : MetaModel | dict | None = None,
         meta_only : bool = False,
         extensions : str | list[str] | None = None,
@@ -127,29 +122,11 @@ class DataModel:
             self.meta.filename = os.path.basename(self._filepath)
             if not meta_only:
                 self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
-            else:
-                self._data = {}
         else:
             self._filepath = None
             self.init_meta(meta=meta)
             if not meta_only:
-                self.init_data(data=data, correct_dtypes=correct_dtypes)
-            else:
-                self._data = {}
-
-        # User input data via kwargs
-        for key in kwargs:
-            keyu = key.upper()
-            if keyu in self.EXTENSIONS:
-                if isinstance(kwargs[key], astropy.table.Table):
-                    self._data[keyu] = kwargs[key]
-                elif isinstance(kwargs[key], np.ndarray):
-                    if correct_dtypes:
-                        self._data[keyu] = kwargs[key].astype(self.EXTENSIONS[keyu]['dtype'])
-                    else:
-                        self._data[keyu] = kwargs[key]
-            else:
-                raise ValueError(f"Unknown extension: {keyu}")
+                self.init_data(correct_dtypes=correct_dtypes, **kwargs)
 
         # Hook
         self.on_init()
@@ -214,29 +191,33 @@ class DataModel:
 
         """
         extensions = self._resolve_extensions(extensions)
-        self._data = {}
         with fits.open(
             self._filepath,
             memmap=False,
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
+                extl = extname.lower()
                 if extname in hdulist:
-                    self._data[extname] = self.read_extension_data(
+                    data = self.read_extension_data(
                         hdulist[extname],
                         correct_dtype=correct_dtypes
                     )
-        # Initialize remaining extensions
+                    setattr(self, extl, data)
+                elif extname not in self.EXTENSIONS:
+                    raise ValueError(f"Extension {extname} not found in FITS file: {self._filepath}")
+
+        # Initialize remaining extensions not set by user or FITS file
         for extname in self.EXTENSIONS:
-            if extname not in self._data:
+            extl = extname.lower()
+            if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    self._data[extname] = astropy.table.Table({
+                    setattr(self, extl, astropy.table.Table({
                         name: np.array([], dtype=dtype)
                         for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    })
+                    }))
                 else:
-                    self._data[extname] = None # Keep Image HDUs as None
-        return self._data
+                    setattr(self, extl, None) # Keep Image HDUs as None
     
     def read_extension_data(
         self, hdu : _VALID_HDU,
@@ -374,7 +355,7 @@ class DataModel:
             + ['RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS']
         for extname in extensions_list:
             if not include_empty_extensions \
-                and (extname not in self._data or self._data[extname] is None) \
+                and getattr(self, extname.lower(), None) is None \
                 and extname not in ('RECEIPT', 'PRIMARY'):
                 continue
             hdu = self.make_hdu(
@@ -448,24 +429,30 @@ class DataModel:
         correct_dtypes : bool, optional
             Whether to correct the data types of the data arrays. Defaults to False.
         """
+        extl = extname.lower()
         hdu_class = self.EXTENSIONS[extname]['hdu_type']
         header = self.meta.to_fits_header(
             extname=extname,
             include_missing_metadata=include_missing_metadata
         )
+
+        # Primary HDU is empty, only header
         if hdu_class is fits.PrimaryHDU:
-            return hdu_class(header=header)
-        if hdu_class is fits.ImageHDU:
-            data = self._data.get(extname, None)
+            hdu = hdu_class(header=header)
+        
+        # Convert Image HDU data to correct dtype if needed
+        elif hdu_class is fits.ImageHDU:
+            data = getattr(self, extl, None)
             if data is not None and correct_dtypes:
                 dtype = self.EXTENSIONS[extname]['dtype']
-                _data = data.astype(dtype)
-            else:
-                _data = data
-            hdu = hdu_class(data=_data, name=extname)
-        elif hdu_class is fits.BinTableHDU:
-            data = self._data.get(extname, None)
+                data = data.astype(dtype)
             hdu = hdu_class(data=data, name=extname)
+        
+        # Nothing special for BIN tables
+        elif hdu_class is fits.BinTableHDU:
+            data = getattr(self, extl, None)
+            hdu = hdu_class(data=data, name=extname)
+
         return hdu
 
     def __repr__(self):
@@ -517,28 +504,29 @@ class DataModel:
             return [extensions.upper()]
         else:
             return [e.upper() for e in extensions]
-
-    def __getattr__(self, attr):
-        """
-        This is only called if the attribute is not found in the instance's __dict__
-        """
-        attru = attr.upper()
-        if attru not in self.EXTENSIONS:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
-        if attru in self._data:
-            return self._data[attru]
-        else:
-            return None
         
+    def __getattr__(self, attr):
+        attrl = attr.lower()
+
+        if attrl in self.__dict__:
+            return self.__dict__[attrl]
+
+        # Or try super's getattr if the parent class has it
+        try:
+            return super().__getattribute__(attrl)
+        except AttributeError:
+            pass
+
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'")
+
     def __setattr__(self, attr, value):
         if attr.startswith("_") or attr in self._ALLOWED_ATTRIBUTES:
-            super().__setattr__(attr, value)
-            return
+            return super().__setattr__(attr, value)
 
         attru = attr.upper()
         if attru in self.EXTENSIONS:
-            self._data[attru] = value
-            return
+            attrl = attru.lower()
+            return super().__setattr__(attrl, value)
 
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{attr}' "
@@ -547,44 +535,47 @@ class DataModel:
 
     def init_data(
         self,
-        data : dict | None = None,
         correct_dtypes : bool = False,
+        **kwargs
     ):
         """
         Initialize the data.
 
         Parameters
         ----------
-        data : dict, optional
-            Dictionary containing data arrays (numpy) or tables (DataFrames).
-            Keys should match the schema's extension names. Defaults to None.
+        correct_dtypes : bool, optional
+            Whether to correct the data types of the data arrays upon initializing them. Defaults to False.
+        kwargs
+            Any valid data attributes to set.
         """
-        self._data = {}
-        if data is not None:
-            for key in data:
-                if key.upper() in self.EXTENSIONS:
-                    if isinstance(data[key], astropy.table.Table):
-                        self._data[key.upper()] = data[key]
-                    elif isinstance(data[key], np.ndarray):
-                        if correct_dtypes:
-                            self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
-                        else:
-                            self._data[key.upper()] = data[key]
-                else:
-                    raise ValueError(f"Unknown extension: {key.upper()}")
-        if 'RECEIPT' not in self._data:
-            self.init_receipt()
+
+        # User input data via kwargs
+        for key in kwargs:
+            keyu = key.upper()
+            keyl = key.lower()
+            val = kwargs[key]
+            if keyu in self.EXTENSIONS:
+                if isinstance(val, astropy.table.Table):
+                    setattr(self, keyl, val)
+                elif isinstance(val, np.ndarray):
+                    if correct_dtypes:
+                        setattr(self, keyl, val.astype(self.EXTENSIONS[keyu]['dtype']))
+                    else:
+                        setattr(self, keyl, val)
+            else:
+                raise ValueError(f"Unknown extension: {key.upper()}")
 
         # Initialize remaining extensions
         for extname in self.EXTENSIONS:
-            if extname not in self._data:
+            extl = extname.lower()
+            if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    self._data[extname] = astropy.table.Table({
+                    setattr(self, extl, astropy.table.Table({
                         name: np.array([], dtype=dtype)
                         for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    })
+                    }))
                 else:
-                    self._data[extname] = None # Keep Image HDUs as None
+                    setattr(self, extl, None)
 
     def init_meta(self, meta: dict | MetaModel | None = None):
         """
@@ -671,29 +662,33 @@ class DataModel:
                     )
                 ))
 
-    def init_receipt(self):
-        """
-        Initialize the receipt.
-        """
-        if 'RECEIPT' not in self._data:
-            self._data['RECEIPT'] = astropy.table.Table({
-                name: np.array([], dtype=dtype)
-                for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()
-            })
-
     @property
     def extinfo(self):
         for extname, info in self.EXTENSIONS.items():
+            extl = extname.lower()
             hdu_type = info['hdu_type']
             if hdu_type is fits.PrimaryHDU:
                 continue
             if hdu_type is fits.ImageHDU:
-                if extname in self._data and self._data[extname] is not None:
-                    dtype = self._data[extname].dtype
-                    print(f"{extname}\n  dtype: {dtype}\n  shape: {self._data[extname].shape}")
+                data = getattr(self, extl, None)
+                if data is not None:
+                    dtype = data.dtype
+                    print(f"{extname}\n  dtype: {dtype}\n  shape: {data.shape}")
             elif hdu_type is fits.BinTableHDU:
-                if extname in self._data and len(self._data[extname]) > 0:
-                    print(f"Extension: {extname}\n  columns: {list(self._data[extname].columns)}\n  nrows: {len(self._data[extname])})")
+                data = getattr(self, extl, None)
+                if data is not None:
+                    print(f"Extension: {extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
+
+    @property
+    def data_dict(self):
+        data = {}
+        for extname, info in self.EXTENSIONS.items():
+            extl = extname.lower()
+            hdu_type = info['hdu_type']
+            if hdu_type is fits.PrimaryHDU:
+                continue
+            data[extl] = getattr(self, extl, None)
+        return data
 
     @property
     def data_level_suffix(self):
@@ -703,10 +698,10 @@ class DataModel:
     def from_datamodels(
         cls,
         input : Any,
-        data: dict | None = None,
         append_receipts: bool = True,
         append_ancestors: bool = True,
         append_calibrations: bool = True,
+        include_data : bool = False,
     ) -> 'DataModel':
         """
         Create a new DataModel by merging metadata from multiple input models.
@@ -721,6 +716,8 @@ class DataModel:
             Whether to append data ancestors from input models. Defaults to True.
         append_calibrations : bool, optional
             Whether to append calibrations from input models. Defaults to True.
+        include_data : bool, optional
+            Whether to include data from the input model (must only be one). Defaults to False.
 
         Returns
         -------
@@ -749,18 +746,26 @@ class DataModel:
         # Merge metadata
         meta_out = merge_meta(input)
 
+        # Get first model
+        first_model = datamodel_open(input[0])
+
         # Create new model
         model_out = cls(
             meta=meta_out,
-            instrument_name=meta_out.instrument_name
+            instrument_name=meta_out.instrument_name,
+            config=first_model.config,
         )
 
-        # Add data if provided
-        if data is not None:
-            for key in data:
-                keyu = key.upper()
-                if keyu in model_out.EXTENSIONS and keyu not in ('RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS'):
-                    setattr(model_out, keyu, data[key])
+        # Forward data?
+        if include_data:
+            assert len(input) == 1, "Cannot include data when merging multiple models. Set include_data=False or provide a single model."
+            first_model = datamodel_open(input[0])
+            for extname in model_out.EXTENSIONS:
+                if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS'):
+                    continue
+                extl = extname.lower()
+                if extname in first_model.EXTENSIONS:
+                    setattr(model_out, extl, getattr(first_model, extl, None))
 
         for _input in input:
 
@@ -817,19 +822,18 @@ class DataModel:
         Returns:
             dict: A dictionary where keys are fiber numbers and values are dictionaries of attributes without the '_fib#' suffix.
         """
-        data = {}
-        for attr in self._data:
-            attr_lower = attr.lower()
-            if '_fib' in attr_lower:
+        trace_data = {}
+        for attr in self.EXTENSIONS:
+            attrl = attr.lower()
+            if '_fib' in attrl:
                 try:
-                    kind, fiber = attr_lower.rsplit('_fib', 1)
+                    kind, fiber = attrl.rsplit('_fib', 1)
                     fiber = int(fiber)
                 except ValueError:
                     continue
-                if fiber not in data:
-                    data[fiber] = {}
-                data[fiber][kind] = getattr(self, attr)
-        return data
+                trace_data.setdefault(fiber, {})
+                trace_data[fiber][kind] = getattr(self, attr, None)
+        return trace_data
 
     def load_calibration_from_role(
         self,
@@ -1035,6 +1039,7 @@ class DataModel:
                 # astropy.table.row -> dict to handle column mapping
                 row_dict = {c: row[c] for c in other_model.data_ancestors.colnames}
                 self.data_ancestors.add_row(row_dict)
+
 
 
 class CalibrationModel(DataModel):
