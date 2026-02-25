@@ -7,8 +7,17 @@ __all__ = ['download_gdrive_file']
 from .testing_data import GDRIVE_FILES
 
 def get_id_from_path(filepath: str) -> str:
+
+    # Full relative filepath
     if filepath in GDRIVE_FILES:
         return GDRIVE_FILES[filepath]
+    
+    # Filename only
+    for key in GDRIVE_FILES:
+        if key.endswith(filepath):
+            return GDRIVE_FILES[key]
+
+    # Error
     raise ValueError(f"Filepath '{filepath}' not found in GDRIVE_FILES mapping.")
 
 def download_gdrive_file(

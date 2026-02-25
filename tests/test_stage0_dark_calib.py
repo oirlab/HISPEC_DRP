@@ -43,10 +43,12 @@ def test_stage0_dark_calib(tmp_path):
     thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
     max = np.full(shape=(ny, nx), fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
     nonlin_dq = np.zeros(shape=(ny, nx), dtype=np.uint32)
-    nonlin_model = datamodels.NonlinearCorrectionModel(data=dict(coeffs=coeffs,
-                                                                 nonlin_thresh=thresh,
-                                                                 nonlin_max=max,
-                                                                 dq=nonlin_dq))
+    nonlin_model = datamodels.NonlinearCorrectionModel(
+        coeffs=coeffs,
+        nonlin_thresh=thresh,
+        nonlin_max=max,
+        dq=nonlin_dq
+    )
 
     step_time = time.time();
     print(f"Step: defining nonlin coefficients, elapsed: {step_time - start_time:.2f}s")
@@ -56,7 +58,7 @@ def test_stage0_dark_calib(tmp_path):
     dqinit_map = np.zeros((ny, nx), dtype=np.uint32)
     # set row to bad
     # dqinit_map[5, :] |= DQ_FLAGS["DO_NOT_USE"]
-    dqinit_model = datamodels.DQModel(data={"DQ": dqinit_map})
+    dqinit_model = datamodels.DQModel(dq=dqinit_map)
 
     step_time = time.time();
     print(f"Step: defining DQ init calibration, elapsed: {step_time - start_time:.2f}s")
@@ -65,8 +67,10 @@ def test_stage0_dark_calib(tmp_path):
     # --- Create saturation threshold map ---
     saturation_threshold = np.iinfo(np.uint16).max  # DN
     saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
-    saturation_model = datamodels.SaturationModel(data={'SAT_THRESH': saturation_map,
-                                                        "DQ": np.zeros_like(saturation_map, dtype=np.uint32), })
+    saturation_model = datamodels.SaturationModel(
+        sat_thresh=saturation_map,
+        dq=np.zeros_like(saturation_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining saturation calibration, elapsed: {step_time - start_time:.2f}s")
@@ -75,10 +79,12 @@ def test_stage0_dark_calib(tmp_path):
     # --- Create random gain map ---
     gain = 3  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
-                                           "RN": np.full_like(gain_map, 0.0),
-                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(
+        gain=gain_map,
+        rn=np.full_like(gain_map, 0.0),
+        cov=np.full((2, 2, ny, nx), 0, dtype=np.float32),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -88,11 +94,13 @@ def test_stage0_dark_calib(tmp_path):
     dark_current = 5  # e-/s
     dark_map = np.random.normal(loc=dark_current, scale=dark_current / 10, size=(ny, nx)).astype(np.float32)
     # dark_map = np.ones((ny, nx), dtype=np.float32)
-    dark_model = datamodels.DarkModel(data={'RATE': dark_map / gain_map,  # dark in DN/s
-                                            "RATE_ERR": np.zeros_like(dark_map),
-                                            "RATE_VAR_RNOISE": np.zeros_like(dark_map),
-                                            "RATE_VAR_POISSON": np.zeros_like(dark_map),
-                                            "DQ": np.zeros_like(dark_map, dtype=np.uint32), })
+    dark_model = datamodels.DarkModel(
+        rate=dark_map / gain_map,  # dark in DN/s
+        rate_err=np.zeros_like(dark_map),
+        rate_var_rnoise=np.zeros_like(dark_map),
+        rate_var_poisson=np.zeros_like(dark_map),
+        dq=np.zeros_like(dark_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining dark calibration, elapsed: {step_time - start_time:.2f}s")
@@ -103,9 +111,11 @@ def test_stage0_dark_calib(tmp_path):
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
     kTC_noise = 50  # e-/s
     kTC_noise_map = np.full((ny, nx), kTC_noise, dtype=np.float32)
-    bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "kTC": kTC_noise_map / gain_map,  # kTC in DN
-                                            "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
+    bias_model = datamodels.BiasModel(
+        bias=bias_map / gain_map,  # bias in DN
+        ktc=kTC_noise_map / gain_map,  # kTC in DN
+        dq=np.zeros_like(bias_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -114,11 +124,13 @@ def test_stage0_dark_calib(tmp_path):
     # --- Create random flat map ---
     # detflat_map = np.random.normal(loc=1, scale=0.1, size=(ny, nx)).astype(np.float32)
     detflat_map = np.ones((ny, nx), dtype=np.float32)
-    detflat_model = datamodels.DetectorFlatModel(data={'FLAT': detflat_map,
-                                                       "FLAT_ERR": np.full_like(gain_map, 0.03),
-                                                       "FLAT_VAR_RNOISE": np.full_like(gain_map, 0.01),
-                                                       "FLAT_VAR_POISSON": np.full_like(gain_map, 0.02),
-                                                       "DQ": np.zeros_like(detflat_map, dtype=np.uint32), })
+    detflat_model = datamodels.DetectorFlatModel(
+        flat=detflat_map,
+        flat_err=np.full_like(gain_map, 0.03),
+        flat_var_rnoise=np.full_like(gain_map, 0.01),
+        flat_var_poisson=np.full_like(gain_map, 0.02),
+        dq=np.zeros_like(detflat_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining flat calibration, elapsed: {step_time - start_time:.2f}s")
@@ -127,9 +139,11 @@ def test_stage0_dark_calib(tmp_path):
     # --- Create random read noise map ---
     RN = 8.5  # e-
     rn_map = np.full((ny, nx), RN, dtype=np.float32)
-    rn_model = datamodels.ReadNoiseModel(data={'RN': rn_map / gain_map,
-                                               "RN_ERR": np.ones_like(rn_map),
-                                               "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    rn_model = datamodels.ReadNoiseModel(
+        rn=rn_map / gain_map,
+        rn_err=np.ones_like(rn_map),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
 
     # --- Create a fake UTR cube ---
     electron_rate_map = np.full((ny, nx), max_slope, dtype=np.float32)
@@ -162,8 +176,11 @@ def test_stage0_dark_calib(tmp_path):
         print(f"Step: creating ramp (new), elapsed: {step_time - start_time:.2f}s")
         start_time = time.time()
 
-        ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
-                                          meta=ramp_data['meta'])
+        ramp_model = datamodels.RampModel(
+            data=ramp_data['data'],
+            dq_raw=ramp_data['dq_raw'],
+            meta=ramp_data['meta']
+        )
         ramp_model.meta.filename = "simulated_ramp.fits"
         print(ramp_model.meta.clock_rate)
 
@@ -309,11 +326,13 @@ def test_stage0_master_dark(tmp_path):
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
     dark_map = np.ones((ny, nx), dtype=np.float32)
     err_map = np.ones((ny, nx), dtype=np.float32)
-    dark_model1 = datamodels.DarkModel(data={'RATE': dark_map / gain_map,  # dark in DN/s
-                                            "RATE_ERR": err_map,
-                                            "RATE_VAR_RNOISE": err_map,
-                                            "RATE_VAR_POISSON": err_map,
-                                            "DQ": np.zeros_like(dark_map, dtype=np.uint32), })
+    dark_model1 = datamodels.DarkModel(
+        rate=dark_map / gain_map,  # dark in DN/s
+        rate_err=err_map,
+        rate_var_rnoise=err_map,
+        rate_var_poisson=err_map,
+        dq=np.zeros_like(dark_map, dtype=np.uint32)
+    )
     dark_model2 = dark_model1.copy()
     dark_model3 = dark_model1.copy()
     dark_model4 = dark_model1.copy()
