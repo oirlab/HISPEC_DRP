@@ -30,7 +30,7 @@ The associated dark calibration can be found with:
 .. code-block:: python
 
     # Returns dictionary with calibration information
-    dark_info = model_result.get_calibration_from_role('dark')
+    dark_info = model_result.get_calibration_from_type('dark')
 
 Primitive Configuration
 -----------------------

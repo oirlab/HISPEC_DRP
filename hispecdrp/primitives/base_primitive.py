@@ -361,8 +361,6 @@ class BasePrimitive(ProcessingComponent):
         self,
         model : DataModel,
         calibration : DataModel | str | dict,
-        cal_role : str,
-        replace_existing : bool = True,
     ):
         """
         Add a calibration to the DataModel's calibrations table.
@@ -377,26 +375,7 @@ class BasePrimitive(ProcessingComponent):
                 - DataModel object
                 - String filepath (will load metadata to create entry)
                 - Dict with calibration column values
-
-        cal_role : str
-            The role of this calibration.
-        replace_existing : bool
-            If True, replace any existing calibration entry with the same role.
         """
-
-        # Check if role already exists
-        remove_row_index = None
-        if cal_role in model.calibrations['CAL_ROLE']:
-            if replace_existing:
-                remove_row_index = np.where(
-                    model.calibrations['CAL_ROLE']==cal_role
-                )[0][0]
-            else:
-                logger.warning(
-                    f"Calibration with role '{cal_role}' already exists for {self} "
-                    "and replace_existing=False, skipping."
-                )
-                return
 
         # Case 1: Either metadata dict or SQL record (dict)
         # Assume same keys for now
@@ -405,7 +384,6 @@ class BasePrimitive(ProcessingComponent):
                 'FILENAME' : calibration['filename'] or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : calibration['cal_type'],
-                'CAL_ROLE' : cal_role,
                 'DATETIME_OBS' : calibration['datetime_obs'],
                 'LAST_PROCESSED' : calibration['last_processed'],
                 'ID' : calibration['cal_id'],
@@ -417,7 +395,6 @@ class BasePrimitive(ProcessingComponent):
                 'FILENAME' : calibration['filename'] or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : calibration['cal_type'],
-                'CAL_ROLE' : cal_role,
                 'DATETIME_OBS' : calibration['datetime_obs'],
                 'LAST_PROCESSED' : calibration['last_processed'],
                 'ID' : calibration['id'],
@@ -434,7 +411,6 @@ class BasePrimitive(ProcessingComponent):
                 'FILENAME' : cal_model.meta.filename or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : cal_model.meta.cal_type,
-                'CAL_ROLE' : cal_role,
                 'DATETIME_OBS' : cal_model.meta.datetime_obs or 'None',
                 'LAST_PROCESSED' : cal_model.meta.last_processed or None,
                 'ID' : cal_model.meta.cal_id,
@@ -442,10 +418,6 @@ class BasePrimitive(ProcessingComponent):
             }
         else:
             raise ValueError("Invalid calibration input")
-
-        # Delete existing row if specified
-        if remove_row_index is not None:
-            model.calibrations.remove_row(remove_row_index)
 
         # Add new row
         model.calibrations.add_row(new_row)
@@ -486,7 +458,7 @@ class BasePrimitive(ProcessingComponent):
         for key in self.ARGUMENTS:
             if hasattr(self, key):
                 val = getattr(self, key)
-                if isinstance(val, np.ndarray):
+                if isinstance(val, np.ndarray) and val.size > 100: # MAX SIZE = 100 elements
                     args_dict[key] = f"ndarray shape={val.shape} dtype={val.dtype}"
                 else:
                     args_dict[key] = getattr(self, key)
@@ -528,13 +500,13 @@ class BasePrimitive(ProcessingComponent):
         if self.run:
             model.meta.last_processed = self._datetime_end
         self.add_receipt_entry(model)
-        for cal_role, calibration in self._calibrations_used.items():
-            self.add_calibration_entry(model, calibration, cal_role=cal_role)
+        for _, calibration in self._calibrations_used.items():
+            self.add_calibration_entry(model, calibration)
 
     def get_calibration(
         self,
         input : str | DataModel,
-        cal_role : str,
+        cal_type : str,
         selector : CalibrationSelector | None = None,
         use_cached : bool | None = None,
     ) -> tuple[str | DataModel, dict | None]:
@@ -545,12 +517,10 @@ class BasePrimitive(ProcessingComponent):
         ----------
         input : str or DataModel
             The filepath or datamodel to get a calibration for.
-        cal_role : str
+        cal_type : str
             The type of calibration to get, which should match a key in
             ``self.CALIBRATIONS``. This should be the same string as
-            ``record['cal_type']`` but is not enforced if multiple calibrations
-            of a single type are needed (e.g., using multiple calibrations and
-            interpolating through them).
+            ``record['cal_type']``.
         selector : CalibrationSelector or None
             An optional selector to use instead of the default selector
             defined in ``self.CALIBRATIONS``.
@@ -565,7 +535,7 @@ class BasePrimitive(ProcessingComponent):
         """
 
         # User provided value
-        cal_value = getattr(self, cal_role, None)
+        cal_value = getattr(self, cal_type, None)
 
         ####################
         #### Case 1: ID ####
@@ -578,7 +548,7 @@ class BasePrimitive(ProcessingComponent):
                 use_cached=use_cached
             ) as store:
                 local_filepath, cal_record = store.get_calibration(calibration=cal_id)
-                self._calibrations_used[cal_role] = cal_record
+                self._calibrations_used[cal_type] = cal_record
                 return local_filepath, cal_record
 
         ###############################################################
@@ -599,7 +569,7 @@ class BasePrimitive(ProcessingComponent):
                 cal_model, datamodels.CalibrationModel
             ), "Input must be a valid CalibrationDataModel."
             cal_record = cal_model.to_record()
-            self._calibrations_used[cal_role] = cal_record
+            self._calibrations_used[cal_type] = cal_record
             return cal_model, cal_record
 
         ######################################
@@ -609,11 +579,11 @@ class BasePrimitive(ProcessingComponent):
 
             selector_class = cal_value.get(
                 'selector',
-                self.CALIBRATIONS[cal_role]['selector']
+                self.CALIBRATIONS[cal_type]['selector']
             )
             selector_kwargs = cal_value.get(
                 'selector_kwargs',
-                self.CALIBRATIONS[cal_role]['selector_kwargs']
+                self.CALIBRATIONS[cal_type]['selector_kwargs']
             )
             selector = selector_class(**selector_kwargs)
             
@@ -629,7 +599,7 @@ class BasePrimitive(ProcessingComponent):
                 )
                 return local_filepath, cal_record
             
-            self._calibrations_used[cal_role] = cal_value
+            self._calibrations_used[cal_type] = cal_value
 
         ######################################
         #### Case 4: Calibration Selector ####
@@ -652,12 +622,12 @@ class BasePrimitive(ProcessingComponent):
         ################################################################
         if cal_value is None:
             if selector is None:
-                if not hasattr(self, 'CALIBRATIONS') or cal_role not in self.CALIBRATIONS:
-                    raise ValueError(f"No calibration configuration found for '{cal_role}' in CALIBRATIONS")
+                if not hasattr(self, 'CALIBRATIONS') or cal_type not in self.CALIBRATIONS:
+                    raise ValueError(f"No calibration configuration found for '{cal_type}' in CALIBRATIONS")
 
-                #calibration_config = self.config['calibrations'][cal_role]
-                #calibration_config = self.config['calibrations'][cal_role]
-                calibration_config = self.CALIBRATIONS[cal_role]
+                #calibration_config = self.config['calibrations'][cal_type]
+                #calibration_config = self.config['calibrations'][cal_type]
+                calibration_config = self.CALIBRATIONS[cal_type]
                 selector_class = calibration_config['selector']
                 selector_kwargs = calibration_config.get('selector_kwargs', {})
                 selector = selector_class(**selector_kwargs)
@@ -675,7 +645,7 @@ class BasePrimitive(ProcessingComponent):
                 return local_filepath, cal_record
 
         # Else raise error
-        msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
+        msg = f"Invalid calibration value for '{cal_type}': {type(cal_value)}"
         logger.error(msg)
         raise ValueError(msg)
     

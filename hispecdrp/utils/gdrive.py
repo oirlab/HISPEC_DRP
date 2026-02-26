@@ -23,7 +23,6 @@ def get_id_from_path(filepath: str) -> str:
 def download_gdrive_file(
     filepath: str,
     output_dir: str | None = None,
-    preserve_rel_path: bool = True,
     use_cached: bool = True
 ) -> str | None:
     
@@ -31,14 +30,14 @@ def download_gdrive_file(
     if output_dir is None:
         output_dir = os.getenv('HISPECDRP_TEST_DATA_DIR')
         if output_dir is None:
-            output_dir = str(astropy.utils.data._get_download_cache_loc())
+            output_dir = os.path.join(
+                str(astropy.utils.data._get_download_cache_loc()),
+                'HISPECDRP_TEST_DATA'
+            )
     
     download_url = f"https://drive.google.com/uc?id={file_id}"
 
-    if preserve_rel_path:
-        output_path = os.path.join(output_dir, filepath)
-    else:
-        output_path = os.path.join(output_dir, os.path.basename(filepath))
+    output_path = os.path.join(output_dir, os.path.basename(filepath))
     
     if os.path.exists(output_path) and use_cached:
         return output_path

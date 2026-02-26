@@ -93,7 +93,6 @@ Each datamodel has a **calibrations** attribute which is a Table that contains a
 * **FILENAME** — Base filename of the calibration
 * **TIME_APPLIED** — Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
 * **CAL_TYPE** — Type of calibration
-* **CAL_ROLE** — Role of calibration
 * **DATETIME_OBS** — Observation date/time of the calibration.
 * **LAST_PROCESSED** — When calibration was last processed.
 * **ID** — UUID

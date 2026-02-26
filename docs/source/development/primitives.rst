@@ -28,7 +28,7 @@ By default, ``NewPrimitive`` will inherit all arguments from :py:class:`~hispecd
 3. Calibrations
 ~~~~~~~~~~~~~~~
 
-Any required calibrations must be specified in the class attribute ``CALIBRATIONS``. The keys are the *role* that a calibration plays for the primitive, which should be identical to the *calibration type* (e.g. 'dark', 'flat', 'arc'), but can be more descriptive if multiple calibrations of the same type are needed. The values specify how to retrieve the calibration file for that role, and must include a 'selector' key which specifies the Selector class to use to retrieve the calibration file. See :doc:`Calibration Selectors Development <selectors>` for information on Calibration selectors. Here, we use the dark calibration as an example.
+Any required calibrations must be specified in the class attribute ``CALIBRATIONS``. The keys are the *calibration type* (``meta.cal_type``). The values specify how to retrieve the calibration, and must include a 'selector' key which specifies the Selector class to use to retrieve the calibration file. See :doc:`Calibration Selectors Development <selectors>` for information on Calibration selectors. Here, we use the dark calibration as an example.
 
 .. code-block:: python
 

@@ -761,7 +761,7 @@ class DataModel:
             assert len(input) == 1, "Cannot include data when merging multiple models. Set include_data=False or provide a single model."
             first_model = datamodel_open(input[0])
             for extname in model_out.EXTENSIONS:
-                if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS'):
+                if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS', 'RECEIPT'):
                     continue
                 extl = extname.lower()
                 if extname in first_model.EXTENSIONS:
@@ -835,49 +835,50 @@ class DataModel:
                 trace_data[fiber][kind] = getattr(self, attr, None)
         return trace_data
 
-    def load_calibration_from_role(
+    def load_calibration_from_type(
         self,
-        cal_role : str,
+        cal_type : str,
     ) -> DataModel:
         """
         Load a calibration from the DataModel's calibrations table.
 
         Parameters
         ----------
-        cal_role : str
-            The role of the calibration to load.
+        cal_type : str
+            The type of the calibration to load.
 
         Returns
         -------
         dict
             The calibration record.
         """
-        row = self.get_calibration_from_role(cal_role)
+        row = self.get_calibration_from_type(cal_type)
         cal_id = row['ID']
         with CalibrationStore(instrument_name=self.meta.instrument_name) as store:
             return store.get_calibration(calibration=cal_id)
 
-    def get_calibration_from_role(self, cal_role : str) -> dict:
+    def get_calibration_from_type(self, cal_type : str) -> dict:
         """
         Return the row from the DataModel's calibrations table.
 
         Parameters
         ----------
-        cal_role : str
-            The role of the calibration to load.
+        cal_type : str
+            The type of the calibration to load.
 
         Returns
         -------
         dict
             The row from the DataModel's calibrations table.
         """
-        # Match on cal_type and role
-        mask = self.calibrations['CAL_ROLE'] == cal_role
+        # Match on cal_type
+        mask = self.calibrations['CAL_TYPE'] == cal_type
         indices = np.where(mask)[0]
         if len(indices) == 0:
             return None
         if len(indices) > 1:
-            raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
+            raise ValueError(f"Multiple calibrations found with type '{cal_type}' in {self.__class__.__name__}")
+        # TODO: Check if they are unique, raise warning if not?
         row_index = indices[0]
         return dict(self.calibrations[row_index])
 
@@ -1039,7 +1040,6 @@ class DataModel:
                 # astropy.table.row -> dict to handle column mapping
                 row_dict = {c: row[c] for c in other_model.data_ancestors.colnames}
                 self.data_ancestors.add_row(row_dict)
-
 
 
 class CalibrationModel(DataModel):

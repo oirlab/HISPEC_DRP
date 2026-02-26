@@ -117,7 +117,7 @@ class HISPECCalibrationStore(CalibrationStore):
                 - `str`: The local file path where the calibration was saved.
                 - `dict`: The calibration metadata dictionary as added to the database.
 
-        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting. 
+        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting.
         """
 
         # Open model
