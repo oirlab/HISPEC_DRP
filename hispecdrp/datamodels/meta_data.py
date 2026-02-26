@@ -278,6 +278,16 @@ class MetaModel(MutableMapping):
             out.update(sec_dict)
 
         return out
+    
+    def boolean_columns(self) -> list[str]:
+        """
+        Return a set of columns that are logically booleans (for PostgreSQL)
+        """
+        return [
+            prop_name
+            for prop_name, sub_schema in self._schema["properties"].items()
+            if sub_schema.get("cal_db") and sub_schema.get("type") == "boolean"
+        ]
 
     def pprint(self, show_none : bool = False):
         """

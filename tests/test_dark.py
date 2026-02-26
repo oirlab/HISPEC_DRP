@@ -8,7 +8,7 @@ def test_dark_level0(tmp_path, datadir):
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
-    shape = (4096, 4096)
+    shape = (4096, 4096+64)
 
     # Science
     input_model = datamodels.L0Model()
@@ -57,5 +57,5 @@ def test_dark_level0(tmp_path, datadir):
     model_result = dark_prim.apply(input_model.copy(), output_dir=tmp_path, dark=dark_filepath)
 
     # Check the calibrations used
-    dark_cal_row = model_result.get_calibration_from_role('dark')
+    dark_cal_row = model_result.get_calibration_from_type('dark')
     assert dark_cal_row['FILENAME'] == os.path.basename(dark_filepath), "Dark calibration path does not match expected value."

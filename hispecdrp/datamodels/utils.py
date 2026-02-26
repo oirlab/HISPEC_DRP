@@ -60,6 +60,8 @@ def open(
         if config is None:
             config = get_instrument_config(init)
         model = model_class(filepath=init, config=config, **kwargs)
+    else:
+        raise TypeError(f"init must be a file path string or a FITS HDUList, got {type(init).__name__}")
 
     # Return the model
     return model
@@ -300,15 +302,12 @@ def _set_datetime_meta(model : 'DataModel'):
         model.meta.koa_utc_obs = dt.strftime("%H:%M:%S.%f").rstrip("0").rstrip(".")
 
 def _set_koa_meta(model: 'DataModel') -> 'DataModel':
-    if model.meta.koa_id is None and model.meta.filename is not None:
-        model.meta.koa_id = model.generate_filename()
-    if model.meta.koa_filepath is None:
-        koa_filepath = generate_koa_filehandle(
-            model.meta.instrument_name,
-            model.meta.datetime_obs,
-            model.meta.koa_id
-        )
-        model.meta.koa_filepath = koa_filepath
+    model.meta.koa_id = model.meta.filename
+    model.meta.koa_filepath = generate_koa_filehandle(
+        model.meta.instrument_name,
+        model.meta.datetime_obs,
+        model.meta.koa_id
+    )
     return model
 
 def get_instrument_alias(instrument_name : str, spectrograph : str | None = None) -> str:

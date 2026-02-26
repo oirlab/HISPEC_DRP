@@ -4,45 +4,42 @@ Running Pipelines
 
 The following examples demonstrate how to run a pipeline, which is a chain of primitives.
 
+**The examples require access to the calibration database hosted at Keck Observatory. See :doc:`installation <../installation>` for instructions.**
+
 Run a Pipeline
 --------------
 
-This example demonstrates how to configure and run the Stage 0 pipeline:
+This example demonstrates how to configure and run the Stage 0 pipeline.
 
 .. code-block:: python
 
     import os
     from hispecdrp.pipelines import Stage0Pipeline
+    from hispecdrp.utils import download_gdrive_file
     from hispecdrp import datamodels
+
+    from dotenv import load_dotenv
+    load_dotenv()  # Load credentials for calibration DB at Keck
     
-    # Configure calibration cache directory
+    # Configure calibration cache directory if not already set in shell environment
     os.environ['KOA_CALIBRATION_CACHE'] = '/path/to/cache/'
-    
-    # Parallel processing
-    max_cores = 2
+
+    # Download simulated ramp from Google drive
+    sci_path = download_gdrive_file('HB.20240924.00000.00_raw.fits')
 
     # Setup and call the pipeline
-    pipe = Stage0Pipeline(max_cores=max_cores)
-    result = pipe.apply('/path/to/ramp_input_file.fits')
+    pipe = Stage0Pipeline(output_dir='/path/to/output/dir/')
+    result = pipe.apply(sci_path)
 
 
 Pipeline Configuration
 ----------------------
 
-Like primitives, pipelines are configurable with different parameters:
-
-.. code-block:: python
-
-    sci_path = '/path/to/ramp_input_file.fits'
-    pipe = Stage0Pipeline(
-        save_result=True,
-        output_dir='/path/to/output/dir/',
-    )
-    result = pipe.apply(sci_path)
+Like primitives, pipelines are configurable with different parameters, however pipeline configuration is typically limited to output directories.
 
 See :doc:`Running a Primitive <run_primitive>` for a full listing of all default pipeline parameters, or the docstring of the pipeline class for parameters specific to that pipeline.
 
-Most of the pipeline configuration is handled through the primitives that the pipeline runs. Individual primitive configuration can be set in a few ways.
+Most of the remaining pipeline configuration is handled through the primitives that the pipeline runs. Individual primitive configuration can be set in a few ways.
 
 Python Interface
 ++++++++++++++++

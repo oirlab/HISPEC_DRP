@@ -7,4 +7,5 @@ Descriptions, runtime performance, and statistical performance (accuracy/precisi
    :maxdepth: 2
 
    spectral_extraction
+   ramp_fitting
    trace_fitting

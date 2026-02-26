@@ -80,45 +80,45 @@ def test_save_result_pipeline(tmp_path, datadir):
     # Create calibration models
     gain = 3.0
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    gain_model = datamodels.GainModel(data={
-        'GAIN': gain_map,
-        'RN': np.full_like(gain_map, 8.5),
-        'COV': np.full((2, 2, ny, nx), 0, dtype=np.float32),
-        'DQ': np.zeros_like(gain_map, dtype=np.uint32),
-    })
+    gain_model = datamodels.GainModel(
+        gain=gain_map,
+        rn=np.full_like(gain_map, 8.5),
+        cov=np.full((2, 2, ny, nx), 0, dtype=np.float32),
+        dq=np.zeros_like(gain_map, dtype=np.uint32),
+    )
     
     rn_map = np.full((ny, nx), 8.5, dtype=np.float32)
-    rn_model = datamodels.ReadNoiseModel(data={
-        'RN': rn_map / gain_map,
-        'RN_ERR': np.ones_like(rn_map),
-        'DQ': np.zeros_like(gain_map, dtype=np.uint32),
-    })
+    rn_model = datamodels.ReadNoiseModel(
+        rn=rn_map / gain_map,
+        rn_err=np.ones_like(rn_map),
+        dq=np.zeros_like(gain_map, dtype=np.uint32),
+    )
     
     bias_map = np.full((ny, nx), 1000, dtype=np.float32)
-    bias_model = datamodels.BiasModel(data={
-        'BIAS': bias_map / gain_map,
-        'kTC': np.full_like(bias_map, 50) / gain_map,
-        'DQ': np.zeros_like(bias_map, dtype=np.uint32),
-    })
+    bias_model = datamodels.BiasModel(
+        bias=bias_map / gain_map,
+        ktc=np.full_like(bias_map, 50) / gain_map,
+        dq=np.zeros_like(bias_map, dtype=np.uint32),
+    )
     
     dqinit_map = np.zeros((ny, nx), dtype=np.uint32)
-    dqinit_model = datamodels.DQModel(data={'DQ': dqinit_map})
+    dqinit_model = datamodels.DQModel(dq=dqinit_map)
     
     saturation_threshold = np.iinfo(np.uint16).max
     saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
-    saturation_model = datamodels.SaturationModel(data={
-        'SAT_THRESH': saturation_map,
-        'DQ': np.zeros_like(saturation_map, dtype=np.uint32),
-    })
+    saturation_model = datamodels.SaturationModel(
+        sat_thresh=saturation_map,
+        dq=np.zeros_like(saturation_map, dtype=np.uint32),
+    )
     
     # Create simulated ramp data
     ramp_model_sequence = []
     for k in range(N_files):
         ramp_data = np.random.randn(n_reads, ny, nx).astype(np.uint16) + 1000
-        ramp_model = datamodels.RampModel(data=dict(
+        ramp_model = datamodels.RampModel(
             data=ramp_data,
             dq_raw=np.zeros_like(ramp_data, dtype=np.uint32)
-        ))
+        )
         ramp_model_sequence.append(ramp_model)
     
     # Configure pipeline

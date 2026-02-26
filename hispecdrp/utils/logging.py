@@ -148,12 +148,12 @@ class LogConfig:
                     logger.addHandler(h)
 
         # Attach handlers to already-existing captured packages
-        for lname in logging.root.manager.loggerDict:
-            if any(lname.startswith(p) for p in LOG_CAPTURE_PACKAGES):
-                logger = logging.getLogger(lname)
-                for h in self.handlers:
-                    if h not in logger.handlers:
-                        logger.addHandler(h)
+        # for lname in logging.root.manager.loggerDict:
+        #     if any(lname.startswith(p) for p in LOG_CAPTURE_PACKAGES):
+        #         logger = logging.getLogger(lname)
+        #         for h in self.handlers:
+        #             if h not in logger.handlers:
+        #                 logger.addHandler(h)
 
     def undo(self, log_names=None, close_handlers=True):
         if log_names is None:
@@ -168,11 +168,11 @@ class LogConfig:
                 logger.setLevel(self._previous_levels[name])
 
         # Remove handlers from captured package loggers
-        for lname in logging.root.manager.loggerDict:
-            if any(lname.startswith(p) for p in LOG_CAPTURE_PACKAGES):
-                logger = logging.getLogger(lname)
-                for h in self.handlers:
-                    logger.removeHandler(h)
+        # for lname in logging.root.manager.loggerDict:
+        #     if any(lname.startswith(p) for p in LOG_CAPTURE_PACKAGES):
+        #         logger = logging.getLogger(lname)
+        #         for h in self.handlers:
+        #             logger.removeHandler(h)
 
         # Flush and close handlers after removing from all loggers
         for h in self.handlers:

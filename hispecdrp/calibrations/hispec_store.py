@@ -59,38 +59,13 @@ class HISPECCalibrationStore(CalibrationStore):
         for filepath in local_files:
             model = datamodels.open(filepath, meta_only=True)
             cal_id = model.meta.cal_id
-            if not self.calibration_in_cache(cal_id, mode='id'):
+            if not self.calibration_record_in_cache(cal_id, mode='id'):
                 _, cal_record_added = self.register_calibration(model, origin=origin)
                 cals_added.append(cal_record_added)
                 logger.info(f"Added calibration to local DB: {cal_record_added['filename']}")
 
         return cals_added
 
-    def get_missing_records(self) -> list[dict]:
-        """
-        Identifies calibration files that exist in the local cache directory
-        but are missing from the sqlite DB.
-
-        Returns
-        -------
-        list[dict]
-            A list of calibration metadata dictionaries for calibrations
-            are not found in the local cache.
-        """
-        instrument_alias = datamodels.utils.get_instrument_alias(
-            instrument_name=self.instrument_name,
-        )
-        missing_files = []
-        all_files = glob.glob(os.path.join(
-            self.cache_dir,
-            f'{instrument_alias}*.fits'
-        ))
-        for filepath in all_files:
-            if not self.calibration_in_cache(filepath, mode='id'):
-                missing_files.append(filepath)
-            
-        return missing_files
-    
     def generate_calibration_version(
         self,
         cal : DataModel | str,
@@ -142,18 +117,18 @@ class HISPECCalibrationStore(CalibrationStore):
                 - `str`: The local file path where the calibration was saved.
                 - `dict`: The calibration metadata dictionary as added to the database.
 
-        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting. 
+        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting.
         """
 
         # Open model
         model = datamodels.open(cal)
 
-        if self.calibration_in_cache(model, mode='id'):
-            msg = f"Calibration already exists in cache: {cal}! Skipping registration."
+        if self.calibration_record_in_cache(model, mode='id'):
+            msg = f"Calibration already exists in cache: {cal}. Skipping registration."
             logger.warning(msg)
             return None, None
         
-        if not new_version and self.calibration_in_cache(cal, mode='version-family'):
+        if not new_version and self.calibration_record_in_cache(cal, mode='version-family'):
             msg = f"Calibration already exists in cache: {cal}! Skipping registration."
             logger.warning(msg)
             return None, None
@@ -185,7 +160,7 @@ class HISPECCalibrationStore(CalibrationStore):
 
         return local_filepath, cal_record_added
 
-    def calibration_in_cache(
+    def calibration_record_in_cache(
         self,
         cal: dict | str | 'CalibrationModel',
         mode: str = 'id'
@@ -214,9 +189,9 @@ class HISPECCalibrationStore(CalibrationStore):
         """
         if isinstance(cal, str) and os.path.isfile(cal):
             model = datamodels.open(cal, meta_only=True)
-            return super().calibration_in_cache(model, mode=mode)
+            return super().calibration_record_in_cache(model, mode=mode)
         
-        return super().calibration_in_cache(cal, mode=mode)
+        return super().calibration_record_in_cache(cal, mode=mode)
     
     def get_version_family_column_names(self, cal_type : str):
         """
@@ -236,6 +211,8 @@ class HISPECCalibrationStore(CalibrationStore):
         Convert an existing calibration file's origin (record and file) to a new origin.
         This creates a new file and record.
         This does not modify the input file or record.
+
+        TODO: Need to generate new claibration ID.
 
         Parameters
         ----------
