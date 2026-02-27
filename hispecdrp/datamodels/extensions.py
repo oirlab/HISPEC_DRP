@@ -37,7 +37,6 @@ CALIBRATIONS = {
             'FILENAME': str, # Base filename of the calibration
             'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
             'CAL_TYPE': str, # Type of calibration
-            'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
             'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
             'LAST_PROCESSED': str, # When calibration was last processed. This is NOT equal to the last_updated timestamp in the calibration DB.
             'ID': str, # UUID

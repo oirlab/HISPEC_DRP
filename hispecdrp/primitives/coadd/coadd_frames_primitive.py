@@ -137,9 +137,9 @@ def coadd_group(
     model_class_out = input_models[0].__class__
     model_out = model_class_out.from_datamodels(
         input=input_models,
-        data=data,
-        append_ancestors=False,
     )
+    for attr, arr in data.items():
+        setattr(model_out, attr, arr)
     if primitive is not None:
         primitive.add_data_ancestors(model_out, input_models)
 

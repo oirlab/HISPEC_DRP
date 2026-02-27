@@ -116,7 +116,7 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
             scales_drp.ref_filter(_data, nchans=_n_channels, in_place=True, avg_type='frame', perint=False,
                    edge_wrap=False, left_ref=True, right_ref=True, nleft=_n_ref_left, nright=_n_ref_right)
         else:
-            raise ValueError(f"Unknown reference pixel correction method: {method}")
+            raise ValueError(f"Unknown reference pixel correction method: {self.method.lower()}")
 
         if not _vertical:
             result.data = np.transpose(_data, (0,2,1))

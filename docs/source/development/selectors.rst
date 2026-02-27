@@ -41,6 +41,6 @@ For example, the :py:class:`~hispecdrp.calibrations.selectors.DarkSelector` clas
 
             return list(rows)
 
-Typically, selectors do not need to filter based on ``master_cal``, ``origin`` (e.g., REMOTE vs LOCAL), or ``cal_version``.
+Typically, ``get_candidates`` should **not** filter based on ``master_cal``, ``origin`` (i.e, 'KECK' or 'LOCAL'), or ``cal_version``.
 
-After ``get_candidates`` is called, ``HISPECCalibrationSelectors`` automatically filters on the calibration ``origin``, whether or not the calibration is a master calibration, and finally the calibration version.
+After ``get_candidates`` is called, ``HISPECCalibrationSelectors`` automatically filters on the calibration ``origin``, whether or not the calibration is a master calibration, and finally the calibration version based on environment variables or inputs to the selector class contructor.

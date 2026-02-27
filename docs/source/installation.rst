@@ -38,11 +38,24 @@ The ``-e`` (editable) flag uses the specified package directory as the "live" so
 Configure Calibration Cache
 ---------------------------
 
-The HISPEC DRP uses the `KOA Middleware <https://oirlab.github.io/KOA_Middleware/>`_ package to manage calibration files. 
+The HISPEC DRP uses the `KOA Middleware <https://oirlab.github.io/KOA_Middleware/>`_ package to manage calibration files.
 
-See the `Calibration configuration <calibrations/configure.html>`_ documentation for instructions on setting up the calibration cache and authenticating with the remote database at Keck.
+Required for Remote Database Access
++++++++++++++++++++++++++++++++++++
 
-For most users, once authenticated, it is sufficient to set the **KOA_CALIBRATION_CACHE** environment variable to point to a local directory where calibration files will be stored.
+See the `Calibration configuration <calibrations/configure.html>`_ documentation for instructions on setting up the calibration cache and authenticating with the remote database at Keck. This requires having a Keck Observer account and API token autheticated through the browser.
+
+For most users, once authenticated, it is sufficient to:
+
+1. Set the **KOA_CALIBRATION_CACHE** environment variable to point to a local directory where calibration files will be stored.
+
+2. Install the package `python-dotenv <https://github.com/theskumar/python-dotenv>`_ to manage passwords through environemnt variables.
+
+.. code-block:: bash
+
+   uv pip install python-dotenv
+
+3. Define a file called ``.env`` in the same directory as your project.
 
 If you have **existing calibration files** that you would like to work with, you can use the method :py:meth:`~hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.sync_local_db_from_local_files` to populate the local database with entries for those files.
 
