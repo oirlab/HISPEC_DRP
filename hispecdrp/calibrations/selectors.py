@@ -486,23 +486,25 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
 
         return list(rows)
             
-class FiberFlatSelector(CalibrationSelector):
+class FiberFlatSelector(HISPECCalibrationSelector):
 
-    def get_candidates(self, meta : dict, db : LocalCalibrationDB):
-        with db.session_manager() as session:
-            if meta['instrument_name'].lower() == 'hispec':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'fiberflat',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.spectrograph == meta['spectrograph'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
-            elif meta['instrument_name'].lower() == 'parvi':
-                return session.query(db.orm_class).filter(
-                    db.orm_class.cal_type == 'fiberflat',
-                    db.orm_class.instrument_era == meta['instrument_era'],
-                    db.orm_class.master_cal == True
-                ).order_by(func.abs(db.orm_class.mjd_start - meta['mjd_start'])).all()
+    def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
+        rows = db.rows_where(
+            """
+            cal_type = :cal_type AND
+            instrument_era = :era AND
+            spectrograph = :spec
+            """,
+            {
+                "cal_type": "fiberflat",
+                "era": meta["instrument_era"],
+                "spec": meta["spectrograph"],
+                "mjd_start": meta["mjd_start"]
+            },
+            order_by="ABS(mjd_start - :mjd_start)"
+        )
+
+        return list(rows)
 
 class DetectorFlatSelector(HISPECCalibrationSelector):
     """
