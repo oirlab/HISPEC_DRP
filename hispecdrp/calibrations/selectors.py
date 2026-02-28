@@ -12,6 +12,7 @@ __all__ = [
     'ReadNoiseSelector',
     'NonlinearCorrectionSelector',
     'DetectorFlatSelector',
+    'FiberFlatSelector',
     'GainSelector',
     'WavelengthSolutionSelector',
     'ReferenceEtalonSelector',
@@ -476,6 +477,26 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
             """,
             {
                 "cal_type": "nonlin",
+                "era": meta["instrument_era"],
+                "spec": meta["spectrograph"],
+                "mjd_start": meta["mjd_start"]
+            },
+            order_by="ABS(mjd_start - :mjd_start)"
+        )
+
+        return list(rows)
+            
+class FiberFlatSelector(HISPECCalibrationSelector):
+
+    def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
+        rows = db.rows_where(
+            """
+            cal_type = :cal_type AND
+            instrument_era = :era AND
+            spectrograph = :spec
+            """,
+            {
+                "cal_type": "fiberflat",
                 "era": meta["instrument_era"],
                 "spec": meta["spectrograph"],
                 "mjd_start": meta["mjd_start"]
