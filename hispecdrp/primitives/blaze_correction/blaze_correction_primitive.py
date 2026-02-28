@@ -52,7 +52,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             fiberflat_model = datamodels.open(fiberflat)
 
             # Init output model
-            output_model = self.get_output_model(input_model, data=input_model._data)
+            output_model = self.get_output_model(input_model, include_data=True)
             
             # Which fibers and orders to process
             do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
@@ -100,8 +100,13 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                 apply_blaze_array(output_model, blaze_array, blaze_std_array,
                                 fiber, order_vec, do_orders,
                                 pixels_per_spline_knot=self.pixels_per_spline_knot)
+                
+                if isinstance(output, list):
+                    output.append(output_model)
+                else:
+                    output = output_model
 
-        return dict(output=output_model)
+        return dict(output=output)
     
 
 def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_orders, pixels_per_spline_knot=16):
