@@ -868,7 +868,7 @@ def utr_variable_rate_cube(
         t_hi = read_edges[i + 1]
 
         sel = (t_grid >= t_lo) & (t_grid <= t_hi)
-        interval_integrals[i] = np.trapz(
+        interval_integrals[i] = np.trapezoid(
             scaling_grid[sel],
             t_grid[sel]
         )
