@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import urllib.request
 
 import numpy as np
@@ -41,6 +42,62 @@ SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
 
+def _fiberflat_rate_filename(spectrograph: str, fiber: int) -> str:
+    """Default filename for a single-fiber fiberflat rate FITS (matches KOA-style naming)."""
+    prefix = "HB" if spectrograph.upper() == "BSPEC" else "HR"
+    return f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}.fits"
+
+
+def get_expected_ramp_path(output_dir: str) -> str:
+    """Return the path where the simulated ramp is saved (same convention as run_simulated_pipeline)."""
+    return os.path.join(os.path.abspath(output_dir), DEFAULT_SIMULATED_RAMP_FILENAME)
+
+
+def get_expected_rate_map_path(output_dir: str) -> str:
+    """Return the path where the rate map is saved by SimulateRateMap.create_native_rate_map."""
+    return os.path.join(os.path.abspath(output_dir), DEFAULT_RATE_MAP_FILENAME)
+
+
+def get_expected_fiberflat_rate_paths(
+    output_dir: str,
+    spectrograph: str,
+    fibers: list[int],
+    fiberflat_filename: callable | None = None,
+) -> list[str]:
+    """Return paths where dummy fiber flat rate FITS would be saved (one per fiber in 1–3)."""
+    if fiberflat_filename is None:
+        fiberflat_filename = _fiberflat_rate_filename
+    out_abs = os.path.abspath(output_dir)
+    return [
+        os.path.join(out_abs, fiberflat_filename(spectrograph, f))
+        for f in sorted(fibers)
+        if f in (1, 2, 3)
+    ]
+
+
+def ramp_file_exists(output_dir: str) -> bool:
+    """Return True if the simulated ramp file already exists in output_dir."""
+    return os.path.isfile(get_expected_ramp_path(output_dir))
+
+
+def rate_map_file_exists(output_dir: str) -> bool:
+    """Return True if the rate map file already exists in output_dir."""
+    return os.path.isfile(get_expected_rate_map_path(output_dir))
+
+
+def fiberflat_rate_files_exist(
+    output_dir: str,
+    spectrograph: str,
+    fibers: list[int],
+    fiberflat_filename: callable | None = None,
+) -> bool:
+    """Return True if all expected dummy fiber flat rate files exist for the given fibers."""
+    paths = get_expected_fiberflat_rate_paths(
+        output_dir, spectrograph, fibers, fiberflat_filename=fiberflat_filename
+    )
+    return len(paths) > 0 and all(os.path.isfile(p) for p in paths)
+
+
 __all__ = [
     "create_simulated_calibration_models",
     "simulate_ramp_from_rate_map",
@@ -48,12 +105,68 @@ __all__ = [
     "get_spectrum_path",
     "load_btsettl_spectrum",
     "create_ramp_and_calibrations",
+    "create_dummy_fiberflat_rate_files",
+    "get_expected_ramp_path",
+    "get_expected_rate_map_path",
+    "get_expected_fiberflat_rate_paths",
+    "ramp_file_exists",
+    "rate_map_file_exists",
+    "fiberflat_rate_files_exist",
     "get_default_stage0_prim_args",
     "run_stage0_simulation",
     "simulate_up_the_ramp",
     "run_fiberflat_pipeline",
     "run_stage1_simulation",
+    "create_wavelength_solution_model_from_sim",
 ]
+
+
+def create_wavelength_solution_model_from_sim(spectrograph: str):
+    """
+    Build an LFCWavesolModel from the SimulateRateMap HDF wavelength solution for the given spectrograph.
+
+    Used so Stage 1 set_wavesol can run with a known wavelength solution when using simulated data.
+
+    Parameters
+    ----------
+    spectrograph : str
+        'BSPEC' or 'RSPEC'.
+
+    Returns
+    -------
+    LFCWavesolModel
+        Model with wave_fib# and spec_dq_fib# set from the HDF trace solution (micron; DQ zeros).
+    """
+    from ..datamodels import hispec_config
+    from ..datamodels.lfcwavesol import LFCWavesolModel
+
+    srm = SimulateRateMap()
+    ws_dict = srm.get_wavelength_solution(spectrograph=spectrograph)
+    spectrograph = spectrograph.upper()
+    order_list = hispec_config.HISPECConfig.get_order_list(spectrograph)
+
+    # Use the real HISPEC instrument config (provides metadata schema, num_fibers, etc.)
+    wavesol_model = LFCWavesolModel(
+        config=hispec_config.HISPECConfig,
+        meta={"spectrograph": spectrograph},
+    )
+    for fiber in (1, 2, 3):
+        if fiber not in ws_dict or not ws_dict[fiber]:
+            continue
+        wave_rows = []
+        for o in order_list:
+            if o not in ws_dict[fiber]:
+                break
+            wave_rows.append(ws_dict[fiber][o]["wavelength"])
+        if wave_rows:
+            wave_arr = np.stack(wave_rows, axis=0).astype(np.float64)
+            setattr(wavesol_model, f"wave_fib{fiber}", wave_arr)
+            setattr(
+                wavesol_model,
+                f"spec_dq_fib{fiber}",
+                np.zeros(wave_arr.shape, dtype=np.uint32),
+            )
+    return wavesol_model
 
 
 def create_simulated_calibration_models(
@@ -337,6 +450,124 @@ def get_default_stage0_prim_args(
         "gain_corr": {"max_cores": max_cores},
         "detflat_corr": {"max_cores": max_cores},
     }
+
+
+def create_dummy_fiberflat_rate_files(
+    fibers: list[int],
+    spectrograph: str,
+    output_dir: str,
+    calibration_models: dict[str, datamodels.CalibrationModel],
+    *,
+    flat_scale: float = 1e-14,
+    flat_temperature_k: float = 1000.0,
+    readtime: float = 1.7,
+    n_reads: int = 10,
+    max_cores: int = 1,
+    stage0_prim_args: dict | None = None,
+    fiberflat_filename: callable | None = None,
+) -> list[str]:
+    """
+    Create dummy fiber flat rate FITS files using the same create_ramp / Stage 0 path as the science ramp.
+
+    For each requested fiber (1, 2, 3), a blackbody spectrum at the given temperature (0.8–3.0 µm,
+    optionally scaled) is placed on that fiber only, a rate map is built, a ramp is simulated,
+    Stage 0 is run, and the rate product is saved to output_dir. The resulting file paths can be
+    passed to :func:`run_fiberflat_pipeline`.
+
+    Parameters
+    ----------
+    fibers : list of int
+        Fiber numbers (1, 2, 3) to create fiber flat rate files for.
+    spectrograph : str
+        Spectrograph name (e.g. "BSPEC", "RSPEC").
+    output_dir : str
+        Directory to save each rate FITS file.
+    calibration_models : dict
+        Calibration models (same as used for the science ramp). Must contain
+        dq, saturation, bias, gain, rn, dark, detflat.
+    flat_scale : float, optional
+        Scale factor for the fiber flat spectrum flux. Default is 1e-14.
+    flat_temperature_k : float, optional
+        Blackbody temperature in Kelvin for the fiber flat spectrum. Default is 1000.0.
+    readtime : float, optional
+        Time between reads in seconds. Default is 1.7.
+    n_reads : int, optional
+        Number of reads in each ramp. Default is 10.
+    max_cores : int, optional
+        Cores for create_ramp and Stage 0. Default is 1.
+    stage0_prim_args : dict or None, optional
+        Primitive arguments for Stage 0. If None, use :func:`get_default_stage0_prim_args`(max_cores).
+    fiberflat_filename : callable or None, optional
+        (spectrograph, fiber) -> filename. If None, use default KOA-style naming.
+
+    Returns
+    -------
+    list of str
+        Paths to the saved rate FITS files (one per fiber), in fiber order.
+    """
+    import astropy.units as u
+    from astropy.modeling.models import BlackBody
+
+    if stage0_prim_args is None:
+        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
+    if fiberflat_filename is None:
+        fiberflat_filename = _fiberflat_rate_filename
+
+    # Blackbody spectrum 0.8–3.0 µm at high resolution to avoid interpolation errors in the simulation
+    n_wl_flat = 100_000
+    wl_flat = np.linspace(0.8, 3.0, n_wl_flat) * u.micron
+    wl_aa = wl_flat.to(u.AA)
+    bb_scale = 1.0 * u.erg / (u.cm**2 * u.s * u.AA * u.sr)
+    bb = BlackBody(temperature=flat_temperature_k * u.K, scale=bb_scale)
+    bb_lam_aa = bb(wl_aa)
+    # BlackBody returns surface brightness (per sr); use .value and attach flux-density unit (sr folded into flat_scale)
+    # Convert per-Angstrom to per-micron: 1 micron = 1e4 AA => same flux density => multiply by 1e4
+    flux_flat = (flat_scale * np.asarray(bb_lam_aa.value) * 1e4) * (u.erg / u.s / u.cm**2 / u.micron)
+
+    out_dir_abs = os.path.abspath(output_dir)
+    os.makedirs(out_dir_abs, exist_ok=True)
+    paths: list[str] = []
+
+    for f in sorted(fibers):
+        if f not in (1, 2, 3):
+            continue
+        logger.info("Creating dummy fiber flat rate file for fiber %s.", f)
+        srm = SimulateRateMap()
+        srm.output_directory = out_dir_abs
+        srm.set_fiber_spectrum(
+            fiber_number=f,
+            spectrum_wavelengths=wl_flat,
+            spectrum_flux=flux_flat,
+            continuous=True,
+        )
+        rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
+        ramp_model = simulate_ramp_from_rate_map(
+            rate_map,
+            calibration_models,
+            readtime=readtime,
+            n_reads=n_reads,
+            max_cores=max_cores,
+            spectrograph=spectrograph,
+            poisson_noise=True,
+            convert_to_uint16=True,
+        )
+        rate_model = run_stage0_simulation(
+            ramp_model,
+            calibration_models,
+            output_dir=out_dir_abs,
+            prim_args=stage0_prim_args,
+        )
+        # Set object_fiber meta so group_by_illuminated_fiber (fiber flat pipeline) finds this fiber
+        obj_flat = "FIBERFLAT-B" if spectrograph.upper() == "BSPEC" else "FIBERFLAT-R"
+        for fib in (1, 2, 3):
+            setattr(rate_model.meta, f"object_fiber{fib}", obj_flat if fib == f else "BLOCKED")
+        filename = fiberflat_filename(spectrograph, f)
+        filepath = os.path.join(out_dir_abs, filename)
+        rate_model.save(filepath=filepath)
+        paths.append(filepath)
+        logger.debug("Saved dummy fiber flat rate file: %s", filepath)
+
+    return paths
 
 
 def run_stage0_simulation(
@@ -850,6 +1081,23 @@ def simulate_up_the_ramp(
     return ramp_model, result, calibration_models
 
 
+def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepath: str) -> None:
+    """
+    Set object_fiber1/2/3 on model.meta from filename so group_by_illuminated_fiber finds fibers.
+
+    Existing FITS (e.g. from disk or GDrive) may lack these; the fiber flat pipeline and
+    trace primitives require them. Infers fiber from ...FIB1.../FIB2.../FIB3... and
+    FIBERFLAT-B vs -R from HB vs HR in the path.
+    """
+    name = os.path.basename(filepath).upper()
+    # Infer illuminated fiber from filename (e.g. rate-FIBERFLAT-FIB1.fits or ...FIB1...)
+    match = re.search(r"FIB(?:ERFLAT-)?FIB([123])", name) or re.search(r"FIB([123])\b", name)
+    fiber = int(match.group(1)) if match else 1
+    obj_flat = "FIBERFLAT-B" if "HB" in name or "BSPEC" in name else "FIBERFLAT-R"
+    for f in (1, 2, 3):
+        setattr(model.meta, f"object_fiber{f}", obj_flat if f == fiber else "BLOCKED")
+
+
 def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
     prim_args: dict | None = None,
@@ -888,6 +1136,8 @@ def run_fiberflat_pipeline(
     """
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
     ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
+    for model, fp in zip(ff_models, fiberflat_filepaths):
+        _patch_fiberflat_model_object_fiber_meta(model, fp)
     if prim_args is None:
         do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
         # Restrict extraction to fibers present in the fiberflat inputs (trace pos/prof only exist for these)

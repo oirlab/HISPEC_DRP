@@ -9,6 +9,24 @@ from multiprocessing.sharedctypes import RawArray
 
 __all__ = ['create_ramp','generate_1overf_noise','compute_psd','generate_1overf_noise_map','compute_channel_psds','generate_1overf_noise_integrated','utr_variable_rate_cube']
 
+# np.random.poisson(lam) fails when lam is too large; use normal approximation above this
+_POISSON_LAM_MAX = 1e8
+
+
+def _poisson_like_draw(lam: np.ndarray, size: tuple) -> np.ndarray:
+    """Draw counts from Poisson where lam is small; use Normal(lam, sqrt(lam)) for large lam."""
+    lam = np.asarray(lam, dtype=np.float64)
+    out = np.empty(size, dtype=np.float64)
+    small = lam <= _POISSON_LAM_MAX
+    large = ~small
+    if np.any(small):
+        out[small] = np.random.poisson(lam=lam[small])
+    if np.any(large):
+        mu, sig = lam[large], np.sqrt(lam[large])
+        out[large] = np.clip(np.round(np.random.normal(mu, sig)), 0.0, None)
+    return out
+
+
 # NOTE: Find a new home for this function
 
 def _create_ramp(
@@ -53,9 +71,9 @@ def _create_ramp(
             lam_dark = np.asarray(dark * readtime, dtype=np.float64)
             lam_dark = np.nan_to_num(lam_dark, nan=0.0, posinf=0.0, neginf=0.0)
             lam_dark = np.maximum(lam_dark, 0.0)
-            _data[i, :, :] = _data[i-1, :, :] + \
-                            (np.random.poisson(lam=lam_source, size=source.shape)*flat +\
-                            np.random.poisson(lam=lam_dark, size=source.shape)) / gain
+            draw_source = _poisson_like_draw(lam_source, source.shape)
+            draw_dark = _poisson_like_draw(lam_dark, source.shape)
+            _data[i, :, :] = _data[i-1, :, :] + (draw_source * flat + draw_dark) / gain
         else:
             _data[i, :, :] = _data[i-1, :, :] + (_source[i-1] * readtime *flat + dark * readtime) / gain
 

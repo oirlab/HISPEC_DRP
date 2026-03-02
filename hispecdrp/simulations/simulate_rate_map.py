@@ -1,4 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
+from hispecdrp.datamodels import hispec_config
 import warnings
 
 try:
@@ -105,8 +106,8 @@ class SimulateRateMap:
         self.telescope_primary_diameter: Quantity = 9.96 * u.m
         self.fibers: dict = {}
 
-        self.bspec_orders: list[int] = list(range(110, 150))
-        self.rspec_orders: list[int] = list(range(59, 99))
+        self.bspec_orders: list[int] = hispec_config.HISPECConfig.get_order_list("BSPEC")
+        self.rspec_orders: list[int] = hispec_config.HISPECConfig.get_order_list("RSPEC")
 
         self.rate_map: np.ndarray[np.float64] = None
 
@@ -270,8 +271,31 @@ class SimulateRateMap:
                 ow = model_data[fiber_key][od]['xy_wavelengths']
                 ox = model_data[fiber_key][od]["x"]
 
-                # Interpolate detector trace positions
-                fx = PchipInterpolator(ox, ow, extrapolate=True)
+                # Interpolate wavelength as function of detector x pixel.
+                # HDF traces may not be strictly sorted in x and may contain duplicate x values,
+                # which breaks PchipInterpolator's requirement that x be strictly increasing.
+                ox = np.asarray(ox, dtype=np.float64)
+                ow = np.asarray(ow, dtype=np.float64)
+                good = np.isfinite(ox) & np.isfinite(ow)
+                ox = ox[good]
+                ow = ow[good]
+                if ox.size < 2:
+                    raise ValueError(f"Not enough valid samples for fiber {fiber} order {od} wavelength solution.")
+
+                # Sort by x
+                sidx = np.argsort(ox)
+                oxs = ox[sidx]
+                ows = ow[sidx]
+
+                # Merge duplicates in x by averaging wavelength at the same pixel
+                ux, inv = np.unique(oxs, return_inverse=True)
+                if ux.size < 2:
+                    raise ValueError(f"Not enough unique x samples for fiber {fiber} order {od} wavelength solution.")
+                wsum = np.bincount(inv, weights=ows)
+                wcnt = np.bincount(inv)
+                uow = wsum / np.maximum(wcnt, 1)
+
+                fx = PchipInterpolator(ux, uow, extrapolate=True)
 
                 self.wavelength_solution[fiber][int(od)] = {
                     "pixel": np.arange(4096),

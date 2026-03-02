@@ -1,7 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
-from numba import njit
 import scipy.signal
 from typing import Sequence
 from ...utils.math import median_filter_2d
@@ -309,9 +308,17 @@ def find_trace_positions(
     ki, kf = max(0, x0 - 3), min(nx, x0 + 3)
     y = np.nanmedian(median_filter_2d(data[:, ki:kf+1], dq[:, ki:kf+1], window_size=(3, 3)), axis=1)
     y = y[yrange[0]:yrange[1] + 1]
-    min_prominence = np.nanmax(y) * prominence_factor
+    y_max = np.nanmax(y) if y.size else np.nan
+    if not np.isfinite(y_max) or y_max <= 0:
+        raise ValueError(
+            "Trace finding failed: no valid signal in center columns (all NaN or zero). "
+            "Check that the fiber flat rate image has real flux in the trace region."
+        )
+    min_prominence = y_max * prominence_factor
     peaks0, _ = scipy.signal.find_peaks(y, prominence=min_prominence, distance=min_distance)
     peaks0 += yrange[0]
+    # Reverse so trace order index 0 matches the intended end of the order list in the rate image (180° flip)
+    peaks0 = np.asarray(peaks0)[::-1]
     num_traces = len(peaks0)
 
     # NOTE: Keep for debugging
@@ -327,9 +334,12 @@ def find_trace_positions(
     y_centroids = np.full((num_traces, nx), np.nan)
     y_widths = np.full((num_traces, nx), np.nan)
 
-    # Walk each trace left/right from initial peak position
+    # Walk each trace left/right from initial peak position (write in-place to avoid broadcast unpacking)
     for i in range(num_traces):
-        y_centroids[i, :], y_widths[i, :] = walk_trace_left_right(data, x0, peaks0[i], xrange, window_size_half)
+        walk_trace_left_right(
+            data, x0, peaks0[i], xrange, window_size_half,
+            ycs_out=y_centroids[i, :], widths_out=y_widths[i, :],
+        )
         good = np.where(np.isfinite(y_centroids[i, :]))[0]
         if len(good) >= deg_pos + 1:
             coeffs_pos[i, :] = np.polyfit(good, y_centroids[i, good], deg_pos)
@@ -359,59 +369,73 @@ def walk_trace_left_right(
     x0 : float, yc0 : float,
     xrange : tuple,
     window_size_half : int,
-) -> np.ndarray:
-    ycs_out = np.full(data.shape[1], np.nan)
-    widths_out = np.full(data.shape[1], np.nan)
+    *,
+    ycs_out : np.ndarray | None = None,
+    widths_out : np.ndarray | None = None,
+) -> None:
+    """Fill ycs_out and widths_out in place (or allocate and discard if not provided)."""
+    n = data.shape[1]
+    # Always use contiguous 1D buffers for Numba; row-slice views can trigger broadcast errors
+    buf_y = np.full(n, np.nan, dtype=np.float64)
+    buf_w = np.full(n, np.nan, dtype=np.float64)
     _walk_trace_left_right(
-        data, x0, yc0, xrange, window_size_half, ycs_out, widths_out
+        data, x0, yc0, xrange, window_size_half, buf_y, buf_w
     )
-    return ycs_out, widths_out
+    if ycs_out is not None:
+        ycs_out[:] = buf_y
+    if widths_out is not None:
+        widths_out[:] = buf_w
 
-@njit(nogil=True, parallel=False, cache=True)
-def _walk_trace_left_right(
-    data : np.ndarray,
-    x0 : float, yc0 : float,
-    xrange : tuple,
-    window_size_half : int,
-    ycs_out : np.ndarray,
-    widths_out : np.ndarray,
-):
-    ny, nx = data.shape
-    yc = yc0
-    ycs_out[x0] = yc
-    xarr = np.arange(nx)
-    ycs_out[x0], widths_out[x0] = _compute_centroid_and_width(xarr, data[:, x0], yc, window_size_half)
-
-    # Walk left
-    for x in range(x0 - 1, xrange[0] - 1, -1):
-        yc = ycs_out[x + 1]
-        ycs_out[x], widths_out[x] = _compute_centroid_and_width(xarr, data[:, x], yc, window_size_half)
-
-    # Walk right
-    yc = yc0
-    for x in range(x0 + 1, xrange[1] + 1):
-        yc = ycs_out[x - 1]
-        ycs_out[x], widths_out[x] = _compute_centroid_and_width(xarr, data[:, x], yc, window_size_half)
-
-@njit(nogil=True, parallel=False, cache=True)
-def _compute_centroid_and_width(
-    xarr : np.ndarray,
-    data : np.ndarray,
-    yc : float,
-    window_size_half : int,
-):
+def _compute_centroid_and_width_py(
+    col_data: np.ndarray,
+    yc: float,
+    window_size_half: int,
+) -> tuple[float, float]:
+    """Pure Python/NumPy: compute centroid and FWHM along a column. Returns (centroid, fwhm) as Python floats.
+    Centroid is along the row (y) direction, so coordinates are row indices [yi, yf], not column indices.
+    """
+    nrow = col_data.shape[0]
     yi = int(max(0, yc - window_size_half))
-    yf = int(min(data.shape[0], yc + window_size_half + 1))
-
-    slice_x = xarr[yi:yf+1]
-    slice_y = data[yi:yf+1]
-    total_flux = np.nansum(slice_y)
-    SIGMA_TO_FWHM = 2 * np.sqrt(2 * np.log(2))
-
+    yf = int(min(nrow - 1, yc + window_size_half))  # inclusive end index so slice [yi:yf+1] is in bounds
+    slice_y = col_data[yi : yf + 1].astype(np.float64)
+    slice_x = np.arange(yi, yf + 1, dtype=np.float64)  # same length as slice_y
+    total_flux = float(np.nansum(slice_y))
+    SIGMA_TO_FWHM = 2.0 * np.sqrt(2.0 * np.log(2.0))
     if total_flux > 0:
-        centroid = np.nansum(slice_x * slice_y) / total_flux
-        variance = np.nansum(((slice_x - centroid) ** 2) * slice_y) / total_flux
-        fwhm = SIGMA_TO_FWHM * np.sqrt(variance)
-        return centroid, fwhm
-    else:
-        return np.nan, np.nan
+        centroid = float(np.nansum(slice_x * slice_y) / total_flux)
+        variance = float(np.nansum(((slice_x - centroid) ** 2) * slice_y) / total_flux)
+        fwhm = SIGMA_TO_FWHM * np.sqrt(max(0.0, variance))
+        return centroid, float(fwhm)
+    return float("nan"), float("nan")
+
+
+def _walk_trace_left_right(
+    data: np.ndarray,
+    x0: float,
+    yc0: float,
+    xrange: tuple,
+    window_size_half: int,
+    ycs_out: np.ndarray,
+    widths_out: np.ndarray,
+) -> None:
+    """Walk trace left/right from initial position; fill ycs_out and widths_out (pure Python to avoid Numba broadcast issues)."""
+    ny, nx = data.shape
+    x0_i = int(x0)
+    yc = float(yc0)
+    ycs_out[x0_i] = yc
+    c, w = _compute_centroid_and_width_py(data[:, x0_i], yc, window_size_half)
+    ycs_out[x0_i] = c
+    widths_out[x0_i] = w
+
+    for x in range(x0_i - 1, xrange[0] - 1, -1):
+        yc = float(ycs_out[x + 1])
+        c, w = _compute_centroid_and_width_py(data[:, x], yc, window_size_half)
+        ycs_out[x] = c
+        widths_out[x] = w
+
+    yc = float(yc0)
+    for x in range(x0_i + 1, xrange[1] + 1):
+        yc = float(ycs_out[x - 1])
+        c, w = _compute_centroid_and_width_py(data[:, x], yc, window_size_half)
+        ycs_out[x] = c
+        widths_out[x] = w

@@ -9,8 +9,8 @@ fiber. Use --fibers to restrict to fibers 1, 2, 3, and/or 4. Use --spectrum with
 a BT-Settl .h5 file path to use that spectrum for the rate map instead of a flat spectrum.
 
 Calibration cache uses the default (see run_caldb) if KOA_CALIBRATION_CACHE is not set.
-Fiberflat files are downloaded via hispecdrp.utils.download_gdrive_file only for
-requested fibers (FIB1, FIB2, FIB3 in testing_data): HB frames for BSPEC, HR for RSPEC.
+Dummy fiber flat rate files are created with a blackbody spectrum (0.8--3.0 µm, optional temperature and scale)
+using the same create_ramp / Stage 0 path, then run through the fiber flat pipeline.
 
 Usage:
     python -m hispecdrp.scripts.run_simulated_pipeline [--datadir DIR] [--fibers 1,2,3] [options]
@@ -37,8 +37,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hispecdrp import simulations
-from hispecdrp.utils import download_gdrive_file
+from hispecdrp import datamodels, simulations
 from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
 
 # Use package logger name so records propagate to "hispecdrp" (which has the handler).
@@ -65,14 +64,15 @@ def _ensure_script_logging():
 def _plot_spectrum_fiber(
     spec: np.ndarray,
     err: np.ndarray,
+    wave: np.ndarray | None,
     do_orders,
     fiber: int,
     method: str,
     output_dir: str,
 ) -> str | None:
     """
-    Plot 1D spectra (spec and err) vs array index, one subplot per order.
-    Save one PNG per fiber with all orders in a vertical stack of subplots.
+    Plot 1D spectra (spec and err) vs wavelength (micron) if provided, else vs array index.
+    Save one PNG per fiber with orders in a grid of 6 columns for easier viewing.
 
     Returns
     -------
@@ -86,20 +86,32 @@ def _plot_spectrum_fiber(
     if len(orders) != n_orders:
         orders = list(range(n_orders))
 
-    ncol = 1
-    nrow = n_orders
-    fig, axes = plt.subplots(nrow, ncol, figsize=(8, 1.5 * n_orders), squeeze=True)
-    if n_orders == 1:
-        axes = [axes]
-    for i, (ax, order) in enumerate(zip(axes, orders)):
-        x = np.arange(spec.shape[1])
+    ncol = 6
+    nrow = (n_orders + ncol - 1) // ncol
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3.0 * ncol, 1.4 * nrow), squeeze=False)
+    # Flatten so we can index by order; hide unused subplots in last row
+    axes_flat = axes.ravel()
+    for i in range(n_orders):
+        ax = axes_flat[i]
+        order = orders[i]
+        wave_arr = None
+        if wave is not None:
+            wave_arr = np.asarray(getattr(wave, "value", wave))
+        if wave_arr is not None and getattr(wave_arr, "shape", None) == spec.shape:
+            x = wave_arr[i, :]
+            xlabel = "wavelength (microns)"
+        else:
+            x = np.arange(spec.shape[1])
+            xlabel = "pixel index"
         ax.plot(x, spec[i, :], color="C0", label="spec", linewidth=0.8)
         ax.plot(x, err[i, :], color="C1", alpha=0.8, label="err", linewidth=0.8)
-        ax.set_ylabel("flux / err")
+        ax.set_ylabel("flux (uncal)")
         ax.set_title(f"Order {order}")
         ax.legend(loc="upper right", fontsize=7)
         ax.grid(True, alpha=0.3)
-    axes[-1].set_xlabel("pixel index")
+    for idx in range(n_orders, len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+    axes_flat[(nrow - 1) * ncol].set_xlabel(xlabel)
     fig.suptitle(f"Fiber {fiber} — {method.upper()} extraction", y=1.002)
     plt.tight_layout()
 
@@ -188,9 +200,7 @@ def _plot_ramp_traces(
                     trace_interp = trace_vals
                 x_plot = np.arange(nx)
                 y_plot = trace_interp
-            # Flip 180° so trace coords match image (e.g. if trace coords use opposite origin)
-            x_plot = (nx - 1) - np.asarray(x_plot, dtype=np.float64)
-            y_plot = (ny - 1) - np.asarray(y_plot, dtype=np.float64)
+            # Trace positions are in array index convention (col, row); imshow(origin="upper") matches, so no flip
             ax.plot(x_plot, y_plot, "r-", linewidth=0.6, alpha=0.9)
             n_plotted += 1
 
@@ -256,11 +266,6 @@ def _memory_sampler(interval_s: float = 0.3):
 ALLOWED_FIBERS = (1, 2, 3, 4)
 
 
-def _fiberflat_filename(spectrograph: str, fiber: int) -> str:
-    prefix = "HB" if spectrograph.upper() == "BSPEC" else "HR"
-    return f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}.fits"
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Simulate up-the-ramp and run Stage 0 and Stage 1.")
     parser.add_argument(
@@ -322,6 +327,20 @@ def parse_args():
         action="store_true",
         help="Fetch master calibrations from calDB. Default: use simulated calibrations.",
     )
+    parser.add_argument(
+        "--fiberflat-scale",
+        type=float,
+        default=1e-14,
+        metavar="F",
+        help="Scale factor for dummy fiber flat blackbody spectrum (0.8--3.0 µm). Default: 1e-14",
+    )
+    parser.add_argument(
+        "--fiberflat-temperature",
+        type=float,
+        default=1000.0,
+        metavar="T",
+        help="Blackbody temperature (K) for dummy fiber flat spectrum. Default: 1000.0",
+    )
     return parser.parse_args()
 
 
@@ -373,61 +392,100 @@ def main():
         if args.spectrum:
             logger.warning("Spectrum file not found: %s; using flat spectrum.", spectrum_path)
 
-    if args.use_master_calibrations:
-        logger.info("Creating ramp and calibrations from calDB (simulation only)...")
-        ramp_model, calibration_models = simulations.create_ramp_and_calibrations(
-            rate_map=None,
-            shape=(4096, 4096),
-            fibers=fibers,
-            spectrum_wavelengths=spectrum_wavelengths,
-            spectrum_flux=spectrum_flux,
-            output_dir=datadir,
-            calibration_models=None,
-            use_master_calibrations=True,
-            readtime=1.7,
-            n_reads=10,
-            spectrograph=spectrograph,
-            max_cores=args.max_cores,
-            instrument_name=None,
-            instrument_era="0.0.1",
-            mjd_start=None,
-            datetime_obs=None,
-            connect_remote=True,
-            sync_caldb_first=True,
-        )
+    # Ramp and calibrations: create or load if files already exist
+    if simulations.ramp_file_exists(datadir):
+        ramp_path = simulations.get_expected_ramp_path(datadir)
+        logger.info("Ramp file exists, loading from %s", ramp_path)
+        ramp_model = datamodels.open(ramp_path)
+        if args.use_master_calibrations:
+            logger.info("Loading master calibrations from calDB...")
+            calibration_models = simulations.get_master_calibrations(
+                meta=None,
+                instrument_name=None,
+                instrument_era="0.0.1",
+                spectrograph=spectrograph,
+                mjd_start=None,
+                datetime_obs=None,
+                connect_remote=True,
+                sync_first=True,
+            )
+        else:
+            calibration_models = simulations.create_simulated_calibration_models(
+                shape=(4096, 4096),
+                dq_bad_rows=[5],
+            )
     else:
-        logger.info("Creating ramp and calibrations (simulation only)...")
-        ramp_model, calibration_models = simulations.create_ramp_and_calibrations(
-            rate_map=None,
-            shape=(4096, 4096),
-            fibers=fibers,
-            spectrum_wavelengths=spectrum_wavelengths,
-            spectrum_flux=spectrum_flux,
-            output_dir=datadir,
-            calibration_models=None,
+        if args.use_master_calibrations:
+            logger.info("Creating ramp and calibrations from calDB (simulation only)...")
+            ramp_model, calibration_models = simulations.create_ramp_and_calibrations(
+                rate_map=None,
+                shape=(4096, 4096),
+                fibers=fibers,
+                spectrum_wavelengths=spectrum_wavelengths,
+                spectrum_flux=spectrum_flux,
+                output_dir=datadir,
+                calibration_models=None,
+                use_master_calibrations=True,
+                readtime=1.7,
+                n_reads=10,
+                spectrograph=spectrograph,
+                max_cores=args.max_cores,
+                instrument_name=None,
+                instrument_era="0.0.1",
+                mjd_start=None,
+                datetime_obs=None,
+                connect_remote=True,
+                sync_caldb_first=True,
+            )
+        else:
+            logger.info("Creating ramp and calibrations (simulation only)...")
+            ramp_model, calibration_models = simulations.create_ramp_and_calibrations(
+                rate_map=None,
+                shape=(4096, 4096),
+                fibers=fibers,
+                spectrum_wavelengths=spectrum_wavelengths,
+                spectrum_flux=spectrum_flux,
+                output_dir=datadir,
+                calibration_models=None,
+                readtime=1.7,
+                n_reads=10,
+                spectrograph=spectrograph,
+                max_cores=args.max_cores,
+                dq_bad_rows=[5],
+            )
+        raw_path = ramp_model.save(
+            filepath=os.path.join(os.path.abspath(datadir), ramp_model.meta.filename or "simulated_ramp_raw.fits")
+        )
+        logger.info("Saved raw ramp: %s", raw_path)
+
+    stage0_prim_args = simulations.get_default_stage0_prim_args(max_cores=args.max_cores)
+    fiberflat_fibers = [f for f in fibers if f in (1, 2, 3)]
+    if simulations.fiberflat_rate_files_exist(datadir, spectrograph, fiberflat_fibers):
+        fiberflat_filepaths = simulations.get_expected_fiberflat_rate_paths(
+            datadir, spectrograph, fiberflat_fibers
+        )
+        logger.info("Using existing dummy fiber flat rate file(s) in %s", datadir)
+    else:
+        fiberflat_filepaths = simulations.create_dummy_fiberflat_rate_files(
+            fiberflat_fibers,
+            spectrograph,
+            datadir,
+            calibration_models,
+            flat_scale=args.fiberflat_scale,
+            flat_temperature_k=args.fiberflat_temperature,
             readtime=1.7,
             n_reads=10,
-            spectrograph=spectrograph,
             max_cores=args.max_cores,
-            dq_bad_rows=[5],
+            stage0_prim_args=stage0_prim_args,
         )
-    raw_path = ramp_model.save(
-        filepath=os.path.join(os.path.abspath(datadir), ramp_model.meta.filename or "simulated_ramp_raw.fits")
-    )
-    logger.info("Saved raw ramp: %s", raw_path)
-
-    fiberflat_filepaths = []
-    for f in fibers:
-        if f in (1, 2, 3):
-            path = download_gdrive_file(_fiberflat_filename(spectrograph, f), output_dir=datadir)
-            fiberflat_filepaths.append(path)
+        if fiberflat_filepaths:
+            logger.info("Created %d dummy fiber flat rate file(s) in %s", len(fiberflat_filepaths), datadir)
 
     logger.info("Running Stage 0 pipeline...")
     start_time = time.time()
     mem = None
     try:
         with _memory_sampler(interval_s=0.3) as mem:
-            stage0_prim_args = simulations.get_default_stage0_prim_args(max_cores=args.max_cores)
             model_result = simulations.run_stage0_simulation(
                 ramp_model,
                 calibration_models,
@@ -452,6 +510,13 @@ def main():
                 trace_prof_model = ff_results["trace_prof"]
                 do_orders = model_result.make_order_vec() if hasattr(model_result, "make_order_vec") else []
 
+                # Wavelength solution from simulation HDF for set_wavesol (Stage 1)
+                try:
+                    wavesol_model = simulations.create_wavelength_solution_model_from_sim(spectrograph)
+                except Exception as ws_err:
+                    logger.warning("Could not build wavelength solution from sim: %s; set_wavesol will be skipped.", ws_err)
+                    wavesol_model = None
+
                 try:
                     ramp_traces_path = _plot_ramp_traces(ramp_model, trace_pos_model, datadir)
                     if ramp_traces_path:
@@ -462,6 +527,9 @@ def main():
                 if len(do_orders) == 0:
                     logger.warning("No orders in model (do_orders is empty); skipping per-order SNR reporting.")
 
+                set_wavesol_args = {"run": True if wavesol_model is not None else False, "do_orders": do_orders}
+                if wavesol_model is not None:
+                    set_wavesol_args["wavesol"] = wavesol_model
                 for method in ("box", "optimal"):
                     spec_model = simulations.run_stage1_simulation(
                         model_result,
@@ -479,7 +547,7 @@ def main():
                                 "tracepos": trace_pos_model,
                                 "traceprof": trace_prof_model,
                             },
-                            "set_wavesol": {"run": False},
+                            "set_wavesol": set_wavesol_args,
                         },
                     )
                     # Ensure script logger has a handler (pipeline logging_context can leave it broken)
@@ -497,13 +565,16 @@ def main():
                             err = getattr(spec_model, f"SPEC_UNCAL_ERR_FIB{fib}", None)
                             if err is None:
                                 err = getattr(spec_model, f"spec_uncal_err_fib{fib}", None)
+                            wave = getattr(spec_model, f"WAVE_FIB{fib}", None)
+                            if wave is None:
+                                wave = getattr(spec_model, f"wave_fib{fib}", None)
                             if spec is not None and err is not None:
                                 for i, order in enumerate(do_orders):
                                     snr = np.nanmean(spec[i, :] / err[i, :])
                                     logger.info("Fiber %s Order %s: %s SNR = %.2f", fib, order, method.upper(), snr)
                                 try:
                                     plot_path = _plot_spectrum_fiber(
-                                        spec, err, do_orders, fib, method, datadir
+                                        spec, err, wave, do_orders, fib, method, datadir
                                     )
                                     if plot_path:
                                         logger.info("Wrote spectrum figure: %s", plot_path)
