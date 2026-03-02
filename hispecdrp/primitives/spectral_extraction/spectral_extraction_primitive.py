@@ -68,6 +68,30 @@ class SpectralExtractionPrimitive(BasePrimitive):
         },
     }
 
+    @staticmethod
+    def _get_trace_positions(tracepos_model, fiber: int):
+        """Get trace position array for a fiber, supporting both uppercase and lowercase attribute names (FITS vs in-memory)."""
+        for name in (f'POS_FIB{fiber}', f'pos_fib{fiber}'):
+            val = getattr(tracepos_model, name, None)
+            if val is not None:
+                return val
+        raise ValueError(
+            f"TracePosModel has no trace positions for fiber {fiber} (tried POS_FIB{fiber} and pos_fib{fiber}). "
+            "Model may be empty or loaded from FITS with different extension names."
+        )
+
+    @staticmethod
+    def _get_trace_profile(traceprof_model, fiber: int):
+        """Get trace profile array for a fiber, supporting both uppercase and lowercase attribute names (FITS vs in-memory)."""
+        for name in (f'PROF_FIB{fiber}', f'prof_fib{fiber}'):
+            val = getattr(traceprof_model, name, None)
+            if val is not None:
+                return val
+        raise ValueError(
+            f"TraceProfModel has no profile for fiber {fiber} (tried PROF_FIB{fiber} and prof_fib{fiber}). "
+            "Model may be empty or loaded from FITS with different extension names."
+        )
+
     def _perform(self):
 
         if isinstance(self.input, (datamodels.DataModel, str)):
@@ -171,9 +195,9 @@ class SpectralExtractionPrimitive(BasePrimitive):
         order_vec = input_model.make_order_vec()
         for fiber in do_fibers:
 
-            # Get the trace position coefficients for the fiber
-            trace_positions = getattr(tracepos_model, f'POS_FIB{fiber}')
-            
+            # Get the trace position coefficients for the fiber (support both POS_FIB# and pos_fib#)
+            trace_positions = self._get_trace_positions(tracepos_model, fiber)
+
             # Sanity check
             assert trace_positions.shape[0] == len(order_vec), "Trace position coefficients do not match number of orders"
 
@@ -226,11 +250,9 @@ class SpectralExtractionPrimitive(BasePrimitive):
         order_vec = input_model.make_order_vec()
         for fiber in do_fibers:
 
-            # Get the trace position coefficients for the fiber
-            trace_positions = getattr(tracepos_model, f'POS_FIB{fiber}')
-            # Sanity check
-            #assert trace_pos_coeffs.shape[0] == len(order_vec), "Trace position coefficients do not match number of orders"
-            fiberflat_profile = getattr(traceprof_model, f'PROF_FIB{fiber}')
+            # Get the trace position and profile for the fiber (support both uppercase and lowercase attr names)
+            trace_positions = self._get_trace_positions(tracepos_model, fiber)
+            fiberflat_profile = self._get_trace_profile(traceprof_model, fiber)
 
             # Alias outputs
             spec_out = getattr(output_model, f'SPEC_UNCAL_FIB{fiber}')
@@ -289,16 +311,17 @@ class SpectralExtractionPrimitive(BasePrimitive):
         ny, nx = input_model.rate.shape
         order_vec = input_model.make_order_vec()
         fiberflat_profiles = np.zeros((n_fibers, ny, nx), dtype=input_model.rate.dtype)
-        
+
         for j, fiber in enumerate(do_fibers):
-            fiberflat_profiles[j, :, :] = getattr(traceprof_model, f'PROF_FIB{fiber}')
+            fiberflat_profiles[j, :, :] = self._get_trace_profile(traceprof_model, fiber)
 
         for i, order in enumerate(order_vec):
             if order not in do_orders:
                 continue
             trace_positions = np.zeros((n_fibers, nx), dtype=input_model.rate.dtype)
             for j, fiber in enumerate(do_fibers):
-                trace_positions[j, :] = getattr(tracepos_model, f'POS_FIB{fiber}')[i, :]
+                pos = self._get_trace_positions(tracepos_model, fiber)
+                trace_positions[j, :] = pos[i, :]
                 
             logger.info(f"Extracting {input_model} with method {self.method} [Fibers {do_fibers}][Order {order}]")
 

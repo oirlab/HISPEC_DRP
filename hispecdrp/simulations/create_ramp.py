@@ -47,9 +47,15 @@ def _create_ramp(
     # First, compute photon counts only (no read noise or bias)
     for i in np.arange(1,n_reads):
         if poisson_noise:
+            lam_source = np.asarray(_source[i - 1] * readtime, dtype=np.float64)
+            lam_source = np.nan_to_num(lam_source, nan=0.0, posinf=0.0, neginf=0.0)
+            lam_source = np.maximum(lam_source, 0.0)
+            lam_dark = np.asarray(dark * readtime, dtype=np.float64)
+            lam_dark = np.nan_to_num(lam_dark, nan=0.0, posinf=0.0, neginf=0.0)
+            lam_dark = np.maximum(lam_dark, 0.0)
             _data[i, :, :] = _data[i-1, :, :] + \
-                            (np.random.poisson(lam=_source[i-1] * readtime, size=source.shape)*flat +\
-                            np.random.poisson(lam=dark * readtime, size=source.shape)) / gain
+                            (np.random.poisson(lam=lam_source, size=source.shape)*flat +\
+                            np.random.poisson(lam=lam_dark, size=source.shape)) / gain
         else:
             _data[i, :, :] = _data[i-1, :, :] + (_source[i-1] * readtime *flat + dark * readtime) / gain
 

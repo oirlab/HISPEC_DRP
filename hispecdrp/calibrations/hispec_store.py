@@ -61,8 +61,9 @@ class HISPECCalibrationStore(CalibrationStore):
             cal_id = model.meta.cal_id
             if not self.calibration_record_in_cache(cal_id, mode='id'):
                 _, cal_record_added = self.register_calibration(model, origin=origin)
-                cals_added.append(cal_record_added)
-                logger.info(f"Added calibration to local DB: {cal_record_added['filename']}")
+                if cal_record_added is not None:
+                    cals_added.append(cal_record_added)
+                    logger.info(f"Added calibration to local DB: {cal_record_added['filename']}")
 
         return cals_added
 
