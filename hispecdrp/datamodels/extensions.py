@@ -34,12 +34,14 @@ CALIBRATIONS = {
     'CALIBRATIONS': {
         'hdu_type': fits.BinTableHDU,
         'columns': {
-            'FILENAME': str, # Base filename of the calibration
-            'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+            'CAL_ROLE': str, # Role of calibration
             'CAL_TYPE': str, # Type of calibration
+            'FILENAME': str, # Base filename of the calibration
+            'ID': str, # UUID
             'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
             'LAST_PROCESSED': str, # When calibration was last processed. This is NOT equal to the last_updated timestamp in the calibration DB.
-            'ID': str, # UUID
+            'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+            'CLASS' : str, # Primitive class that used the calibration.
             'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
         }
     }

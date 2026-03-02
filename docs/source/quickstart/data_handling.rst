@@ -88,14 +88,16 @@ Each datamodel has a **receipt** attribute which is a Table that contains a hist
 Calibration History
 +++++++++++++++++++
 
-Each datamodel has a **calibrations** attribute which is a Table that contains a history of all calibrations that have been applied to the datamodel.
+Each datamodel has a **calibrations** attribute which is a Table that contains a history of all calibrations that have been used within the context of this datamodel. Typically this means the calibration was 'applied' to the datamodel in some way, but it can also be used to track calibrations that were used in the creation of this datamodel, for example using an existing calibration as an initial guess to create a new calibration.
 
-* **FILENAME** — Base filename of the calibration
-* **TIME_APPLIED** — Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+* **CAL_ROLE** — Role of calibration
 * **CAL_TYPE** — Type of calibration
+* **FILENAME** — Base filename of the calibration
+* **ID** — UUID
 * **DATETIME_OBS** — Observation date/time of the calibration.
 * **LAST_PROCESSED** — When calibration was last processed.
-* **ID** — UUID
+* **TIME_APPLIED** — Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+* **CLASS** — Primitive class that used the calibration.
 * **DRP_VERSION** — DRP semver calibration was processed with
 
 

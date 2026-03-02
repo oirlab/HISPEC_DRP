@@ -361,6 +361,7 @@ class BasePrimitive(ProcessingComponent):
         self,
         model : DataModel,
         calibration : DataModel | str | dict,
+        cal_role : str,
     ):
         """
         Add a calibration to the DataModel's calibrations table.
@@ -375,29 +376,36 @@ class BasePrimitive(ProcessingComponent):
                 - DataModel object
                 - String filepath (will load metadata to create entry)
                 - Dict with calibration column values
+
+        cal_role : str
+            The role of the calibration.
         """
 
         # Case 1: Either metadata dict or SQL record (dict)
         # Assume same keys for now
         if isinstance(calibration, datamodels.MetaModel):
             new_row = {
+                'CAL_ROLE': cal_role,
                 'FILENAME' : calibration['filename'] or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : calibration['cal_type'],
                 'DATETIME_OBS' : calibration['datetime_obs'],
                 'LAST_PROCESSED' : calibration['last_processed'],
                 'ID' : calibration['cal_id'],
+                'CLASS' : self.__class__.__name__,
                 'DRP_VERSION' : calibration['drp_version'],
             }
 
         if isinstance(calibration, dict):
             new_row = {
+                'CAL_ROLE': cal_role,
                 'FILENAME' : calibration['filename'] or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : calibration['cal_type'],
                 'DATETIME_OBS' : calibration['datetime_obs'],
                 'LAST_PROCESSED' : calibration['last_processed'],
                 'ID' : calibration['id'],
+                'CLASS' : self.__class__.__name__,
                 'DRP_VERSION' : calibration['drp_version'],
             }
 
@@ -408,12 +416,14 @@ class BasePrimitive(ProcessingComponent):
             from ..datamodels import open as open_datamodel
             cal_model = open_datamodel(calibration, meta_only=True)
             new_row = {
+                'CAL_ROLE': cal_role,
                 'FILENAME' : cal_model.meta.filename or 'None',
                 'TIME_APPLIED' : self._datetime_start,
                 'CAL_TYPE' : cal_model.meta.cal_type,
                 'DATETIME_OBS' : cal_model.meta.datetime_obs or 'None',
                 'LAST_PROCESSED' : cal_model.meta.last_processed or None,
                 'ID' : cal_model.meta.cal_id,
+                'CLASS' : self.__class__.__name__,
                 'DRP_VERSION' : cal_model.meta.drp_version,
             }
         else:
@@ -495,18 +505,21 @@ class BasePrimitive(ProcessingComponent):
         """
         if isinstance(model, str):
             return
+        
+        if model.meta.filename is None and not isinstance(model, datamodels.CalibrationModel):
+            model.generate_filename(suffix=self.suffix)
 
         model.meta.drp_version = hispecdrp._version.__version__ # Always override the current DRP version.
         if self.run:
             model.meta.last_processed = self._datetime_end
         self.add_receipt_entry(model)
-        for _, calibration in self._calibrations_used.items():
-            self.add_calibration_entry(model, calibration)
+        for cal_role, calibration in self._calibrations_used.items():
+            self.add_calibration_entry(model, calibration, cal_role=cal_role)
 
     def get_calibration(
         self,
         input : str | DataModel,
-        cal_type : str,
+        cal_role : str,
         selector : CalibrationSelector | None = None,
         use_cached : bool | None = None,
     ) -> tuple[str | DataModel, dict | None]:
@@ -517,10 +530,9 @@ class BasePrimitive(ProcessingComponent):
         ----------
         input : str or DataModel
             The filepath or datamodel to get a calibration for.
-        cal_type : str
-            The type of calibration to get, which should match a key in
-            ``self.CALIBRATIONS``. This should be the same string as
-            ``record['cal_type']``.
+        cal_role : str
+            The role of calibration in this primitive, which should match a key in
+            ``self.CALIBRATIONS``.
         selector : CalibrationSelector or None
             An optional selector to use instead of the default selector
             defined in ``self.CALIBRATIONS``.
@@ -535,20 +547,29 @@ class BasePrimitive(ProcessingComponent):
         """
 
         # User provided value
-        cal_value = getattr(self, cal_type, None)
+        cal_value = getattr(self, cal_role, None)
+
+        # Input model
+        input_model = datamodels.open(input, meta_only=True)
 
         ####################
         #### Case 1: ID ####
         ####################
         if isinstance(cal_value, str) and is_valid_uuid(cal_value):
             cal_id = cal_value
-            input_model = datamodels.open(input, meta_only=True)
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached
             ) as store:
+                
                 local_filepath, cal_record = store.get_calibration(calibration=cal_id)
-                self._calibrations_used[cal_type] = cal_record
+                
+                self._calibrations_used[cal_role] = cal_record
+
+                logger.info(
+                    f"Calibration role={cal_role}: Using file={cal_record['filename']} ID={cal_record['id']} for input={input_model}"
+                )
+                
                 return local_filepath, cal_record
 
         ###############################################################
@@ -558,18 +579,27 @@ class BasePrimitive(ProcessingComponent):
 
             # Open to get cal id (open in full mode to return for processing)
             if isinstance(cal_value, str):
+
                 if os.path.isfile(cal_value):
                     cal_model = datamodels.open(cal_value)
                 elif os.path.isfile(os.path.join(os.environ['KOA_CALIBRATION_CACHE'], cal_value)):
                     cal_filepath = os.path.join(os.environ['KOA_CALIBRATION_CACHE'], cal_value)
                     cal_model = datamodels.open(cal_filepath)
+
             elif isinstance(cal_value, datamodels.CalibrationModel):
                 cal_model = cal_value
+
             assert isinstance(
                 cal_model, datamodels.CalibrationModel
             ), "Input must be a valid CalibrationDataModel."
+
             cal_record = cal_model.to_record()
-            self._calibrations_used[cal_type] = cal_record
+            self._calibrations_used[cal_role] = cal_record
+
+            logger.info(
+                f"Calibration role={cal_role}: Using file={cal_record['filename']} ID={cal_record['id']} for input={input_model}"
+            )
+
             return cal_model, cal_record
 
         ######################################
@@ -579,15 +609,13 @@ class BasePrimitive(ProcessingComponent):
 
             selector_class = cal_value.get(
                 'selector',
-                self.CALIBRATIONS[cal_type]['selector']
+                self.CALIBRATIONS[cal_role]['selector']
             )
             selector_kwargs = cal_value.get(
                 'selector_kwargs',
-                self.CALIBRATIONS[cal_type]['selector_kwargs']
+                self.CALIBRATIONS[cal_role]['selector_kwargs']
             )
             selector = selector_class(**selector_kwargs)
-            
-            input_model = datamodels.open(input, meta_only=True)
             
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
@@ -597,55 +625,74 @@ class BasePrimitive(ProcessingComponent):
                     input_model.meta,
                     selector=selector
                 )
-                return local_filepath, cal_record
             
-            self._calibrations_used[cal_type] = cal_value
+            self._calibrations_used[cal_role] = cal_record
+            logger.info(
+                f"Calibration role={cal_role}: Using file={cal_record['filename']} ID={cal_record['id']} for input={input_model}"
+            )
+
+            return local_filepath, cal_record
 
         ######################################
         #### Case 4: Calibration Selector ####
         ######################################
         if isinstance(cal_value, CalibrationSelector):
+
             selector = cal_value
             input_model = datamodels.open(input, meta_only=True)
+
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached
             ) as store:
+                
                 local_filepath, cal_record = store.select_and_get_calibration(
                     input_model.meta,
                     selector=selector
                 )
-                return local_filepath, cal_record
+            
+            self._calibrations_used[cal_role] = cal_record
+
+            logger.info(
+                f"Calibration role={cal_role}: Using file={cal_record['filename']} ID={cal_record['id']} for input={input_model}"
+            )
+
+            return local_filepath, cal_record
 
         ################################################################
         ##### Case 5: None - use default selector from CALIBRATIONS ####
         ################################################################
         if cal_value is None:
             if selector is None:
-                if not hasattr(self, 'CALIBRATIONS') or cal_type not in self.CALIBRATIONS:
-                    raise ValueError(f"No calibration configuration found for '{cal_type}' in CALIBRATIONS")
+                if not hasattr(self, 'CALIBRATIONS') or cal_role not in self.CALIBRATIONS:
+                    raise ValueError(f"No calibration configuration found for '{cal_role}' in CALIBRATIONS")
 
-                #calibration_config = self.config['calibrations'][cal_type]
-                #calibration_config = self.config['calibrations'][cal_type]
-                calibration_config = self.CALIBRATIONS[cal_type]
+                #calibration_config = self.config['calibrations'][cal_role]
+                #calibration_config = self.config['calibrations'][cal_role]
+                calibration_config = self.CALIBRATIONS[cal_role]
                 selector_class = calibration_config['selector']
                 selector_kwargs = calibration_config.get('selector_kwargs', {})
                 selector = selector_class(**selector_kwargs)
-
-            input_model = datamodels.open(input, meta_only=True)
             
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached
             ) as store:
+                
                 local_filepath, cal_record = store.select_and_get_calibration(
                     input_model.meta,
                     selector=selector
                 )
-                return local_filepath, cal_record
+
+            self._calibrations_used[cal_role] = cal_record
+
+            logger.info(
+                f"Calibration role={cal_role}: Using file={cal_record['filename']} ID={cal_record['id']} for input={input_model}"
+            )
+            return local_filepath, cal_record
 
         # Else raise error
-        msg = f"Invalid calibration value for '{cal_type}': {type(cal_value)}"
+        msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
         logger.error(msg)
         raise ValueError(msg)
     

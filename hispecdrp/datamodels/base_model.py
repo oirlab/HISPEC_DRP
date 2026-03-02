@@ -835,49 +835,50 @@ class DataModel:
                 trace_data[fiber][kind] = getattr(self, attr, None)
         return trace_data
 
-    def load_calibration_from_type(
+    def load_calibration_from_role(
         self,
-        cal_type : str,
+        cal_role : str,
     ) -> DataModel:
         """
         Load a calibration from the DataModel's calibrations table.
 
         Parameters
         ----------
-        cal_type : str
-            The type of the calibration to load.
+        cal_role : str
+            The role of the calibration to load.
 
         Returns
         -------
         dict
             The calibration record.
         """
-        row = self.get_calibration_from_type(cal_type)
+        row = self.get_calibration_from_role(cal_role)
         cal_id = row['ID']
         with CalibrationStore(instrument_name=self.meta.instrument_name) as store:
             return store.get_calibration(calibration=cal_id)
 
-    def get_calibration_from_type(self, cal_type : str) -> dict:
+    def get_calibration_from_role(self, cal_role : str) -> dict:
         """
         Return the row from the DataModel's calibrations table.
 
         Parameters
         ----------
-        cal_type : str
-            The type of the calibration to load.
+        cal_role : str
+            The role of the calibration to load.
 
         Returns
         -------
         dict
             The row from the DataModel's calibrations table.
         """
-        # Match on cal_type
-        mask = self.calibrations['CAL_TYPE'] == cal_type
+        # Match on cal_role
+        mask = self.calibrations['CAL_ROLE'] == cal_role
         indices = np.where(mask)[0]
         if len(indices) == 0:
             return None
         if len(indices) > 1:
-            raise ValueError(f"Multiple calibrations found with type '{cal_type}' in {self.__class__.__name__}")
+            raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
+        # ! This can happen since we append calibration tables when say coadding data products.
         # TODO: Check if they are unique, raise warning if not?
         row_index = indices[0]
         return dict(self.calibrations[row_index])
