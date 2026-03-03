@@ -15,21 +15,17 @@ from __future__ import annotations
 import logging
 import os
 import re
-import urllib.request
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# SVO Filter Profile Service (https://svo2.cab.inta-csic.es/theory/fps3/)
-SVO_FILTER_URL = "https://svo2.cab.inta-csic.es/theory/fps3/getdata.php?format=ascii&id=2MASS/2MASS.{band}"
-
-try:
-    import h5py
-except ImportError:
-    h5py = None  # type: ignore[assignment]
-
 from .. import datamodels
+from ..utils.spectral_templates_utils import (
+    fetch_svo_2mass_filter,
+    get_spectrum_path,
+    load_btsettl_spectrum,
+)
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline, Stage1Pipeline
 from .create_ramp import create_ramp
@@ -118,6 +114,8 @@ __all__ = [
     "run_fiberflat_pipeline",
     "run_stage1_simulation",
     "create_wavelength_solution_model_from_sim",
+    "prepare_fiberflat_models",
+    "get_fiberflat_prim_args",
 ]
 
 
@@ -614,186 +612,6 @@ def run_stage0_simulation(
     return pipe.apply(ramp_model, prim_args=prim_args, output_dir=output_dir)
 
 
-def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Fetch 2MASS filter profile (wavelength in Angstrom, transmission) from the
-    SVO Filter Profile Service.
-
-    Parameters
-    ----------
-    band : str
-        One of 'J', 'H', 'K'.
-
-    Returns
-    -------
-    wavelength_angstrom : np.ndarray
-        Wavelength in Angstrom.
-    transmission : np.ndarray
-        Dimensionless transmission (0--1).
-    """
-    band = band.upper()
-    if band not in ("J", "H", "K"):
-        raise ValueError("band must be one of 'J', 'H', 'K'")
-    url = SVO_FILTER_URL.format(band=band)
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        data = np.loadtxt(resp, dtype=np.float64)
-    if data.ndim != 2 or data.shape[1] < 2:
-        raise ValueError(f"Unexpected SVO filter data shape for 2MASS.{band}")
-    wavelength_angstrom = data[:, 0]
-    transmission = data[:, 1]
-    return wavelength_angstrom, transmission
-
-
-def _ab_mag_through_filter(
-    wavelength_um: np.ndarray,
-    flux_erg_scm2_angstrom: np.ndarray,
-    filter_wl_angstrom: np.ndarray,
-    filter_transmission: np.ndarray,
-) -> float:
-    """
-    Compute AB magnitude of a spectrum through a filter.
-
-    Spectrum: wavelength in micron, flux in erg/s/cm^2/Angstrom (same units as
-    BT-Settl file). Filter: wavelength in Angstrom, dimensionless transmission.
-    Uses the bandpass-weighted mean f_nu and m_AB = -2.5*log10(f_nu) - 48.60
-    (f_nu in erg/s/cm^2/Hz).
-
-    Parameters
-    ----------
-    wavelength_um : np.ndarray
-        Spectrum wavelength in micron.
-    flux_erg_scm2_angstrom : np.ndarray
-        Spectrum flux in erg/s/cm^2/Angstrom (no units object).
-    filter_wl_angstrom : np.ndarray
-        Filter wavelength in Angstrom.
-    filter_transmission : np.ndarray
-        Filter transmission (dimensionless).
-
-    Returns
-    -------
-    float
-        AB magnitude in the band.
-    """
-    # Common grid: use spectrum wavelength in Angstrom
-    wl_A = np.asarray(wavelength_um, dtype=np.float64) * 1.0e4
-    flux = np.asarray(flux_erg_scm2_angstrom, dtype=np.float64)
-    # Interpolate filter transmission onto spectrum wavelength
-    trans = np.interp(wl_A, filter_wl_angstrom, filter_transmission)
-    # Restrict to where filter has support
-    valid = trans > 1.0e-6
-    if not np.any(valid):
-        raise ValueError("Spectrum and filter wavelength ranges do not overlap")
-    wl = wl_A[valid]
-    fl = flux[valid]
-    tr = trans[valid]
-    # f_nu(lambda) = F_lambda * lambda^2 / c  (c in A/s -> f_nu in erg/s/cm^2/Hz)
-    c_angstrom_per_s = 2.99792458e18
-    f_nu = fl * (wl**2) / c_angstrom_per_s
-    # Bandpass-weighted mean f_nu
-    num = np.trapz(f_nu * tr, wl)
-    den = np.trapz(tr, wl)
-    if den <= 0:
-        raise ValueError("Filter transmission integral is non-positive")
-    f_nu_band = num / den
-    # AB mag: m_AB = -2.5*log10(f_nu) - 48.60  (Oke & Gunn 1983, f_nu in erg/s/cm^2/Hz)
-    return float(-2.5 * np.log10(f_nu_band) - 48.60)
-
-
-def get_spectrum_path(path: str) -> str:
-    """
-    Resolve a spectrum file path relative to the simulations data directory.
-
-    If ``path`` is absolute, it is returned unchanged. Otherwise the path is
-    resolved relative to ``hispecdrp/simulations/data/`` (e.g. for bundled
-    BT-Settl .h5 files).
-
-    Parameters
-    ----------
-    path : str
-        Filename (e.g. lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5) or absolute path.
-
-    Returns
-    -------
-    str
-        Absolute path to the spectrum file.
-    """
-    if os.path.isabs(path):
-        return path
-    return os.path.join(SIMULATIONS_DATA_DIR, path)
-
-
-def load_btsettl_spectrum(
-    filepath: str,
-    wl_min_um: float = 0.8,
-    wl_max_um: float = 3.0,
-    mag_ab: float | None = None,
-    filter_band: str | None = None,
-):
-    """
-    Load wavelength and flux from a BT-Settl spectrum HDF5 file.
-
-    Adapted from create_rate_map.py. The file is expected to have 'wavelength'
-    (in Angstrom) and 'flux' (in 1e-23 erg/cm^2/s/Angstrom) datasets. Values
-    are converted to micron and astropy units, and clipped to the given
-    wavelength range.
-
-    If ``mag_ab`` and ``filter_band`` are set, the spectrum is normalized to
-    the given AB magnitude in the corresponding 2MASS filter (J, H, or K).
-    The 2MASS profile is fetched from the SVO Filter Profile Service.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to the .h5 file (e.g. lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5).
-    wl_min_um : float, optional
-        Minimum wavelength in microns. Default is 0.8.
-    wl_max_um : float, optional
-        Maximum wavelength in microns. Default is 3.0.
-    mag_ab : float or None, optional
-        If set with ``filter_band``, normalize the spectrum to this AB magnitude
-        in that band. Default is None.
-    filter_band : str or None, optional
-        One of 'J', 'H', 'K'. Used with ``mag_ab`` to normalize. Default is None.
-
-    Returns
-    -------
-    wavelength : astropy.units.Quantity
-        Wavelength array in micron.
-    flux : astropy.units.Quantity
-        Flux density in erg/s/cm^2/Angstrom (same as file).
-    """
-    if h5py is None:
-        raise ImportError("h5py is required to load BT-Settl spectrum; install with pip install h5py")
-    import astropy.units as u
-
-    logger.debug("Loading BT-Settl spectrum from %s (wl=%.2f--%.2f um)", filepath, wl_min_um, wl_max_um)
-    with h5py.File(filepath, "r") as f:
-        wavelength = f["wavelength"][:] * 1.0e-4 * u.micron
-        flux = f["flux"][:] * 1.0e-23 * (u.erg / u.cm**2 / u.s / u.Angstrom)
-
-    mask = (wavelength >= wl_min_um * u.micron) & (wavelength <= wl_max_um * u.micron)
-    wavelength = wavelength[mask]
-    flux = flux[mask]
-    logger.debug("Loaded %d wavelength points from %s", len(wavelength), filepath)
-
-    if mag_ab is not None and filter_band is not None:
-        filter_wl_A, filter_trans = fetch_svo_2mass_filter(filter_band)
-        wl_um = wavelength.to(u.micron).value
-        flux_val = flux.to(u.erg / u.cm**2 / u.s / u.Angstrom).value
-        m_current = _ab_mag_through_filter(wl_um, flux_val, filter_wl_A, filter_trans)
-        scale = 10.0 ** (-0.4 * (mag_ab - m_current))
-        flux = flux * scale
-        logger.info(
-            "Normalized spectrum to %s=%.2f (AB mag); scale=%.4e (was %.2f mag)",
-            filter_band,
-            mag_ab,
-            scale,
-            m_current,
-        )
-
-    return wavelength, flux
-
-
 def create_ramp_and_calibrations(
     rate_map: np.ndarray | None = None,
     shape: tuple[int, int] = (4096, 4096),
@@ -801,6 +619,7 @@ def create_ramp_and_calibrations(
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
     spectrum_flux=None,
+    radial_velocity_km_s: float = 0.0,
     output_dir: str = ".",
     calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
     use_master_calibrations: bool = False,
@@ -844,6 +663,11 @@ def create_ramp_and_calibrations(
     spectrum_flux : array-like with units or None, optional
         Flux array for the input spectrum. Must be provided with
         spectrum_wavelengths to use an input spectrum.
+    radial_velocity_km_s : float, optional
+        Radial velocity in km/s to apply to the input spectrum before generating
+        the rate map (Doppler shift). Must be in the range -500 to 500. Applied
+        via SimulateRateMap.apply_radial_velocity before create_native_rate_map.
+        Default is 0.0.
     output_dir : str, optional
         Directory for saving the rate map when building the default rate map
         (when ``rate_map`` is None). Default is ".".
@@ -914,6 +738,15 @@ def create_ramp_and_calibrations(
         for f in fibers:
             if f in (1, 2, 3):
                 srm.set_fiber_spectrum(fiber_number=f, spectrum_wavelengths=wl, spectrum_flux=flux, continuous=True)
+        if radial_velocity_km_s != 0.0:
+            if not (-500.0 <= radial_velocity_km_s <= 500.0):
+                raise ValueError(
+                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
+                )
+            rv_quantity = radial_velocity_km_s * u.km / u.s
+            for f in fibers:
+                if f in (1, 2, 3):
+                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
         rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
         logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
 
@@ -938,6 +771,7 @@ def simulate_up_the_ramp(
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
     spectrum_flux=None,
+    radial_velocity_km_s: float = 0.0,
     output_dir: str = ".",
     calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
     use_master_calibrations: bool = False,
@@ -985,6 +819,10 @@ def simulate_up_the_ramp(
         :func:`create_ramp_and_calibrations`.
     spectrum_flux : array-like with units or None, optional
         Input spectrum flux. Passed to :func:`create_ramp_and_calibrations`.
+    radial_velocity_km_s : float, optional
+        Radial velocity in km/s (-500 to 500) to apply to the spectrum when
+        building the rate map. Passed to :func:`create_ramp_and_calibrations`.
+        Default is 0.0.
     output_dir : str, optional
         Output directory for Stage 0. Default is ".".
     calibration_models : dict or None, optional
@@ -1050,6 +888,7 @@ def simulate_up_the_ramp(
         fibers=fibers,
         spectrum_wavelengths=spectrum_wavelengths,
         spectrum_flux=spectrum_flux,
+        radial_velocity_km_s=radial_velocity_km_s,
         output_dir=output_dir,
         calibration_models=calibration_models,
         use_master_calibrations=use_master_calibrations,
@@ -1098,6 +937,51 @@ def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepa
         setattr(model.meta, f"object_fiber{f}", obj_flat if f == fiber else "BLOCKED")
 
 
+def prepare_fiberflat_models(fiberflat_filepaths: list[str]) -> list[datamodels.DataModel]:
+    """
+    Open fiberflat rate FITS files and patch object_fiber meta so pipelines can group by fiber.
+
+    Parameters
+    ----------
+    fiberflat_filepaths : list of str
+        Paths to fiberflat rate FITS files (one per fiber).
+
+    Returns
+    -------
+    list of DataModel
+        Opened models with object_fiber# meta set.
+    """
+    ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
+    for model, fp in zip(ff_models, fiberflat_filepaths):
+        _patch_fiberflat_model_object_fiber_meta(model, fp)
+    return ff_models
+
+
+def get_fiberflat_prim_args(
+    ff_models: list[datamodels.DataModel],
+    *,
+    yrange: tuple[int, int] = (500, 4000),
+    xrange: tuple[int, int] = (100, 4050),
+    deg_pos: int = 4,
+    deg_width: int = 2,
+    extraction_aperture: int = 10,
+) -> dict:
+    """Build default primitive arguments for ProcessFiberflatsPipeline from opened fiberflat models."""
+    do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
+    ff_by_fiber = datamodels.group_by_illuminated_fiber(ff_models)
+    do_fibers = sorted(ff_by_fiber.keys(), key=int)
+    return {
+        "trace_pos": {"deg_pos": deg_pos, "deg_width": deg_width, "yrange": yrange, "xrange": xrange},
+        "spec_extract": {
+            "extraction_aperture": extraction_aperture,
+            "do_orders": do_orders,
+            "do_fibers": do_fibers,
+        },
+        "set_wavesol": {"run": False},
+        "register_fiberflat_cal": {"run": False},
+    }
+
+
 def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
     prim_args: dict | None = None,
@@ -1135,24 +1019,16 @@ def run_fiberflat_pipeline(
         Pipeline results with keys such as ``trace_pos``, ``trace_prof``.
     """
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
-    ff_models = [datamodels.open(fp) for fp in fiberflat_filepaths]
-    for model, fp in zip(ff_models, fiberflat_filepaths):
-        _patch_fiberflat_model_object_fiber_meta(model, fp)
+    ff_models = prepare_fiberflat_models(fiberflat_filepaths)
     if prim_args is None:
-        do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
-        # Restrict extraction to fibers present in the fiberflat inputs (trace pos/prof only exist for these)
-        ff_by_fiber = datamodels.group_by_illuminated_fiber(ff_models)
-        do_fibers = sorted(ff_by_fiber.keys(), key=int)
-        prim_args = {
-            "trace_pos": {"deg_pos": deg_pos, "deg_width": deg_width, "yrange": yrange, "xrange": xrange},
-            "spec_extract": {
-                "extraction_aperture": extraction_aperture,
-                "do_orders": do_orders,
-                "do_fibers": do_fibers,
-            },
-            "set_wavesol": {"run": False},
-            "register_fiberflat_cal": {"run": False},
-        }
+        prim_args = get_fiberflat_prim_args(
+            ff_models,
+            yrange=yrange,
+            xrange=xrange,
+            deg_pos=deg_pos,
+            deg_width=deg_width,
+            extraction_aperture=extraction_aperture,
+        )
     pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
     return pipe.apply(ff_models)
 

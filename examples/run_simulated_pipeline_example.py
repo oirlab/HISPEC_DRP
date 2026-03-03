@@ -35,5 +35,6 @@ if __name__ == "__main__":
             "--fibers", "1",
             "--J", "11",
             "--use-master-calibrations",
+            "--radial-velocity", "50",  # km/s; input spectrum shifted before rate map (range -500 to 500)
         ])
     main()

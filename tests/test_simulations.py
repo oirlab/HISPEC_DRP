@@ -10,6 +10,7 @@ import astropy.units as u
 import pytest
 
 from hispecdrp import simulations
+from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
 
 
 # ----- simulate_rate_map -----
@@ -157,12 +158,12 @@ def test_create_simulated_calibration_models():
 def test_get_spectrum_path():
     """get_spectrum_path resolves relative path under simulations data dir."""
     rel = "lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5"
-    out = simulations.get_spectrum_path(rel)
+    out = get_spectrum_path(rel)
     assert "simulations" in out
     assert "data" in out
     assert out.endswith(rel)
     abs_path = "/absolute/path/to/file.h5"
-    assert simulations.get_spectrum_path(abs_path) == abs_path
+    assert get_spectrum_path(abs_path) == abs_path
 
 
 def test_get_default_stage0_prim_args():
@@ -231,13 +232,13 @@ def test_create_ramp_and_calibrations(tmp_path):
 
 
 @pytest.mark.skipif(
-    not os.path.isfile(simulations.get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
+    not os.path.isfile(get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
     reason="BT-Settl spectrum file not present",
 )
 def test_load_btsettl_spectrum():
     """load_btsettl_spectrum loads wavelength and flux from bundled .h5 if present."""
-    path = simulations.get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
-    wl, flux = simulations.load_btsettl_spectrum(path, wl_min_um=1.0, wl_max_um=2.0)
+    path = get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
+    wl, flux = load_btsettl_spectrum(path, wl_min_um=1.0, wl_max_um=2.0)
     assert wl is not None
     assert flux is not None
     assert len(wl) == len(flux)

@@ -1,7 +1,21 @@
 
 from .base_model import DataModel
 
-from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_rv_extensions, create_drift_extensions, create_etalonfitparam_extensions
+from .extensions import (
+    create_dataspec_extensions,
+    create_specdq_extensions,
+    create_wave_extensions,
+    create_midtime_extensions,
+    create_barycorr_extensions,
+    create_starmodel_extensions,
+    create_throughput_extensions,
+    create_rv_ccf_spectrograph_extensions,
+    create_sky_extensions,
+    create_telluric_extensions,
+    create_trans_extensions,
+    create_drift_extensions,
+    create_etalonfitparam_extensions,
+)
 
 __all__ = ['L2Model']
 
@@ -18,7 +32,8 @@ def _create_l2_extensions(num_fibers : int):
         ext.update(create_barycorr_extensions(fiber=fiber))
         ext.update(create_starmodel_extensions(fiber=fiber))
         ext.update(create_throughput_extensions(fiber=fiber))
-        ext.update(create_rv_extensions(fiber=fiber))
+        for spec_name in ("BSPEC", "RSPEC"):
+            ext.update(create_rv_ccf_spectrograph_extensions(str(fiber), spec_name))
         ext.update(create_sky_extensions(fiber=fiber))
         ext.update(create_telluric_extensions(fiber=fiber))
         ext.update(create_trans_extensions(fiber=fiber))
@@ -61,8 +76,8 @@ class L2Model(DataModel):
         "DRIFT_ERR_PIX_FIB#", "Image", "Float64", "Nord x 4096", "e-/s", "Drift error in pixels for each pixel."
         "DRIFT_WAVE_FIB3#", "Image", "Float64", "Nord x 4096", "e-/s", "Drift measured by etalon in microns for each pixel."
         "DRIFT_ERR_WAVE_FIB#", "Image", "Float64", "Nord x 4096", "e-/s", "Drift error in microns for each pixel."
-        "RVCCF_FIB#", "Table", "See below", "See below", "See below", "RVs for each chunk."
-        "RVCCFAGG_FIB#", "Table", "See below", "See below", "See below", "RVs aggregated across chunks."
+        "RVCCF_[BSPEC/RSPEC]_FIB#", "Table", "See below", "See below", "m/s", "Per-chunk CCF RVs (by spectrograph); RV, RV_ERR in m/s."
+        "RVCCFAVG_[BSPEC/RSPEC]_FIB#", "Table", "See below", "See below", "m/s", "Averaged CCF RV (by spectrograph); RV, RV_ERR in m/s."
     """
 
     # def __init__(self, *args, **kwargs):

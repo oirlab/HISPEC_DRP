@@ -4,8 +4,9 @@ Simulate up-the-ramp data and run Stage 0 and Stage 1 pipelines.
 
 Uses hispecdrp.simulations to create a rate map (with spectra only on requested
 fibers), ramp, and Stage 0 result, then (if fiberflat files are available) runs
-the fiberflat and Stage 1 pipelines and prints per-order SNR for each requested
-fiber. Use --fibers to restrict to fibers 1, 2, 3, and/or 4. Use --spectrum with
+the fiberflat, Stage 1, and Stage 2 pipelines. Stage 2 runs blaze correction
+using the same fiber flat and cross correlation using the same spectral template
+as the rate map; it is only run when a valid --spectrum template file exists. Use --fibers to restrict to fibers 1, 2, 3, and/or 4. Use --spectrum with
 a BT-Settl .h5 file path to use that spectrum for the rate map instead of a flat spectrum.
 
 Calibration cache uses the default (see run_caldb) if KOA_CALIBRATION_CACHE is not set.
@@ -30,6 +31,7 @@ os.environ.setdefault("OMP_DISPLAY_ENV", "FALSE")
 os.environ.setdefault("KMP_WARNINGS", "0")
 
 import numpy as np
+from scipy.interpolate import interp1d
 
 import sys
 
@@ -38,7 +40,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hispecdrp import datamodels, simulations
+from hispecdrp.pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline, ProcessFiberflatsPipeline
 from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
+from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
 
 # Use package logger name so records propagate to "hispecdrp" (which has the handler).
 # When run as __main__, __name__ is "__main__", so they would go to root and be dropped (root is WARNING, no handler).
@@ -122,6 +126,257 @@ def _plot_spectrum_fiber(
     finally:
         plt.close(fig)
     return outpath
+
+
+def _plot_rvccf_chunks(
+    l2_model,
+    input_radial_velocity_km_s: float,
+    output_dir: str,
+) -> str | None:
+    """
+    Plot per-chunk radial velocity vs wavelength from L2 RVCCF_* tables and overplot input RV.
+
+    Reads RVCCF_[BSPEC/RSPEC]_FIB# tables (WAVELENGTH, RV, RV_ERR in m/s), plots wavelength
+    (micron) vs RV with error bars for each fiber, and adds a dashed horizontal line at the
+    input radial velocity (converted from km/s to m/s). Saves the figure in output_dir.
+
+    Parameters
+    ----------
+    l2_model : DataModel
+        Level 2 model with RVCCF_{spectrograph}_FIB# table extensions.
+    input_radial_velocity_km_s : float
+        Input radial velocity used in the simulated pipeline (km/s).
+    output_dir : str
+        Directory to save the PNG file.
+
+    Returns
+    -------
+    str or None
+        Path to the saved figure, or None if no RVCCF data or plot failed.
+    """
+    try:
+        spectrograph = getattr(
+            getattr(l2_model, "meta", None),
+            "spectrograph",
+            None,
+        )
+    except Exception:
+        spectrograph = None
+    if spectrograph not in ("BSPEC", "RSPEC"):
+        spectrograph = "BSPEC"
+    ext_prefix = f"rvccf_{spectrograph}_fib"
+    fibers_with_data = []
+    data_per_fiber = {}
+    for f in (1, 2, 3, 4):
+        attr = f"{ext_prefix}{f}"
+        tbl = getattr(l2_model, attr, None)
+        if tbl is None and hasattr(l2_model, attr):
+            tbl = getattr(l2_model, attr)
+        if tbl is not None and hasattr(tbl, "columns") and len(tbl) > 0:
+            if "WAVELENGTH" not in tbl.colnames or "RV" not in tbl.colnames:
+                continue
+            wl = np.asarray(tbl["WAVELENGTH"])
+            rv = np.asarray(tbl["RV"])
+            rv_err = np.asarray(tbl["RV_ERR"]) if "RV_ERR" in tbl.colnames else None
+            fibers_with_data.append(f)
+            data_per_fiber[f] = (wl, rv, rv_err)
+    if not fibers_with_data:
+        return None
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    input_rv_m_s = input_radial_velocity_km_s * 1000.0
+    no_signal_plotted = False
+    for fib in fibers_with_data:
+        wl, rv, rv_err = data_per_fiber[fib]
+        valid = np.isfinite(rv)
+        invalid = ~valid
+        if np.any(valid):
+            wl_v, rv_v = wl[valid], rv[valid]
+            err_v = rv_err[valid] if rv_err is not None and len(rv_err) == len(rv) else None
+            if err_v is not None and np.any(np.isfinite(err_v)):
+                ax.errorbar(wl_v, rv_v, yerr=err_v, fmt="o", capsize=2, label=f"Fiber {fib}", alpha=0.8)
+            else:
+                ax.plot(wl_v, rv_v, "o", label=f"Fiber {fib}", alpha=0.8)
+        if np.any(invalid):
+            ax.plot(wl[invalid], np.zeros(np.sum(invalid)), "x", color="gray", markersize=6, markeredgewidth=1.5, label="No RV signal" if not no_signal_plotted else None, alpha=0.7)
+            no_signal_plotted = True
+    ax.axhline(input_rv_m_s, color="k", linestyle="--", linewidth=1.5, label=f"Input RV ({input_radial_velocity_km_s} km/s)")
+    ax.set_xlabel("Wavelength (µm)")
+    ax.set_ylabel("Radial velocity (m/s)")
+    ax.set_title(f"Per-chunk CCF RV vs wavelength ({spectrograph})")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    outpath = os.path.join(output_dir, "rvccf_chunks_vs_wavelength.png")
+    try:
+        fig.savefig(outpath, dpi=100, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+    return outpath
+
+
+# Speed of light in m/s for template RV shift
+_C_M_S = 299792458.0
+
+
+def _plot_rvccf_spectra(
+    l2_model,
+    template_path: str,
+    output_dir: str,
+    window_size_um: float = 0.3,
+    max_panels: int = 48,
+) -> str | None:
+    """
+    Plot blaze-corrected spectrum vs wavelength for each CCF chunk with template shifted by chunk RV.
+
+    For each chunk in the RVCCF table, extracts the blaze spectrum in that wavelength range,
+    shifts the spectral template by the chunk's measured RV, and plots both in a panel.
+    Output is one figure with a grid of panels (one per chunk), wavelength on x-axis.
+
+    Parameters
+    ----------
+    l2_model : DataModel
+        Level 2 model with SPEC_FIB, WAVE_FIB and RVCCF_* table extensions.
+    template_path : str
+        Path to BT-Settl (or similar) template .h5 file.
+    output_dir : str
+        Directory to save the PNG file.
+    window_size_um : float
+        Half-width in micron for chunk wavelength range (default 0.3).
+    max_panels : int
+        Maximum number of panels per figure (default 48). Extra chunks are skipped.
+
+    Returns
+    -------
+    str or None
+        Path to the saved figure, or None if no data or plot failed.
+    """
+    try:
+        spectrograph = getattr(
+            getattr(l2_model, "meta", None),
+            "spectrograph",
+            None,
+        )
+    except Exception:
+        spectrograph = None
+    if spectrograph not in ("BSPEC", "RSPEC"):
+        spectrograph = "BSPEC"
+
+    try:
+        w_t, f_t = load_btsettl_spectrum(template_path, wl_min_um=0.8, wl_max_um=3.0)
+        template_wl = np.asarray(w_t.to_value("micron"), dtype=np.float64)
+        template_flux = np.asarray(f_t.value, dtype=np.float64)
+        ok_t = np.isfinite(template_wl) & np.isfinite(template_flux) & (template_wl > 0)
+        template_wl = template_wl[ok_t]
+        template_flux = template_flux[ok_t]
+        if len(template_wl) < 10:
+            return None
+    except Exception:
+        return None
+
+    half = window_size_um / 2.0
+    ext_prefix = f"rvccf_{spectrograph}_fib"
+    chunks_to_plot = []
+
+    for fib in (1, 2, 3, 4):
+        tbl = getattr(l2_model, f"{ext_prefix}{fib}", None)
+        if tbl is None or not hasattr(tbl, "columns") or len(tbl) == 0:
+            continue
+        if "WAVELENGTH" not in tbl.colnames or "RV" not in tbl.colnames:
+            continue
+        spec_attr = f"spec_fib{fib}"
+        wave_attr = f"wave_fib{fib}"
+        if not hasattr(l2_model, spec_attr) or getattr(l2_model, spec_attr) is None:
+            continue
+        if not hasattr(l2_model, wave_attr) or getattr(l2_model, wave_attr) is None:
+            continue
+        wave_all = np.asarray(getattr(l2_model, wave_attr), dtype=np.float64)
+        spec_all = np.asarray(getattr(l2_model, spec_attr), dtype=np.float64)
+        n_orders = wave_all.shape[0]
+        wl_centers = np.asarray(tbl["WAVELENGTH"])
+        rvs = np.asarray(tbl["RV"])
+        for idx in range(len(tbl)):
+            wl_c = wl_centers[idx]
+            rv = rvs[idx]
+            if not np.isfinite(wl_c):
+                continue
+            wl_lo, wl_hi = wl_c - half, wl_c + half
+            for oi in range(n_orders):
+                w = wave_all[oi]
+                if not np.any(np.isfinite(w)):
+                    continue
+                in_chunk = (w >= wl_lo) & (w <= wl_hi) & np.isfinite(w)
+                if np.sum(in_chunk) < 5:
+                    continue
+                wave_chunk = np.asarray(w[in_chunk], dtype=np.float64)
+                spec_chunk = np.asarray(spec_all[oi][in_chunk], dtype=np.float64)
+                rv_m_s = float(rv) if np.isfinite(rv) else 0.0
+                chunks_to_plot.append((fib, idx, wl_c, rv_m_s, wave_chunk, spec_chunk))
+                break
+
+    if not chunks_to_plot:
+        return None
+
+    n_show = min(len(chunks_to_plot), max_panels)
+    n_cols = 4
+    n_rows = (n_show + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 2.5 * n_rows), squeeze=False)
+    axes_flat = axes.ravel()
+
+    for k in range(n_show):
+        fib, idx, wl_c, rv_m_s, wave_chunk, spec_chunk = chunks_to_plot[k]
+        ax = axes_flat[k]
+        ax.plot(wave_chunk, spec_chunk, "b-", lw=0.8, alpha=0.9, label="Blaze-corrected")
+        wl_rest = wave_chunk / (1.0 + rv_m_s / _C_M_S)
+        t_interp = interp1d(
+            template_wl,
+            template_flux,
+            kind="linear",
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+        t_flux = t_interp(wl_rest)
+        valid = np.isfinite(t_flux)
+        if np.any(valid):
+            scale = np.nanmedian(spec_chunk[valid]) / np.nanmedian(t_flux[valid]) if np.any(np.isfinite(spec_chunk) & valid) else 1.0
+            if not np.isfinite(scale) or scale <= 0:
+                scale = 1.0
+            ax.plot(wave_chunk, t_flux * scale, "r-", lw=0.8, alpha=0.8, label="Template (shifted)")
+        ax.set_xlabel("Wavelength (µm)")
+        ax.set_ylabel("Flux")
+        ax.set_title(f"F{fib} chunk {idx + 1} λ={wl_c:.3f} µm RV={rv_m_s:.0f} m/s")
+        ax.legend(loc="upper right", fontsize=6)
+        ax.grid(True, alpha=0.3)
+
+    for k in range(n_show, len(axes_flat)):
+        axes_flat[k].set_visible(False)
+
+    fig.suptitle(f"Per-chunk spectra and shifted template ({spectrograph})", y=1.002)
+    plt.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    outpath = os.path.join(output_dir, "rvccf_spectra_per_chunk.png")
+    try:
+        fig.savefig(outpath, dpi=100, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+    return outpath
+
+
+def _attach_stage0_calibrations(pipe: Stage0Pipeline, calibration_models: dict) -> None:
+    """Attach calibration models to Stage0Pipeline primitives (for simulated or master cals)."""
+    pipe.dq_init.dq = calibration_models["dq"]
+    pipe.saturation_check.saturation = calibration_models["saturation"]
+    pipe.bias_sub.bias = calibration_models["bias"]
+    pipe.ramp_fit.gain = calibration_models["gain"]
+    pipe.ramp_fit.rn = calibration_models["rn"]
+    pipe.dark_sub.dark = calibration_models["dark"]
+    pipe.gain_corr.gain = calibration_models["gain"]
+    pipe.detflat_corr.detflat = calibration_models["detflat"]
+
+
+def _attach_stage2_calibrations(pipe: Stage2Pipeline, ff_results: dict) -> None:
+    """Attach fiber flat from the simulated fiber flat pipeline to Stage2Pipeline blaze step."""
+    pipe.blaze_corr.fiberflat = ff_results["fiberflat"]
 
 
 def _get_trace_positions(trace_pos_model, fiber: int):
@@ -295,6 +550,15 @@ def parse_args():
         help="BT-Settl spectrum .h5 filename in simulations/data/ or absolute path. Default: lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5",
     )
     parser.add_argument(
+        "--radial-velocity",
+        "--rv",
+        type=float,
+        default=0.0,
+        metavar="KM_S",
+        dest="radial_velocity",
+        help="Radial velocity in km/s to apply to the input spectrum when building the rate map (range -500 to 500). Default: 0.0",
+    )
+    parser.add_argument(
         "--J",
         type=float,
         default=None,
@@ -371,7 +635,13 @@ def main():
     fibers = _parse_fibers(args.fibers)
     fibers_str = [str(f) for f in fibers]
     spectrograph = args.spectrograph
+    if not (-500.0 <= args.radial_velocity <= 500.0):
+        raise ValueError(
+            f"--radial-velocity must be in the range -500 to 500 km/s, got {args.radial_velocity}"
+        )
     logger.info("Output directory: %s; fibers: %s; spectrograph: %s", datadir, fibers, spectrograph)
+    if args.radial_velocity != 0.0:
+        logger.info("Radial velocity for rate map spectrum: %s km/s", args.radial_velocity)
 
     spectrum_wavelengths = None
     spectrum_flux = None
@@ -382,9 +652,9 @@ def main():
             mag_ab = mag
             filter_band = band
             break
-    spectrum_path = simulations.get_spectrum_path(args.spectrum)
+    spectrum_path = get_spectrum_path(args.spectrum)
     try:
-        spectrum_wavelengths, spectrum_flux = simulations.load_btsettl_spectrum(
+        spectrum_wavelengths, spectrum_flux = load_btsettl_spectrum(
             spectrum_path, mag_ab=mag_ab, filter_band=filter_band
         )
         logger.info("Using spectrum: %s", spectrum_path)
@@ -423,6 +693,7 @@ def main():
                 fibers=fibers,
                 spectrum_wavelengths=spectrum_wavelengths,
                 spectrum_flux=spectrum_flux,
+                radial_velocity_km_s=args.radial_velocity,
                 output_dir=datadir,
                 calibration_models=None,
                 use_master_calibrations=True,
@@ -445,6 +716,7 @@ def main():
                 fibers=fibers,
                 spectrum_wavelengths=spectrum_wavelengths,
                 spectrum_flux=spectrum_flux,
+                radial_velocity_km_s=args.radial_velocity,
                 output_dir=datadir,
                 calibration_models=None,
                 readtime=1.7,
@@ -486,26 +758,26 @@ def main():
     mem = None
     try:
         with _memory_sampler(interval_s=0.3) as mem:
-            model_result = simulations.run_stage0_simulation(
-                ramp_model,
-                calibration_models,
-                output_dir=datadir,
-                prim_args=stage0_prim_args,
-            )
+            stage0_pipe = Stage0Pipeline(prim_args=stage0_prim_args)
+            _attach_stage0_calibrations(stage0_pipe, calibration_models)
+            model_result = stage0_pipe.apply(ramp_model, output_dir=datadir)
             stage0_end_time = time.time()
             logger.info("Stage 0 complete. Elapsed: %.2fs", stage0_end_time - start_time)
             rate_filename = getattr(model_result, "meta", None) and getattr(model_result.meta, "filename", None) or "in memory"
             logger.info("Rate/slope product: %s", rate_filename)
 
             if fiberflat_filepaths and all(p for p in fiberflat_filepaths):
-                ff_results = simulations.run_fiberflat_pipeline(
-                    fiberflat_filepaths,
+                ff_models = simulations.prepare_fiberflat_models(fiberflat_filepaths)
+                ff_prim_args = simulations.get_fiberflat_prim_args(
+                    ff_models,
                     yrange=(500, 4000),
                     xrange=(100, 4050),
                     deg_pos=4,
                     deg_width=2,
                     extraction_aperture=10,
                 )
+                ff_pipe = ProcessFiberflatsPipeline(prim_args=ff_prim_args)
+                ff_results = ff_pipe.apply(ff_models)
                 trace_pos_model = ff_results["trace_pos"]
                 trace_prof_model = ff_results["trace_prof"]
                 do_orders = model_result.make_order_vec() if hasattr(model_result, "make_order_vec") else []
@@ -530,26 +802,20 @@ def main():
                 set_wavesol_args = {"run": True if wavesol_model is not None else False, "do_orders": do_orders}
                 if wavesol_model is not None:
                     set_wavesol_args["wavesol"] = wavesol_model
-                for method in ("box", "optimal"):
-                    spec_model = simulations.run_stage1_simulation(
-                        model_result,
-                        trace_pos_model,
-                        trace_prof_model,
-                        extraction_aperture=10,
-                        do_orders=do_orders,
-                        do_fibers=fibers_str,
-                        prim_args={
-                            "spec_extract": {
-                                "method": method,
-                                "extraction_aperture": 10,
-                                "do_orders": do_orders,
-                                "do_fibers": fibers_str,
-                                "tracepos": trace_pos_model,
-                                "traceprof": trace_prof_model,
-                            },
-                            "set_wavesol": set_wavesol_args,
+                for method in ("box",):  # box extraction only; optimal skipped
+                    stage1_prim_args = {
+                        "spec_extract": {
+                            "method": method,
+                            "extraction_aperture": 10,
+                            "do_orders": do_orders,
+                            "do_fibers": fibers_str,
+                            "tracepos": trace_pos_model,
+                            "traceprof": trace_prof_model,
                         },
-                    )
+                        "set_wavesol": set_wavesol_args,
+                    }
+                    stage1_pipe = Stage1Pipeline(prim_args=stage1_prim_args)
+                    spec_model = stage1_pipe.apply(model_result)
                     # Ensure script logger has a handler (pipeline logging_context can leave it broken)
                     _ensure_script_logging()
                     config.apply([ROOT_LOGGER])
@@ -557,6 +823,11 @@ def main():
                     if spec_model is None:
                         logger.warning("Stage 1 returned None; cannot report SNR for %s.", method)
                         continue
+                    try:
+                        spec_path = spec_model.save(output_dir=datadir)
+                        logger.info("Saved L1 spec model to %s", spec_path)
+                    except Exception as save_err:
+                        logger.warning("Failed to save L1 spec model to %s: %s", datadir, save_err)
                     try:
                         for fib in fibers:
                             spec = getattr(spec_model, f"SPEC_UNCAL_FIB{fib}", None)
@@ -582,6 +853,37 @@ def main():
                                     logger.warning("Failed to write spectrum figure for fiber %s %s: %s", fib, method, plot_err)
                     except Exception as snr_err:
                         logger.exception("SNR reporting failed for %s: %s", method, snr_err)
+
+                # Stage 2: blaze correction (same fiber flat) + cross correlation (same spectral template as rate map)
+                if spec_model is not None and spectrum_path is not None and os.path.isfile(spectrum_path):
+                    try:
+                        stage2_prim_args = {
+                            "blaze_corr": {"do_fibers": fibers_str},
+                            "cross_corr": {
+                                "template_path": spectrum_path,
+                                "do_fibers": fibers_str,
+                                "continuum_normalize_spec": True,
+                                "continuum_normalize_template": True,
+                                "continuum_lowpass_window": 51,
+                                "continuum_poly_order": 3,
+                            },
+                        }
+                        stage2_pipe = Stage2Pipeline(prim_args=stage2_prim_args)
+                        _attach_stage2_calibrations(stage2_pipe, ff_results)
+                        l2_model = stage2_pipe.apply(spec_model, output_dir=datadir)
+                        _ensure_script_logging()
+                        config.apply([ROOT_LOGGER])
+                        logger.info("Stage 2 complete (blaze + cross correlation); L2 output: %s", getattr(l2_model, "meta", None) and getattr(l2_model.meta, "filename", None) or "in memory")
+                        rvccf_plot_path = _plot_rvccf_chunks(l2_model, args.radial_velocity, datadir)
+                        if rvccf_plot_path:
+                            logger.info("Wrote RVCCF diagnostic: %s", rvccf_plot_path)
+                        rvccf_spectra_path = _plot_rvccf_spectra(l2_model, spectrum_path, datadir)
+                        if rvccf_spectra_path:
+                            logger.info("Wrote RVCCF spectra diagnostic: %s", rvccf_spectra_path)
+                    except Exception as stage2_err:
+                        logger.warning("Stage 2 failed: %s", stage2_err, exc_info=True)
+                elif spec_model is not None and (spectrum_path is None or not os.path.isfile(spectrum_path)):
+                    logger.info("Skipping Stage 2: no spectral template file for cross correlation (use --spectrum with a valid path to enable Stage 2).")
     except Exception as e:
         logger.exception("Pipeline step failed: %s", e)
         raise
