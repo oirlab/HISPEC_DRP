@@ -135,7 +135,7 @@ class TestPackageCapture:
         hispec_logger = logging.getLogger(f"{ROOT_LOGGER}.test")
         
         config = LogConfig(level="INFO", enable_stdout=False, enable_file=True, log_dir=str(tmp_path))
-        config.apply([hispec_logger.name])
+        config.apply([hispec_logger.name, "koa_middleware"])
         
         hispec_logger.info("hispec message")
         koa_logger.info("koa message")
@@ -168,7 +168,7 @@ class TestPackageCapture:
         hispec_logger = logging.getLogger(f"{ROOT_LOGGER}.test")
         
         config = LogConfig(level="INFO", enable_stdout=False, enable_file=True, log_dir=str(tmp_path))
-        config.apply([hispec_logger.name])
+        config.apply([hispec_logger.name, "koa_middleware"])
         
         # Test different log levels for hispecdrp
         hispec_logger.debug("hispec debug")

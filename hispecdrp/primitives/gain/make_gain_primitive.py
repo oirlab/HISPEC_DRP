@@ -18,6 +18,7 @@ import ctypes
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 from tqdm import tqdm
+import numbers
 
 
 __all__ = ['MakeGainPrimitive', 'fit_gain_and_readnoise','plot_2d_posterior']
@@ -103,7 +104,7 @@ class MakeGainPrimitive(BasePrimitive):
 
     Returns
     -------
-    output : DataModel
+    output : GainModel
         Data model containing the fitted gain (and, if applicable, read
         noise) parameters and associated fit diagnostics.
 
@@ -172,7 +173,7 @@ class MakeGainPrimitive(BasePrimitive):
             gain_init_model = datamodels.open(gain_init)
             _init_center_gain = gain_init_model.gain
             logger.info(f"Using {gain_init} as initial detector gain values with median value {np.nanmedian(_init_center_gain)}.")
-        elif isinstance(self.init_gain, float):
+        elif isinstance(self.init_gain, numbers.Number):
             _init_center_gain = self.init_gain
             logger.info(f"Using user-defined initial detector gain values: {self.init_gain}.")
         if self.init_RN is None:
@@ -180,7 +181,7 @@ class MakeGainPrimitive(BasePrimitive):
             rn_model_init = datamodels.open(rn_cal_init)
             _init_center_RN = rn_model_init.RN
             logger.info(f"Using {rn_cal_init} as initial read noise values with median value {np.nanmedian(_init_center_RN)} DN.")
-        elif isinstance(self.init_RN, float):
+        elif isinstance(self.init_RN, numbers.Number):
             _init_center_RN = self.init_RN
             logger.info(f"Using user-defined initial read noise values: {self.init_RN}.")
 

@@ -18,6 +18,7 @@ from .lsf import *
 from .register_calibration import *
 from .jump_detection import *
 from .spectral_extraction import *
+from .blaze_correction import *
 from .refpix import *
 
 # Registry of primitives

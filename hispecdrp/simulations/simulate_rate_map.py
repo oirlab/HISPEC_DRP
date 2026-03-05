@@ -79,7 +79,7 @@ class SimulateRateMap:
         self.hdf_file_directory : str = os.getenv(
             'HISPEC_TEST_DATA_DIR',
             str(astropy.utils.data._get_download_cache_loc()) + os.sep
-        )
+        ) + 'HISPECDRP_TEST_DATA' + os.sep
         self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
         self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
         self.output_directory: str = os.getcwd()
@@ -214,6 +214,55 @@ class SimulateRateMap:
             self.fibers[fiber_number]["wavelength"],
             self.fibers[fiber_number]["flux"],
         )
+    
+
+    def get_wavelength_solution(self,
+                                spectrograph: str = "BSPEC",
+                                ) -> dict[int, dict[str, np.ndarray]]:
+        """Get wavelength solution from HDF model file as a nested dictionary of the form:
+        {order_number: {'wavelengths': np.ndarray, 'x': np.ndarray, 'y': np.ndarray}}
+        where the wavelength, x, and y arrays are all 1D and correspond to each other.
+        """
+        spectrograph = spectrograph.upper()
+
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
+        
+        model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        model_path = self.hdf_file_directory + model
+
+        if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
+            print('Model file not found locally. Attemping to download to ', model_path)
+            download_gdrive_file(model, use_cached=True)
+
+        if os.path.isfile(model_path) is False:
+            raise FileNotFoundError(f".hdf model file not found at {model_path}!")
+
+        model_data = read_pyechelle_hdf(model_path)
+
+        order_list = (
+            self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
+        )
+        order_list_str = [str(o) for o in order_list]
+
+        self.wavelength_solution = {}
+        for fiber in [*range(1,4)]:
+            self.wavelength_solution[fiber] = {}
+            fiber_key = f"fiber_{fiber}"
+            for od in order_list_str:
+                self.wavelength_solution[fiber][int(od)] = {}
+                ow = model_data[fiber_key][od]['xy_wavelengths']
+                ox = model_data[fiber_key][od]["x"]
+
+                # Interpolate detector trace positions
+                fx = PchipInterpolator(ox, ow, extrapolate=True)
+
+                self.wavelength_solution[fiber][int(od)] = {
+                    "pixel": np.arange(4096),
+                    "wavelength": fx(np.arange(4096))[::-1] # reversed to account for mirrored hdf file
+                }
+
+        return self.wavelength_solution
 
 
     def create_pyechelle_rate_map(
@@ -294,6 +343,11 @@ class SimulateRateMap:
         self.rate_map = (
             fits.getdata(output_path) / exposure_time.to(u.s).value
         )
+
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
 
         if save:
             save_path = os.path.join(
@@ -414,6 +468,11 @@ class SimulateRateMap:
 
         self.rate_map = np.sum(rate_map_array, axis=0)
 
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
+
         if save and self.rate_map is not None:
             if os.path.isdir(self.output_directory) is False:
                 os.mkdir(self.output_directory)
@@ -453,7 +512,36 @@ class SimulateRateMap:
 
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
+
     
+    def flip_rate_map_horizontal(self):
+        """Flip the rate map horizontally to correct for backwards hdf file"""
+        if self.rate_map is not None:
+            self.rate_map = np.flip(self.rate_map, axis=1)
+        return self.rate_map
+
+    def rotate_rate_map_vertical(self):
+        """Rotate the rate map so orders are vertical"""
+        if self.rate_map is not None:
+            self.rate_map = np.rot90(self.rate_map, 3)
+        return self.rate_map
+    
+    def add_channel_rate_map(self, where='right'):
+        """Add extra channel to rate map at left or right."""
+        if self.rate_map is None:
+            raise ValueError("Rate map must be generated before adding channel!")
+        
+        new_channel = np.zeros((4096, 64))
+
+        if where == 'left':
+            self.rate_map = np.hstack((new_channel, self.rate_map))
+        elif where == 'right':
+            self.rate_map = np.hstack((self.rate_map, new_channel))
+        else:
+            raise ValueError("where must be 'left' or 'right'!")
+        
+        return self.rate_map
+
 
 def bilinear_weights_rate_map(
     wave: Quantity,

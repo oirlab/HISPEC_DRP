@@ -42,10 +42,12 @@ def test_stage0(tmp_path):
     thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
     max = np.full(shape=(ny, nx), fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
     nonlin_dq = np.zeros(shape=(ny,nx), dtype=np.uint32)
-    nonlin_model = datamodels.NonlinearCorrectionModel(data=dict(coeffs=coeffs,
-                                                                 nonlin_thresh=thresh,
-                                                                 nonlin_max=max,
-                                                                 dq=nonlin_dq))
+    nonlin_model = datamodels.NonlinearCorrectionModel(
+        coeffs=coeffs,
+        nonlin_thresh=thresh,
+        nonlin_max=max,
+        dq=nonlin_dq
+    )
 
     step_time = time.time();
     print(f"Step: defining nonlin coefficients, elapsed: {step_time - start_time:.2f}s")
@@ -55,7 +57,7 @@ def test_stage0(tmp_path):
     dqinit_map = np.zeros((ny, nx), dtype=np.uint32)
     # set row to bad
     dqinit_map[5, :] |= DQ_FLAGS["DO_NOT_USE"]
-    dqinit_model = datamodels.DQModel(data={"DQ": dqinit_map})
+    dqinit_model = datamodels.DQModel(dq=dqinit_map)
 
     step_time = time.time();
     print(f"Step: defining DQ init calibration, elapsed: {step_time - start_time:.2f}s")
@@ -64,8 +66,10 @@ def test_stage0(tmp_path):
     # --- Create saturation threshold map ---
     saturation_threshold = np.iinfo(np.uint16).max  # DN
     saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
-    saturation_model = datamodels.SaturationModel(data={'SAT_THRESH': saturation_map,
-                                                        "DQ": np.zeros_like(saturation_map, dtype=np.uint32), })
+    saturation_model = datamodels.SaturationModel(
+        sat_thresh=saturation_map,
+        dq=np.zeros_like(saturation_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining saturation calibration, elapsed: {step_time - start_time:.2f}s")
@@ -74,10 +78,12 @@ def test_stage0(tmp_path):
     # --- Create random gain map ---
     gain = 1.0  # e-/ADU
     gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    gain_model = datamodels.GainModel(data={'GAIN': gain_map,
-                                           "RN": np.full_like(gain_map, 0.0),
-                                           "COV": np.full((2, 2, ny, nx), 0, dtype=np.float32),
-                                           "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    gain_model = datamodels.GainModel(
+        gain=gain_map,
+        rn=np.full_like(gain_map, 0.0),
+        cov=np.full((2, 2, ny, nx), 0, dtype=np.float32),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
@@ -86,11 +92,13 @@ def test_stage0(tmp_path):
     # --- Create random dark map ---
     dark_current = 10  # e-/s
     dark_map = np.random.normal(loc=dark_current, scale=dark_current / 10, size=(ny, nx)).astype(np.float32)
-    dark_model = datamodels.DarkModel(data={'RATE': dark_map / gain_map,  # dark in DN/s
-                                            "RATE_ERR": np.zeros_like(dark_map),
-                                            "RATE_VAR_RNOISE": np.zeros_like(dark_map),
-                                            "RATE_VAR_POISSON": np.zeros_like(dark_map),
-                                            "DQ": np.zeros_like(dark_map, dtype=np.uint32), })
+    dark_model = datamodels.DarkModel(
+        rate=dark_map / gain_map,  # dark in DN/s
+        rate_err=np.zeros_like(dark_map),
+        rate_var_rnoise=np.zeros_like(dark_map),
+        rate_var_poisson=np.zeros_like(dark_map),
+        dq=np.zeros_like(dark_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining dark calibration, elapsed: {step_time - start_time:.2f}s")
@@ -99,21 +107,25 @@ def test_stage0(tmp_path):
     # --- Create bias map ---
     bias = 1000  # e-/s
     bias_map = np.full((ny, nx), bias, dtype=np.float32)
-    bias_model = datamodels.BiasModel(data={'BIAS': bias_map / gain_map,  # bias in DN
-                                            "kTC": np.zeros_like(bias_map),
-                                            "DQ": np.zeros_like(bias_map, dtype=np.uint32), })
+    bias_model = datamodels.BiasModel(
+        bias=bias_map / gain_map,  # bias in DN
+        ktc=np.zeros_like(bias_map),  # kTC in DN
+        dq=np.zeros_like(bias_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
-    print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
+    print(f"Step: defining bias calibration, elapsed: {step_time - start_time:.2f}s")
     start_time = time.time()
 
     # --- Create random flat map ---
     detflat_map = np.random.normal(loc=1, scale=0.1, size=(ny, nx)).astype(np.float32)
-    detflat_model = datamodels.DetectorFlatModel(data={'FLAT': detflat_map,
-                                                       "FLAT_ERR": np.zeros_like(detflat_map),
-                                                       "FLAT_VAR_RNOISE": np.zeros_like(detflat_map),
-                                                       "FLAT_VAR_POISSON": np.zeros_like(detflat_map),
-                                                       "DQ": np.zeros_like(detflat_map, dtype=np.uint32), })
+    detflat_model = datamodels.DetectorFlatModel(
+        flat=detflat_map,
+        flat_err=np.zeros_like(detflat_map),
+        flat_var_rnoise=np.zeros_like(detflat_map),
+        flat_var_poisson=np.zeros_like(detflat_map),
+        dq=np.zeros_like(detflat_map, dtype=np.uint32)
+    )
 
     step_time = time.time();
     print(f"Step: defining flat calibration, elapsed: {step_time - start_time:.2f}s")
@@ -122,24 +134,28 @@ def test_stage0(tmp_path):
     # --- Create random read noise map ---
     RN = 20.0  # e-
     rn_map = np.full((ny, nx), RN, dtype=np.float32)
-    rn_model = datamodels.ReadNoiseModel(data={'RN': rn_map / gain_map,
-                                               "RN_ERR": np.zeros_like(rn_map),
-                                               "DQ": np.zeros_like(gain_map, dtype=np.uint32), })
+    rn_model = datamodels.ReadNoiseModel(
+        rn=rn_map / gain_map,
+        rn_err=np.zeros_like(rn_map),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
 
     # --- Create a fake UTR cube ---
     electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
     start_time = time.time()
-    ramp_data = simu.create_ramp(electron_rate_map,  # in e-/s
-                                       readtime=readtime, n_reads=n_reads,
-                                       nonlin_coeffs=nonlin_coeffs,
-                                       gain=gain_map,  # in e-/s
-                                       flat=detflat_map,
-                                       dark=dark_map,  # in e-/s
-                                       bias=bias_map,  # in e-/s
-                                       kTC_noise=50,  # in e-/s
-                                       poisson_noise=False, read_noise=0,  # in e-/s
-                                       convert_to_uint16=False, clip_ramps=True,
-                                       max_cores=max_cores)
+    ramp_data = simu.create_ramp(
+        electron_rate_map,  # in e-/s
+        readtime=readtime, n_reads=n_reads,
+        nonlin_coeffs=nonlin_coeffs,
+        gain=gain_map,  # in e-/s
+        flat=detflat_map,
+        dark=dark_map,  # in e-/s
+        bias=bias_map,  # in e-/s
+        kTC_noise=50,  # in e-/s
+        poisson_noise=False, read_noise=0,  # in e-/s
+        convert_to_uint16=False, clip_ramps=True,
+        max_cores=max_cores
+    )
 
     #adding a jump
     ramp_data['data'][4::,:,0:nx//2] += 1000
@@ -148,8 +164,11 @@ def test_stage0(tmp_path):
     print(f"Step: creating ramp (new), elapsed: {step_time - start_time:.2f}s")
     start_time = time.time()
 
-    ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
-                                      meta=ramp_data['meta'])
+    ramp_model = datamodels.RampModel(
+        data=ramp_data['data'],
+        dq_raw=ramp_data['dq_raw'],
+        meta=ramp_data['meta']
+    )
     ramp_model.meta.filename = "simulated_ramp.fits"
     print(ramp_model.meta.clock_rate)
 

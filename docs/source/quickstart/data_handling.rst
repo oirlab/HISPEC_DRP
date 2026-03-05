@@ -13,13 +13,15 @@ The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and const
 .. code-block:: python
 
     from hispecdrp import datamodels
-    model = datamodels.open('HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits')
-    print(model.meta.datetime_obs) # -> '2024-09-24T00:00:00.000'
+    from hispecdrp.utils import download_gdrive_file
+    sci_path = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits')
+    model = datamodels.open(sci_path)
+    print(model.meta.datetime_obs) # -> '2023-10-06T00:00:00.000'
     print(model.meta.model_type) # -> 'L0Model'
     print(model.meta.exposure_type) # -> 'SPEC'
     print(model.meta.spectrograph) # -> 'BSPEC'
     print(model.meta.instrument_mode) # -> 'YJHK'
-    print(model.data.shape) # -> (4096, 4096)
+    print(model.data.shape) # -> (4096, 4160)
 
 .. autofunction:: hispecdrp.datamodels.open
 
@@ -29,7 +31,7 @@ A file can alose be passed to the constructor for the appropriate datamodel clas
 .. code-block:: python
 
     from hispecdrp import datamodels
-    model = datamodels.HISPECL0Model(filepath='HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits')
+    model = datamodels.HISPECL0Model(sci_path)
     ...
 
 .. autofunction:: hispecdrp.datamodels.DataModel.__init__
@@ -43,9 +45,8 @@ Saving a datamodel is done with `DataModel.save`:
 .. code-block:: python
 
     from hispecdrp import datamodels
-    file_path = 'HISPEC/L0/HB.20240924.0000.00_RATE-TELLURICS-FIB1.fits'
-    model = datamodels.open(file_path)
-    model.save(file_path.replace('.fits', '_copy.fits'))
+    model = datamodels.open(sci_path)
+    model.save(sci_path.replace('.fits', '_copy.fits'))
 
 .. autofunction:: hispecdrp.datamodels.DataModel.save
 
@@ -59,13 +60,15 @@ Instead of reading in a datamodel from a file, one can instantiate a datamodel f
 
     from hispecdrp import datamodels
     model = datamodels.L0Model(
-        data = {'rate' : np.ones((4096, 4096), dtype=np.float32)},
-        meta = {'datetime_obs': '2024-09-24T00:00:00.000', 'exposure_type': 'DARK'}
+        rate=np.ones((4096, 4160), dtype=np.float32),
+        meta={
+            'datetime_obs': '2024-09-24T00:00:00.000',
+            'exposure_type': 'DARK'
+        }
     )
 
 
 **NOTE**: When instantiating new datamodels without a file, one should at minimum pass the ``datetime_obs`` keyword to the metadata.
-
 
 Processing History
 ++++++++++++++++++
@@ -85,15 +88,16 @@ Each datamodel has a **receipt** attribute which is a Table that contains a hist
 Calibration History
 +++++++++++++++++++
 
-Each datamodel has a **calibrations** attribute which is a Table that contains a history of all calibrations that have been applied to the datamodel.
+Each datamodel has a **calibrations** attribute which is a Table that contains a history of all calibrations that have been used within the context of this datamodel. Typically this means the calibration was 'applied' to the datamodel in some way, but it can also be used to track calibrations that were used in the creation of this datamodel, for example using an existing calibration as an initial guess to create a new calibration.
 
-* **FILENAME** — Base filename of the calibration
-* **TIME_APPLIED** — Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
-* **CAL_TYPE** — Type of calibration
 * **CAL_ROLE** — Role of calibration
+* **CAL_TYPE** — Type of calibration
+* **FILENAME** — Base filename of the calibration
+* **ID** — UUID
 * **DATETIME_OBS** — Observation date/time of the calibration.
 * **LAST_PROCESSED** — When calibration was last processed.
-* **ID** — UUID
+* **TIME_APPLIED** — Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+* **CLASS** — Primitive class that used the calibration.
 * **DRP_VERSION** — DRP semver calibration was processed with
 
 

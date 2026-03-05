@@ -8,7 +8,7 @@ def test_dark_level0(tmp_path, datadir):
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
-    shape = (4096, 4096)
+    shape = (4096, 4096+64)
 
     # Science
     input_model = datamodels.L0Model()

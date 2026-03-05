@@ -13,7 +13,7 @@ def test_process_lfc_parvi(tmp_path, datadir):
     lfc_path = download_gdrive_file('PR.20230725.83774.17_spec-LFC.fits', output_dir=datadir)
 
     # Fit 1D LFC lines with Gaussian
-    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
+    do_orders = np.array([90, 91, 92, 93, 94, 96, 97, 98, 99])
     do_fibers = ['4']
     prim = FitLFCLinesPrimitive()
     line_fits_model = prim.apply(
