@@ -38,6 +38,19 @@ class HISPECConfig:
         }
     }
 
+    @classmethod
+    def get_order_list(cls, spectrograph: str) -> list[int]:
+        """
+        Return the list of echelle order numbers for a spectrograph (single source of truth).
+        Used by simulations and trace finding so order count and indices match model meta.
+        """
+        if spectrograph not in cls.echelle_orders:
+            return []
+        o = cls.echelle_orders[spectrograph]
+        start, end = o['order_start'], o['order_end']
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+
     metadata_schema_filename : ClassVar[str] = 'hispec_metadata_schema.yaml'
 
     @classmethod

@@ -272,12 +272,17 @@ RVFWMAVG_HDU = {
 }
 
 def create_rv_extensions(fiber : str) -> dict[str, dict]:
-    return {
+    ext = {
         f'RVCCF_FIB{fiber}': RVCCF_HDU,
         f'RVCCFAVG_FIB{fiber}': RVCCFAVG_HDU,
         f'RVFWM_FIB{fiber}': RVFWM_HDU,
         f'RVFWMAVG_FIB{fiber}': RVFWMAVG_HDU
     }
+    # Per-spectrograph CCF tables (cross-correlation primitive writes RVCCF_{BSPEC|RSPEC}_FIB#)
+    for spec in ('BSPEC', 'RSPEC'):
+        ext[f'RVCCF_{spec}_FIB{fiber}'] = RVCCF_HDU
+        ext[f'RVCCFAVG_{spec}_FIB{fiber}'] = RVCCFAVG_HDU
+    return ext
 
 
 #### Telluric models
