@@ -89,7 +89,7 @@ class CrossCorrelationPrimitive(BasePrimitive):
 
         Loads the template, then for each input model and each fiber runs
         CCF (serial or Numba-parallel), combines chunk RVs, and writes
-        RVCCF_* and RVCCFAVG_* tables to the output L2 model.
+        RVCCF_FIB# and RVCCFAVG_FIB# tables to the output L2 model.
 
         Returns
         -------
@@ -230,8 +230,8 @@ class CrossCorrelationPrimitive(BasePrimitive):
         Reads SPEC_FIB{fiber}, SPEC_ERR_FIB{fiber}, SPEC_DQ_FIB{fiber}, WAVE_FIB{fiber}
         from the input. Processes each order (serial or Numba-parallel depending on
         debug_ccf and max_cores), combines chunk RVs with median/MAD outlier
-        rejection and inverse-variance weighting, then writes RVCCF_* and
-        RVCCFAVG_* extensions for this spectrograph and fiber.
+        rejection and inverse-variance weighting, then writes RVCCF_FIB{fiber}
+        and RVCCFAVG_FIB{fiber} extensions to the output model.
 
         Parameters
         ----------
@@ -585,7 +585,7 @@ class CrossCorrelationPrimitive(BasePrimitive):
         inlier: np.ndarray | None = None,
     ):
         """
-        Write RVCCF_* and RVCCFAVG_* extensions for this spectrograph and fiber.
+        Write RVCCF_FIB{fiber} and RVCCFAVG_FIB{fiber} extensions.
 
         Creates table extensions on the output L2 model with per-chunk RVs and
         the aggregated RV (mean and std). All velocities are in m/s.
@@ -635,7 +635,7 @@ class CrossCorrelationPrimitive(BasePrimitive):
             "RV_ABS_ERR": rv_abs_err,
         })
         def _ext(name: str) -> str:
-            return (f"{name}_{spectrograph}_FIB{fiber}").lower()
+            return (f"{name}_FIB{fiber}").lower()
 
         setattr(output_model, _ext("RVCCF"), tbl)
         avg_tbl = astropy.table.Table({

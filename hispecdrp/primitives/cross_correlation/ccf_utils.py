@@ -7,7 +7,6 @@ and combine with median/MAD outlier rejection and inverse-variance weighting.
 from __future__ import annotations
 
 import numpy as np
-from scipy.interpolate import interp1d
 from scipy.ndimage import median_filter
 from astropy.stats import mad_std
 
@@ -512,15 +511,10 @@ def masked_ccf_rv(
         # Shift template in log space: ln_lam_shifted = ln_lam + v/c (v in m/s)
         delta_ln = v / C_M_S
         template_ln_shifted = template_ln + delta_ln
-        # Interpolate template onto data log wavelength
-        interp = interp1d(
-            template_ln_shifted,
-            template_flux,
-            kind="linear",
-            bounds_error=False,
-            fill_value=0.0,
+        # Interpolate template onto data log wavelength (linear; 0 outside bounds)
+        t_at_data = np.interp(
+            ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
-        t_at_data = interp(ln_lam)
         # Masked correlation: sum over good pixels only, normalize
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
@@ -592,14 +586,9 @@ def masked_ccf_rv_full(
     for i, v in enumerate(v_grid):
         delta_ln = v / C_M_S
         template_ln_shifted = template_ln + delta_ln
-        interp = interp1d(
-            template_ln_shifted,
-            template_flux,
-            kind="linear",
-            bounds_error=False,
-            fill_value=0.0,
+        t_at_data = np.interp(
+            ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
-        t_at_data = interp(ln_lam)
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
             ccf[i] = np.nan
@@ -693,14 +682,9 @@ def masked_ccf_rv_diagnostics(
     for i, v in enumerate(v_grid):
         delta_ln = v / C_M_S
         template_ln_shifted = template_ln + delta_ln
-        interp = interp1d(
-            template_ln_shifted,
-            template_flux,
-            kind="linear",
-            bounds_error=False,
-            fill_value=0.0,
+        t_at_data = np.interp(
+            ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
-        t_at_data = interp(ln_lam)
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
             ccf[i] = np.nan
@@ -737,14 +721,9 @@ def masked_ccf_rv_diagnostics(
 
     delta_ln_peak = rv / C_M_S
     template_ln_shifted = template_ln + delta_ln_peak
-    interp = interp1d(
-        template_ln_shifted,
-        template_flux,
-        kind="linear",
-        bounds_error=False,
-        fill_value=0.0,
+    t_at_data = np.interp(
+        ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
     )
-    t_at_data = interp(ln_lam)
     use_peak = good & np.isfinite(t_at_data) & (t_at_data != 0)
     n_use_at_peak = int(np.sum(use_peak))
     t_mean = float(np.mean(t_at_data[use_peak])) if n_use_at_peak > 0 else np.nan
