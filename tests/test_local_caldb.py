@@ -8,7 +8,7 @@ import astropy.time
 import numpy as np
 import os
 
-def _test_local_caldb(tmp_path, datadir):
+def test_local_caldb(tmp_path, datadir):
 
     # Calibration cache
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
@@ -72,7 +72,7 @@ def _test_local_caldb(tmp_path, datadir):
             assert file_md5_from_record == generate_md5_file(dark_model._filepath), "MD5 checksum mismatch between record and live file"
 
 
-def _test_sync_db_from_existing_files(tmp_path, datadir):
+def test_sync_db_from_existing_files(tmp_path, datadir):
 
     # Calibration cache
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
