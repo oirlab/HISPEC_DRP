@@ -23,7 +23,8 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templa
 C_KM_S = 299792.458  # speed of light, km/s
 LAMBDA_ORDER_COEF_UM = 147.0  # λ_center(m) = LAMBDA_ORDER_COEF_UM / m (µm)
 INPUT_RV_KM_S = -110.0  # km/s (stellar RV to recover)
-SIGMA_V_KM_S = 50.0  # Gaussian absorption velocity width (σ), km/s
+# Line width (σ_v); smaller gives a narrower CCF peak in the preview.
+SIGMA_V_KM_S = 5.0  # Gaussian absorption velocity width (σ), km/s
 ABSORPTION_DEPTH = 0.05  # 5% absorption depth
 FLAT_FLUX = 100.0
 
@@ -332,12 +333,14 @@ def test_cross_correlation_recovers_rv_per_chunk(spectrograph):
         sigma_v_km_s=SIGMA_V_KM_S,
     )
 
+    show_preview = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW", "").strip().lower() in ("1", "true", "yes")
     prim = CrossCorrelationPrimitive(
         template_wavelength=template_wl,
         template_flux=template_flux,
         do_fibers=["1"],
         window_size_um=0.3,
         debug_ccf=True,
+        show_preview=show_preview,
     )
     result = prim.apply(l2)
     assert result is not None

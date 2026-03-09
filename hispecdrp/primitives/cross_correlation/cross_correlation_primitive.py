@@ -5,10 +5,14 @@ median/MAD outlier rejection, and inverse-variance weighted mean.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Sequence
 
 import numpy as np
 import astropy.table
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from ..base_primitive import BasePrimitive
 from ... import datamodels
@@ -16,11 +20,13 @@ from ...datamodels.dqflags import DQ_FLAGS
 
 from .ccf_utils import (
     _HAS_NUMBA,
+    combine_rvs_median_mad,
     continuum_normalize,
     masked_ccf_rv_diagnostics,
+    masked_ccf_rv_full,
     process_one_order_rvs,
     process_orders_rvs_numba_parallel,
-    combine_rvs_median_mad,
+    rv_per_chunks_with_ccf,
     weighted_mean_rv,
 )
 
@@ -356,6 +362,79 @@ class CrossCorrelationPrimitive(BasePrimitive):
             rv_std,
             inlier=inlier,
         )
+        # Store one representative CCF curve (first order, middle chunk) for preview power spectrum
+        self._store_ccf_curve_for_preview(
+            fiber,
+            order_tasks,
+            wave,
+            spec,
+            err,
+            dq,
+            do_not_use,
+            template_ln,
+            template_flux,
+            do_continuum=do_continuum,
+            cont_lw=cont_lw,
+            cont_po=cont_po,
+        )
+
+    def _store_ccf_curve_for_preview(
+        self,
+        fiber: str,
+        order_tasks: list,
+        wave: np.ndarray,
+        spec: np.ndarray,
+        err: np.ndarray,
+        dq: np.ndarray,
+        do_not_use: int,
+        template_ln: np.ndarray,
+        template_flux: np.ndarray,
+        do_continuum: bool = False,
+        cont_lw: int | None = None,
+        cont_po: int | None = None,
+    ):
+        """
+        Compute CCF vs velocity for every chunk, average across all chunks and orders,
+        and store on the primitive (self._ccf_curves) for the preview. In-memory only.
+        """
+        if not order_tasks:
+            return
+        all_ccf = []
+        v_grid_ref = None
+        for oi, _ in order_tasks:
+            w = np.asarray(wave[oi], dtype=np.float64)
+            s = np.asarray(spec[oi], dtype=np.float64).copy()
+            e = np.asarray(err[oi] if err.ndim >= 2 else err, dtype=np.float64)
+            d = np.asarray(dq[oi] if dq.ndim >= 2 else dq, dtype=np.uint32)
+            mask = (d & do_not_use) != 0
+            if do_continuum and (cont_lw is not None or cont_po is not None):
+                s = continuum_normalize(s, wavelength=w, lowpass_window=cont_lw, poly_order=cont_po)
+            w_min, w_max = np.nanmin(w), np.nanmax(w)
+            ln_min, ln_max = np.log(w_min), np.log(w_max)
+            in_range = (template_ln >= ln_min - 0.01) & (template_ln <= ln_max + 0.01)
+            if np.sum(in_range) < 20:
+                continue
+            t_ln = template_ln[in_range]
+            t_flux = template_flux[in_range]
+            _rvs, _rv_errs, _centers, v_grid, ccf_2d = rv_per_chunks_with_ccf(
+                w, s, e, mask,
+                t_ln, t_flux,
+                self.window_size_um,
+            )
+            if v_grid_ref is None:
+                v_grid_ref = v_grid
+            all_ccf.append(ccf_2d)
+        if not all_ccf or v_grid_ref is None:
+            return
+        stacked = np.vstack(all_ccf)
+        combined_ccf = np.nanmean(stacked, axis=0)
+        tbl = astropy.table.Table({
+            "VELOCITY": np.asarray(v_grid_ref, dtype=np.float64),
+            "CCF": np.asarray(combined_ccf, dtype=np.float64),
+        })
+        if not hasattr(self, "_ccf_curves"):
+            self._ccf_curves = {}
+        self._ccf_curves[fiber] = tbl
 
     def _process_fiber_orders_serial_debug(
         self,
@@ -650,3 +729,195 @@ class CrossCorrelationPrimitive(BasePrimitive):
             "RV_ABS_ERR": [rv_agg_err],
         })
         setattr(output_model, _ext("RVCCFAVG"), avg_tbl)
+
+    def _create_preview(self):
+        """
+        Create preview figure(s) for cross-correlation results.
+
+        Plots per-chunk RV vs wavelength with error bars for each fiber that has
+        CCF results, and shows the aggregated RV (weighted mean) as a reference line.
+        """
+        out = self._output.get("output") if self._output else None
+        if out is None:
+            logger.warning("No output model for cross-correlation preview.")
+            return
+        # Handle list of outputs (multi-input) by taking first
+        if isinstance(out, (list, tuple)):
+            if not out:
+                logger.warning("Empty output list for cross-correlation preview.")
+                return
+            output_model = out[0]
+        else:
+            output_model = out
+
+        # Find fibers that have RVCCF tables with plottable data (skip empty or all-NaN)
+        fibers_with_ccf = []
+        for f in ["1", "2", "3"]:
+            tbl = getattr(output_model, f"rvccf_fib{f}", None)
+            if tbl is None or not hasattr(tbl, "columns") or "RV" not in tbl.colnames:
+                continue
+            wl = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
+            rv = np.asarray(tbl["RV"], dtype=np.float64)
+            valid = np.isfinite(wl) & np.isfinite(rv)
+            if not np.any(valid):
+                continue
+            fibers_with_ccf.append(f)
+
+        if not fibers_with_ccf:
+            logger.warning("No RVCCF tables found on output for cross-correlation preview.")
+            return
+
+        # Build row layout: one RV row per fiber; one CCF-vs-velocity row per fiber that has CCF curve
+        row_specs = []  # (fiber, "rv" | "ccf")
+        rv_row = {}
+        ccf_row = {}
+        r = 0
+        for f in fibers_with_ccf:
+            row_specs.append((f, "rv"))
+            r += 1
+            rv_row[f] = r
+        ccf_curves = getattr(self, "_ccf_curves", {})
+        for f in fibers_with_ccf:
+            curve = ccf_curves.get(f)
+            if curve is not None and hasattr(curve, "colnames") and "VELOCITY" in curve.colnames and "CCF" in curve.colnames:
+                vel = np.asarray(curve["VELOCITY"], dtype=np.float64)
+                ccf = np.asarray(curve["CCF"], dtype=np.float64)
+                valid = np.isfinite(vel) & np.isfinite(ccf)
+                if np.sum(valid) > 10:
+                    row_specs.append((f, "ccf"))
+                    r += 1
+                    ccf_row[f] = r
+        subplot_titles = []
+        for f, kind in row_specs:
+            if kind == "rv":
+                subplot_titles.append(f"Fiber {f} — per-chunk RV")
+            else:
+                subplot_titles.append(f"Fiber {f} — CCF vs velocity shift (mean over all chunks)")
+        n_rows = len(row_specs)
+        fig = make_subplots(
+            rows=n_rows,
+            cols=1,
+            subplot_titles=subplot_titles,
+            vertical_spacing=0.18,
+        )
+
+        for fiber in fibers_with_ccf:
+            tbl = getattr(output_model, f"rvccf_fib{fiber}", None)
+            avg_tbl = getattr(output_model, f"rvccfavg_fib{fiber}", None)
+            wl = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
+            rv = np.asarray(tbl["RV"], dtype=np.float64)
+            rv_err = np.asarray(tbl["RV_ERR"], dtype=np.float64)
+            valid = np.isfinite(wl) & np.isfinite(rv)
+            if not np.any(valid):
+                continue
+            wl, rv, rv_err = wl[valid], rv[valid], rv_err[valid]
+            i = rv_row[fiber]
+            # Per-chunk RV with error bars
+            fig.add_trace(
+                go.Scatter(
+                    x=wl,
+                    y=rv,
+                    error_y=dict(type="data", array=rv_err, visible=True),
+                    mode="markers",
+                    name=f"Fiber {fiber} chunks",
+                    marker=dict(size=6, color="royalblue"),
+                ),
+                row=i,
+                col=1,
+            )
+            # Aggregated RV as horizontal line with ±1σ band
+            if avg_tbl is not None and len(avg_tbl) > 0:
+                rv_agg = float(avg_tbl["RV"][0])
+                rv_agg_err = float(avg_tbl["RV_ERR"][0])
+                x_range = [np.nanmin(wl), np.nanmax(wl)] if len(wl) else [0, 1]
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_range,
+                        y=[rv_agg, rv_agg],
+                        mode="lines",
+                        line=dict(dash="dash", color="crimson", width=2),
+                        name=f"RV mean = {rv_agg:.0f} ± {rv_agg_err:.0f} m/s",
+                    ),
+                    row=i,
+                    col=1,
+                )
+                if rv_agg_err > 0:
+                    for y_val, label in [(rv_agg + rv_agg_err, "+1σ"), (rv_agg - rv_agg_err, "-1σ")]:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_range,
+                                y=[y_val, y_val],
+                                mode="lines",
+                                line=dict(dash="dot", color="crimson", width=1),
+                                name=label,
+                            ),
+                            row=i,
+                            col=1,
+                        )
+
+        # CCF vs velocity shift (full search range from _V_MIN to _V_MAX; peak at injected RV)
+        for fiber in fibers_with_ccf:
+            if fiber not in ccf_row:
+                continue
+            curve = ccf_curves.get(fiber)
+            vel = np.asarray(curve["VELOCITY"], dtype=np.float64)
+            ccf = np.asarray(curve["CCF"], dtype=np.float64)
+            valid = np.isfinite(vel) & np.isfinite(ccf)
+            vel_plot = vel[valid]
+            ccf_plot = ccf[valid]
+            fig.add_trace(
+                go.Scatter(
+                    x=vel_plot,
+                    y=ccf_plot,
+                    mode="lines",
+                    name=f"Fiber {fiber} CCF",
+                    line=dict(width=1.5, color="darkgreen"),
+                ),
+                row=ccf_row[fiber],
+                col=1,
+            )
+
+        title = "Cross-correlation RV"
+        if hasattr(output_model, "meta") and getattr(output_model.meta, "filename", None):
+            title += f" — {output_model.meta.filename}"
+        fig.update_layout(
+            height=340 * max(1, n_rows),
+            width=900,
+            title_text=title,
+            showlegend=True,
+            margin=dict(l=70, r=50, t=70, b=60),
+        )
+        fig.update_xaxes(showgrid=True)
+        fig.update_yaxes(showgrid=True)
+        # Axis labels: RV rows get wavelength/RV; CCF rows get velocity shift / CCF
+        for idx, (f, kind) in enumerate(row_specs):
+            if kind == "rv":
+                fig.update_xaxes(title_text="Wavelength (µm)", row=idx + 1, col=1)
+                fig.update_yaxes(title_text="RV (m/s)", row=idx + 1, col=1)
+            else:
+                fig.update_xaxes(title_text="Velocity shift (m/s)", row=idx + 1, col=1)
+                fig.update_yaxes(title_text="CCF", row=idx + 1, col=1)
+
+        # get_output_path requires output_dir or filename; use cwd when only showing preview
+        output_dir = getattr(self, "output_dir", None) or os.getcwd()
+        base_path = output_model.get_output_path(
+            output_dir=output_dir, suffix=self.suffix
+        )
+        output_path_html = base_path.replace(".fits", "_preview.html")
+        output_path_png = base_path.replace(".fits", "_preview.png")
+
+        if self.save_preview:
+            fig.write_html(output_path_html, include_plotlyjs="cdn")
+            try:
+                fig.write_image(output_path_png, scale=2)
+            except Exception as e:
+                logger.debug("Could not write preview PNG (kaleido may be missing): %s", e)
+        if self.show_preview:
+            logger.info("Showing cross-correlation preview...")
+            fig.show()
+
+        self._output["preview"] = {
+            "html": output_path_html,
+            "png": output_path_png,
+            "fig": fig,
+        }
