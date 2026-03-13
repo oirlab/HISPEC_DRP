@@ -890,13 +890,18 @@ class StellarRVPrimitive(BasePrimitive):
         fig.update_xaxes(showgrid=True)
         fig.update_yaxes(showgrid=True)
         # Axis labels: RV rows get wavelength/RV; CCF rows get velocity shift / CCF
+        # CCF is not normalized: it is weighted covariance (data − mean)×(template − mean), units of flux².
         for idx, (f, kind) in enumerate(row_specs):
             if kind == "rv":
                 fig.update_xaxes(title_text="Wavelength (µm)", row=idx + 1, col=1)
                 fig.update_yaxes(title_text="RV (m/s)", row=idx + 1, col=1)
             else:
                 fig.update_xaxes(title_text="Velocity shift (m/s)", row=idx + 1, col=1)
-                fig.update_yaxes(title_text="CCF", row=idx + 1, col=1)
+                fig.update_yaxes(
+                    title_text="CCF (weighted cov., not norm.; flux²)",
+                    row=idx + 1,
+                    col=1,
+                )
 
         # get_output_path requires output_dir or filename; use cwd when only showing preview
         output_dir = getattr(self, "output_dir", None) or os.getcwd()

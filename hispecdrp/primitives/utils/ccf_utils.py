@@ -6,6 +6,8 @@ and combine with median/MAD outlier rejection and inverse-variance weighting.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from scipy.ndimage import median_filter
 from scipy.optimize import curve_fit
@@ -37,6 +39,8 @@ _V_STEP = 50.0
 #   velocity per pixel = c / (order * 4096) m/s.
 #   BSPEC (order 110–148): ~494–665 m/s per pixel.  RSPEC (order 60–97): ~755–1220 m/s per pixel.
 
+logger = logging.getLogger(__name__)
+
 
 def _gaussian_ccf_model(v: np.ndarray, amplitude: float, v0: float, sigma: float, baseline: float) -> np.ndarray:
     """Gaussian CCF model: amplitude * exp(-(v - v0)^2 / (2*sigma^2)) + baseline."""
@@ -55,7 +59,7 @@ def fit_gaussian_to_ccf(
 
     Model: CCF(v) = A * exp(-(v - v0)^2 / (2*sigma^2)) + B.
     The radial velocity is v0; the uncertainty is taken from the fit covariance
-    (error on v0), with a floor of v_step and optional scaling by 1/sqrt(n_good/50).
+    (error on v0); no minimum floor, so uncertainty can be arbitrarily small.
 
     Parameters
     ----------
@@ -66,11 +70,13 @@ def fit_gaussian_to_ccf(
     v_step : float
         Velocity step in m/s (used as minimum uncertainty).
     n_good : int or None
-        Number of good pixels; if provided, uncertainty is max(sigma_v0, v_step)
-        where sigma_v0 comes from the fit (no extra 1/sqrt(n) scaling by default).
+        Number of good pixels; if provided, used in sigma/sqrt(n) fallback when
+        covariance is not used (no minimum floor on reported uncertainty).
     return_params : bool, optional
-        If True, also return the full fit parameters as a dict with keys
-        'amplitude', 'v0', 'sigma', 'baseline' (default False).
+        If True, also return the full fit parameters and fit diagnostics as
+        (rv, rv_err, params, diagnostics). params has keys 'amplitude', 'v0',
+        'sigma', 'baseline'. diagnostics has 'fit_ok', 'used_covariance_for_error',
+        'used_sigma_fallback', 'message' (default False).
 
     Returns
     -------
@@ -80,19 +86,34 @@ def fit_gaussian_to_ccf(
         Uncertainty in m/s (nan if fit fails).
     params : dict, optional
         If return_params is True and fit succeeded: amplitude, v0, sigma, baseline.
+    diagnostics : dict, optional
+        If return_params is True: fit_ok, used_covariance_for_error,
+        used_sigma_fallback, message (for logging and preview).
     """
+    def _fail_diagnostics(msg: str):
+        out = {
+            "fit_ok": False,
+            "used_covariance_for_error": False,
+            "used_sigma_fallback": False,
+            "message": msg,
+        }
+        logger.warning("CCF Gaussian fit: %s", msg)
+        return out
+
     v_grid = np.asarray(v_grid, dtype=np.float64).ravel()
     ccf = np.asarray(ccf, dtype=np.float64).ravel()
     valid = np.isfinite(v_grid) & np.isfinite(ccf)
     if np.sum(valid) < 10:
-        return (np.nan, np.nan, {}) if return_params else (np.nan, np.nan)
+        diag = _fail_diagnostics("insufficient valid points for Gaussian fit")
+        return (np.nan, np.nan, {}, diag) if return_params else (np.nan, np.nan)
     v = v_grid[valid]
     y = ccf[valid]
     i_max = np.nanargmax(y)
     ccf_max = float(y[i_max])
     ccf_min = float(np.nanmin(y))
     if ccf_max <= ccf_min:
-        return (np.nan, np.nan, {}) if return_params else (np.nan, np.nan)
+        diag = _fail_diagnostics("no CCF peak (ccf_max <= ccf_min)")
+        return (np.nan, np.nan, {}, diag) if return_params else (np.nan, np.nan)
     v0_init = float(v[i_max])
     sigma_init = max((np.nanmax(v) - np.nanmin(v)) / 10.0, v_step * 10.0)
     amplitude_init = ccf_max - ccf_min
@@ -112,12 +133,19 @@ def fit_gaussian_to_ccf(
         )
         rv = float(popt[1])
         sigma_v0 = float(np.sqrt(pcov[1, 1])) if np.all(np.isfinite(pcov)) else np.nan
-        if np.isfinite(sigma_v0) and sigma_v0 > 0:
-            rv_err = max(sigma_v0, v_step)
+        used_covariance = np.isfinite(sigma_v0) and sigma_v0 > 0
+        if used_covariance:
+            rv_err = sigma_v0
+            used_sigma_fallback = False
+            diag_msg = "RV uncertainty from fit covariance (sigma_v0)"
         else:
-            rv_err = max(float(np.abs(popt[2])) / np.sqrt(np.sum(valid) / 50.0), v_step)
-        if n_good is not None and n_good > 50:
-            rv_err = max(rv_err, float(np.abs(popt[2])) / np.sqrt(n_good / 50.0))
+            rv_err = float(np.abs(popt[2])) / np.sqrt(np.sum(valid) / 50.0)
+            if n_good is not None and n_good > 50:
+                rv_err = max(rv_err, float(np.abs(popt[2])) / np.sqrt(n_good / 50.0))
+            used_sigma_fallback = True
+            reason = "sigma_v0 non-finite or non-positive from curve_fit"
+            diag_msg = f"RV uncertainty from sigma/sqrt(n) fallback ({reason})"
+            logger.warning("CCF Gaussian fit: %s", diag_msg)
         if return_params:
             params = {
                 "amplitude": float(popt[0]),
@@ -125,11 +153,18 @@ def fit_gaussian_to_ccf(
                 "sigma": float(popt[2]),
                 "baseline": float(popt[3]),
             }
-            return rv, rv_err, params
+            diagnostics = {
+                "fit_ok": True,
+                "used_covariance_for_error": used_covariance,
+                "used_sigma_fallback": used_sigma_fallback,
+                "message": diag_msg,
+            }
+            return rv, rv_err, params, diagnostics
         return rv, rv_err
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError) as e:
+        diag = _fail_diagnostics(f"curve_fit failed: {e!s}")
         if return_params:
-            return np.nan, np.nan, {}
+            return np.nan, np.nan, {}, diag
         return np.nan, np.nan
 
 
@@ -638,7 +673,8 @@ def masked_ccf_rv(
         t_at_data = np.interp(
             ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
-        # Masked correlation: sum over good pixels only, normalize
+        # Masked correlation: weighted covariance (not normalized; peak is not scaled to 1).
+        # CCF = weighted mean of (data - mean) * (template_shifted - mean); units of flux².
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
             ccf[i] = np.nan
@@ -715,6 +751,7 @@ def masked_ccf_rv_full(
         t_at_data = np.interp(
             ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
+        # Weighted covariance (not normalized; peak not scaled to 1).
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
             ccf[i] = np.nan
@@ -814,6 +851,7 @@ def masked_ccf_rv_diagnostics(
         t_at_data = np.interp(
             ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
         )
+        # Weighted covariance (not normalized; peak not scaled to 1).
         use = good & np.isfinite(t_at_data) & (t_at_data != 0)
         if np.sum(use) < 5:
             ccf[i] = np.nan

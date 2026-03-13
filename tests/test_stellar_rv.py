@@ -382,7 +382,9 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
     """
     Validate that fit_gaussian_to_ccf recovers the true RV and returns a sensible
     uncertainty when given a synthetic Gaussian CCF (velocity vs correlation).
-    Set HISPEC_DRP_SHOW_CCF_PREVIEW=1 to display a preview of the data and fitted Gaussian.
+    Models one chunk per BSPEC order (110–148) with wavelength ranges from the
+    echelle relation λ_center = 147/order µm, FSR = 147/order² µm.
+    Set HISPEC_DRP_SHOW_CCF_PREVIEW=1 to display a preview with a dropdown to select chunk.
     """
     v_step = 500.0  # m/s; use default CCF search range (-500 to 500 km/s)
     v_min, v_max = _V_MIN, _V_MAX
@@ -391,66 +393,176 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
     true_sigma = 15000.0  # m/s (Gaussian width)
     amplitude = 1.0
     baseline = 0.0
-    ccf = amplitude * np.exp(-0.5 * ((v_grid - true_rv) / true_sigma) ** 2) + baseline
-    # Add small noise so fit is non-trivial
-    rng = np.random.default_rng(42)
-    ccf += 0.02 * (rng.random(v_grid.size) - 0.5)
 
-    show_preview = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW", "").strip().lower() in ("1", "true", "yes")
-    if show_preview:
-        rv, rv_err, params = fit_gaussian_to_ccf(v_grid, ccf, v_step, return_params=True)
-    else:
-        rv, rv_err = fit_gaussian_to_ccf(v_grid, ccf, v_step)
-        params = {}
+    # One chunk per BSPEC order; wavelength range from echelle relation (same as _order_wavelength_grid)
+    orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
+    chunk_results = []
+    for idx, order in enumerate(orders):
+        wave, _ = _order_wavelength_grid(order, 100)
+        wl_lo = float(wave[0])
+        wl_hi = float(wave[-1])
+        ccf = amplitude * np.exp(-0.5 * ((v_grid - true_rv) / true_sigma) ** 2) + baseline
+        rng = np.random.default_rng(42 + idx)
+        ccf += 0.02 * (rng.random(v_grid.size) - 0.5)
+        chunk_results.append({
+            "order": order,
+            "wl_lo": wl_lo,
+            "wl_hi": wl_hi,
+            "ccf": ccf.copy(),
+        })
 
+    # Fit first chunk for assertions (test still validates one fit)
+    rv, rv_err = fit_gaussian_to_ccf(
+        v_grid, chunk_results[0]["ccf"], v_step
+    )
     assert np.isfinite(rv) and np.isfinite(rv_err), "Gaussian fit should return finite RV and uncertainty"
     assert rv_err > 0, "Uncertainty should be positive"
     assert abs(rv - true_rv) < 2 * true_sigma, (
         f"Recovered RV {rv} m/s should be within ~2 sigma of true {true_rv} m/s"
     )
-    # Uncertainty should be at least v_step and not unreasonably large
-    assert v_step <= rv_err <= true_sigma * 3, (
-        f"RV uncertainty {rv_err} m/s should be between v_step and ~3*sigma ({true_sigma})"
+    assert rv_err > 0 and rv_err <= true_sigma * 3, (
+        f"RV uncertainty {rv_err} m/s should be positive and ≤ ~3*sigma ({true_sigma})"
     )
 
-    if show_preview and params:
-        import plotly.graph_objects as go
+    show_preview = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW", "").strip().lower() in ("1", "true", "yes")
+    if show_preview:
+        # Fit all chunks and build per-chunk metadata for dropdown
         v_fine = np.linspace(v_min, v_max, 800)
-        ccf_fit = _gaussian_ccf_model(
-            v_fine,
-            params["amplitude"],
-            params["v0"],
-            params["sigma"],
-            params["baseline"],
+        for cr in chunk_results:
+            rv_i, rv_err_i, params_i, diag_i = fit_gaussian_to_ccf(
+                v_grid, cr["ccf"], v_step, return_params=True
+            )
+            cr["rv"] = rv_i
+            cr["rv_err"] = rv_err_i
+            cr["params"] = params_i
+            cr["diagnostics"] = diag_i
+            if params_i:
+                cr["ccf_fit"] = _gaussian_ccf_model(
+                    v_fine,
+                    params_i["amplitude"],
+                    params_i["v0"],
+                    params_i["sigma"],
+                    params_i["baseline"],
+                )
+            else:
+                cr["ccf_fit"] = np.full_like(v_fine, np.nan)
+
+        # Optimal combination: mean CCF across orders (same RV assumption -> variance reduction)
+        combined_ccf = np.nanmean(np.array([cr["ccf"] for cr in chunk_results], dtype=np.float64), axis=0)
+        rv_comb_fit, rv_err_comb_fit, params_comb, diag_comb = fit_gaussian_to_ccf(
+            v_grid, combined_ccf, v_step, return_params=True
         )
-        param_text = (
-            f"RV (v0) = {params['v0']:.1f} m/s<br>"
-            f"RV uncertainty = {rv_err:.1f} m/s<br>"
-            f"amplitude = {params['amplitude']:.4f}<br>"
-            f"sigma = {params['sigma']:.1f} m/s<br>"
-            f"baseline = {params['baseline']:.4f}"
-        )
+        # Combined RV and uncertainty from same method as per-order: fit to (mean) CCF, no floor
+        combined_result = {
+            "rv": rv_comb_fit,
+            "rv_err": rv_err_comb_fit,
+            "params": params_comb,
+            "diagnostics": diag_comb,
+        }
+        if params_comb:
+            combined_result["ccf_fit"] = _gaussian_ccf_model(
+                v_fine,
+                params_comb["amplitude"],
+                params_comb["v0"],
+                params_comb["sigma"],
+                params_comb["baseline"],
+            )
+        else:
+            combined_result["ccf_fit"] = np.full_like(v_fine, np.nan)
+
+        import plotly.graph_objects as go
+
+        def make_annotation_text(cr, idx, is_combined=False):
+            if is_combined:
+                p, d = cr.get("params") or {}, cr.get("diagnostics") or {}
+                if p:
+                    n_ord = len(chunk_results)
+                    return (
+                        f"<b>Combined</b> (all BSPEC orders, N={n_ord})<br>"
+                        f"<b>RV</b> = {cr['rv']:.1f} m/s (from fit to mean CCF)<br>"
+                        f"<b>RV uncertainty</b> = {cr['rv_err']:.1f} m/s (empirical, no floor)<br>"
+                        f"v0 = {p['v0']:.1f}, σ = {p['sigma']:.1f} m/s<br>"
+                        f"amplitude = {p['amplitude']:.4f}, baseline = {p['baseline']:.4f}<br>"
+                        f"<i>Y-axis: CCF = weighted cov.(spec, template), not normalized; flux².</i><br>"
+                        f"<b>Error source:</b> {d.get('message', '—')}"
+                    )
+                return (
+                    f"<b>Combined</b> (all BSPEC orders)<br>"
+                    f"<b>Fit status:</b> FAILED<br>"
+                    f"<b>Message:</b> {d.get('message', '—')}"
+                )
+            order = cr.get("order", idx)
+            wl_lo, wl_hi = cr["wl_lo"], cr["wl_hi"]
+            p, d = cr.get("params") or {}, cr.get("diagnostics") or {}
+            if p:
+                return (
+                    f"<b>Chunk {idx}</b> (BSPEC order {order})<br>"
+                    f"λ {wl_lo:.4f}–{wl_hi:.4f} µm<br>"
+                    f"<b>Fit status:</b> OK<br>"
+                    f"<b>RV (v0)</b> = {p['v0']:.1f} m/s<br>"
+                    f"<b>RV uncertainty</b> = {cr['rv_err']:.1f} m/s<br>"
+                    f"amplitude = {p['amplitude']:.4f}<br>"
+                    f"sigma = {p['sigma']:.1f} m/s<br>"
+                    f"baseline = {p['baseline']:.4f}<br>"
+                    f"<b>Error source:</b> {d.get('message', '—')}"
+                )
+            return (
+                f"<b>Chunk {idx}</b> (BSPEC order {order})<br>"
+                f"λ {wl_lo:.4f}–{wl_hi:.4f} µm<br>"
+                f"<b>Fit status:</b> FAILED<br>"
+                f"<b>Message:</b> {d.get('message', '—')}"
+            )
+
+        n_chunks = len(chunk_results)
         fig = go.Figure()
+        # Trace 0,1: combined CCF (default visible)
         fig.add_trace(
             go.Scatter(
                 x=v_grid,
-                y=ccf,
+                y=combined_ccf,
                 mode="markers",
-                name="CCF data",
+                name="Combined data",
                 marker=dict(size=4, symbol="circle"),
+                visible=True,
             )
         )
         fig.add_trace(
             go.Scatter(
                 x=v_fine,
-                y=ccf_fit,
+                y=combined_result["ccf_fit"],
                 mode="lines",
-                name="Gaussian fit",
+                name="Combined fit",
                 line=dict(width=2),
+                visible=True,
             )
         )
-        fig.add_annotation(
-            text=param_text,
+        # Traces 2..2*n_chunks+1: per-order [data, fit]
+        for idx, cr in enumerate(chunk_results):
+            order = cr["order"]
+            fig.add_trace(
+                go.Scatter(
+                    x=v_grid,
+                    y=cr["ccf"],
+                    mode="markers",
+                    name=f"Order {order} data",
+                    marker=dict(size=4, symbol="circle"),
+                    visible=False,
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=v_fine,
+                    y=cr["ccf_fit"],
+                    mode="lines",
+                    name=f"Order {order} fit",
+                    line=dict(width=2),
+                    visible=False,
+                )
+            )
+
+        n_traces = 2 + 2 * n_chunks
+        default_annotation = dict(
+            text=make_annotation_text(combined_result, 0, is_combined=True),
             xref="paper",
             yref="paper",
             x=0.02,
@@ -461,12 +573,63 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
             font=dict(size=11),
             bgcolor="rgba(255,255,255,0.8)",
         )
+        fig.add_annotation(**default_annotation)
+
+        # Dropdown: Combined (default) then one button per order
+        buttons = []
+        # Combined: show traces 0,1 only
+        visible_combined = [False] * n_traces
+        visible_combined[0] = True
+        visible_combined[1] = True
+        buttons.append(
+            dict(
+                label="Combined (all orders)",
+                method="update",
+                args=[
+                    {"visible": visible_combined},
+                    {"annotations": [dict(
+                        default_annotation,
+                        text=make_annotation_text(combined_result, 0, is_combined=True),
+                    )]},
+                ],
+            )
+        )
+        for idx in range(n_chunks):
+            visible = [False] * n_traces
+            visible[2 + 2 * idx] = True
+            visible[2 + 2 * idx + 1] = True
+            cr = chunk_results[idx]
+            buttons.append(
+                dict(
+                    label=f"Order {cr['order']} (λ {cr['wl_lo']:.3f}–{cr['wl_hi']:.3f} µm)",
+                    method="update",
+                    args=[
+                        {"visible": visible},
+                        {"annotations": [dict(
+                            default_annotation,
+                            text=make_annotation_text(chunk_results[idx], idx),
+                        )]},
+                    ],
+                )
+            )
         fig.update_layout(
-            title="Gaussian fit to CCF: radial velocity shift vs CCF power",
+            title="Gaussian fit to CCF: combined or per BSPEC order (select from dropdown)",
             xaxis_title="Velocity shift (m/s)",
-            yaxis_title="CCF",
+            yaxis_title="CCF (weighted covariance, not normalized; units of flux²)",
             xaxis=dict(range=[v_min, v_max]),
             height=500,
             showlegend=True,
+            updatemenus=[
+                dict(
+                    active=0,
+                    buttons=buttons,
+                    direction="down",
+                    showactive=True,
+                    x=0.0,
+                    xanchor="left",
+                    y=1.12,
+                    yanchor="top",
+                )
+            ],
         )
         fig.show()
