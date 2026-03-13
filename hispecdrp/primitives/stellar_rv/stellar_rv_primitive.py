@@ -20,8 +20,10 @@ from ...datamodels.dqflags import DQ_FLAGS
 
 from ..utils.ccf_utils import (
     _HAS_NUMBA,
+    _gaussian_ccf_model,
     combine_rvs_median_mad,
     continuum_normalize,
+    fit_gaussian_to_ccf,
     masked_ccf_rv_diagnostics,
     masked_ccf_rv_full,
     process_one_order_rvs,
@@ -701,6 +703,7 @@ class StellarRVPrimitive(BasePrimitive):
         bis = np.zeros(n, dtype=np.float64)
         rv_abs = np.zeros(n, dtype=np.float64)
         rv_abs_err = np.zeros(n, dtype=np.float64)
+        inlier_col = np.asarray(inlier, dtype=np.uint8)
         tbl = astropy.table.Table({
             "MBJDW": mbjd,
             "BERVW": berv,
@@ -712,6 +715,7 @@ class StellarRVPrimitive(BasePrimitive):
             "BIS": bis,
             "RV_ABS": rv_abs,
             "RV_ABS_ERR": rv_abs_err,
+            "INLIER": inlier_col,
         })
         def _ext(name: str) -> str:
             return (f"{name}_FIB{fiber}").lower()
@@ -801,30 +805,62 @@ class StellarRVPrimitive(BasePrimitive):
             vertical_spacing=0.18,
         )
 
+        v_step_ccf = 500.0  # m/s, for Gaussian fit to mean CCF
         for fiber in fibers_with_ccf:
             tbl = getattr(output_model, f"rvccf_fib{fiber}", None)
             avg_tbl = getattr(output_model, f"rvccfavg_fib{fiber}", None)
             wl = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
             rv = np.asarray(tbl["RV"], dtype=np.float64)
             rv_err = np.asarray(tbl["RV_ERR"], dtype=np.float64)
+            inlier = np.asarray(tbl["INLIER"], dtype=bool) if "INLIER" in tbl.colnames else np.ones(len(rv), dtype=bool)
             valid = np.isfinite(wl) & np.isfinite(rv)
             if not np.any(valid):
                 continue
             wl, rv, rv_err = wl[valid], rv[valid], rv_err[valid]
+            inlier = inlier[valid]
             i = rv_row[fiber]
-            # Per-chunk RV with error bars
-            fig.add_trace(
-                go.Scatter(
-                    x=wl,
-                    y=rv,
-                    error_y=dict(type="data", array=rv_err, visible=True),
-                    mode="markers",
-                    name=f"Fiber {fiber} chunks",
-                    marker=dict(size=6, color="royalblue"),
-                ),
-                row=i,
-                col=1,
-            )
+            # Per-chunk RV: inliers in blue, outliers in grey
+            in_ok = inlier & np.isfinite(rv_err) & (rv_err > 0)
+            out_ok = ~inlier & np.isfinite(rv_err) & (rv_err > 0)
+            if np.any(in_ok):
+                fig.add_trace(
+                    go.Scatter(
+                        x=wl[in_ok],
+                        y=rv[in_ok],
+                        error_y=dict(type="data", array=rv_err[in_ok], visible=True),
+                        mode="markers",
+                        name=f"Fiber {fiber} (inlier)",
+                        marker=dict(size=6, color="royalblue"),
+                    ),
+                    row=i,
+                    col=1,
+                )
+            if np.any(out_ok):
+                fig.add_trace(
+                    go.Scatter(
+                        x=wl[out_ok],
+                        y=rv[out_ok],
+                        error_y=dict(type="data", array=rv_err[out_ok], visible=True),
+                        mode="markers",
+                        name=f"Fiber {fiber} (outlier)",
+                        marker=dict(size=5, color="grey", symbol="circle-open"),
+                    ),
+                    row=i,
+                    col=1,
+                )
+            if not np.any(in_ok) and np.any(valid):
+                fig.add_trace(
+                    go.Scatter(
+                        x=wl,
+                        y=rv,
+                        error_y=dict(type="data", array=rv_err, visible=True),
+                        mode="markers",
+                        name=f"Fiber {fiber} chunks",
+                        marker=dict(size=6, color="royalblue"),
+                    ),
+                    row=i,
+                    col=1,
+                )
             # Aggregated RV as horizontal line with ±1σ band
             if avg_tbl is not None and len(avg_tbl) > 0:
                 rv_agg = float(avg_tbl["RV"][0])
@@ -836,7 +872,7 @@ class StellarRVPrimitive(BasePrimitive):
                         y=[rv_agg, rv_agg],
                         mode="lines",
                         line=dict(dash="dash", color="crimson", width=2),
-                        name=f"RV mean = {rv_agg:.0f} ± {rv_agg_err:.0f} m/s",
+                        name=f"RV mean = {rv_agg:.3f} ± {rv_agg_err:.3f} m/s",
                     ),
                     row=i,
                     col=1,
@@ -855,7 +891,7 @@ class StellarRVPrimitive(BasePrimitive):
                             col=1,
                         )
 
-        # CCF vs velocity shift (full search range from _V_MIN to _V_MAX; peak at injected RV)
+        # CCF vs velocity shift; add Gaussian fit over fit window (like combined fit in test preview)
         for fiber in fibers_with_ccf:
             if fiber not in ccf_row:
                 continue
@@ -870,12 +906,38 @@ class StellarRVPrimitive(BasePrimitive):
                     x=vel_plot,
                     y=ccf_plot,
                     mode="lines",
-                    name=f"Fiber {fiber} CCF",
+                    name=f"Fiber {fiber} CCF (mean)",
                     line=dict(width=1.5, color="darkgreen"),
                 ),
                 row=ccf_row[fiber],
                 col=1,
             )
+            if len(vel_plot) > 10:
+                rv_fit, rv_err_fit, params, diag = fit_gaussian_to_ccf(
+                    vel_plot, ccf_plot, v_step_ccf, return_params=True
+                )
+                if params and diag.get("fit_ok"):
+                    v_lo = diag.get("fit_v_lo", np.nanmin(vel_plot))
+                    v_hi = diag.get("fit_v_hi", np.nanmax(vel_plot))
+                    v_fit = np.linspace(v_lo, v_hi, 200)
+                    ccf_fit = _gaussian_ccf_model(
+                        v_fit,
+                        params["amplitude"],
+                        params["v0"],
+                        params["sigma"],
+                        params["baseline"],
+                    )
+                    fig.add_trace(
+                        go.Scatter(
+                            x=v_fit,
+                            y=ccf_fit,
+                            mode="lines",
+                            name=f"Fiber {fiber} Gaussian fit",
+                            line=dict(width=2, color="crimson", dash="dash"),
+                        ),
+                        row=ccf_row[fiber],
+                        col=1,
+                    )
 
         title = "Stellar RV"
         if hasattr(output_model, "meta") and getattr(output_model.meta, "filename", None):

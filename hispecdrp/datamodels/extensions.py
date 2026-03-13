@@ -216,6 +216,7 @@ RVCCF_HDU = {
         'BIS' : np.float64,
         'RV_ABS' : np.float64,
         'RV_ABS_ERR' : np.float64,
+        'INLIER' : np.uint8,  # 1 = used in aggregate, 0 = rejected by median/MAD outlier
     }
 }
 

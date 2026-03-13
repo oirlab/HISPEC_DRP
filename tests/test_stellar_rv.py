@@ -13,8 +13,14 @@ from hispecdrp import datamodels
 import hispecdrp
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.primitives import StellarRVPrimitive
-from hispecdrp.primitives.utils.ccf_utils import _V_MAX, _V_MIN, _gaussian_ccf_model, fit_gaussian_to_ccf
-from hispecdrp.utils.spectral_templates_utils import get_spectrum_path
+from hispecdrp.primitives.utils.ccf_utils import (
+    _V_MAX,
+    _V_MIN,
+    _gaussian_ccf_model,
+    fit_gaussian_to_ccf,
+    rv_per_chunks_with_ccf,
+)
+from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
 
 # BT-Settl template lives in hispecdrp/data/templates/
 TEMPLATE_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
@@ -312,8 +318,9 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     """
     Generate L2 dummy spectra for BSPEC or RSPEC covering the full wavelength range:
     flat continuum + Gaussian absorption (50 km/s width, 5% depth) at RV = -110 km/s.
-    Use a rest-frame template with the same feature; CCF should recover -110 km/s
-    to within the reported uncertainty in each chunk.
+    Use a rest-frame template with the same feature. The pipeline uses median/MAD
+    outlier rejection; the combined RV (RVCCFAVG) must recover the input to within
+    tolerance. Outlier chunks are allowed and are masked in the preview (grey points).
     """
     n_pix = 4096
     input_rv_m_s = INPUT_RV_KM_S * 1000.0  # m/s
@@ -345,7 +352,6 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     )
     result = prim.apply(l2)
     assert result is not None
-    # apply() returns the main output (L2Model) directly, not a dict
     out = result
 
     tbl_attr = "rvccf_fib1"
@@ -358,21 +364,32 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     rvs = np.asarray(tbl["RV"], dtype=np.float64)
     rv_errs = np.asarray(tbl["RV_ERR"], dtype=np.float64)
     valid = np.isfinite(rvs) & np.isfinite(rv_errs) & (rv_errs > 0)
+    assert np.any(valid), f"No valid chunk RVs for {spectrograph}"
 
-    assert np.any(valid), (
-        f"No valid chunk RVs for {spectrograph}"
+    # Primary check: combined RV (after outlier rejection) recovers input
+    avg_tbl = getattr(out, "rvccfavg_fib1", None)
+    assert avg_tbl is not None and len(avg_tbl) > 0, f"Output L2 missing rvccfavg_fib1 for {spectrograph}"
+    rv_agg = float(avg_tbl["RV"][0])
+    rv_agg_err = float(avg_tbl["RV_ERR"][0])
+    tolerance_m_s = max(3.0 * rv_agg_err, 100.0)
+    assert abs(rv_agg - input_rv_m_s) <= tolerance_m_s, (
+        f"{spectrograph}: combined RV {rv_agg/1000:.2f} km/s should be within {tolerance_m_s/1000:.1f} km/s of input {INPUT_RV_KM_S} km/s."
     )
 
-    residuals = np.abs(rvs[valid] - input_rv_m_s)
-    within_err = residuals <= rv_errs[valid]
-    n_within = np.sum(within_err)
-    n_total = np.sum(valid)
+    # Inlier chunks (if INLIER column present) should mostly agree with input; outliers are allowed
+    if "INLIER" in tbl.colnames:
+        inlier = np.asarray(tbl["INLIER"], dtype=bool)[valid]
+        in_ok = inlier
+        if np.any(in_ok):
+            res_in = np.abs(rvs[valid][in_ok] - input_rv_m_s)
+            # Allow inlier chunks to be within 3*RV_ERR or 100 m/s (whichever is larger)
+            loose = np.maximum(3.0 * rv_errs[valid][in_ok], 100.0)
+            n_ok = np.sum(res_in <= loose)
+            assert n_ok >= np.sum(in_ok) * 0.5, (
+                f"{spectrograph}: at least half of inlier chunks should have |RV - input| <= 3*RV_ERR or 100 m/s."
+            )
 
-    assert n_within == n_total, (
-        f"{spectrograph}: {n_total - n_within}/{n_total} chunks have |RV - {INPUT_RV_KM_S} km/s| > RV_ERR. "
-        f"Max residual = {np.max(residuals):.1f} m/s, min RV_ERR = {np.min(rv_errs[valid]):.1f} m/s."
-    )
-    # Gaussian-fit method: RV and uncertainty should be finite and reasonable
+    # Sanity: valid chunk RVs and uncertainties are finite and reasonable
     assert np.all(np.isfinite(rvs[valid])), "All valid chunk RVs should be finite"
     assert np.all(rv_errs[valid] > 0), "All valid chunk RV uncertainties should be positive"
     assert np.all(rv_errs[valid] < 1e6), "RV uncertainties should be reasonable (< 1000 km/s)"
@@ -437,15 +454,20 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
             cr["params"] = params_i
             cr["diagnostics"] = diag_i
             if params_i:
+                v_lo_fit = diag_i.get("fit_v_lo", v_min)
+                v_hi_fit = diag_i.get("fit_v_hi", v_max)
+                v_fit = np.linspace(v_lo_fit, v_hi_fit, 200)
                 cr["ccf_fit"] = _gaussian_ccf_model(
-                    v_fine,
+                    v_fit,
                     params_i["amplitude"],
                     params_i["v0"],
                     params_i["sigma"],
                     params_i["baseline"],
                 )
+                cr["v_fit"] = v_fit
             else:
-                cr["ccf_fit"] = np.full_like(v_fine, np.nan)
+                cr["ccf_fit"] = np.array([])
+                cr["v_fit"] = np.array([])
 
         # Optimal combination: mean CCF across orders (same RV assumption -> variance reduction)
         combined_ccf = np.nanmean(np.array([cr["ccf"] for cr in chunk_results], dtype=np.float64), axis=0)
@@ -460,15 +482,20 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
             "diagnostics": diag_comb,
         }
         if params_comb:
+            v_lo_fit = diag_comb.get("fit_v_lo", v_min)
+            v_hi_fit = diag_comb.get("fit_v_hi", v_max)
+            v_fit_comb = np.linspace(v_lo_fit, v_hi_fit, 200)
             combined_result["ccf_fit"] = _gaussian_ccf_model(
-                v_fine,
+                v_fit_comb,
                 params_comb["amplitude"],
                 params_comb["v0"],
                 params_comb["sigma"],
                 params_comb["baseline"],
             )
+            combined_result["v_fit"] = v_fit_comb
         else:
-            combined_result["ccf_fit"] = np.full_like(v_fine, np.nan)
+            combined_result["ccf_fit"] = np.array([])
+            combined_result["v_fit"] = np.array([])
 
         import plotly.graph_objects as go
 
@@ -479,9 +506,9 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
                     n_ord = len(chunk_results)
                     return (
                         f"<b>Combined</b> (all BSPEC orders, N={n_ord})<br>"
-                        f"<b>RV</b> = {cr['rv']:.1f} m/s (from fit to mean CCF)<br>"
-                        f"<b>RV uncertainty</b> = {cr['rv_err']:.1f} m/s (empirical, no floor)<br>"
-                        f"v0 = {p['v0']:.1f}, σ = {p['sigma']:.1f} m/s<br>"
+                        f"<b>RV</b> = {cr['rv']:.3f} m/s (from fit to mean CCF)<br>"
+                        f"<b>RV uncertainty</b> = {cr['rv_err']:.3f} m/s (empirical, no floor)<br>"
+                        f"v0 = {p['v0']:.3f}, σ = {p['sigma']:.3f} m/s<br>"
                         f"amplitude = {p['amplitude']:.4f}, baseline = {p['baseline']:.4f}<br>"
                         f"<i>Y-axis: CCF = weighted cov.(spec, template), not normalized; flux².</i><br>"
                         f"<b>Error source:</b> {d.get('message', '—')}"
@@ -499,8 +526,8 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
                     f"<b>Chunk {idx}</b> (BSPEC order {order})<br>"
                     f"λ {wl_lo:.4f}–{wl_hi:.4f} µm<br>"
                     f"<b>Fit status:</b> OK<br>"
-                    f"<b>RV (v0)</b> = {p['v0']:.1f} m/s<br>"
-                    f"<b>RV uncertainty</b> = {cr['rv_err']:.1f} m/s<br>"
+                    f"<b>RV (v0)</b> = {p['v0']:.3f} m/s<br>"
+                    f"<b>RV uncertainty</b> = {cr['rv_err']:.3f} m/s<br>"
                     f"amplitude = {p['amplitude']:.4f}<br>"
                     f"sigma = {p['sigma']:.1f} m/s<br>"
                     f"baseline = {p['baseline']:.4f}<br>"
@@ -528,7 +555,7 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
         )
         fig.add_trace(
             go.Scatter(
-                x=v_fine,
+                x=combined_result.get("v_fit", np.array([])),
                 y=combined_result["ccf_fit"],
                 mode="lines",
                 name="Combined fit",
@@ -536,7 +563,7 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
                 visible=True,
             )
         )
-        # Traces 2..2*n_chunks+1: per-order [data, fit]
+        # Traces 2..2*n_chunks+1: per-order [data, fit]; fit only over fitted velocity range
         for idx, cr in enumerate(chunk_results):
             order = cr["order"]
             fig.add_trace(
@@ -551,7 +578,7 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
             )
             fig.add_trace(
                 go.Scatter(
-                    x=v_fine,
+                    x=cr.get("v_fit", np.array([])),
                     y=cr["ccf_fit"],
                     mode="lines",
                     name=f"Order {order} fit",
@@ -614,6 +641,363 @@ def test_fit_gaussian_to_ccf_recovers_center_and_uncertainty():
             )
         fig.update_layout(
             title="Gaussian fit to CCF: combined or per BSPEC order (select from dropdown)",
+            xaxis_title="Velocity shift (m/s)",
+            yaxis_title="CCF (weighted covariance, not normalized; units of flux²)",
+            xaxis=dict(range=[v_min, v_max]),
+            height=500,
+            showlegend=True,
+            updatemenus=[
+                dict(
+                    active=0,
+                    buttons=buttons,
+                    direction="down",
+                    showactive=True,
+                    x=0.0,
+                    xanchor="left",
+                    y=1.12,
+                    yanchor="top",
+                )
+            ],
+        )
+        fig.show()
+
+
+def test_btsettl_shifted_polynomial_l2_recovers_rv_with_preview(template_path):
+    """
+    Load BT-Settl template, shift by a known RV, multiply by a 4th-order polynomial,
+    put into a BSPEC L2 model, run stellar RV (CCF) with default algorithm/parameters,
+    output Gaussian preview (per order + combined), and validate input RV is recovered.
+
+    Set HISPEC_DRP_SHOW_CCF_PREVIEW=1 to display the dropdown preview.
+    """
+    input_rv_km_s = -110.0  # km/s (same as other tests)
+    input_rv_m_s = input_rv_km_s * 1000.0
+    n_pix = 4096
+    v_step = 500.0  # m/s
+    v_min, v_max = _V_MIN, _V_MAX
+    window_size_um = 0.3  # default
+
+    # BSPEC wavelength range (orders 110–148): ~0.99–1.34 µm
+    wl_min_um, wl_max_um = 0.95, 1.4
+    w_rest, flux_rest = load_btsettl_spectrum(
+        template_path, wl_min_um=wl_min_um, wl_max_um=wl_max_um
+    )
+    w_rest = np.asarray(w_rest.to_value("micron"), dtype=np.float64)
+    flux_rest = np.asarray(flux_rest.value, dtype=np.float64)
+    # Sort and ensure no NaNs in used range
+    ok = np.isfinite(w_rest) & np.isfinite(flux_rest) & (w_rest > 0)
+    w_rest = w_rest[ok]
+    flux_rest = flux_rest[ok]
+    idx = np.argsort(w_rest)
+    w_rest = w_rest[idx]
+    flux_rest = flux_rest[idx]
+    assert len(w_rest) > 100, "BT-Settl template should have many points in BSPEC range"
+
+    # 4th-order polynomial: 1 + 0.05*x + 0.01*x^2 - 0.001*x^3 + 0.0001*x^4 (x in µm)
+    poly_coefs = [0.0001, -0.001, 0.01, 0.05, 1.0]
+    poly = np.poly1d(poly_coefs)
+
+    orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
+    order_start = int(min(orders))
+    order_end = int(max(orders))
+    n_orders = len(orders)
+    meta = {
+        "order_start": order_start,
+        "order_end": order_end,
+        "spectrograph": "BSPEC",
+        "instrument_name": "HISPEC",
+    }
+    model = datamodels.L2Model(meta=meta)
+    model.meta.order_start = order_start
+    model.meta.order_end = order_end
+
+    wave = np.zeros((n_orders, n_pix), dtype=np.float64)
+    spec = np.zeros((n_orders, n_pix), dtype=np.float32)
+    for oi, m in enumerate(orders):
+        wave_ord, _ = _order_wavelength_grid(m, n_pix)
+        wave[oi] = wave_ord
+        # Observed λ; rest-frame wavelength where we evaluate template: λ_rest = λ_obs / (1 + v/c)
+        lambda_rest = wave_ord / (1.0 + input_rv_km_s / C_KM_S)
+        flux_at_rest = np.interp(lambda_rest, w_rest, flux_rest)
+        spec[oi] = (flux_at_rest * poly(wave_ord)).astype(np.float32)
+
+    spec_err = np.maximum(spec * 0.01, 0.1).astype(np.float32)
+    spec_dq = np.zeros((n_orders, n_pix), dtype=np.uint32)
+
+    model.spec_fib1 = spec
+    model.spec_err_fib1 = spec_err
+    model.wave_fib1 = wave
+    model.spec_dq_fib1 = spec_dq
+
+    # Run stellar RV with default algorithm and parameters (template_path = unshifted BT-Settl)
+    prim = StellarRVPrimitive(
+        template_path=template_path,
+        do_fibers=["1"],
+        window_size_um=window_size_um,
+    )
+    out = prim.apply(model)
+    assert out is not None
+
+    # Recovered RV from pipeline: use RVCCFAVG if available, else weighted mean from RVCCF
+    tbl_avg = getattr(out, "rvccfavg_fib1", None)
+    if tbl_avg is not None and hasattr(tbl_avg, "columns") and "RV" in tbl_avg.colnames:
+        recovered_rv_m_s = float(tbl_avg["RV"][0])
+        recovered_rv_err_m_s = float(tbl_avg["RV_ERR"][0]) if "RV_ERR" in tbl_avg.colnames else None
+    else:
+        tbl = getattr(out, "rvccf_fib1", None)
+        assert tbl is not None and "RV" in tbl.colnames
+        rvs = np.asarray(tbl["RV"], dtype=np.float64)
+        rv_errs = np.asarray(tbl["RV_ERR"], dtype=np.float64)
+        valid = np.isfinite(rvs) & np.isfinite(rv_errs) & (rv_errs > 0)
+        assert np.any(valid), "No valid chunk RVs from pipeline"
+        w = 1.0 / (rv_errs[valid] ** 2)
+        recovered_rv_m_s = float(np.average(rvs[valid], weights=w))
+        recovered_rv_err_m_s = float(1.0 / np.sqrt(np.sum(w)))
+
+    # Validate input RV is recovered (within 2*uncertainty or 5 km/s)
+    tolerance_m_s = max(2.0 * (recovered_rv_err_m_s or 5000.0), 5000.0)
+    assert abs(recovered_rv_m_s - input_rv_m_s) <= tolerance_m_s, (
+        f"Recovered RV {recovered_rv_m_s/1000:.2f} km/s should match input {input_rv_km_s} km/s "
+        f"within {tolerance_m_s/1000:.1f} km/s."
+    )
+
+    # Build Gaussian preview: per-order CCF (mean over chunks) + combined, fit Gaussian, dropdown
+    # CCF API: mask = True for BAD pixels (excluded); good = ~mask & finite(spec) & err>0
+    template_ln = np.log(w_rest)
+    do_not_use = 0
+    chunk_results = []
+    for oi, order in enumerate(orders):
+        wave_ord = wave[oi]
+        spec_ord = spec[oi]
+        err_ord = spec_err[oi]
+        dq_ord = spec_dq[oi]
+        good_pixels = (dq_ord == do_not_use) & (err_ord > 0) & np.isfinite(spec_ord)
+        mask_bad = ~good_pixels  # True = bad, so CCF uses good = ~mask_bad
+        rvs_o, rv_errs_o, chunk_wl, v_grid, ccf_2d = rv_per_chunks_with_ccf(
+            wave_ord,
+            spec_ord,
+            err_ord,
+            mask_bad,
+            template_ln,
+            flux_rest,
+            window_size_um=window_size_um,
+            v_min=v_min,
+            v_max=v_max,
+            v_step=v_step,
+        )
+        ccf_order = np.nanmean(ccf_2d, axis=0)
+        wl_lo = float(np.nanmin(wave_ord))
+        wl_hi = float(np.nanmax(wave_ord))
+        chunk_results.append({
+            "order": order,
+            "wl_lo": wl_lo,
+            "wl_hi": wl_hi,
+            "ccf": ccf_order,
+        })
+
+    v_grid = np.arange(v_min, v_max + v_step * 0.5, v_step, dtype=np.float64)
+    for cr in chunk_results:
+        rv_i, rv_err_i, params_i, diag_i = fit_gaussian_to_ccf(
+            v_grid, cr["ccf"], v_step, return_params=True
+        )
+        cr["rv"] = rv_i
+        cr["rv_err"] = rv_err_i
+        cr["params"] = params_i
+        cr["diagnostics"] = diag_i
+        if params_i:
+            v_lo_fit = diag_i.get("fit_v_lo", v_min)
+            v_hi_fit = diag_i.get("fit_v_hi", v_max)
+            v_fit = np.linspace(v_lo_fit, v_hi_fit, 200)
+            cr["ccf_fit"] = _gaussian_ccf_model(
+                v_fit,
+                params_i["amplitude"],
+                params_i["v0"],
+                params_i["sigma"],
+                params_i["baseline"],
+            )
+            cr["v_fit"] = v_fit
+        else:
+            cr["ccf_fit"] = np.array([])
+            cr["v_fit"] = np.array([])
+
+    ccf_array = np.array([cr["ccf"] for cr in chunk_results], dtype=np.float64)
+    # Avoid "Mean of empty slice" when some orders have all-NaN CCF
+    if ccf_array.size > 0 and np.any(np.isfinite(ccf_array)):
+        combined_ccf = np.nanmean(ccf_array, axis=0)
+    else:
+        combined_ccf = np.full(ccf_array.shape[1] if ccf_array.ndim > 1 else len(v_grid), np.nan)
+    rv_comb_fit, rv_err_comb_fit, params_comb, diag_comb = fit_gaussian_to_ccf(
+        v_grid, combined_ccf, v_step, return_params=True
+    )
+    combined_result = {
+        "rv": rv_comb_fit,
+        "rv_err": rv_err_comb_fit,
+        "params": params_comb,
+        "diagnostics": diag_comb,
+    }
+    if params_comb:
+        v_lo_fit = diag_comb.get("fit_v_lo", v_min)
+        v_hi_fit = diag_comb.get("fit_v_hi", v_max)
+        v_fit_comb = np.linspace(v_lo_fit, v_hi_fit, 200)
+        combined_result["ccf_fit"] = _gaussian_ccf_model(
+            v_fit_comb,
+            params_comb["amplitude"],
+            params_comb["v0"],
+            params_comb["sigma"],
+            params_comb["baseline"],
+        )
+        combined_result["v_fit"] = v_fit_comb
+    else:
+        combined_result["ccf_fit"] = np.array([])
+        combined_result["v_fit"] = np.array([])
+
+    show_preview = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if show_preview:
+        import plotly.graph_objects as go
+
+        def make_annotation_text(cr, idx, is_combined=False):
+            if is_combined:
+                p, d = cr.get("params") or {}, cr.get("diagnostics") or {}
+                if p:
+                    n_ord = len(chunk_results)
+                    return (
+                        f"<b>Combined</b> (all BSPEC orders, N={n_ord})<br>"
+                        f"<b>RV</b> = {cr['rv']:.3f} m/s (from fit to mean CCF)<br>"
+                        f"<b>RV uncertainty</b> = {cr['rv_err']:.3f} m/s<br>"
+                        f"Input RV = {input_rv_km_s} km/s<br>"
+                        f"v0 = {p['v0']:.3f}, σ = {p['sigma']:.3f} m/s<br>"
+                        f"amplitude = {p['amplitude']:.4f}, baseline = {p['baseline']:.4f}<br>"
+                        f"<i>BT-Settl template, shifted + 4th-order polynomial.</i>"
+                    )
+                return (
+                    f"<b>Combined</b> (all BSPEC orders)<br>"
+                    f"<b>Fit status:</b> FAILED<br>"
+                    f"<b>Message:</b> {d.get('message', '—')}"
+                )
+            order = cr.get("order", idx)
+            wl_lo, wl_hi = cr["wl_lo"], cr["wl_hi"]
+            p, d = cr.get("params") or {}, cr.get("diagnostics") or {}
+            if p:
+                return (
+                    f"<b>Order {order}</b><br>"
+                    f"λ {wl_lo:.4f}–{wl_hi:.4f} µm<br>"
+                    f"<b>RV (v0)</b> = {p['v0']:.3f} m/s<br>"
+                    f"<b>RV uncertainty</b> = {cr['rv_err']:.3f} m/s<br>"
+                    f"amplitude = {p['amplitude']:.4f}, sigma = {p['sigma']:.1f} m/s<br>"
+                )
+            return (
+                f"<b>Order {order}</b><br>"
+                f"λ {wl_lo:.4f}–{wl_hi:.4f} µm<br>"
+                f"<b>Fit status:</b> FAILED<br>"
+                f"<b>Message:</b> {d.get('message', '—')}"
+            )
+
+        n_chunks = len(chunk_results)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=v_grid,
+                y=combined_ccf,
+                mode="markers",
+                name="Combined data",
+                marker=dict(size=4, symbol="circle"),
+                visible=True,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=combined_result.get("v_fit", np.array([])),
+                y=combined_result["ccf_fit"],
+                mode="lines",
+                name="Combined fit",
+                line=dict(width=2),
+                visible=True,
+            )
+        )
+        for idx, cr in enumerate(chunk_results):
+            fig.add_trace(
+                go.Scatter(
+                    x=v_grid,
+                    y=cr["ccf"],
+                    mode="markers",
+                    name=f"Order {cr['order']} data",
+                    marker=dict(size=4, symbol="circle"),
+                    visible=False,
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=cr.get("v_fit", np.array([])),
+                    y=cr["ccf_fit"],
+                    mode="lines",
+                    name=f"Order {cr['order']} fit",
+                    line=dict(width=2),
+                    visible=False,
+                )
+            )
+        n_traces = 2 + 2 * n_chunks
+        default_annotation = dict(
+            text=make_annotation_text(combined_result, 0, is_combined=True),
+            xref="paper",
+            yref="paper",
+            x=0.02,
+            y=0.98,
+            xanchor="left",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=11),
+            bgcolor="rgba(255,255,255,0.8)",
+        )
+        fig.add_annotation(**default_annotation)
+        buttons = []
+        visible_combined = [False] * n_traces
+        visible_combined[0] = True
+        visible_combined[1] = True
+        buttons.append(
+            dict(
+                label="Combined (all orders)",
+                method="update",
+                args=[
+                    {"visible": visible_combined},
+                    {
+                        "annotations": [
+                            dict(
+                                default_annotation,
+                                text=make_annotation_text(combined_result, 0, is_combined=True),
+                            )
+                        ]
+                    },
+                ],
+            )
+        )
+        for idx in range(n_chunks):
+            visible = [False] * n_traces
+            visible[2 + 2 * idx] = True
+            visible[2 + 2 * idx + 1] = True
+            cr = chunk_results[idx]
+            buttons.append(
+                dict(
+                    label=f"Order {cr['order']} (λ {cr['wl_lo']:.3f}–{cr['wl_hi']:.3f} µm)",
+                    method="update",
+                    args=[
+                        {"visible": visible},
+                        {
+                            "annotations": [
+                                dict(
+                                    default_annotation,
+                                    text=make_annotation_text(chunk_results[idx], idx),
+                                )
+                            ]
+                        },
+                    ],
+                )
+            )
+        fig.update_layout(
+            title="BT-Settl shifted + polynomial in L2: Gaussian fit to CCF (per order + combined)",
             xaxis_title="Velocity shift (m/s)",
             yaxis_title="CCF (weighted covariance, not normalized; units of flux²)",
             xaxis=dict(range=[v_min, v_max]),

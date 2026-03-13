@@ -47,12 +47,107 @@ def _gaussian_ccf_model(v: np.ndarray, amplitude: float, v0: float, sigma: float
     return amplitude * np.exp(-0.5 * ((v - v0) / np.maximum(sigma, 1e-10)) ** 2) + baseline
 
 
+# Sigma from HWHM for a Gaussian: sigma = HWHM / sqrt(2*ln(2))
+_HWHM_TO_SIGMA = 1.0 / np.sqrt(2.0 * np.log(2.0))
+
+
+def _choose_ccf_fit_window(
+    v: np.ndarray,
+    y: np.ndarray,
+    v0_peak: float,
+    v_step: float,
+    n_sigma_window: float = 4.0,
+    min_points: int = 15,
+    min_half_width_vel: float | None = None,
+) -> tuple[float, float]:
+    """
+    Choose a velocity window around the CCF peak for Gaussian fitting so the fit
+    is optimized to the signal and minimizes influence of structured background.
+
+    Uses the half-width at half maximum (HWHM) of the CCF around the peak to
+    estimate the Gaussian width, then sets the window to v0 ± n_sigma_window * sigma_est.
+    This keeps the window as large as the signal (maximizing use of peak data) while
+    excluding distant background.
+
+    Parameters
+    ----------
+    v, y : np.ndarray
+        Velocity and CCF values (1D, same length).
+    v0_peak : float
+        Approximate peak position (m/s).
+    v_step : float
+        Velocity step in m/s (used for minimum window size).
+    n_sigma_window : float
+        Window half-width in units of estimated sigma (default 4).
+    min_points : int
+        Require at least this many points in the window; window is expanded if needed.
+    min_half_width_vel : float or None
+        Minimum half-width in m/s. If None, uses max(5*v_step, 2*estimated sigma).
+
+    Returns
+    -------
+    v_lo, v_hi : float
+        Velocity bounds [v_lo, v_hi] for the fit window.
+    """
+    v_min, v_max = float(np.nanmin(v)), float(np.nanmax(v))
+    ccf_max = float(y[np.nanargmax(y)])
+    baseline_est = float(np.nanmin(y))
+    amp_est = ccf_max - baseline_est
+    if amp_est <= 0:
+        return v_min, v_max
+    half_max = baseline_est + 0.5 * amp_est
+    i_peak = int(np.argmin(np.abs(v - v0_peak)))
+    # Left HWHM: first point left of peak where y <= half_max
+    left_hw = np.nan
+    for i in range(i_peak - 1, -1, -1):
+        if y[i] <= half_max:
+            if i + 1 < len(v):
+                # Linear interpolate for finer HWHM
+                t = (half_max - y[i]) / (y[i + 1] - y[i]) if y[i + 1] != y[i] else 0.0
+                left_hw = v[i] + t * (v[i + 1] - v[i]) - v0_peak
+            else:
+                left_hw = v[i] - v0_peak
+            break
+    if np.isnan(left_hw):
+        left_hw = v0_peak - v_min
+    # Right HWHM
+    right_hw = np.nan
+    for i in range(i_peak + 1, len(v)):
+        if y[i] <= half_max:
+            if i - 1 >= 0:
+                t = (half_max - y[i - 1]) / (y[i] - y[i - 1]) if y[i] != y[i - 1] else 0.0
+                right_hw = v[i - 1] + t * (v[i] - v[i - 1]) - v0_peak
+            else:
+                right_hw = v[i] - v0_peak
+            break
+    if np.isnan(right_hw):
+        right_hw = v_max - v0_peak
+    hwhm = max(abs(left_hw), abs(right_hw), 1e-10)
+    # sigma = HWHM / sqrt(2*ln(2))
+    sigma_est = hwhm * _HWHM_TO_SIGMA
+    half_width = n_sigma_window * sigma_est
+    if min_half_width_vel is not None:
+        half_width = max(half_width, min_half_width_vel)
+    else:
+        half_width = max(half_width, 5.0 * v_step, 2.0 * sigma_est)
+    # Ensure enough points in window
+    n_pts = np.sum((v >= v0_peak - half_width) & (v <= v0_peak + half_width))
+    while n_pts < min_points and half_width <= (v_max - v_min) / 2.0:
+        half_width *= 1.2
+        n_pts = np.sum((v >= v0_peak - half_width) & (v <= v0_peak + half_width))
+    v_lo = max(v_min, v0_peak - half_width)
+    v_hi = min(v_max, v0_peak + half_width)
+    return v_lo, v_hi
+
+
 def fit_gaussian_to_ccf(
     v_grid: np.ndarray,
     ccf: np.ndarray,
     v_step: float,
     n_good: int | None = None,
     return_params: bool = False,
+    use_dynamic_window: bool = True,
+    n_sigma_window: float = 4.0,
 ):
     """
     Fit a Gaussian to CCF(velocity) and return best-fit RV and uncertainty.
@@ -60,6 +155,14 @@ def fit_gaussian_to_ccf(
     Model: CCF(v) = A * exp(-(v - v0)^2 / (2*sigma^2)) + B.
     The radial velocity is v0; the uncertainty is taken from the fit covariance
     (error on v0); no minimum floor, so uncertainty can be arbitrarily small.
+
+    When use_dynamic_window is True (default), the fit is performed in a window
+    around the CCF peak. The routine tries several window sizes (including narrow
+    ones, 2–6 sigma_est from HWHM) and keeps the fit that minimizes the sum of
+    squared residuals (RSS) between the CCF data and the Gaussian, so the chosen
+    fit best matches the data and typically has smaller residuals. The reported
+    RV uncertainty is from that fit. Diagnostics include fit_v_lo and fit_v_hi
+    so callers can plot the Gaussian only over the fitted range.
 
     Parameters
     ----------
@@ -77,6 +180,13 @@ def fit_gaussian_to_ccf(
         (rv, rv_err, params, diagnostics). params has keys 'amplitude', 'v0',
         'sigma', 'baseline'. diagnostics has 'fit_ok', 'used_covariance_for_error',
         'used_sigma_fallback', 'message' (default False).
+    use_dynamic_window : bool, optional
+        If True (default), restrict the fit to a dynamic window around the peak
+        to reduce influence of structured background. If False, use the full
+        velocity range.
+    n_sigma_window : float, optional
+        When use_dynamic_window is True, fit window half-width in units of
+        estimated sigma (default 4.0).
 
     Returns
     -------
@@ -115,57 +225,156 @@ def fit_gaussian_to_ccf(
         diag = _fail_diagnostics("no CCF peak (ccf_max <= ccf_min)")
         return (np.nan, np.nan, {}, diag) if return_params else (np.nan, np.nan)
     v0_init = float(v[i_max])
-    sigma_init = max((np.nanmax(v) - np.nanmin(v)) / 10.0, v_step * 10.0)
     amplitude_init = ccf_max - ccf_min
     baseline_init = ccf_min
-    p0 = (amplitude_init, v0_init, sigma_init, baseline_init)
-    try:
-        popt, pcov = curve_fit(
-            _gaussian_ccf_model,
-            v,
-            y,
-            p0=p0,
-            maxfev=200,
-            bounds=(
-                (-np.inf, np.nanmin(v), v_step * 2, -np.inf),
-                (np.inf, np.nanmax(v), (np.nanmax(v) - np.nanmin(v)) * 0.5, np.inf),
-            ),
-        )
-        rv = float(popt[1])
-        sigma_v0 = float(np.sqrt(pcov[1, 1])) if np.all(np.isfinite(pcov)) else np.nan
-        used_covariance = np.isfinite(sigma_v0) and sigma_v0 > 0
-        if used_covariance:
-            rv_err = sigma_v0
-            used_sigma_fallback = False
-            diag_msg = "RV uncertainty from fit covariance (sigma_v0)"
+    v_full, y_full = v.copy(), y.copy()
+
+    # Candidate window sizes (n_sigma * sigma_est). Include narrow windows (2–3 sigma)
+    # so the fit focuses on the peak and minimizes residuals when CCF has structured wings.
+    _N_SIGMA_CANDIDATES = (2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0)
+
+    # Select the fit that minimizes sum of squared residuals (RSS), not rv_err, so we
+    # get a Gaussian that best matches the data and report its uncertainty (often smaller
+    # when the fit is good and the window is appropriate).
+    best_rss = np.inf
+    best_result = None
+
+    if use_dynamic_window:
+        for n_sig in _N_SIGMA_CANDIDATES:
+            v_lo, v_hi = _choose_ccf_fit_window(
+                v_full, y_full, v0_init, v_step,
+                n_sigma_window=n_sig,
+                min_points=15,
+            )
+            in_window = (v_full >= v_lo) & (v_full <= v_hi)
+            n_in = np.sum(in_window)
+            if n_in < 10:
+                v_lo, v_hi = float(np.nanmin(v_full)), float(np.nanmax(v_full))
+                v_win, y_win = v_full, y_full
+            else:
+                v_win = v_full[in_window]
+                y_win = y_full[in_window]
+            window_half = (v_hi - v_lo) * 0.5
+            sigma_init = max(window_half / n_sig, v_step * 10.0)
+            # Tighter sigma_max so the Gaussian stays near the peak (reduces fitting to wings)
+            sigma_max = window_half * 0.4
+            p0 = (amplitude_init, v0_init, sigma_init, baseline_init)
+            try:
+                popt, pcov = curve_fit(
+                    _gaussian_ccf_model,
+                    v_win,
+                    y_win,
+                    p0=p0,
+                    maxfev=200,
+                    bounds=(
+                        (-np.inf, v_lo, v_step * 2, -np.inf),
+                        (np.inf, v_hi, sigma_max, np.inf),
+                    ),
+                )
+                y_pred = _gaussian_ccf_model(v_win, popt[0], popt[1], popt[2], popt[3])
+                rss = float(np.sum((y_win - y_pred) ** 2))
+                if rss < best_rss:
+                    best_rss = rss
+                    best_result = (popt, pcov, v_win, v_lo, v_hi, n_sig)
+            except (RuntimeError, ValueError):
+                continue
+        if best_result is None:
+            v_lo, v_hi = float(np.nanmin(v_full)), float(np.nanmax(v_full))
+            v_win, y_win = v_full, y_full
         else:
-            rv_err = float(np.abs(popt[2])) / np.sqrt(np.sum(valid) / 50.0)
-            if n_good is not None and n_good > 50:
-                rv_err = max(rv_err, float(np.abs(popt[2])) / np.sqrt(n_good / 50.0))
-            used_sigma_fallback = True
-            reason = "sigma_v0 non-finite or non-positive from curve_fit"
-            diag_msg = f"RV uncertainty from sigma/sqrt(n) fallback ({reason})"
-            logger.warning("CCF Gaussian fit: %s", diag_msg)
-        if return_params:
-            params = {
-                "amplitude": float(popt[0]),
-                "v0": float(popt[1]),
-                "sigma": float(popt[2]),
-                "baseline": float(popt[3]),
-            }
-            diagnostics = {
-                "fit_ok": True,
-                "used_covariance_for_error": used_covariance,
-                "used_sigma_fallback": used_sigma_fallback,
-                "message": diag_msg,
-            }
-            return rv, rv_err, params, diagnostics
-        return rv, rv_err
-    except (RuntimeError, ValueError) as e:
-        diag = _fail_diagnostics(f"curve_fit failed: {e!s}")
-        if return_params:
-            return np.nan, np.nan, {}, diag
-        return np.nan, np.nan
+            popt, pcov, v_win, v_lo, v_hi, _ = best_result
+            v, y = v_win, y_full[(v_full >= v_lo) & (v_full <= v_hi)]
+    else:
+        v_lo, v_hi = float(np.nanmin(v)), float(np.nanmax(v))
+        v_win, y_win = v, y
+
+    if best_result is None and use_dynamic_window:
+        v_lo, v_hi = float(np.nanmin(v_full)), float(np.nanmax(v_full))
+        v_win, y_win = v_full, y_full
+        window_half = (v_hi - v_lo) * 0.5
+        sigma_init = max(window_half / n_sigma_window, v_step * 10.0)
+        amplitude_init = ccf_max - ccf_min
+        baseline_init = ccf_min
+        p0 = (amplitude_init, v0_init, sigma_init, baseline_init)
+        sigma_max = window_half * 0.4
+        try:
+            popt, pcov = curve_fit(
+                _gaussian_ccf_model,
+                v_win,
+                y_win,
+                p0=p0,
+                maxfev=200,
+                bounds=(
+                    (-np.inf, v_lo, v_step * 2, -np.inf),
+                    (np.inf, v_hi, sigma_max, np.inf),
+                ),
+            )
+            best_result = (popt, pcov, v_win, v_lo, v_hi, n_sigma_window)
+        except (RuntimeError, ValueError):
+            pass
+
+    if best_result is not None:
+        popt, pcov, v_win, v_lo, v_hi, _ = best_result
+    else:
+        v_lo, v_hi = float(np.nanmin(v_full)), float(np.nanmax(v_full))
+        window_half = (v_hi - v_lo) * 0.5
+        sigma_init = max(window_half / n_sigma_window, v_step * 10.0)
+        amplitude_init = ccf_max - ccf_min
+        baseline_init = ccf_min
+        p0 = (amplitude_init, v0_init, sigma_init, baseline_init)
+        sigma_max = window_half * 0.4
+        try:
+            popt, pcov = curve_fit(
+                _gaussian_ccf_model,
+                v_full,
+                y_full,
+                p0=p0,
+                maxfev=200,
+                bounds=(
+                    (-np.inf, v_lo, v_step * 2, -np.inf),
+                    (np.inf, v_hi, sigma_max, np.inf),
+                ),
+            )
+            v_win = v_full
+        except (RuntimeError, ValueError) as e:
+            diag = _fail_diagnostics(f"curve_fit failed: {e!s}")
+            if return_params:
+                return np.nan, np.nan, {}, diag
+            return np.nan, np.nan
+
+    rv = float(popt[1])
+    sigma_v0 = float(np.sqrt(pcov[1, 1])) if np.all(np.isfinite(pcov)) else np.nan
+    used_covariance = np.isfinite(sigma_v0) and sigma_v0 > 0
+    n_fit = len(v_win)
+    if used_covariance:
+        rv_err = sigma_v0
+        used_sigma_fallback = False
+        diag_msg = "RV uncertainty from fit covariance (sigma_v0)"
+    else:
+        rv_err = float(np.abs(popt[2])) / np.sqrt(n_fit / 50.0)
+        if n_good is not None and n_good > 50:
+            rv_err = max(rv_err, float(np.abs(popt[2])) / np.sqrt(n_good / 50.0))
+        used_sigma_fallback = True
+        reason = "sigma_v0 non-finite or non-positive from curve_fit"
+        diag_msg = f"RV uncertainty from sigma/sqrt(n) fallback ({reason})"
+        logger.warning("CCF Gaussian fit: %s", diag_msg)
+    if return_params:
+        params = {
+            "amplitude": float(popt[0]),
+            "v0": float(popt[1]),
+            "sigma": float(popt[2]),
+            "baseline": float(popt[3]),
+        }
+        diagnostics = {
+            "fit_ok": True,
+            "used_covariance_for_error": used_covariance,
+            "used_sigma_fallback": used_sigma_fallback,
+            "message": diag_msg,
+            "fit_v_lo": v_lo,
+            "fit_v_hi": v_hi,
+        }
+        return rv, rv_err, params, diagnostics
+    return rv, rv_err
 
 
 @njit(cache=True)
