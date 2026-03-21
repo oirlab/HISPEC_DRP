@@ -6,6 +6,10 @@ wavelength and flux arrays from BT-Settl or similar .h5 files.
 """
 from __future__ import annotations
 
+# Provenance: BT-Settl .h5 files are from the BT-Settl atmosphere grid (Allard et al.);
+# cite the BT-Settl publication for science. fetch_svo_2mass_filter uses SVO Filter Profile
+# Service (see SVO_FILTER_URL below).
+
 import logging
 import os
 import urllib.request
@@ -28,10 +32,38 @@ except ImportError:
     h5py = None  # type: ignore[assignment]
 
 __all__ = [
+    "air_wavelength_nm_to_vacuum_nm",
     "get_spectrum_path",
     "load_btsettl_spectrum",
     "fetch_svo_2mass_filter",
 ]
+
+
+def _edlen_refractivity_ppm_nm(wavelength_nm: np.ndarray, *, air_density: float = 1.0) -> np.ndarray:
+    """
+    (n - 1) in ppm for dry air at STP; wavelength in **nanometers**.
+
+    Same Cauchy form as SPIROU ``spectrumlib.nrefrac`` / Morton (1991) style dispersion.
+    """
+
+    wl = np.asarray(wavelength_nm, dtype=np.float64)
+    wl2inv = (1.0e3 / wl) ** 2
+    refracstp = 272.643 + 1.2288 * wl2inv + 3.555e-2 * wl2inv**2
+    return float(air_density) * refracstp
+
+
+def air_wavelength_nm_to_vacuum_nm(
+    air_wavelength_nm: np.ndarray | float, *, air_density: float = 1.0
+) -> np.ndarray:
+    """
+    Convert **air** to **vacuum** wavelength (same input units as output: nm).
+
+    λ_vac = λ_air * (1 + 1e-6 * N) with N from :func:`_edlen_refractivity_ppm_nm`.
+    """
+
+    air = np.asarray(air_wavelength_nm, dtype=np.float64)
+    nppm = _edlen_refractivity_ppm_nm(air, air_density=air_density)
+    return air * (1.0 + 1.0e-6 * nppm)
 
 
 def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
@@ -146,6 +178,8 @@ def load_btsettl_spectrum(
     wl_max_um: float = 3.0,
     mag_ab: float | None = None,
     filter_band: str | None = None,
+    *,
+    wavelengths_are_air: bool = True,
 ):
     """
     Load wavelength and flux from a BT-Settl spectrum HDF5 file.
@@ -153,6 +187,11 @@ def load_btsettl_spectrum(
     The file is expected to have 'wavelength' (in Angstrom) and 'flux'
     (in 1e-23 erg/cm^2/s/Angstrom) datasets. Values are converted to micron
     and astropy units, and clipped to the given wavelength range.
+
+    By default (``wavelengths_are_air=True``) the HDF5 wavelength grid is treated as
+    **air** Angstrom and converted to **vacuum** microns before return, so the template
+    matches vacuum wavelength axes (e.g. HISPEC L2 ``wave_*``, SPIROU-style masks in
+    vacuum nm). Set ``wavelengths_are_air=False`` if the file is already on a vacuum grid.
 
     If ``mag_ab`` and ``filter_band`` are set, the spectrum is normalized to
     the given AB magnitude in the corresponding 2MASS filter (J, H, or K).
@@ -171,11 +210,14 @@ def load_btsettl_spectrum(
         in that band. Default is None.
     filter_band : str or None, optional
         One of 'J', 'H', 'K'. Used with ``mag_ab`` to normalize. Default is None.
+    wavelengths_are_air : bool, optional
+        If True (default), convert stored wavelengths from air to vacuum before applying
+        ``wl_min_um`` / ``wl_max_um`` (interpreted as vacuum microns).
 
     Returns
     -------
     wavelength : astropy.units.Quantity
-        Wavelength array in micron.
+        Wavelength array in micron (**vacuum** when ``wavelengths_are_air`` is True).
     flux : astropy.units.Quantity
         Flux density in erg/s/cm^2/Angstrom (same as file).
     """
@@ -192,10 +234,21 @@ def load_btsettl_spectrum(
         wl_max_um,
     )
     with h5py.File(filepath, "r") as f:
-        wavelength = f["wavelength"][:] * 1.0e-4 * u.micron
+        wl_air_angstrom = np.asarray(f["wavelength"][:], dtype=np.float64)
+        if wavelengths_are_air:
+            wl_nm_air = wl_air_angstrom / 10.0
+            wl_vac_nm = np.full_like(wl_nm_air, np.nan, dtype=np.float64)
+            ok = np.isfinite(wl_nm_air) & (wl_nm_air > 0)
+            wl_vac_nm[ok] = air_wavelength_nm_to_vacuum_nm(wl_nm_air[ok])
+            wl_vac_um = wl_vac_nm * 1.0e-3
+        else:
+            wl_vac_um = wl_air_angstrom * 1.0e-4
+        wavelength = wl_vac_um * u.micron
         flux = f["flux"][:] * 1.0e-23 * (u.erg / u.cm**2 / u.s / u.Angstrom)
 
-    mask = (wavelength >= wl_min_um * u.micron) & (wavelength <= wl_max_um * u.micron)
+    mask = np.isfinite(wavelength.value) & (wavelength >= wl_min_um * u.micron) & (
+        wavelength <= wl_max_um * u.micron
+    )
     wavelength = wavelength[mask]
     flux = flux[mask]
     logger.debug("Loaded %d wavelength points from %s", len(wavelength), filepath)
