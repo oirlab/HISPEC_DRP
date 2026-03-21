@@ -61,7 +61,7 @@ dependencies = [
   "jsonref",
   "barycorrpy>=0.4.4",
   "plotly",
-  "kaleido",
+  "kaleido>=1",  # v1 API (write_fig_sync); PNG previews avoid plotly.io engine deprecation
 ]
 
 
