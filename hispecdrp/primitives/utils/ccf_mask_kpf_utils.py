@@ -1,20 +1,52 @@
 """
-KPF-inspired mask-shifted cross-correlation for stellar RV.
+Mask-shifted cross-correlation (CCF) for stellar radial velocity.
 
-This module mirrors the core mechanics of KPF's mask-shift CCF:
-- Load a line mask from disk (SPIROU-style ``.mas`` or KPF-style 2-col ``.txt``).
-- For each trial velocity, Doppler-shift mask line segments into wavelength space.
-- Compute pixel overlap fractions between shifted mask segments and data pixel bins.
-- Build CCF(v) = sum(flux * mask_weight * sn) over pixels.
-- Fit a Gaussian to the CCF peak to estimate RV and RV uncertainty.
+This module implements an **independent HISPEC DRP** treatment of mask-line RV:
+load line segments, Doppler-shift them on a velocity grid, accumulate pixel overlap
+weights, form :math:`\\mathrm{CCF}(v)`, and estimate RV (parabolic refinement near
+the peak; see :func:`rv_from_ccf_mask_kpf`). Chunking, median/MAD rejection, and
+inverse-variance aggregation match the semantics of the stellar-template path in
+:mod:`hispecdrp.primitives.utils.ccf_utils` and
+:class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
 
-The orchestration (chunking/orders + median/MAD + weighted mean) is written to
-match the output semantics of :meth:`hispecdrp.primitives.StellarRVPrimitive._run_algorithm_ccf_median_mad`.
+**Mask formats**
+
+- **SPIROU-style** ``.mas``: three columns (wavelength start, end, weight). Bundled
+  files under ``hispecdrp/data/masks/`` document **vacuum** nm; values are divided
+  by 1000 to microns (no dispersion conversion in :func:`load_mask_spirou_mas`).
+- **KPF-style** two-column text: center wavelength + weight; segment half-width from
+  ``mask_width_um`` or inferred spacing (see :func:`load_mask_kpf_two_column`).
+
+Notes
+-----
+Algorithm structure (velocity loop, shifted segments, overlap with pixel bins) is
+**inspired by** the Keck **KPF** pipeline’s public mask-line machinery, e.g.
+``alg_rv_mask_line.py`` in the radial_velocity module. This repository’s code is
+**not** a verbatim copy of KPF source.
+
+Packaged ``.mas`` line lists are **redistributed for convenience** from the
+SPIRou / **spirou-ccf** ecosystem (E. Martioli); cite upstream masks and HISPEC
+appropriately for publications.
+
+References
+----------
+.. [1] Keck Data Reduction Pipelines, KPF-Pipeline, ``alg_rv_mask_line.py`` (commit
+       ``81609b0ac0ab6d12536fb771bfdd0112001340c3``):
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+.. [2] KPF radial_velocity ``src`` tree (same commit):
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+.. [3] spirou-ccf, ``spiroulib.py`` (SPIRou data/CCF context):
+       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+.. [4] spirou-ccf ``ccf_masks`` directory (mask files):
+       https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+
+See Also
+--------
+:func:`hispecdrp.primitives.utils.ccf_mask_kpf_utils.run_ccf_mask_kpf_for_fiber` :
+    Fiber-level driver used by ``StellarRVPrimitive(algorithm="ccf_mask_kpf")``.
+``hispecdrp/data/masks/README.md`` :
+    Packaged-mask provenance and citation guidance.
 """
-# Provenance: Independent HISPEC DRP implementation; mechanics follow public KPF
-# mask-shift CCF concepts (not copied from KPF proprietary code). SPIROU .mas format from
-# SPIROU/OPERA conventions. Default mask: hispecdrp/data/masks/M2_filt_allRV.mas.
-# Combines chunks via ccf_utils.combine_rvs_median_mad / weighted_mean_rv.
 
 from __future__ import annotations
 
@@ -44,12 +76,18 @@ C_M_S = 299792458.0
 @dataclass(frozen=True)
 class MaskLines:
     """
-    Mask line segments in microns.
+    Mask line segments in wavelength space (microns).
 
-    Arrays are 1D, same length:
-    - start_um: segment start wavelength
-    - end_um: segment end wavelength
-    - weight: mask weight per line segment
+    All arrays are 1-D and equal length after validation in ``__post_init__``.
+
+    Attributes
+    ----------
+    start_um : np.ndarray
+        Segment start wavelength (µm), same frame as L2 ``WAVE_*`` (typically vacuum).
+    end_um : np.ndarray
+        Segment end wavelength (µm).
+    weight : np.ndarray
+        Per-segment weight used in the mask CCF sum.
     """
 
     start_um: np.ndarray
@@ -78,9 +116,28 @@ def _default_masks_dir() -> Path:
 
 def resolve_mask_path(mask_path: str | None) -> str:
     """
-    Resolve the configured mask path to an absolute path.
+    Resolve a user mask path or the packaged default to an absolute path.
 
-    If mask_path is None, uses the packaged SPIROU mask.
+    Parameters
+    ----------
+    mask_path : str or None
+        User path to a ``.mas`` or two-column mask. If ``None``, uses
+        ``hispecdrp/data/masks/M2_filt_allRV.mas`` (SPIROU-style default).
+
+    Returns
+    -------
+    str
+        Absolute filesystem path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the default packaged mask is missing and ``mask_path`` was ``None``.
+
+    Notes
+    -----
+    Default mask provenance: spirou-ccf ``ccf_masks`` on GitHub; see this module’s
+    ``References`` section and ``hispecdrp/data/masks/README.md``.
     """
 
     if mask_path:
@@ -158,16 +215,30 @@ def _iter_numeric_tokens_from_file(path: str) -> Iterable[tuple[float, float, fl
 
 def load_mask_spirou_mas(mask_file: str) -> MaskLines:
     """
-    Load a SPIROU-style mask file ``.mas`` with columns:
-    - lambda_start (nanometers **in air**, SPIROU/OPERA convention)
-    - lambda_end (nanometers **in air**)
-    - weight
+    Load a SPIROU-style three-column ``.mas`` mask file.
 
-    Wavelengths are converted **air → vacuum** (nm) using the same formula as SPIROU
-    ``spectrumlib.convert_air_to_vacuum_wl``, then converted to **microns** via ``/ 1e3``
-    for use in the rest of this module.
+    Each data row: wavelength start, wavelength end, weight. Wavelength columns are
+    **divided by 1000** to convert **nanometers → microns**. No additional air→vacuum
+    correction is applied in code. Bundled HISPEC masks document **vacuum** nm in file
+    headers; some upstream SPIROU/APERO masks may use **air** nm—in that case convert
+    externally or pre-process the file.
 
-    Returns wavelengths in micron (vacuum).
+    Comment lines beginning with ``#``, ``;``, or ``//`` are skipped.
+
+    Parameters
+    ----------
+    mask_file : str
+        Path to the ``.mas`` file.
+
+    Returns
+    -------
+    MaskLines
+        Segment boundaries and weights in microns (same spectral frame as the numbers
+        in the file after the nm→µm scale change).
+
+    See Also
+    --------
+    load_mask_kpf_two_column : KPF-style two-column masks.
     """
 
     start_vals: list[float] = []
@@ -264,6 +335,26 @@ def load_mask_kpf_two_column(mask_file: str, *, mask_width_um: float | None) -> 
 
 
 def load_mask(mask_path: str, *, mask_width_um: float | None = None) -> MaskLines:
+    """
+    Load a line mask from disk, dispatching on file extension.
+
+    Parameters
+    ----------
+    mask_path : str
+        Path to ``.mas`` (SPIROU-style) or ``.txt`` / ``.dat`` / ``.csv`` (KPF-style).
+    mask_width_um : float or None, optional
+        Half-width of each segment in µm for two-column masks only; ignored for
+        ``.mas`` files that carry explicit start/end columns.
+
+    Returns
+    -------
+    MaskLines
+        Parsed segments in microns.
+
+    Notes
+    -----
+    Unknown extensions try SPIROU parsing first, then KPF two-column.
+    """
     p = Path(mask_path)
     suffix = p.suffix.lower()
     if suffix == ".mas":
@@ -344,13 +435,35 @@ def calc_ccf_mask_kpf_like(
     sn_floor: float = 0.0,
 ) -> np.ndarray:
     """
-    Compute mask-shifted CCF(v) for one spectral chunk.
+    Compute mask-shifted :math:`\\mathrm{CCF}(v)` for one spectral chunk.
 
-    This is a direct, readable translation of KPF's logic:
-    - compute pixel bin edges
-    - for each velocity step, shift each mask line segment
-    - compute overlap fraction with each pixel bin
-    - CCF(v) = sum(flux * mask_weight * sn)
+    Builds pixel bin edges from the wavelength grid, then for each trial velocity
+    Doppler-shifts mask segments and accumulates overlap-weighted mask density per
+    pixel. The CCF value is the sum of flux × mask × signal-to-noise factor over
+    pixels (KPF-style structure; see module ``References``).
+
+    Parameters
+    ----------
+    wave_um : np.ndarray
+        Wavelength samples (µm), same length as ``flux``.
+    flux : np.ndarray
+        Flux per pixel.
+    flux_err : np.ndarray or None
+        Flux error per pixel; if None, errors are taken as unity internally.
+    mask_lines : MaskLines
+        Line segments in µm.
+    v_grid_m_s : np.ndarray
+        Trial velocities (m s⁻¹).
+    zb : float, optional
+        Barycentric correction factor :math:`(1+z_b)` applied in the shift denominator
+        (default 0 → factor 1).
+    sn_floor : float, optional
+        Floor for SN weighting on bad pixels.
+
+    Returns
+    -------
+    np.ndarray
+        CCF array, same shape as ``v_grid_m_s``.
     """
 
     w = np.asarray(wave_um, dtype=np.float64).ravel()
@@ -436,11 +549,33 @@ def rv_from_ccf_mask_kpf(
     n_good: int,
 ) -> tuple[float, float, np.ndarray]:
     """
-    Estimate RV + uncertainty by fitting a Gaussian to the CCF peak.
+    Estimate radial velocity and uncertainty from a mask CCF.
 
-    KPF's mask CCF can be either a positive peak or a negative trough depending
-    on mask/spectrum conventions. We enforce a *maximum* peak for the fitter
-    by flipping the sign when needed.
+    The CCF may appear as a positive peak or a negative trough depending on data and
+    mask sign conventions; the array is negated when a trough is deeper than the peak
+    is tall, so subsequent peak finding targets a maximum. RV is refined with a
+    three-point parabolic interpolation; uncertainty uses curvature and a simple
+    :math:`\\sqrt{N}` scaling heuristic (no SciPy Gaussian fit in this path).
+
+    Parameters
+    ----------
+    v_grid_m_s : np.ndarray
+        Velocity grid (m s⁻¹), same length as ``ccf_raw``.
+    ccf_raw : np.ndarray
+        CCF values on ``v_grid_m_s``.
+    v_step_m_s : float
+        Uniform grid step (m s⁻¹) for parabolic refinement.
+    n_good : int
+        Number of good pixels in the chunk (scales reported error).
+
+    Returns
+    -------
+    rv : float
+        Radial velocity (m s⁻¹).
+    rv_err : float
+        Estimated uncertainty (m s⁻¹).
+    ccf : np.ndarray
+        CCF array used for peak finding (possibly sign-flipped copy of ``ccf_raw``).
     """
 
     ccf_raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
@@ -533,7 +668,44 @@ def rv_per_chunks_mask_kpf(
     min_good_pixels: int = 10,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """
-    Compute per-chunk RV and (optionally) CCF(v) for one spectral order.
+    Compute per-chunk RVs and optional CCF stacks for one echelle order.
+
+    Splits the order into ``n_chunk`` wavelength bins of width set by
+    ``window_size_um`` (derived from full order span), runs
+    :func:`calc_ccf_mask_kpf_like` + :func:`rv_from_ccf_mask_kpf` per chunk, and
+    returns flattened lists of chunk centers and RVs.
+
+    Parameters
+    ----------
+    wave_um, spec, spec_err : np.ndarray
+        Wavelength (µm), flux, and error; same length.
+    dq_bad_mask : np.ndarray
+        True where pixel should be excluded (e.g. DO_NOT_USE).
+    mask_lines : MaskLines
+        Full-order mask; restricted per chunk via :func:`restrict_mask_to_chunk`.
+    window_size_um : float
+        Target chunk width in µm (actual count adapts to order span).
+    v_min_m_s, v_max_m_s, v_step_m_s : float, optional
+        Velocity search grid (m s⁻¹).
+    zb : float, optional
+        Barycentric factor passed to the CCF shift.
+    return_ccf : bool, optional
+        If True, also return mean CCF rows per chunk (stacked for preview).
+    min_good_pixels : int, optional
+        Minimum unmasked finite pixels required per chunk.
+
+    Returns
+    -------
+    rvs : np.ndarray
+        Per-chunk RV (m s⁻¹).
+    rv_errs : np.ndarray
+        Per-chunk RV uncertainty.
+    centers : np.ndarray
+        Chunk center wavelength (µm).
+    v_grid : np.ndarray
+        Velocity grid used for the CCF.
+    ccf_2d : np.ndarray or None
+        If ``return_ccf``, shape ``(n_chunks, n_v)`` of CCFs; else ``None``.
     """
 
     w = np.asarray(wave_um, dtype=np.float64).ravel()
@@ -671,8 +843,75 @@ def run_ccf_mask_kpf_for_fiber(
     dict | None,
 ]:
     """
-    Compute per-chunk and aggregated RV for one fiber using mask-shifted CCF.
+    Run mask-line CCF RV for one fiber (``algorithm="ccf_mask_kpf"``).
+
+    Reads ``SPEC_FIB*``, ``SPEC_ERR_FIB*``, ``SPEC_DQ_FIB*``, ``WAVE_FIB*`` from
+    ``input_model``, loads the mask (see :func:`resolve_mask_path`), and processes
+    each requested echelle order with :func:`rv_per_chunks_mask_kpf`. Chunk RVs are
+    combined with :func:`~hispecdrp.primitives.utils.ccf_utils.combine_rvs_median_mad`
+    and :func:`~hispecdrp.primitives.utils.ccf_utils.weighted_mean_rv`.
+
+    Parameters
+    ----------
+    input_model
+        L2-like datamodel with fiber spectra and wavelengths.
+    fiber : str
+        Fiber label (e.g. ``"A"``) used in attribute names.
+    do_orders : list of int
+        Echelle orders to include.
+    order_vec : list of int
+        Full order indexing aligned with array axis 0.
+    window_size_um : float
+        Wavelength chunk width (µm).
+    outlier_sigma : float
+        Median/MAD outlier threshold for chunk RV combination.
+    mask_path : str or None
+        Path to mask file; ``None`` selects packaged default (see README).
+    mask_width_um : float or None, optional
+        Segment half-width for two-column masks only.
+    v_min_m_s, v_max_m_s, v_step_m_s : float, optional
+        Velocity grid (m s⁻¹).
+    zb : float, optional
+        Barycentric factor for mask shift.
+    want_preview : bool, optional
+        If True, build order-averaged CCF data for Plotly preview.
+    debug_ccf : bool, optional
+        Extra logging per order.
+
+    Returns
+    -------
+    all_wavelengths : np.ndarray
+        Chunk center wavelengths (µm).
+    all_rvs : np.ndarray
+        Per-chunk RVs (m s⁻¹).
+    all_rv_errs : np.ndarray
+        Per-chunk uncertainties.
+    inlier : np.ndarray
+        Boolean mask after outlier rejection.
+    rv_mean : float
+        Inverse-variance weighted mean RV (m s⁻¹).
+    rv_std : float
+        Combined uncertainty (m s⁻¹).
+    all_orders : np.ndarray
+        Echelle order index per chunk (-1 if length mismatch).
+    preview_detail : dict or None
+        Payload for stellar RV preview, or None.
+
+    Notes
+    -----
+    Mask and algorithm provenance: module docstring ``References``;
+    ``hispecdrp/data/masks/README.md``.
     """
+
+    logger.info(
+        "CCF mask_kpf: starting fiber=%s n_do_orders=%d window_um=%.4f want_preview=%s "
+        "debug_ccf=%s",
+        fiber,
+        len(do_orders),
+        window_size_um,
+        want_preview,
+        debug_ccf,
+    )
 
     spec_attr = f"SPEC_FIB{fiber}"
     err_attr = f"SPEC_ERR_FIB{fiber}"
@@ -696,12 +935,22 @@ def run_ccf_mask_kpf_for_fiber(
     mask_lines = load_mask(resolved_mask, mask_width_um=mask_width_um)
     if mask_lines.start_um.size == 0:
         raise ValueError(f"Mask loaded no lines: {resolved_mask}")
+    logger.info(
+        "CCF mask_kpf: loaded mask path=%s n_line_segments=%d",
+        resolved_mask,
+        int(mask_lines.start_um.size),
+    )
 
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
     # We treat any non-zero "do_not_use" bits as bad pixels.
     bad = (np.asarray(dq, dtype=np.uint32) & do_not_use) != 0
 
     order_tasks = [(oi, order) for oi, order in enumerate(order_vec) if order in do_orders]
+    logger.info(
+        "CCF mask_kpf: fiber=%s will process n_order_tasks=%d (echelle orders in do_orders)",
+        fiber,
+        len(order_tasks),
+    )
 
     all_rvs: list[float] = []
     all_rv_errs: list[float] = []
@@ -788,6 +1037,11 @@ def run_ccf_mask_kpf_for_fiber(
 
     preview_detail = None
     if want_preview_effective and order_slots and all_ccf_rows:
+        logger.info(
+            "CCF mask_kpf: fiber=%s building preview n_preview_orders=%d",
+            fiber,
+            len(order_slots),
+        )
         preview_detail = finalize_ccf_preview_dict(
             order_slots,
             all_ccf_rows,
@@ -796,6 +1050,18 @@ def run_ccf_mask_kpf_for_fiber(
             v_max_m_s,
             v_step_m_s,
         )
+
+    logger.info(
+        "CCF mask_kpf: fiber=%s finished n_chunks=%d rv_mean=%.2f m/s rv_err=%.2f m/s "
+        "n_inlier=%d/%d preview=%s",
+        fiber,
+        len(all_wavelengths_arr),
+        float(rv_mean),
+        float(rv_std),
+        int(np.sum(inlier)) if len(inlier) else 0,
+        len(inlier),
+        preview_detail is not None,
+    )
 
     return (
         all_wavelengths_arr,

@@ -1,19 +1,43 @@
-"""Plotly preview for stellar RV (per-chunk RV + CCF panels)."""
+"""
+Interactive Plotly previews for stellar radial-velocity products.
+
+Builds multi-panel figures (CCF vs velocity, per-chunk RV, etc.) and optional
+HTML debug views that overlay mask line segments on extracted spectral chunks for
+``algorithm="ccf_mask_kpf"``. Gaussian reference curves use
+:func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`; mask geometry uses
+:mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`.
+
+Notes
+-----
+Plotly layout code is **HISPEC DRP–original**. For mask file format and upstream
+line lists, see ``hispecdrp/data/masks/README.md`` and spirou-ccf/KPF references
+in :mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`.
+
+References
+----------
+.. [1] spirou-ccf masks: https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+.. [2] KPF radial_velocity ``src``: https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+"""
 from __future__ import annotations
 
-# Provenance: HISPEC DRP original (Plotly graph_objects/subplots). CCF fits from ccf_utils.
-
+import json
 import logging
 import os
-import time
+import webbrowser
 
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from ..utils.ccf_mask_kpf_utils import (
+    load_mask,
+    resolve_mask_path,
+    restrict_mask_to_chunk,
+)
 from ..utils.ccf_utils import (
     _V_MAX,
     _V_MIN,
+    _V_STEP,
     _gaussian_ccf_model,
     fit_ccf_rv,
 )
@@ -118,6 +142,518 @@ def _preview_should_write_png(primitive) -> bool:
     return bool(getattr(primitive, "preview_save_png", True))
 
 
+def _primitive_output_dir(primitive) -> str:
+    return getattr(primitive, "output_dir", None) or os.getcwd()
+
+
+def _fits_base_path(primitive, output_model) -> str:
+    """FITS output path stem (with .fits) used for sibling preview HTML/PNG paths."""
+    return output_model.get_output_path(
+        output_dir=_primitive_output_dir(primitive),
+        suffix=primitive.suffix,
+    )
+
+
+def _first_output_model_from_primitive(primitive):
+    """
+    Resolve the first L2 output model from ``primitive._output['output']``.
+
+    Returns ``None`` if missing or empty.
+    """
+    out = primitive._output.get("output") if primitive._output else None
+    if out is None:
+        return None
+    if isinstance(out, (list, tuple)):
+        if not out:
+            return None
+        return out[0]
+    return out
+
+
+def collect_mask_overlay_payload_for_primitive(
+    primitive,
+    *,
+    input_model,
+    fiber: str,
+    order_vec: list,
+) -> dict | None:
+    """
+    Build per-order spectrum + mask payload for mask-overlay debug HTML (ccf_mask_kpf).
+    """
+    try:
+        resolved_mask = resolve_mask_path(getattr(primitive, "mask_path", None))
+        mask_lines = load_mask(
+            resolved_mask, mask_width_um=getattr(primitive, "mask_width_um", None)
+        )
+    except Exception as exc:
+        logger.warning(
+            "Stellar RV preview: mask overlay payload — cannot load mask: %s", exc
+        )
+        return None
+
+    wave = getattr(input_model, f"WAVE_FIB{fiber}", None)
+    spec = getattr(input_model, f"SPEC_FIB{fiber}", None)
+    if wave is None or spec is None:
+        logger.debug(
+            "Stellar RV preview: mask overlay payload — missing WAVE/SPEC fiber=%s",
+            fiber,
+        )
+        return None
+
+    entries: list[dict] = []
+    # Include every order on the input model so the HTML dropdown can inspect the
+    # full BSPEC/RSPEC order set even if RV fitting used a subset via do_orders.
+    for oi, order in enumerate(order_vec):
+        w = np.asarray(wave[oi], dtype=np.float64)
+        s = np.asarray(spec[oi], dtype=np.float64)
+        ok = np.isfinite(w) & np.isfinite(s)
+        if int(np.sum(ok)) < 10:
+            continue
+        w = w[ok]
+        s = s[ok]
+        med = float(np.nanmedian(s))
+        if not np.isfinite(med) or med == 0.0:
+            med = 1.0
+        s_norm = s / med
+
+        mask_o = restrict_mask_to_chunk(
+            mask_lines,
+            float(np.nanmin(w)),
+            float(np.nanmax(w)),
+            v_min_m_s=_V_MIN,
+            v_max_m_s=_V_MAX,
+            zb=0.0,
+        )
+        if mask_o.start_um.size > 0:
+            mstart = np.asarray(mask_o.start_um, dtype=np.float64)
+            mend = np.asarray(mask_o.end_um, dtype=np.float64)
+            mw = np.asarray(mask_o.weight, dtype=np.float64)
+        else:
+            mstart = np.array([], dtype=np.float64)
+            mend = np.array([], dtype=np.float64)
+            mw = np.array([], dtype=np.float64)
+
+        entries.append(
+            {
+                "order": int(order),
+                "wave": np.asarray(w, dtype=np.float64),
+                "spec": np.asarray(s_norm, dtype=np.float64),
+                "mask_start_um": np.asarray(mstart, dtype=np.float64),
+                "mask_end_um": np.asarray(mend, dtype=np.float64),
+                "mask_weight": np.asarray(mw, dtype=np.float64),
+            }
+        )
+
+    if not entries:
+        logger.info(
+            "Stellar RV preview: mask overlay payload — no valid orders fiber=%s",
+            fiber,
+        )
+        return None
+    logger.info(
+        "Stellar RV preview: mask overlay payload built fiber=%s n_orders=%d",
+        fiber,
+        len(entries),
+    )
+    return {"fiber": str(fiber), "orders": entries}
+
+
+C_M_S = 299792458.0
+
+
+def _to_serializable_order_payload(order_payload: dict) -> dict:
+    out_orders = []
+    for row in order_payload.get("orders", []):
+        out_orders.append(
+            {
+                "order": int(row["order"]),
+                "wave": [float(x) for x in row["wave"]],
+                "spec": [float(x) for x in row["spec"]],
+                "mask_start_um": [float(x) for x in row["mask_start_um"]],
+                "mask_end_um": [float(x) for x in row["mask_end_um"]],
+                "mask_weight": [float(x) for x in row["mask_weight"]],
+            }
+        )
+    return {"fiber": str(order_payload["fiber"]), "orders": out_orders}
+
+
+def _build_mask_overlay_debug_html(
+    *,
+    title: str,
+    payload: dict,
+    v_init_m_s: float,
+    v_min_m_s: float,
+    v_max_m_s: float,
+    v_step_m_s: float,
+    zb: float = 0.0,
+) -> str:
+    payload_json = json.dumps(_to_serializable_order_payload(payload))
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{title}</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 14px; }}
+    .row {{ display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }}
+    .row label {{ font-size: 13px; }}
+    #plot {{ width: 100%; height: 760px; }}
+    input[type=number] {{ width: 140px; }}
+    select {{ min-width: 140px; }}
+  </style>
+</head>
+<body>
+  <div class="row">
+    <label>Order
+      <select id="orderSelect"></select>
+    </label>
+    <label>Velocity shift (m/s)
+      <input id="vInput" type="number" step="{float(v_step_m_s):.1f}" />
+    </label>
+  </div>
+  <div class="row">
+    <input id="vSlider" type="range" min="{float(v_min_m_s):.1f}" max="{float(v_max_m_s):.1f}" step="{float(v_step_m_s):.1f}" style="width: 840px;" />
+    <span id="vLabel"></span>
+  </div>
+  <div id="plot"></div>
+
+  <script>
+    const C_MS = {C_M_S};
+    const ZB = {float(zb)};
+    const DATA = {payload_json};
+    let currentOrderIdx = 0;
+    let currentV = {float(v_init_m_s)};
+
+    const orderSelect = document.getElementById("orderSelect");
+    const vSlider = document.getElementById("vSlider");
+    const vInput = document.getElementById("vInput");
+    const vLabel = document.getElementById("vLabel");
+    const plotDiv = document.getElementById("plot");
+    const orderCache = new Map();
+
+    DATA.orders.forEach((o, i) => {{
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `Order ${{o.order}}`;
+      orderSelect.appendChild(opt);
+    }});
+
+    function shiftWavelengths(arr, vMs) {{
+      const factor = (1.0 + vMs / C_MS) / (1.0 + ZB);
+      return arr.map(c => c * factor);
+    }}
+
+    function lowerBound(arr, x) {{
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {{
+        const mid = (lo + hi) >> 1;
+        if (arr[mid] < x) lo = mid + 1;
+        else hi = mid;
+      }}
+      return lo;
+    }}
+
+    function upperBound(arr, x) {{
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {{
+        const mid = (lo + hi) >> 1;
+        if (arr[mid] <= x) lo = mid + 1;
+        else hi = mid;
+      }}
+      return lo;
+    }}
+
+    function buildOrderCache(order) {{
+      const w = order.wave;
+      const s = order.spec;
+      const n = w.length;
+      if (n < 3) return null;
+      const left = new Array(n);
+      const right = new Array(n);
+      const width = new Array(n);
+      const sUse = new Array(n);
+      for (let i = 0; i < n; i++) {{
+        let l;
+        let r;
+        if (i === 0) {{
+          const d = w[1] - w[0];
+          l = w[0] - 0.5 * d;
+        }} else {{
+          l = 0.5 * (w[i - 1] + w[i]);
+        }}
+        if (i === n - 1) {{
+          const d = w[n - 1] - w[n - 2];
+          r = w[n - 1] + 0.5 * d;
+        }} else {{
+          r = 0.5 * (w[i] + w[i + 1]);
+        }}
+        left[i] = l;
+        right[i] = r;
+        const pw = r - l;
+        width[i] = Number.isFinite(pw) && pw > 0 ? pw : NaN;
+        sUse[i] = Number.isFinite(s[i]) ? s[i] : 0.0;
+      }}
+      return {{ left, right, width, sUse, n }};
+    }}
+
+    function ccfAtVelocity(order, vMs) {{
+      let cache = orderCache.get(currentOrderIdx);
+      if (!cache) {{
+        cache = buildOrderCache(order);
+        if (!cache) return NaN;
+        orderCache.set(currentOrderIdx, cache);
+      }}
+
+      const left = cache.left;
+      const right = cache.right;
+      const width = cache.width;
+      const sUse = cache.sUse;
+      const n = cache.n;
+      const maskSpectra = new Array(n).fill(0.0);
+      const shift = (1.0 + vMs / C_MS) / (1.0 + ZB);
+
+      for (let i = 0; i < order.mask_start_um.length; i++) {{
+        const lnStart = order.mask_start_um[i];
+        const lnEnd = order.mask_end_um[i];
+        const lnWeight = order.mask_weight[i];
+        if (!Number.isFinite(lnStart) || !Number.isFinite(lnEnd) || !Number.isFinite(lnWeight)) continue;
+        let lineStart = lnStart * shift;
+        let lineEnd = lnEnd * shift;
+        if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd)) continue;
+        if (lineEnd <= lineStart) continue;
+
+        const closest = lowerBound(right, lineStart);
+        const next = upperBound(left, lineEnd);
+        if (next <= 0 || closest >= n - 1) continue;
+        const lo = Math.max(0, closest);
+        const hi = Math.min(n, next);
+        if (hi <= lo) continue;
+
+        for (let p = lo; p < hi; p++) {{
+          if (left[p] <= lineEnd && right[p] >= lineStart) {{
+            const waveStart = Math.max(left[p], lineStart);
+            const waveEnd = Math.min(right[p], lineEnd);
+            const overlap = waveEnd - waveStart;
+            if (overlap > 0 && Number.isFinite(width[p]) && width[p] > 0) {{
+              maskSpectra[p] += lnWeight * (overlap / width[p]);
+            }}
+          }}
+        }}
+      }}
+
+      let ccf = 0.0;
+      for (let i = 0; i < n; i++) {{
+        ccf += sUse[i] * maskSpectra[i];
+      }}
+      return ccf;
+    }}
+
+    function updatePlot() {{
+      const order = DATA.orders[currentOrderIdx];
+      if (!order) return;
+
+      const xSpec = order.wave;
+      const ySpec = order.spec;
+      let loF = Infinity;
+      let hiF = -Infinity;
+      for (let i = 0; i < ySpec.length; i++) {{
+        const v = ySpec[i];
+        if (Number.isFinite(v)) {{
+          loF = Math.min(loF, v);
+          hiF = Math.max(hiF, v);
+        }}
+      }}
+      const spanF = hiF - loF;
+      const ySpec01 = [];
+      if (spanF > 0 && Number.isFinite(spanF)) {{
+        for (let i = 0; i < ySpec.length; i++) {{
+          const v = ySpec[i];
+          ySpec01.push(Number.isFinite(v) ? (v - loF) / spanF : NaN);
+        }}
+      }} else {{
+        for (let i = 0; i < ySpec.length; i++) {{
+          const v = ySpec[i];
+          ySpec01.push(Number.isFinite(v) ? 0.5 : NaN);
+        }}
+      }}
+
+      const xMin = Math.min(...xSpec);
+      const xMax = Math.max(...xSpec);
+      const xMaskStart = shiftWavelengths(order.mask_start_um, currentV);
+      const xMaskEnd = shiftWavelengths(order.mask_end_um, currentV);
+      const wMask = order.mask_weight;
+
+      const shapes = [];
+      for (let i = 0; i < xMaskStart.length; i++) {{
+        const x0 = xMaskStart[i];
+        const x1 = xMaskEnd[i];
+        if (!Number.isFinite(x0) || !Number.isFinite(x1)) continue;
+        const lo = Math.min(x0, x1);
+        const hi = Math.max(x0, x1);
+        if (hi < xMin || lo > xMax) continue;
+        let w = Number(wMask[i]);
+        if (!Number.isFinite(w) || w < 0) w = 0;
+        const yTop = 1.0;
+        const yBot = Math.max(0.0, yTop - 2.0 * w);
+        if (yBot >= yTop) continue;
+        shapes.push({{
+          type: "rect",
+          xref: "x",
+          yref: "y2",
+          x0: lo,
+          x1: hi,
+          y0: yBot,
+          y1: yTop,
+          fillcolor: "rgba(255, 140, 0, 0.42)",
+          line: {{ color: "rgba(230, 115, 0, 0.95)", width: 1 }},
+          layer: "below",
+        }});
+      }}
+
+      const traces = [
+        {{
+          x: xSpec, y: ySpec01, mode: "lines", name: "Spectrum",
+          line: {{ width: 1.2 }},
+          yaxis: "y1",
+        }},
+        {{
+          x: [null], y: [null], mode: "markers", name: "Mask lines (shifted)",
+          marker: {{ size: 10, color: "rgba(255, 140, 0, 0.7)", symbol: "square" }},
+          yaxis: "y2",
+          showlegend: true,
+        }},
+      ];
+
+      const layout = {{
+        uirevision: `fib-${{DATA.fiber}}-ord-${{order.order}}`,
+        title: {{
+          text: `Fiber ${{DATA.fiber}} | Order ${{order.order}} | v = ${{currentV.toFixed(1)}} m/s`,
+          y: 1.08,
+          yref: "paper",
+          yanchor: "top",
+          pad: {{ b: 20 }},
+        }},
+        xaxis: {{ title: "Wavelength (um)" }},
+        yaxis: {{
+          title: "Normalized flux (0–1)",
+          range: [0, 1],
+          zeroline: true,
+        }},
+        yaxis2: {{
+          title: "Mask weight",
+          overlaying: "y",
+          side: "right",
+          range: [0, 1],
+          scaleanchor: "y",
+          scaleratio: 1,
+          showgrid: false,
+        }},
+        shapes: shapes,
+        legend: {{
+          orientation: "h",
+          xref: "paper",
+          yref: "paper",
+          x: 0.5,
+          xanchor: "center",
+          y: 1.03,
+          yanchor: "bottom",
+          bgcolor: "rgba(255, 255, 255, 0.92)",
+          bordercolor: "rgba(0,0,0,0.15)",
+          borderwidth: 1,
+        }},
+        margin: {{ l: 70, r: 70, t: 170, b: 55 }},
+      }};
+
+      Plotly.react(plotDiv, traces, layout, {{responsive: true}});
+      const ccfVal = ccfAtVelocity(order, currentV);
+      const ccfText = Number.isFinite(ccfVal) ? ccfVal.toExponential(3) : "nan";
+      vLabel.textContent = `v = ${{currentV.toFixed(1)}} m/s | CCF = ${{ccfText}}`;
+    }}
+
+    function setVelocity(v) {{
+      currentV = Number(v);
+      if (!Number.isFinite(currentV)) currentV = 0.0;
+      vSlider.value = String(currentV);
+      vInput.value = String(currentV);
+      updatePlot();
+    }}
+
+    orderSelect.addEventListener("change", (ev) => {{
+      currentOrderIdx = Number(ev.target.value);
+      updatePlot();
+    }});
+    vSlider.addEventListener("input", (ev) => setVelocity(ev.target.value));
+    vInput.addEventListener("change", (ev) => setVelocity(ev.target.value));
+    vInput.addEventListener("keydown", (ev) => {{
+      if (ev.key === "Enter") setVelocity(ev.target.value);
+    }});
+
+    vSlider.value = String(currentV);
+    vInput.value = String(currentV);
+    orderSelect.value = "0";
+    updatePlot();
+  </script>
+</body>
+</html>
+"""
+
+
+def write_mask_overlay_debug_pages(primitive, output_model) -> dict[str, str]:
+    """
+    Write debug HTML overlays for mask-shift RV and optionally open them.
+
+    Returns
+    -------
+    dict[str, str]
+        fiber -> html path
+    """
+    out: dict[str, str] = {}
+    payloads = getattr(primitive, "_mask_overlay_by_fiber", {}) or {}
+    if not payloads:
+        logger.info("Stellar RV preview: mask overlay debug — no payloads to plot.")
+        return out
+
+    logger.info(
+        "Stellar RV preview: mask overlay debug — writing HTML for %d fiber(s)",
+        len(payloads),
+    )
+    base_path = _fits_base_path(primitive, output_model)
+    v_init = float(getattr(primitive, "mask_overlay_velocity_m_s", 0.0))
+
+    for fiber, payload in payloads.items():
+        html = _build_mask_overlay_debug_html(
+            title=f"Stellar RV mask overlay debug (fiber {fiber})",
+            payload=payload,
+            v_init_m_s=v_init,
+            v_min_m_s=_V_MIN,
+            v_max_m_s=_V_MAX,
+            v_step_m_s=_V_STEP,
+        )
+        path = base_path.replace(".fits", f"_mask_overlay_debug_fib{fiber}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        out[str(fiber)] = path
+        logger.info(
+            "Stellar RV preview: mask overlay debug — wrote fiber=%s path=%s n_orders=%d",
+            fiber,
+            path,
+            len(payload.get("orders", [])),
+        )
+        if bool(getattr(primitive, "show_mask_overlay_debug", False)):
+            try:
+                webbrowser.open(f"file://{path}")
+            except Exception as exc:
+                logger.debug("Could not open mask overlay debug HTML: %s", exc)
+    logger.info(
+        "Stellar RV preview: mask overlay debug — finished n_files=%d",
+        len(out),
+    )
+    return out
+
+
 def create_stellar_rv_preview(primitive) -> None:
     """
     Plotly preview: for each fiber, three panels stacked vertically:
@@ -125,18 +661,11 @@ def create_stellar_rv_preview(primitive) -> None:
     2) CCF vs RV shift + Gaussian fit + metadata, with dropdown to select combined or per-order,
     3) Residual (CCF − Gaussian) vs RV shift (same dropdown selection).
     """
-    t0 = time.perf_counter()
-    out = primitive._output.get("output") if primitive._output else None
-    if out is None:
-        logger.warning("No output model for stellar RV preview.")
+    logger.info("Stellar RV preview: create_stellar_rv_preview starting")
+    output_model = _first_output_model_from_primitive(primitive)
+    if output_model is None:
+        logger.warning("Stellar RV preview: no output model — aborting preview.")
         return
-    if isinstance(out, (list, tuple)):
-        if not out:
-            logger.warning("Empty output list for stellar RV preview.")
-            return
-        output_model = out[0]
-    else:
-        output_model = out
 
     fibers_with_ccf = []
     for f in ["1", "2", "3"]:
@@ -151,8 +680,17 @@ def create_stellar_rv_preview(primitive) -> None:
         fibers_with_ccf.append(f)
 
     if not fibers_with_ccf:
-        logger.warning("No RVCCF tables found on output for stellar RV preview.")
+        logger.warning(
+            "Stellar RV preview: no RVCCF tables with valid RV/wavelength — aborting."
+        )
         return
+
+    logger.info(
+        "Stellar RV preview: fibers with RVCCF data: %s save_preview=%s show_preview=%s",
+        fibers_with_ccf,
+        getattr(primitive, "save_preview", False),
+        getattr(primitive, "show_preview", False),
+    )
 
     # Three rows per fiber: RV vs λ, CCF (dropdown), Residual (dropdown)
     row_plan: list[tuple] = []
@@ -162,6 +700,10 @@ def create_stellar_rv_preview(primitive) -> None:
         row_plan.append(("resid", fiber))
 
     n_rows = len(row_plan)
+    logger.info(
+        "Stellar RV preview: building Plotly figure n_subplot_rows=%d (3 × n_fibers)",
+        n_rows,
+    )
     subplot_titles = []
     for entry in row_plan:
         kind, fiber = entry[0], entry[1]
@@ -241,6 +783,12 @@ def create_stellar_rv_preview(primitive) -> None:
                     tail = fail_msg[:56] + "…" if len(fail_msg) > 56 else fail_msg
                     meta += f" · {tail}"
             slot_metadata[fiber].append(meta)
+
+    logger.info(
+        "Stellar RV preview: CCF slot metadata and Gaussian cache ready "
+        "(cached distinct slot objects=%d)",
+        len(fit_slot_cache),
+    )
 
     rv_panel_y_title: dict[str, str] = {}
     rv_panel_y_range: dict[str, tuple[float, float]] = {}
@@ -461,7 +1009,7 @@ def create_stellar_rv_preview(primitive) -> None:
                 ccf_trace_indices[fiber].append((idx_data, idx_fit))
                 first_ccf_legend = False
                 if si == 0:
-                        ccf_ylim_lo, ccf_ylim_hi = _preview_ccf_y_limits(ccf)
+                    ccf_ylim_lo, ccf_ylim_hi = _preview_ccf_y_limits(ccf)
             fig.update_yaxes(range=[ccf_ylim_lo, ccf_ylim_hi], autorange=False, row=row, col=1)
             continue
 
@@ -609,7 +1157,7 @@ def create_stellar_rv_preview(primitive) -> None:
             )
         )
 
-    algo = getattr(primitive, "algorithm", None) or "ccf_median_mad"
+    algo = getattr(primitive, "algorithm", None) or "ccf_stellar_template"
     title = f"Stellar RV — algorithm: {algo}"
     if hasattr(output_model, "meta") and getattr(output_model.meta, "filename", None):
         title += f" — {output_model.meta.filename}"
@@ -669,44 +1217,36 @@ def create_stellar_rv_preview(primitive) -> None:
             )
             fig.update_yaxes(title_text="CCF residual", row=row, col=1)
 
-    t_after_figure = time.perf_counter()
     logger.info(
-        "PREVIEW_TIMING create_stellar_rv_preview figure_build (traces+layout) wall_s=%.3f",
-        t_after_figure - t0,
+        "Stellar RV preview: figure traces, axes, dropdowns, and layout complete "
+        "(n_plotly_traces=%d)",
+        len(fig.data),
     )
 
-    # get_output_path requires output_dir or filename; use cwd when only showing preview
-    output_dir = getattr(primitive, "output_dir", None) or os.getcwd()
-    base_path = output_model.get_output_path(
-        output_dir=output_dir, suffix=primitive.suffix
-    )
+    base_path = _fits_base_path(primitive, output_model)
     output_path_html = base_path.replace(".fits", "_preview.html")
     output_path_png = base_path.replace(".fits", "_preview.png")
     wrote_png = False
 
-    t_save0 = time.perf_counter()
     if primitive.save_preview:
-        t_html = time.perf_counter()
+        logger.info("Stellar RV preview: writing HTML path=%s", output_path_html)
         fig.write_html(output_path_html, include_plotlyjs="cdn")
-        logger.info(
-            "PREVIEW_TIMING write_html wall_s=%.3f",
-            time.perf_counter() - t_html,
-        )
+        logger.info("Stellar RV preview: HTML write complete")
         if _preview_should_write_png(primitive):
-            t_png = time.perf_counter()
             try:
                 # Use Kaleido v1 API directly so Plotly's write_image(engine=...) path is avoided.
                 import kaleido
 
                 scale = float(getattr(primitive, "preview_png_scale", 2.0))
                 scale = max(0.25, min(scale, 8.0))
+                logger.info(
+                    "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f",
+                    output_path_png,
+                    scale,
+                )
                 kaleido.write_fig_sync(fig, path=output_path_png, opts={"scale": scale})
                 wrote_png = True
-                logger.info(
-                    "PREVIEW_TIMING kaleido_png scale=%.2f wall_s=%.3f",
-                    scale,
-                    time.perf_counter() - t_png,
-                )
+                logger.info("Stellar RV preview: PNG write complete")
             except Exception as e:
                 logger.debug(
                     "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
@@ -719,26 +1259,20 @@ def create_stellar_rv_preview(primitive) -> None:
             else:
                 skip_reason = "disabled"
             logger.info(
-                "PREVIEW_TIMING kaleido_png skipped (%s) wall_s=0.000",
+                "Stellar RV preview: skipping Kaleido PNG (%s)",
                 skip_reason,
             )
     if primitive.save_preview:
         logger.info(
-            "PREVIEW_TIMING save_preview_total (html +/- png) wall_s=%.3f",
-            time.perf_counter() - t_save0,
+            "Stellar RV preview: save_preview phase done html=%s png=%s",
+            output_path_html,
+            output_path_png if wrote_png else None,
         )
-    t_show0 = time.perf_counter()
     if primitive.show_preview:
-        logger.info("Showing stellar RV preview...")
+        logger.info("Stellar RV preview: opening interactive figure (fig.show)")
         fig.show()
-    if primitive.show_preview:
-        logger.info(
-            "PREVIEW_TIMING fig.show wall_s=%.3f", time.perf_counter() - t_show0
-        )
-    logger.info(
-        "PREVIEW_TIMING create_stellar_rv_preview total wall_s=%.3f",
-        time.perf_counter() - t0,
-    )
+        logger.info("Stellar RV preview: fig.show returned")
+    logger.info("Stellar RV preview: create_stellar_rv_preview finished")
 
     primitive._output["preview"] = {
         "html": output_path_html,

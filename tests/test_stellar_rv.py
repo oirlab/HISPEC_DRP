@@ -1,12 +1,13 @@
 """
-Stellar RV primitive tests (**ccf_median_mad**: log-λ CCF, median/MAD, weighted mean).
+Stellar RV primitive tests (**ccf_stellar_template**: stellar-template CCF in log-λ,
+median/MAD outlier rejection, inverse-variance weighted mean).
 
 Synthetic L2 spectra use a uniform echelle grid (:func:`_order_wavelength_grid`) with
 Gaussian absorption at the linear-Doppler-shifted wavelength. Rest-frame templates
 are sampled at **3×** the L2 pixel count per order (finer λ sampling) to reduce
 log-λ CCF / interpolation bias vs. template-at-data-resolution.
 
-**Template CCF + BT-Settl BSPEC preview** (``ccf_median_mad``)::
+**Stellar-template CCF + BT-Settl BSPEC preview** (``ccf_stellar_template``)::
 
   pytest tests/test_stellar_rv.py -v
   HISPEC_DRP_SHOW_CCF_PREVIEW=1 pytest tests/test_stellar_rv.py::test_btsettl_shifted_polynomial_l2_recovers_rv_with_preview -v -s
@@ -375,7 +376,7 @@ def test_stellar_rv_single_order_injection_recovery(spectrograph):
     order = int(orders[len(orders) // 2])
     n_pix = 2048
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
-    algorithm = "ccf_median_mad"
+    algorithm = "ccf_stellar_template"
 
     l2 = make_synthetic_l2_single_order(
         spectrograph,
@@ -632,7 +633,7 @@ def test_stellar_rv_rspec_order_61_red_arm_recovery():
     )
     prim = StellarRVPrimitive(
         template_wavelength=tw, template_flux=tf, do_fibers=["1"], do_orders=[order],
-        window_size_um=0.3, debug_ccf=False, algorithm="ccf_median_mad",
+        window_size_um=0.3, debug_ccf=False, algorithm="ccf_stellar_template",
         show_preview=False, save_preview=False,
     )
     out = prim.apply(l2)
@@ -650,10 +651,10 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     Generate L2 dummy spectra for BSPEC or RSPEC covering the full wavelength range:
     flat continuum + Gaussian absorption (50 km/s width, 5% depth) at RV = -110 km/s.
     Use a rest-frame template (3× λ resolution per order). The pipeline combines
-    chunk/order RVs (ccf_median_mad); RVCCFAVG must recover INPUT_RV_KM_S to within
+    chunk/order RVs (ccf_stellar_template); RVCCFAVG must recover INPUT_RV_KM_S to within
     tolerance. Set HISPEC_DRP_SHOW_CCF_PREVIEW=1 for unified RV + CCF preview.
     """
-    algorithm = "ccf_median_mad"
+    algorithm = "ccf_stellar_template"
     n_pix = 4096
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
 
@@ -1009,7 +1010,7 @@ def test_btsettl_bspec_l2_mask_kpf_recovers_rv_with_preview(
     checks finite outputs, table structure, and optional HTML preview.
 
     Set ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` for Plotly preview (same env as the BT-Settl
-    ``ccf_median_mad`` test). Preview HTML is written under ``tests/output/stellar_rv_plots/``
+    ``ccf_stellar_template`` test). Preview HTML is written under ``tests/output/stellar_rv_plots/``
     when preview is enabled.
     """
     input_rv_km_s = -110.0
@@ -1102,7 +1103,7 @@ def test_btsettl_bspec_l2_mask_kpf_recovers_rv_with_preview(
     rvs = np.asarray(tbl["RV"], dtype=np.float64)
     assert np.any(np.isfinite(rvs)), "Per-chunk RV column should have finite values"
 
-    # Unlike ccf_median_mad, mask-shift CCF does not compare to the BT-Settl template;
+    # Unlike ccf_stellar_template, mask-shift CCF does not compare to the BT-Settl template;
     # the injected Doppler shift used to build the spectrum is not expected to match
     # the mask-based aggregate RV. Smoke-check uncertainty is reported when present.
     if recovered_rv_err_m_s is not None:

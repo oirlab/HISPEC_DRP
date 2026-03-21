@@ -1,17 +1,34 @@
-"""CCF → RV utilities: weighted-covariance CCF in log-λ, KPF-style Gaussian fit
-(:func:`fit_ccf_rv`), Numba multi-order path, masked single-spectrum CCF, continuum
-normalize, median/MAD + inverse-variance chunk combination.  Velocities are m/s."""
-from __future__ import annotations
+"""
+Cross-correlation (CCF) and radial-velocity utilities for stellar templates.
 
-# Provenance: Weighted CCF in log-λ and Numba path are HISPEC DRP implementations.
-# fit_ccf_rv uses Astropy Gaussian1D + LevMarLSQFitter; design follows public KPF-style
-# PRV two-pass LM ideas (not copied from KPF proprietary source). _ccf_chunk_ccf_numba
-# matches the masked_ccf_rv weighted-covariance statistic.
+Provides weighted-covariance CCF in :math:`\\ln\\lambda`, Gaussian fitting to
+:math:`\\mathrm{CCF}(v)` via :func:`fit_ccf_rv` (Astropy ``Gaussian1D`` +
+``LevMarLSQFitter``, two-pass windows, error heuristics labeled “KPF” in-code), a
+Numba multi-order path, continuum normalization, median/MAD outlier rejection, and
+inverse-variance chunk combination. **All velocities are in m s\\ :sup:`−1`**.
+
+Notes
+-----
+The **template CCF** implementation is specific to HISPEC DRP. The **Gaussian fit**
+machinery intentionally mirrors *published* behavior of Keck **KPF** PRV-style
+two-pass Levenberg–Marquardt CCF fitting; this file is **not** a copy of KPF
+pipeline source. For **mask-line** CCF (separate code path), see
+:mod:`hispecdrp.primitives.utils.ccf_mask_kpf_utils`.
+
+References
+----------
+.. [1] KPF-Pipeline radial_velocity ``src`` (mask-line tables and RV context;
+       template path differs): https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+.. [2] ``alg_rv_mask_line.py`` (mask geometry / BC bookkeeping in KPF):
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+.. [3] spirou-ccf (SPIRou spectra / CCF ecosystem):
+       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+"""
+from __future__ import annotations
 
 import logging
 import math
 import os
-import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -102,7 +119,47 @@ def fit_ccf_rv(
     vel_span_m_s_per_pixel: float | None = None,
     two_pass: bool = True,
 ):
-    """Gaussian + LevMar on CCF(v); median inside window; two passes; σ from KPF formula or fallbacks (m/s out)."""
+    """
+    Fit a Gaussian model to a precomputed CCF and return RV ± error in m s⁻¹.
+
+    Uses a robust emission/absorption profile guess, median-subtracted CCF in a
+    sliding velocity window, and one or two Levenberg–Marquardt passes. Formal
+    uncertainty may use a KPF-inspired ``ccf_error`` scaling when plausible, else
+    covariance from the fitter, else a σ/√n fallback.
+
+    Parameters
+    ----------
+    v_grid_m_s : np.ndarray
+        Uniform velocity grid (m s⁻¹).
+    ccf : np.ndarray
+        CCF values on the same grid.
+    v_step_m_s : float
+        Grid spacing (m s⁻¹).
+    n_good : int or None, optional
+        Number of good spectral pixels in the chunk (for fallback error scaling).
+    return_params : bool, optional
+        If True, return ``(rv, rv_err, params_dict, diag_dict)``; else ``(rv, rv_err)``.
+    mask_method : str or None, optional
+        If in ``CCFFitKpfConfig.cal_mask_methods``, use absorption-style calibration
+        peak logic.
+    config : CCFFitKpfConfig or None, optional
+        Override fit windows and thresholds.
+    vel_span_m_s_per_pixel : float or None, optional
+        Spectral sampling scale passed into error heuristics.
+    two_pass : bool, optional
+        If True (default), run a second fit narrowed around the first mean.
+
+    Returns
+    -------
+    tuple
+        If ``return_params`` is False: ``(rv_ms, rv_err_ms)``.
+        If True: ``(rv_ms, rv_err_ms, params, diag)`` with fitted Gaussian parameters
+        and diagnostic metadata.
+
+    Notes
+    -----
+    Design parallels public KPF PRV CCF-fitting ideas; see module ``References``.
+    """
     cfg = config or CCFFitKpfConfig()
     vmax = 2.0e5  # max plausible formal σ_RV (m/s); KPF sqrt(CCF) model breaks on flux² CCFs
 
@@ -613,7 +670,13 @@ def process_all_orders_rvs_numba(
     all_rv_errs = np.empty(total_chunks, dtype=np.float64)
     all_rv_errs[:] = np.nan
 
-    t_ccf0 = time.perf_counter()
+    nt = numba_threads if numba_threads is not None else 1
+    logger.info(
+        "CCF (Numba): starting CCF matrix fill total_chunks=%d n_vel=%d numba_threads=%d",
+        total_chunks,
+        n_vel,
+        nt,
+    )
     _process_all_orders_ccf_numba(
         wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
         template_ln, template_flux, window_size_um,
@@ -621,11 +684,18 @@ def process_all_orders_rvs_numba(
         v_min, v_max, v_step, n_vel,
         all_ccf, all_n_good, all_wl,
     )
-    t_ccf1 = time.perf_counter()
+    logger.info(
+        "CCF (Numba): CCF matrix fill complete total_chunks=%d n_vel=%d",
+        total_chunks,
+        n_vel,
+    )
 
     # Phase B — Gaussian fit per chunk row in Python (cannot run inside Numba).
     v_grid = v_min + np.arange(n_vel, dtype=np.float64) * v_step
-    t_fit0 = time.perf_counter()
+    logger.info(
+        "CCF (Python): starting per-chunk Gaussian RV fits total_chunks=%d",
+        total_chunks,
+    )
     n_fit_rows = 0
     for i in range(total_chunks):
         if all_n_good[i] < 10:
@@ -644,22 +714,39 @@ def process_all_orders_rvs_numba(
         )
         all_rvs[i] = rv
         all_rv_errs[i] = rv_err
-    t_fit1 = time.perf_counter()
-    nt = numba_threads if numba_threads is not None else 1
     logger.info(
-        "CCF_TIMING numba_threads=%d numba_ccf_fill chunks=%d n_vel=%d wall_s=%.3f | "
-        "python_chunk_gaussian_fits rows=%d wall_s=%.3f",
-        nt,
-        total_chunks,
-        n_vel,
-        t_ccf1 - t_ccf0,
+        "CCF (Python): per-chunk Gaussian fits complete rows_fitted=%d of total_chunks=%d",
         n_fit_rows,
-        t_fit1 - t_fit0,
+        total_chunks,
     )
 
     if return_ccf:
         return all_rvs, all_rv_errs, all_wl, all_ccf, v_grid
     return all_rvs, all_rv_errs, all_wl
+
+
+def flat_chunk_echelle_orders(
+    order_tasks: list,
+    chunk_start: np.ndarray,
+    n_flat: int,
+) -> np.ndarray:
+    """
+    Echelle order number for each flattened chunk index (same packing as
+    :func:`process_orders_rvs_numba_parallel`).
+
+    ``chunk_start[j]`` is the global flat index of the first chunk of
+    ``order_tasks[j]`` (``(order_row_index, echelle_order_number)``).
+    """
+    if n_flat <= 0 or not order_tasks:
+        return np.array([], dtype=np.int64)
+    chunk_start = np.asarray(chunk_start, dtype=np.int64)
+    order_nums = np.array([int(t[1]) for t in order_tasks], dtype=np.int64)
+    ii = np.arange(n_flat, dtype=np.int64)
+    j = np.searchsorted(chunk_start, ii, side="right") - 1
+    valid = (j >= 0) & (j < len(order_tasks))
+    out = np.full(n_flat, -1, dtype=np.int64)
+    out[valid] = order_nums[j[valid]]
+    return out
 
 
 def process_orders_rvs_numba_parallel(
@@ -676,7 +763,7 @@ def process_orders_rvs_numba_parallel(
     *,
     return_ccf: bool = False,
 ) -> (
-    tuple[np.ndarray, np.ndarray, np.ndarray]
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     | tuple[
         np.ndarray,
         np.ndarray,
@@ -724,8 +811,11 @@ def process_orders_rvs_numba_parallel(
         Per-chunk uncertainty (m/s).
     all_wl : np.ndarray
         Chunk center wavelength (micron).
-    all_ccf, v_grid, n_chunks_per_order, chunk_start, order_indices : np.ndarray, optional
-        Returned when ``return_ccf`` is True (for preview / diagnostics).
+    n_chunks_per_order, chunk_start : np.ndarray
+        Chunk layout (always returned). Use with :func:`flat_chunk_echelle_orders`
+        to map flat chunk index → echelle order number.
+    all_ccf, v_grid, order_indices : np.ndarray, optional
+        Extra arrays when ``return_ccf`` is True (for preview / diagnostics).
 
     Notes
     -----
@@ -737,15 +827,16 @@ def process_orders_rvs_numba_parallel(
             np.array([], dtype=np.float64),
             np.array([], dtype=np.float64),
         )
+        z64 = np.array([], dtype=np.int64)
         if return_ccf:
             return empty + (
                 np.zeros((0, 0), dtype=np.float64),
                 np.array([], dtype=np.float64),
-                np.array([], dtype=np.int64),
-                np.array([], dtype=np.int64),
-                np.array([], dtype=np.int64),
+                z64,
+                z64,
+                z64,
             )
-        return empty
+        return empty + (z64, z64)
     wave_2d = np.asarray(wave_2d, dtype=np.float64)
     spec_2d = np.asarray(spec_2d, dtype=np.float64)
     spec_err_2d = np.asarray(spec_err_2d, dtype=np.float64)
@@ -765,6 +856,17 @@ def process_orders_rvs_numba_parallel(
     nthr = _resolve_stellar_rv_numba_threads(max_cores)
     if _HAS_NUMBA:
         set_num_threads(nthr)
+    total_chunks_layout = int(chunk_start[-1] + n_chunks_per_order[-1])
+    logger.info(
+        "CCF: process_orders_rvs_numba_parallel n_order_tasks=%d total_chunks=%d "
+        "window_um=%.4f return_ccf=%s numba_threads=%d numba_available=%s",
+        len(order_tasks),
+        total_chunks_layout,
+        window_size_um,
+        return_ccf,
+        nthr,
+        _HAS_NUMBA,
+    )
     # Flattened (order, chunk) RV list; parallelized over orders inside Numba.
     if return_ccf:
         all_rvs, all_rv_errs, all_wl, all_ccf, v_grid = process_all_orders_rvs_numba(
@@ -793,7 +895,7 @@ def process_orders_rvs_numba_parallel(
         return_ccf=False,
         numba_threads=nthr,
     )
-    return all_rvs, all_rv_errs, all_wl
+    return all_rvs, all_rv_errs, all_wl, n_chunks_per_order, chunk_start
 
 
 def finalize_ccf_preview_dict(
@@ -829,7 +931,10 @@ def finalize_ccf_preview_dict(
     }
     slots = [mean_slot] + order_slots
     vs = float(v_step)
-    t_prev = time.perf_counter()
+    logger.info(
+        "CCF preview: finalize_ccf_preview_dict fitting Gaussians n_slots=%d (mean + orders)",
+        len(slots),
+    )
     for sl in slots:
         wl = sl.get("wl_lo", np.nan)
         if not np.isfinite(wl):
@@ -844,9 +949,8 @@ def finalize_ccf_preview_dict(
         )
         sl["kpf_fit"] = {"rv": rv, "rv_err": rv_err, "params": params, "diagnostics": diag}
     logger.info(
-        "PREVIEW_TIMING finalize_ccf_preview_dict Gaussian fits for %d CCF slots wall_s=%.3f",
+        "CCF preview: finalize_ccf_preview_dict Gaussian fits done n_slots=%d",
         len(slots),
-        time.perf_counter() - t_prev,
     )
     return {
         "v_step": float(v_step),
@@ -901,7 +1005,7 @@ def ccf_preview_dict_from_numba_flat(
     if not order_slots:
         return None
     logger.info(
-        "PREVIEW_TIMING ccf_preview_dict_from_numba_flat orders=%d (mean CCF + finalize)",
+        "CCF preview: ccf_preview_dict_from_numba_flat n_orders=%d (mean CCF rows + finalize)",
         len(order_slots),
     )
     return finalize_ccf_preview_dict(order_slots, all_rows, v_grid, v_min, v_max, v_step)
@@ -927,6 +1031,15 @@ def ccf_preview_dict_from_spectra_orders(
     """
     if not order_tasks:
         return None
+    logger.info(
+        "CCF preview: ccf_preview_dict_from_spectra_orders starting n_order_tasks=%d "
+        "window_um=%.4f v_grid=[%.0f, %.0f] m/s step=%.1f",
+        len(order_tasks),
+        window_size_um,
+        v_min,
+        v_max,
+        v_step,
+    )
     order_slots: list[dict] = []
     all_rows: list[np.ndarray] = []
     v_grid_ref = None
@@ -973,7 +1086,14 @@ def ccf_preview_dict_from_spectra_orders(
         )
         all_rows.append(ccf_2d)
     if not order_slots or v_grid_ref is None:
+        logger.info(
+            "CCF preview: ccf_preview_dict_from_spectra_orders no valid orders after CCF pass"
+        )
         return None
+    logger.info(
+        "CCF preview: ccf_preview_dict_from_spectra_orders built %d order slots; calling finalize",
+        len(order_slots),
+    )
     return finalize_ccf_preview_dict(order_slots, all_rows, v_grid_ref, v_min, v_max, v_step)
 
 
@@ -1633,6 +1753,7 @@ def rv_per_chunks_with_ccf(
 
 # =============================================================================
 # Combine many chunk RVs: robust rejection then inverse-variance mean
+# (used after stellar-template or mask-shift CCF per-chunk RVs)
 # =============================================================================
 
 

@@ -1,16 +1,34 @@
 """
-Stellar RV primitive: masking-based CCF with template, windowed RVs,
-median/MAD outlier rejection, and inverse-variance weighted mean.
+Stellar radial-velocity primitive (template and mask-line CCF).
+
+Computes RVs by cross-correlating the observed L2 spectrum with either a **stellar
+template** (``algorithm="ccf_stellar_template"``) or a **line mask**
+(``algorithm="ccf_mask_kpf"``). Per-wavelength-chunk RVs are combined with
+median/MAD outlier rejection and an inverse-variance weighted mean where applicable.
+
+Notes
+-----
+- **Template path** uses :mod:`hispecdrp.primitives.utils.ccf_utils` and
+  :mod:`hispecdrp.utils.spectral_templates_utils`.
+- **Mask path** uses :mod:`hispecdrp.primitives.utils.ccf_mask_kpf_utils` with
+  SPIROU-style ``.mas`` files (default ``hispecdrp/data/masks/M2_filt_allRV.mas``).
+  Mask-shift CCF is **inspired by** Keck KPF’s public mask-line design; packaged
+  masks trace to **spirou-ccf** — see ``hispecdrp/data/masks/README.md``.
+
+References
+----------
+.. [1] KPF ``alg_rv_mask_line.py`` (mask-line reference):
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+.. [2] KPF radial_velocity ``src``:
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+.. [3] spirou-ccf ``spiroulib.py``:
+       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+.. [4] spirou-ccf ``ccf_masks``:
+       https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
 """
 from __future__ import annotations
 
-# Provenance: ccf_median_mad uses hispecdrp.primitives.utils.ccf_utils (template CCF).
-# ccf_mask_kpf uses ccf_mask_kpf_utils (SPIROU .mas masks; KPF-inspired mask-shift CCF).
-# Default mask: hispecdrp/data/masks/M2_filt_allRV.mas; templates: hispecdrp/data/templates/.
-
 import logging
-import os
-import time
 from typing import Sequence
 
 import numpy as np
@@ -30,63 +48,46 @@ from ..utils.ccf_utils import (
     ccf_preview_dict_from_spectra_orders,
     combine_rvs_median_mad,
     finalize_ccf_preview_dict,
+    flat_chunk_echelle_orders,
     masked_ccf_rv_diagnostics,
     process_one_order_rvs,
     process_orders_rvs_numba_parallel,
     weighted_mean_rv,
 )
-from ..utils.ccf_mask_kpf_utils import (
-    load_mask,
-    resolve_mask_path,
-    restrict_mask_to_chunk,
-    run_ccf_mask_kpf_for_fiber,
-)
+from ..utils.ccf_mask_kpf_utils import run_ccf_mask_kpf_for_fiber
+from ...utils.spectral_templates_utils import resolve_stellar_template_to_log_micron
 
 __all__ = ["StellarRVPrimitive", "STELLAR_RV_ALGORITHMS"]
 
 logger = logging.getLogger(__name__)
 
 
-def _echelle_order_per_flat_chunk(
-    order_tasks: list,
-    wave_2d: np.ndarray,
-    window_size_um: float,
-    n_chunks_total: int,
-) -> np.ndarray:
+def _fiber_l2_bundle(input_model, fiber: str):
     """
-    Map flattened chunk index to echelle order number (same packing as Numba CCF).
+    Return (spec, err, dq, wave) for a fiber, or None if SPEC/WAVE missing.
 
-    ``order_tasks`` is ``(order_row_index, order_number)`` per order; chunk layout
-    matches :func:`process_orders_rvs_numba_parallel`.
+    Logs a warning when returning None (same messages as former _process_fiber checks).
     """
-
-    if n_chunks_total <= 0:
-        return np.array([], dtype=np.int64)
-    wave_2d = np.asarray(wave_2d, dtype=np.float64)
-    n_chunks_per_order = np.array(
-        [
-            max(
-                1,
-                int(
-                    (np.nanmax(wave_2d[oi]) - np.nanmin(wave_2d[oi]))
-                    / float(window_size_um)
-                ),
-            )
-            for oi, _ in order_tasks
-        ],
-        dtype=np.int64,
-    )
-    chunk_start = np.zeros(len(order_tasks), dtype=np.int64)
-    for i in range(1, len(order_tasks)):
-        chunk_start[i] = chunk_start[i - 1] + n_chunks_per_order[i - 1]
-    out = np.empty(n_chunks_total, dtype=np.int64)
-    for i in range(n_chunks_total):
-        idx = int(np.searchsorted(chunk_start, i, side="right") - 1)
-        if 0 <= idx < len(order_tasks):
-            out[i] = int(order_tasks[idx][1])
-        else:
-            out[i] = -1
-    return out
+    sa, wa = f"SPEC_FIB{fiber}", f"WAVE_FIB{fiber}"
+    if not hasattr(input_model, sa) or getattr(input_model, sa) is None:
+        logger.warning("No %s on input; skipping CCF for fiber %s.", sa, fiber)
+        return None
+    if not hasattr(input_model, wa) or getattr(input_model, wa) is None:
+        logger.warning("No %s on input; skipping CCF for fiber %s.", wa, fiber)
+        return None
+    spec = getattr(input_model, sa)
+    ea, da = f"SPEC_ERR_FIB{fiber}", f"SPEC_DQ_FIB{fiber}"
+    err = getattr(input_model, ea) if hasattr(input_model, ea) else None
+    dq = getattr(input_model, da) if hasattr(input_model, da) else None
+    if err is None:
+        err = np.ones_like(spec, dtype=np.float64)
+    else:
+        err = np.asarray(err, dtype=np.float64)
+    if dq is None:
+        dq = np.zeros_like(spec, dtype=np.uint32)
+    else:
+        dq = np.asarray(dq, dtype=np.uint32)
+    return spec, err, dq, getattr(input_model, wa)
 
 
 # Registry of stellar RV algorithm names -> method name on StellarRVPrimitive.
@@ -94,60 +95,55 @@ def _echelle_order_per_flat_chunk(
 # do_orders, order_vec, template_ln, template_flux) and returns
 # (all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std) for _write_rv_tables.
 STELLAR_RV_ALGORITHMS = {
-    "ccf_median_mad": "_run_algorithm_ccf_median_mad",
+    "ccf_stellar_template": "_run_algorithm_ccf_stellar_template",
     "ccf_mask_kpf": "_run_algorithm_ccf_mask_kpf",
 }
-
-def _load_template_from_path(filepath: str, wl_min_um: float, wl_max_um: float):
-    """
-    Load wavelength and flux from a BT-Settl-style HDF5 file.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to the HDF5 spectrum file.
-    wl_min_um : float
-        Minimum wavelength to load (micron).
-    wl_max_um : float
-        Maximum wavelength to load (micron).
-
-    Returns
-    -------
-    tuple of np.ndarray
-        (wave_um, flux) as numpy arrays: wavelength in **vacuum** micron (BT-Settl HDF5
-        grid is converted from air via :func:`hispecdrp.utils.spectral_templates_utils.load_btsettl_spectrum`).
-    """
-    from ...utils.spectral_templates_utils import load_btsettl_spectrum
-    w, f = load_btsettl_spectrum(filepath, wl_min_um=wl_min_um, wl_max_um=wl_max_um)
-    return w.to_value("micron"), f.value
 
 
 class StellarRVPrimitive(BasePrimitive):
     """
-    Compute radial velocity via masking-based cross correlation with a spectral template.
+    Cross-correlate L2 spectra against a template or a line mask to measure RV.
 
-    All radial velocities (per-chunk RV and aggregated RV) are in meters per second (m/s).
-    The spectrum is split into wavelength chunks (window_size_um). Each chunk yields one RV;
-    chunk RVs are combined according to the chosen algorithm and written to RVCCF/RVCCFAVG
-    extensions on the output L2 model.
+    **ccf_stellar_template** (default): weighted CCF in :math:`\\ln\\lambda` against a
+    stellar template; per-chunk RVs; median/MAD rejection; inverse-variance mean
+    (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
 
-    Algorithm
-    ---------
+    **ccf_mask_kpf**: mask-shifted CCF using SPIROU ``.mas`` or KPF-style two-column
+    masks (:mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`). Default packaged
+    mask and citations: ``hispecdrp/data/masks/README.md``.
+
+    All RVs are in **m s\\ :sup:`−1`**. Chunks use ``window_size_um``; results go to
+    RVCCF / RVCCFAVG on the output L2 model.
+
+    Parameters (primitive arguments)
+    --------------------------------
+    The full argument schema is in ``ARGUMENTS``; key fields include:
+
     algorithm : str, optional
-        Stellar RV algorithm to use. Options are registered in STELLAR_RV_ALGORITHMS.
+        One of ``STELLAR_RV_ALGORITHMS`` keys: ``ccf_stellar_template`` or
+        ``ccf_mask_kpf``.
+    template_path, template_wavelength, template_flux : optional
+        Template inputs for ``ccf_stellar_template``.
+    mask_path, mask_width_um : optional
+        Mask file and (for two-column masks) half-width in µm for ``ccf_mask_kpf``.
+    window_size_um, outlier_sigma, max_cores : optional
+        Chunk width, MAD threshold, and Numba thread count for template path.
 
-        - **ccf_median_mad** (default): Template CCF in log(λ); per-chunk RVs;
-          median/MAD outlier rejection and inverse-variance weighted mean.
+    Notes
+    -----
+    ``max_cores`` affects only parallel echelle processing (``prange``); set ``1`` for
+    deterministic single-thread debugging.
 
-    max_cores : int, optional
-        Numba parallelizes the CCF across echelle orders (``prange``). Default
-        ``None`` uses all logical CPUs; set ``1`` for single-threaded runs (e.g.
-        debugging). This does not change the mathematical result.
+    See Also
+    --------
+    :mod:`hispecdrp.primitives.utils.ccf_utils`
+    :mod:`hispecdrp.primitives.utils.ccf_mask_kpf_utils`
+    :mod:`hispecdrp.utils.spectral_templates_utils`
     """
 
     ARGUMENTS = {
         "suffix": "stellar_rv",
-        "algorithm": "ccf_median_mad",
+        "algorithm": "ccf_stellar_template",
         "do_fibers": None,
         "do_orders": None,
         "template_path": None,
@@ -183,8 +179,8 @@ class StellarRVPrimitive(BasePrimitive):
         """
         Run stellar RV on the input model(s) and produce L2 output.
 
-        Loads the template, then for each input model and each fiber runs
-        CCF (serial or Numba-parallel), combines chunk RVs, and writes
+        For template mode, loads the stellar template, then for each input model and
+        each fiber runs CCF (serial or Numba-parallel), combines chunk RVs, and writes
         RVCCF_FIB# and RVCCFAVG_FIB# tables to the output L2 model.
 
         Returns
@@ -201,16 +197,25 @@ class StellarRVPrimitive(BasePrimitive):
         else:
             raise TypeError("Input must be a DataModel, path, or sequence of these.")
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_median_mad").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_stellar_template").lower().strip()
+        logger.info(
+            "Stellar RV: starting _perform algorithm=%s n_inputs=%d suffix=%s",
+            algo_key,
+            len(inp_list),
+            getattr(self, "suffix", ""),
+        )
         template_ln, template_flux = None, None
         if algo_key != "ccf_mask_kpf":
-            t_tpl = time.perf_counter()
-            template_ln, template_flux = self._get_template()
+            logger.info("Stellar RV: resolving stellar template (path or inline arrays)")
+            template_ln, template_flux = resolve_stellar_template_to_log_micron(
+                getattr(self, "template_path", None),
+                getattr(self, "template_wavelength", None),
+                getattr(self, "template_flux", None),
+            )
             n_tpl = int(len(template_ln)) if template_ln is not None else 0
             logger.info(
-                "STELLAR_RV_TIMING step=resolve_template algorithm=%s wall_s=%.3f n_ln_points=%d",
+                "Stellar RV: template ready algorithm=%s n_ln_points=%d",
                 algo_key,
-                time.perf_counter() - t_tpl,
                 n_tpl,
             )
             if template_ln is None:
@@ -222,6 +227,7 @@ class StellarRVPrimitive(BasePrimitive):
             # variables to satisfy the algorithm dispatch signature.
             template_ln = np.array([], dtype=np.float64)
             template_flux = np.array([], dtype=np.float64)
+            logger.info("Stellar RV: ccf_mask_kpf mode — empty template arrays (mask CCF only)")
 
         # Per-fiber CCF preview slots (mean + per-order); filled when save/show preview.
         self._ccf_preview_by_fiber: dict = {}
@@ -229,24 +235,29 @@ class StellarRVPrimitive(BasePrimitive):
         self._mask_overlay_by_fiber: dict = {}
 
         for _input in inp_list:
-            t_open = time.perf_counter()
+            logger.info("Stellar RV: opening input (path or in-memory model)")
             input_model = datamodels.open(_input)
+            logger.info("Stellar RV: input open complete")
             logger.info(
-                "STELLAR_RV_TIMING step=open_input wall_s=%.3f", time.perf_counter() - t_open
+                "Stellar RV: cloning output L2 (output_model=%s include_data=True)",
+                self.output_model,
             )
-            t_clone = time.perf_counter()
             output_model = self.get_output_model(
                 input_model, output_model=self.output_model, include_data=True
             )
-            logger.info(
-                "STELLAR_RV_TIMING step=clone_output_L2 wall_s=%.3f",
-                time.perf_counter() - t_clone,
-            )
+            logger.info("Stellar RV: output L2 clone complete")
             spectrograph = self._get_spectrograph(input_model)
             do_fibers, do_orders = self.get_do_traces(
                 input_model, self.do_fibers, self.do_orders
             )
             order_vec = input_model.make_order_vec()
+            logger.info(
+                "Stellar RV: spectrograph=%s do_fibers=%s n_do_orders=%d n_order_vec=%d",
+                spectrograph,
+                do_fibers,
+                len(do_orders) if do_orders is not None else 0,
+                len(order_vec),
+            )
 
             for fiber in do_fibers:
                 self._process_fiber(
@@ -264,17 +275,17 @@ class StellarRVPrimitive(BasePrimitive):
                 getattr(self, "show_mask_overlay_debug", False)
                 or getattr(self, "save_mask_overlay_debug", False)
             ):
-                from .stellar_rv_mask_overlay_debug import create_stellar_rv_mask_overlay_debug
+                from .stellar_rv_preview import write_mask_overlay_debug_pages
 
-                t_dbg = time.perf_counter()
-                paths = create_stellar_rv_mask_overlay_debug(self, output_model)
+                logger.info("Stellar RV: writing mask overlay debug HTML pages")
+                paths = write_mask_overlay_debug_pages(self, output_model)
                 if paths:
                     if self._output is None:
                         self._output = {}
                     self._output["mask_overlay_debug"] = paths
                 logger.info(
-                    "STELLAR_RV_TIMING step=create_mask_overlay_debug_html wall_s=%.3f",
-                    time.perf_counter() - t_dbg,
+                    "Stellar RV: mask overlay debug HTML done n_files=%d",
+                    len(paths),
                 )
 
             if isinstance(output, list):
@@ -282,47 +293,8 @@ class StellarRVPrimitive(BasePrimitive):
             else:
                 output = output_model
 
+        logger.info("Stellar RV: _perform finished algorithm=%s", algo_key)
         return dict(output=output)
-
-    def _get_template(self):
-        """
-        Resolve template to (log wavelength, flux) numpy arrays.
-
-        Loads from template_path if set, or uses template_wavelength and
-        template_flux. Per-fiber wavelength clipping happens in _process_fiber.
-
-        Returns
-        -------
-        tuple of np.ndarray or (None, None)
-            (template_ln, template_flux) in log(micron) and flux units,
-            or (None, None) if template could not be resolved.
-        """
-        tw = getattr(self, "template_wavelength", None)
-        tf = getattr(self, "template_flux", None)
-        path = getattr(self, "template_path", None)
-        if path is not None and (tw is None or tf is None):
-            # Load from file; use a broad range; per-fiber clipping happens in _process_fiber
-            wl_min, wl_max = 0.8, 3.0
-            try:
-                tw, tf = _load_template_from_path(path, wl_min, wl_max)
-            except Exception as e:
-                logger.exception("Failed to load template from %s: %s", path, e)
-                return None, None
-        if tw is None or tf is None:
-            return None, None
-        tw = np.asarray(tw, dtype=np.float64)
-        tf = np.asarray(tf, dtype=np.float64)
-        ok = np.isfinite(tw) & np.isfinite(tf) & (tw > 0)
-        if not np.any(ok):
-            return None, None
-        tw = tw[ok]
-        tf = tf[ok]
-        # Sort by wavelength
-        idx = np.argsort(tw)
-        tw = tw[idx]
-        tf = tf[idx]
-        ln_lam = np.log(tw)
-        return ln_lam, tf
 
     @staticmethod
     def _get_spectrograph(input_model) -> str:
@@ -351,7 +323,7 @@ class StellarRVPrimitive(BasePrimitive):
             return sg
         return "BSPEC"
 
-    def _run_algorithm_ccf_median_mad(
+    def _run_algorithm_ccf_stellar_template(
         self,
         input_model,
         output_model,
@@ -363,11 +335,12 @@ class StellarRVPrimitive(BasePrimitive):
         template_flux: np.ndarray,
     ):
         """
-        CCF + median/MAD outlier rejection + inverse-variance weighted mean.
+        Stellar-template cross-correlation + median/MAD + inverse-variance weighted mean.
 
-        Computes per-chunk RVs via CCF in log(lambda) with the template (serial or
-        parallel), combines with median/MAD and weighted mean, and optionally stores
-        CCF curves for the preview. Returns the standard 6-tuple for _write_rv_tables.
+        Cross-correlates the stellar template spectrum to the input spectrum in
+        log(wavelength), producing per-chunk RVs (serial or Numba-parallel). Chunk RVs
+        are combined with median/MAD outlier rejection and a weighted mean; CCF curves
+        may be stored for the preview. Returns the standard 6-tuple for _write_rv_tables.
 
         Returns
         -------
@@ -384,18 +357,10 @@ class StellarRVPrimitive(BasePrimitive):
         rv_std : float
             Uncertainty of the aggregated RV (m/s).
         """
-        spec_attr = f"SPEC_FIB{fiber}"
-        err_attr = f"SPEC_ERR_FIB{fiber}"
-        dq_attr = f"SPEC_DQ_FIB{fiber}"
-        wave_attr = f"WAVE_FIB{fiber}"
-        spec = getattr(input_model, spec_attr)
-        err = getattr(input_model, err_attr) if hasattr(input_model, err_attr) else np.ones_like(spec)
-        dq = getattr(input_model, dq_attr) if hasattr(input_model, dq_attr) else np.zeros_like(spec, dtype=np.uint32)
-        wave = getattr(input_model, wave_attr)
-        if err is None:
-            err = np.ones_like(spec, dtype=np.float64)
-        if dq is None:
-            dq = np.zeros_like(spec, dtype=np.uint32)
+        bundle = _fiber_l2_bundle(input_model, fiber)
+        if bundle is None:
+            raise RuntimeError("internal: expected SPEC/WAVE after _process_fiber guard")
+        spec, err, dq, wave = bundle
         do_not_use = DQ_FLAGS.get("DO_NOT_USE", 1)
         debug_ccf = getattr(self, "debug_ccf", False)
         _mc = getattr(self, "max_cores", None)
@@ -417,6 +382,18 @@ class StellarRVPrimitive(BasePrimitive):
             mode = "parallel"
         else:
             mode = "serial"
+
+        logger.info(
+            "Stellar RV: ccf_stellar_template fiber=%s spectrograph=%s mode=%s "
+            "n_order_tasks=%d want_preview=%s max_cores=%s window_um=%.4f",
+            fiber,
+            spectrograph,
+            mode,
+            len(order_tasks),
+            want_preview,
+            max_cores,
+            float(getattr(self, "window_size_um", 0.3)),
+        )
 
         all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail = self._process_fiber_orders(
             order_tasks,
@@ -446,17 +423,25 @@ class StellarRVPrimitive(BasePrimitive):
             inlier = np.zeros(len(all_rvs), dtype=bool)
             rv_mean, rv_std = np.nan, np.nan
         else:
-            t_combo = time.perf_counter()
+            logger.info(
+                "Stellar RV: combining chunk RVs (median/MAD + weighted mean) fiber=%s "
+                "n_valid_chunks=%d outlier_sigma=%.2f",
+                fiber,
+                int(np.sum(valid)),
+                float(self.outlier_sigma),
+            )
             inlier, _, _ = combine_rvs_median_mad(
                 all_rvs, all_rv_errs, self.outlier_sigma
             )
             rv_mean, rv_std = weighted_mean_rv(all_rvs, all_rv_errs, inlier)
             logger.info(
-                "STELLAR_RV_TIMING step=combine_median_mad_weighted_mean fiber=%s "
-                "n_chunks=%d wall_s=%.3f",
+                "Stellar RV: aggregate RV fiber=%s rv_mean=%.2f m/s rv_std=%.2f m/s "
+                "n_inlier=%d/%d",
                 fiber,
-                int(np.sum(valid)),
-                time.perf_counter() - t_combo,
+                float(rv_mean),
+                float(rv_std),
+                int(np.sum(inlier)),
+                len(inlier),
             )
 
         if debug_ccf and len(all_wavelengths) > 0:
@@ -504,9 +489,16 @@ class StellarRVPrimitive(BasePrimitive):
 
         Minimal delegation to :func:`ccf_mask_kpf_utils.run_ccf_mask_kpf_for_fiber`.
         """
-
         want_preview = bool(
             getattr(self, "save_preview", False) or getattr(self, "show_preview", False)
+        )
+        logger.info(
+            "Stellar RV: dispatching ccf_mask_kpf fiber=%s spectrograph=%s "
+            "n_do_orders=%d want_preview=%s",
+            fiber,
+            spectrograph,
+            len(do_orders) if do_orders is not None else 0,
+            want_preview,
         )
         preview_detail = None
         (
@@ -540,88 +532,22 @@ class StellarRVPrimitive(BasePrimitive):
             getattr(self, "show_mask_overlay_debug", False)
             or getattr(self, "save_mask_overlay_debug", False)
         ):
-            payload = self._collect_mask_overlay_payload(
+            from .stellar_rv_preview import collect_mask_overlay_payload_for_primitive
+
+            payload = collect_mask_overlay_payload_for_primitive(
+                self,
                 input_model=input_model,
                 fiber=fiber,
                 order_vec=order_vec,
             )
             if payload is not None:
                 self._mask_overlay_by_fiber[fiber] = payload
+                logger.debug(
+                    "Stellar RV: mask overlay payload stored fiber=%s n_orders_in_payload=%d",
+                    fiber,
+                    len(payload.get("orders", [])),
+                )
         return all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std, all_orders
-
-    def _collect_mask_overlay_payload(
-        self,
-        *,
-        input_model,
-        fiber: str,
-        order_vec: list,
-    ) -> dict | None:
-        """
-        Build per-order spectrum + mask payload for debug overlay HTML.
-        """
-        try:
-            resolved_mask = resolve_mask_path(getattr(self, "mask_path", None))
-            mask_lines = load_mask(
-                resolved_mask, mask_width_um=getattr(self, "mask_width_um", None)
-            )
-        except Exception as exc:
-            logger.warning("MASK_OVERLAY_DEBUG cannot load mask: %s", exc)
-            return None
-
-        wave = getattr(input_model, f"WAVE_FIB{fiber}", None)
-        spec = getattr(input_model, f"SPEC_FIB{fiber}", None)
-        if wave is None or spec is None:
-            return None
-
-        entries: list[dict] = []
-        # For debug visualization, include every order present on the input model so
-        # the HTML dropdown can inspect the full BSPEC/RSPEC order set, even if
-        # RV fitting itself was restricted to a subset via do_orders.
-        for oi, order in enumerate(order_vec):
-            w = np.asarray(wave[oi], dtype=np.float64)
-            s = np.asarray(spec[oi], dtype=np.float64)
-            ok = np.isfinite(w) & np.isfinite(s)
-            if int(np.sum(ok)) < 10:
-                continue
-            w = w[ok]
-            s = s[ok]
-            med = float(np.nanmedian(s))
-            if not np.isfinite(med) or med == 0.0:
-                med = 1.0
-            s_norm = s / med
-
-            mask_o = restrict_mask_to_chunk(
-                mask_lines,
-                float(np.nanmin(w)),
-                float(np.nanmax(w)),
-                v_min_m_s=_V_MIN,
-                v_max_m_s=_V_MAX,
-                zb=0.0,
-            )
-            if mask_o.start_um.size > 0:
-                mstart = np.asarray(mask_o.start_um, dtype=np.float64)
-                mend = np.asarray(mask_o.end_um, dtype=np.float64)
-                # Raw file weights for debug HTML: rectangles span mask weight 1 → (1 − w).
-                mw = np.asarray(mask_o.weight, dtype=np.float64)
-            else:
-                mstart = np.array([], dtype=np.float64)
-                mend = np.array([], dtype=np.float64)
-                mw = np.array([], dtype=np.float64)
-
-            entries.append(
-                {
-                    "order": int(order),
-                    "wave": np.asarray(w, dtype=np.float64),
-                    "spec": np.asarray(s_norm, dtype=np.float64),
-                    "mask_start_um": np.asarray(mstart, dtype=np.float64),
-                    "mask_end_um": np.asarray(mend, dtype=np.float64),
-                    "mask_weight": np.asarray(mw, dtype=np.float64),
-                }
-            )
-
-        if not entries:
-            return None
-        return {"fiber": str(fiber), "orders": entries}
 
     def _process_fiber(
         self,
@@ -660,27 +586,25 @@ class StellarRVPrimitive(BasePrimitive):
         template_flux : np.ndarray
             Template flux.
         """
-        spec_attr = f"SPEC_FIB{fiber}"
-        err_attr = f"SPEC_ERR_FIB{fiber}"
-        dq_attr = f"SPEC_DQ_FIB{fiber}"
-        wave_attr = f"WAVE_FIB{fiber}"
-
-        if not hasattr(input_model, spec_attr) or getattr(input_model, spec_attr) is None:
-            logger.warning("No %s on input; skipping CCF for fiber %s.", spec_attr, fiber)
-            return
-        if not hasattr(input_model, wave_attr) or getattr(input_model, wave_attr) is None:
-            logger.warning("No %s on input; skipping CCF for fiber %s.", wave_attr, fiber)
+        if _fiber_l2_bundle(input_model, fiber) is None:
             return
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_median_mad").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_stellar_template").lower().strip()
         method_name = STELLAR_RV_ALGORITHMS.get(algo_key)
         if method_name is None:
             raise ValueError(
                 f"Unknown stellar RV algorithm: {self.algorithm}. "
                 f"Valid: {list(STELLAR_RV_ALGORITHMS.keys())}"
             )
+        logger.info(
+            "Stellar RV: _process_fiber fiber=%s spectrograph=%s algorithm=%s -> %s",
+            fiber,
+            spectrograph,
+            algo_key,
+            method_name,
+        )
         runner = getattr(self, method_name)
-        t_run = time.perf_counter()
+        logger.info("Stellar RV: running RV algorithm fiber=%s algo=%s", fiber, algo_key)
         (
             all_wavelengths,
             all_rvs,
@@ -700,12 +624,12 @@ class StellarRVPrimitive(BasePrimitive):
             template_flux,
         )
         logger.info(
-            "STELLAR_RV_TIMING step=rv_algorithm fiber=%s algo=%s wall_s=%.3f",
+            "Stellar RV: RV algorithm returned fiber=%s algo=%s n_chunks=%d",
             fiber,
             algo_key,
-            time.perf_counter() - t_run,
+            len(all_wavelengths),
         )
-        t_w = time.perf_counter()
+        logger.info("Stellar RV: writing RV tables fiber=%s", fiber)
         self._write_rv_tables(
             output_model,
             fiber,
@@ -719,9 +643,8 @@ class StellarRVPrimitive(BasePrimitive):
             orders=all_orders,
         )
         logger.info(
-            "STELLAR_RV_TIMING step=write_rv_tables fiber=%s wall_s=%.3f",
+            "Stellar RV: RV tables written fiber=%s (RVCCF + RVCCFAVG)",
             fiber,
-            time.perf_counter() - t_w,
         )
 
     def _process_fiber_orders(
@@ -754,7 +677,21 @@ class StellarRVPrimitive(BasePrimitive):
         all_orders: list = []
         preview_detail: dict | None = None
 
+        logger.info(
+            "Stellar RV: _process_fiber_orders fiber=%s mode=%s n_order_tasks=%d "
+            "want_preview=%s max_cores=%s",
+            fiber,
+            mode,
+            len(order_tasks),
+            want_preview,
+            max_cores,
+        )
+
         if mode == "debug":
+            logger.info(
+                "Stellar RV: debug mode — per-chunk masked_ccf_rv_diagnostics fiber=%s",
+                fiber,
+            )
             for oi, order in order_tasks:
                 w = np.asarray(wave[oi], dtype=np.float64)
                 s = np.asarray(spec[oi], dtype=np.float64)
@@ -811,7 +748,10 @@ class StellarRVPrimitive(BasePrimitive):
                     all_wavelengths.append(wl_center)
                     all_orders.append(int(order))
             if want_preview:
-                t_pv = time.perf_counter()
+                logger.info(
+                    "Stellar RV: building CCF preview dict (spectra_orders path) fiber=%s",
+                    fiber,
+                )
                 preview_detail = ccf_preview_dict_from_spectra_orders(
                     order_tasks,
                     wave,
@@ -827,14 +767,19 @@ class StellarRVPrimitive(BasePrimitive):
                     _V_STEP,
                 )
                 logger.info(
-                    "STELLAR_RV_TIMING fiber=%s ccf_preview_dict_from_spectra_orders "
-                    "(debug path) wall_s=%.3f",
+                    "Stellar RV: CCF preview dict ready (debug path) fiber=%s slots=%s",
                     fiber,
-                    time.perf_counter() - t_pv,
+                    len(preview_detail.get("slots", [])) if preview_detail else 0,
                 )
             return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
 
         if mode == "parallel":
+            logger.info(
+                "Stellar RV: Numba parallel path fiber=%s want_preview=%s has_numba=%s",
+                fiber,
+                want_preview,
+                _HAS_NUMBA,
+            )
             spec_2d = np.asarray(spec, dtype=np.float64)
             err_2d = np.asarray(err, dtype=np.float64)
             if err.ndim == 1:
@@ -844,8 +789,12 @@ class StellarRVPrimitive(BasePrimitive):
                 dq_2d = np.broadcast_to(dq, spec.shape).copy()
             wave_2d = np.asarray(wave, dtype=np.float64)
 
+            preview_detail = None
             if want_preview and _HAS_NUMBA:
-                t_nb = time.perf_counter()
+                logger.info(
+                    "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=True) fiber=%s",
+                    fiber,
+                )
                 (
                     all_rvs_arr,
                     all_rv_errs_arr,
@@ -869,20 +818,14 @@ class StellarRVPrimitive(BasePrimitive):
                     return_ccf=True,
                 )
                 logger.info(
-                    "STELLAR_RV_TIMING fiber=%s process_orders_rvs_numba_parallel"
-                    "(return_ccf=True) wall_s=%.3f",
+                    "Stellar RV: Numba parallel CCF+RV done fiber=%s n_flat_chunks=%d",
                     fiber,
-                    time.perf_counter() - t_nb,
+                    len(all_rvs_arr),
                 )
-                ao_flat = _echelle_order_per_flat_chunk(
-                    order_tasks, wave_2d, self.window_size_um, len(all_rvs_arr)
+                logger.info(
+                    "Stellar RV: building preview from Numba flat CCF fiber=%s",
+                    fiber,
                 )
-                for i in range(len(all_rvs_arr)):
-                    all_rvs.append(all_rvs_arr[i])
-                    all_rv_errs.append(all_rv_errs_arr[i])
-                    all_wavelengths.append(all_wl_arr[i])
-                    all_orders.append(int(ao_flat[i]))
-                t_pv = time.perf_counter()
                 preview_detail = ccf_preview_dict_from_numba_flat(
                     order_tasks,
                     order_indices,
@@ -896,13 +839,21 @@ class StellarRVPrimitive(BasePrimitive):
                     _V_STEP,
                 )
                 logger.info(
-                    "STELLAR_RV_TIMING fiber=%s ccf_preview_dict_from_numba_flat "
-                    "wall_s=%.3f",
+                    "Stellar RV: preview from Numba flat complete fiber=%s",
                     fiber,
-                    time.perf_counter() - t_pv,
                 )
             else:
-                all_rvs_arr, all_rv_errs_arr, all_wl_arr = process_orders_rvs_numba_parallel(
+                logger.info(
+                    "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=False) fiber=%s",
+                    fiber,
+                )
+                (
+                    all_rvs_arr,
+                    all_rv_errs_arr,
+                    all_wl_arr,
+                    n_chunks_per_order,
+                    chunk_start,
+                ) = process_orders_rvs_numba_parallel(
                     wave_2d,
                     spec_2d,
                     err_2d,
@@ -915,17 +866,30 @@ class StellarRVPrimitive(BasePrimitive):
                     max_cores=max_cores,
                     return_ccf=False,
                 )
-                ao_flat = _echelle_order_per_flat_chunk(
-                    order_tasks, wave_2d, self.window_size_um, len(all_rvs_arr)
+                logger.info(
+                    "Stellar RV: Numba parallel RV only done fiber=%s n_flat_chunks=%d",
+                    fiber,
+                    len(all_rvs_arr),
                 )
-                for i in range(len(all_rvs_arr)):
-                    all_rvs.append(all_rvs_arr[i])
-                    all_rv_errs.append(all_rv_errs_arr[i])
-                    all_wavelengths.append(all_wl_arr[i])
-                    all_orders.append(int(ao_flat[i]))
+
+            ao_flat = flat_chunk_echelle_orders(order_tasks, chunk_start, len(all_rvs_arr))
+            all_rvs.extend(all_rvs_arr)
+            all_rv_errs.extend(all_rv_errs_arr)
+            all_wavelengths.extend(all_wl_arr)
+            all_orders.extend(int(x) for x in ao_flat)
+            logger.info(
+                "Stellar RV: parallel path collected fiber=%s n_chunks=%d preview=%s",
+                fiber,
+                len(all_rvs),
+                preview_detail is not None,
+            )
             return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
 
         # serial (no Numba)
+        logger.info(
+            "Stellar RV: serial Python path (per-order process_one_order_rvs) fiber=%s",
+            fiber,
+        )
         if want_preview:
             order_slots: list[dict] = []
             all_rows: list[np.ndarray] = []
@@ -971,7 +935,12 @@ class StellarRVPrimitive(BasePrimitive):
                 )
                 all_rows.append(ccf_2d)
             if order_slots and v_ref is not None:
-                t_fin = time.perf_counter()
+                logger.info(
+                    "Stellar RV: finalize_ccf_preview_dict (serial+preview) fiber=%s "
+                    "n_order_slots=%d",
+                    fiber,
+                    len(order_slots),
+                )
                 preview_detail = finalize_ccf_preview_dict(
                     order_slots,
                     all_rows,
@@ -981,10 +950,9 @@ class StellarRVPrimitive(BasePrimitive):
                     _V_STEP,
                 )
                 logger.info(
-                    "STELLAR_RV_TIMING fiber=%s finalize_ccf_preview_dict "
-                    "(serial+preview path) wall_s=%.3f",
+                    "Stellar RV: serial preview dict complete fiber=%s total_slots=%s",
                     fiber,
-                    time.perf_counter() - t_fin,
+                    len(preview_detail.get("slots", [])) if preview_detail else 0,
                 )
         else:
             for oi, order in order_tasks:
@@ -1008,6 +976,12 @@ class StellarRVPrimitive(BasePrimitive):
                     all_wavelengths.append(chunk_centers[i])
                     all_orders.append(int(order))
 
+        logger.info(
+            "Stellar RV: serial path done fiber=%s n_chunks=%d preview=%s",
+            fiber,
+            len(all_rvs),
+            preview_detail is not None,
+        )
         return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
 
     def _write_rv_tables(
@@ -1053,6 +1027,14 @@ class StellarRVPrimitive(BasePrimitive):
             Echelle order number per chunk (same length as ``rvs``). -1 if unknown.
         """
         n = len(rvs)
+        logger.info(
+            "Stellar RV: _write_rv_tables fiber=%s spectrograph=%s n_per_chunk_rows=%d "
+            "rv_agg=%.2f m/s",
+            fiber,
+            spectrograph,
+            n,
+            float(rv_agg) if np.isfinite(rv_agg) else float("nan"),
+        )
         if inlier is None:
             inlier = np.ones(n, dtype=bool) if n else np.array([], dtype=bool)
         wl = np.asarray(wavelengths, dtype=np.float64) if len(wavelengths) else np.array([], dtype=np.float64)
@@ -1098,13 +1080,15 @@ class StellarRVPrimitive(BasePrimitive):
             "RV_ABS_ERR": [rv_agg_err],
         })
         setattr(output_model, _ext("RVCCFAVG"), avg_tbl)
+        logger.debug(
+            "Stellar RV: RVCCF/AVG attributes set on model (%s, %s)",
+            _ext("RVCCF"),
+            _ext("RVCCFAVG"),
+        )
 
     def _create_preview(self):
         from .stellar_rv_preview import create_stellar_rv_preview
 
-        t0 = time.perf_counter()
+        logger.info("Stellar RV: _create_preview starting (Plotly stellar RV preview)")
         create_stellar_rv_preview(self)
-        logger.info(
-            "STELLAR_RV_TIMING step=create_stellar_rv_preview total wall_s=%.3f",
-            time.perf_counter() - t0,
-        )
+        logger.info("Stellar RV: _create_preview finished")

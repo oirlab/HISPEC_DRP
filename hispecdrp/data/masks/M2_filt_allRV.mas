@@ -1,7 +1,11 @@
-# HISPEC DRP default SPIROU-style mask for ccf_mask_kpf (columns: start_nm, end_nm, weight).
-# Wavelength columns: **vacuum** nanometers (÷1e3 → µm in loader).
-# Format: SPIROU/OPERA three-column .mas; mask-shift CCF algorithm is KPF-inspired (see
-# hispecdrp/primitives/utils/ccf_mask_kpf_utils.py).
+# HISPEC DRP SPIROU-style CCF line mask (columns: start_nm, end_nm, weight).
+# Template line mask for M2 spectral-type stars: filtered subset for all-RV use (SPIROU
+# filt_allRV-style naming).
+# Wavelength columns: vacuum nanometers (÷1e3 → µm in the HISPEC loader; no air→vac in code).
+# Format: SPIROU/OPERA three-column .mas.
+#
+# Upstream mask collection (SPIRou / spirou-ccf, E. Martioli):
+#   https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
 #
    967.31071758469182        967.32426942492827       0.26544494289607518     
    967.47528824587118        967.48884239171150        3.6706218343512897E-002

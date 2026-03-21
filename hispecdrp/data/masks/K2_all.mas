@@ -1,3 +1,11 @@
+# HISPEC DRP SPIROU-style CCF line mask (columns: start_nm, end_nm, weight).
+# Template line mask for K2 spectral-type stars: full K2 line list (SPIROU K2_all-style naming).
+# Wavelength columns: vacuum nanometers (÷1e3 → µm in the HISPEC loader; no air→vac in code).
+# Format: SPIROU/OPERA three-column .mas.
+#
+# Upstream mask collection (SPIRou / spirou-ccf, E. Martioli):
+#   https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+#
    968.46681737308211        968.48044059736674       0.12610835821439312     
    968.55081291234933        968.56443731818194        3.6400235671302815E-002
    968.69620702318673        968.70983347424851        9.6555592437049240E-002
