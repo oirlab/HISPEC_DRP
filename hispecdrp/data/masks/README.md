@@ -4,7 +4,7 @@
 
 The **`.mas`** files in this directory use the **SPIROU / OPERA-style** three-column
 format (wavelength start, wavelength end, weight in **air nanometers** for the wavelength
-columns—see `load_mask_spirou_mas` in `hispecdrp.primitives.utils.ccf_mask_kpf_utils`).
+columns—see `load_mask_spirou_mas` in `hispecdrp.primitives.utils.ccf_utils`).
 
 They are **redistributed for convenience** with HISPEC DRP so that
 `algorithm="ccf_mask_kpf"` works out of the box. The **scientific content** of the line

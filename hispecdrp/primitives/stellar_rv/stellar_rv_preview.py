@@ -1,17 +1,21 @@
 """
-Interactive Plotly previews for stellar radial-velocity products.
+Interactive previews for stellar radial-velocity products.
 
-Builds multi-panel figures (CCF vs velocity, per-chunk RV, etc.) and optional
-HTML debug views that overlay mask line segments on extracted spectral chunks for
-``algorithm="ccf_mask_kpf"``. Gaussian reference curves use
-:func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`; mask geometry uses
-:mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`.
+There are **two** preview surfaces:
+
+1. **Default unified figure** (``create_stellar_rv_preview``): Plotly panels for RV vs
+   wavelength (per chunk), CCF vs velocity with Gaussian fits, and fit residuals.
+2. **Mask-shift debug HTML** (``write_mask_overlay_debug_pages``): per-order spectrum with
+   mask segment overlay and velocity slider, for ``algorithm="ccf_mask_kpf"`` only.
+
+Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
+mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
 
 Notes
 -----
 Plotly layout code is **HISPEC DRP–original**. For mask file format and upstream
 line lists, see ``hispecdrp/data/masks/README.md`` and spirou-ccf/KPF references
-in :mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`.
+in :mod:`~hispecdrp.primitives.utils.ccf_utils`.
 
 References
 ----------
@@ -29,17 +33,15 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ..utils.ccf_mask_kpf_utils import (
-    load_mask,
-    resolve_mask_path,
-    restrict_mask_to_chunk,
-)
 from ..utils.ccf_utils import (
     _V_MAX,
     _V_MIN,
     _V_STEP,
     _gaussian_ccf_model,
     fit_ccf_rv,
+    load_mask,
+    resolve_mask_path,
+    restrict_mask_to_chunk,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,15 +172,51 @@ def _first_output_model_from_primitive(primitive):
     return out
 
 
+def _aggregated_mask_chunk_rv_for_order(
+    order_num: int,
+    chunk_echelle_order: np.ndarray,
+    chunk_rv_m_s: np.ndarray,
+    chunk_rv_err_m_s: np.ndarray,
+) -> tuple[float | None, float | None]:
+    """
+    Inverse-variance weighted mean RV and combined σ for all chunks on one echelle order.
+    """
+    co = np.asarray(chunk_echelle_order, dtype=np.int64).ravel()
+    rv = np.asarray(chunk_rv_m_s, dtype=np.float64).ravel()
+    er = np.asarray(chunk_rv_err_m_s, dtype=np.float64).ravel()
+    if co.size == 0 or co.size != rv.size or co.size != er.size:
+        return None, None
+    sel = co == int(order_num)
+    if not np.any(sel):
+        return None, None
+    rv_s, er_s = rv[sel], er[sel]
+    ok = np.isfinite(rv_s) & np.isfinite(er_s) & (er_s > 0)
+    if np.any(ok):
+        w = 1.0 / (er_s[ok] ** 2)
+        mu = float(np.average(rv_s[ok], weights=w))
+        sig = float(1.0 / np.sqrt(np.sum(w))) if np.sum(w) > 0 else None
+        return mu, sig
+    ok2 = np.isfinite(rv_s)
+    if np.any(ok2):
+        return float(np.nanmedian(rv_s[ok2])), None
+    return None, None
+
+
 def collect_mask_overlay_payload_for_primitive(
     primitive,
     *,
     input_model,
     fiber: str,
     order_vec: list,
+    chunk_rv_m_s: np.ndarray | None = None,
+    chunk_rv_err_m_s: np.ndarray | None = None,
+    chunk_echelle_order: np.ndarray | None = None,
 ) -> dict | None:
     """
     Build per-order spectrum + mask payload for mask-overlay debug HTML (ccf_mask_kpf).
+
+    When chunk RV arrays are supplied (same length as ``run_ccf_mask_kpf_for_fiber`` outputs),
+    each order entry includes ``fit_rv_m_s`` / ``fit_rv_err_m_s`` for the velocity-slider hint.
     """
     try:
         resolved_mask = resolve_mask_path(getattr(primitive, "mask_path", None))
@@ -215,6 +253,23 @@ def collect_mask_overlay_payload_for_primitive(
         if not np.isfinite(med) or med == 0.0:
             med = 1.0
         s_norm = s / med
+        wl_lo = float(np.nanmin(w))
+        wl_hi = float(np.nanmax(w))
+        fit_rv: float | None
+        fit_err: float | None
+        if (
+            chunk_echelle_order is not None
+            and chunk_rv_m_s is not None
+            and chunk_rv_err_m_s is not None
+        ):
+            fit_rv, fit_err = _aggregated_mask_chunk_rv_for_order(
+                int(order),
+                chunk_echelle_order,
+                chunk_rv_m_s,
+                chunk_rv_err_m_s,
+            )
+        else:
+            fit_rv, fit_err = None, None
 
         mask_o = restrict_mask_to_chunk(
             mask_lines,
@@ -236,11 +291,15 @@ def collect_mask_overlay_payload_for_primitive(
         entries.append(
             {
                 "order": int(order),
+                "wl_lo_um": wl_lo,
+                "wl_hi_um": wl_hi,
                 "wave": np.asarray(w, dtype=np.float64),
                 "spec": np.asarray(s_norm, dtype=np.float64),
                 "mask_start_um": np.asarray(mstart, dtype=np.float64),
                 "mask_end_um": np.asarray(mend, dtype=np.float64),
                 "mask_weight": np.asarray(mw, dtype=np.float64),
+                "fit_rv_m_s": fit_rv,
+                "fit_rv_err_m_s": fit_err,
             }
         )
 
@@ -261,17 +320,28 @@ def collect_mask_overlay_payload_for_primitive(
 C_M_S = 299792458.0
 
 
+def _json_opt_float(x: float | None) -> float | None:
+    if x is None:
+        return None
+    xf = float(x)
+    return xf if np.isfinite(xf) else None
+
+
 def _to_serializable_order_payload(order_payload: dict) -> dict:
     out_orders = []
     for row in order_payload.get("orders", []):
         out_orders.append(
             {
                 "order": int(row["order"]),
+                "wl_lo_um": float(row["wl_lo_um"]),
+                "wl_hi_um": float(row["wl_hi_um"]),
                 "wave": [float(x) for x in row["wave"]],
                 "spec": [float(x) for x in row["spec"]],
                 "mask_start_um": [float(x) for x in row["mask_start_um"]],
                 "mask_end_um": [float(x) for x in row["mask_end_um"]],
                 "mask_weight": [float(x) for x in row["mask_weight"]],
+                "fit_rv_m_s": _json_opt_float(row.get("fit_rv_m_s")),
+                "fit_rv_err_m_s": _json_opt_float(row.get("fit_rv_err_m_s")),
             }
         )
     return {"fiber": str(order_payload["fiber"]), "orders": out_orders}
@@ -300,7 +370,16 @@ def _build_mask_overlay_debug_html(
     .row label {{ font-size: 13px; }}
     #plot {{ width: 100%; height: 760px; }}
     input[type=number] {{ width: 140px; }}
-    select {{ min-width: 140px; }}
+    select {{ min-width: 280px; }}
+    #vSliderWrap {{ position: relative; width: 840px; height: 28px; }}
+    #rvFitTrack {{ position: absolute; left: 0; right: 0; top: 10px; height: 8px;
+      background: rgba(0,0,0,0.08); border-radius: 4px; pointer-events: none; }}
+    #rvFitBand {{ display: none; position: absolute; top: 10px; height: 8px;
+      background: rgba(46, 204, 113, 0.55); border-radius: 4px; pointer-events: none; }}
+    #rvFitTick {{ display: none; position: absolute; top: 5px; width: 0; height: 18px;
+      border-left: 3px solid #1e8449; transform: translateX(-1.5px); pointer-events: none; }}
+    #vSlider {{ position: absolute; left: 0; width: 100%; top: 0; height: 28px; margin: 0;
+      z-index: 2; background: transparent; }}
   </style>
 </head>
 <body>
@@ -312,8 +391,16 @@ def _build_mask_overlay_debug_html(
       <input id="vInput" type="number" step="{float(v_step_m_s):.1f}" />
     </label>
   </div>
+  <p style="font-size:11px;color:#555;margin:0 0 4px 0;max-width:840px;">
+    Green band / tick: fitted RV ±1σ for this order (inverse-variance mean over mask-CCF chunks).
+  </p>
   <div class="row">
-    <input id="vSlider" type="range" min="{float(v_min_m_s):.1f}" max="{float(v_max_m_s):.1f}" step="{float(v_step_m_s):.1f}" style="width: 840px;" />
+    <div id="vSliderWrap">
+      <div id="rvFitTrack"></div>
+      <div id="rvFitBand"></div>
+      <div id="rvFitTick"></div>
+      <input id="vSlider" type="range" min="{float(v_min_m_s):.1f}" max="{float(v_max_m_s):.1f}" step="{float(v_step_m_s):.1f}" />
+    </div>
     <span id="vLabel"></span>
   </div>
   <div id="plot"></div>
@@ -335,9 +422,51 @@ def _build_mask_overlay_debug_html(
     DATA.orders.forEach((o, i) => {{
       const opt = document.createElement("option");
       opt.value = String(i);
-      opt.textContent = `Order ${{o.order}}`;
+      const lo = Number(o.wl_lo_um);
+      const hi = Number(o.wl_hi_um);
+      let lab = `Order ${{o.order}}`;
+      if (Number.isFinite(lo) && Number.isFinite(hi)) {{
+        lab += ` · λ ${{lo.toFixed(4)}}–${{hi.toFixed(4)}} µm`;
+      }}
+      opt.textContent = lab;
       orderSelect.appendChild(opt);
     }});
+
+    function updateRvFitIndicator(order) {{
+      const band = document.getElementById("rvFitBand");
+      const tick = document.getElementById("rvFitTick");
+      const vMin = parseFloat(vSlider.min);
+      const vMax = parseFloat(vSlider.max);
+      const span = vMax - vMin;
+      if (!band || !tick || !(span > 0)) return;
+      const rv = order.fit_rv_m_s;
+      const sig = order.fit_rv_err_m_s;
+      if (rv == null || !Number.isFinite(Number(rv))) {{
+        band.style.display = "none";
+        tick.style.display = "none";
+        return;
+      }}
+      const rvN = Number(rv);
+      const sigN = Number(sig);
+      band.style.display = "block";
+      tick.style.display = "block";
+      let lo = rvN;
+      let hi = rvN;
+      if (Number.isFinite(sigN) && sigN > 0) {{
+        lo = rvN - sigN;
+        hi = rvN + sigN;
+      }}
+      const pLo = 100 * (lo - vMin) / span;
+      const pHi = 100 * (hi - vMin) / span;
+      const leftPct = Math.max(0, Math.min(100, Math.min(pLo, pHi)));
+      const rightPct = Math.max(0, Math.min(100, Math.max(pLo, pHi)));
+      let widthPct = rightPct - leftPct;
+      if (widthPct < 0.4) widthPct = 0.4;
+      band.style.left = leftPct + "%";
+      band.style.width = widthPct + "%";
+      const cPct = Math.max(0, Math.min(100, 100 * (rvN - vMin) / span));
+      tick.style.left = cPct + "%";
+    }}
 
     function shiftWavelengths(arr, vMs) {{
       const factor = (1.0 + vMs / C_MS) / (1.0 + ZB);
@@ -530,7 +659,15 @@ def _build_mask_overlay_debug_html(
       const layout = {{
         uirevision: `fib-${{DATA.fiber}}-ord-${{order.order}}`,
         title: {{
-          text: `Fiber ${{DATA.fiber}} | Order ${{order.order}} | v = ${{currentV.toFixed(1)}} m/s`,
+          text: (() => {{
+            const lo = Number(order.wl_lo_um);
+            const hi = Number(order.wl_hi_um);
+            let wl = "";
+            if (Number.isFinite(lo) && Number.isFinite(hi)) {{
+              wl = ` | λ ${{lo.toFixed(4)}}–${{hi.toFixed(4)}} µm`;
+            }}
+            return `Fiber ${{DATA.fiber}} | Order ${{order.order}}${{wl}} | v = ${{currentV.toFixed(1)}} m/s`;
+          }})(),
           y: 1.08,
           yref: "paper",
           yanchor: "top",
@@ -538,7 +675,7 @@ def _build_mask_overlay_debug_html(
         }},
         xaxis: {{ title: "Wavelength (um)" }},
         yaxis: {{
-          title: "Normalized flux (0–1)",
+          title: "Normalize flux",
           range: [0, 1],
           zeroline: true,
         }},
@@ -570,7 +707,18 @@ def _build_mask_overlay_debug_html(
       Plotly.react(plotDiv, traces, layout, {{responsive: true}});
       const ccfVal = ccfAtVelocity(order, currentV);
       const ccfText = Number.isFinite(ccfVal) ? ccfVal.toExponential(3) : "nan";
-      vLabel.textContent = `v = ${{currentV.toFixed(1)}} m/s | CCF = ${{ccfText}}`;
+      let fitTxt = "";
+      if (order.fit_rv_m_s != null && Number.isFinite(Number(order.fit_rv_m_s))) {{
+        const frv = Number(order.fit_rv_m_s);
+        const fe = order.fit_rv_err_m_s;
+        if (fe != null && Number.isFinite(Number(fe)) && Number(fe) > 0) {{
+          fitTxt = ` | fit ${{frv.toFixed(1)}} ± ${{Number(fe).toFixed(1)}} m/s`;
+        }} else {{
+          fitTxt = ` | fit ${{frv.toFixed(1)}} m/s`;
+        }}
+      }}
+      vLabel.textContent = `v = ${{currentV.toFixed(1)}} m/s | CCF = ${{ccfText}}${{fitTxt}}`;
+      updateRvFitIndicator(order);
     }}
 
     function setVelocity(v) {{

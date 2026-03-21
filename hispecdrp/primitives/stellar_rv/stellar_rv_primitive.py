@@ -10,7 +10,7 @@ Notes
 -----
 - **Template path** uses :mod:`hispecdrp.primitives.utils.ccf_utils` and
   :mod:`hispecdrp.utils.spectral_templates_utils`.
-- **Mask path** uses :mod:`hispecdrp.primitives.utils.ccf_mask_kpf_utils` with
+- **Mask path** uses :mod:`hispecdrp.primitives.utils.ccf_utils` (mask CCF) with
   SPIROU-style ``.mas`` files (default ``hispecdrp/data/masks/M2_filt_allRV.mas``).
   Mask-shift CCF is **inspired by** Keck KPF’s public mask-line design; packaged
   masks trace to **spirou-ccf** — see ``hispecdrp/data/masks/README.md``.
@@ -39,6 +39,7 @@ from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
 
 from ..utils.ccf_utils import (
+    run_ccf_mask_kpf_for_fiber,
     _HAS_NUMBA,
     _V_MAX,
     _V_MIN,
@@ -54,7 +55,6 @@ from ..utils.ccf_utils import (
     process_orders_rvs_numba_parallel,
     weighted_mean_rv,
 )
-from ..utils.ccf_mask_kpf_utils import run_ccf_mask_kpf_for_fiber
 from ...utils.spectral_templates_utils import resolve_stellar_template_to_log_micron
 
 __all__ = ["StellarRVPrimitive", "STELLAR_RV_ALGORITHMS"]
@@ -109,7 +109,7 @@ class StellarRVPrimitive(BasePrimitive):
     (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
 
     **ccf_mask_kpf**: mask-shifted CCF using SPIROU ``.mas`` or KPF-style two-column
-    masks (:mod:`~hispecdrp.primitives.utils.ccf_mask_kpf_utils`). Default packaged
+    masks (:mod:`~hispecdrp.primitives.utils.ccf_utils`). Default packaged
     mask and citations: ``hispecdrp/data/masks/README.md``.
 
     All RVs are in **m s\\ :sup:`−1`**. Chunks use ``window_size_um``; results go to
@@ -136,8 +136,7 @@ class StellarRVPrimitive(BasePrimitive):
 
     See Also
     --------
-    :mod:`hispecdrp.primitives.utils.ccf_utils`
-    :mod:`hispecdrp.primitives.utils.ccf_mask_kpf_utils`
+    :mod:`hispecdrp.primitives.utils.ccf_utils` — template CCF + mask-line CCF
     :mod:`hispecdrp.utils.spectral_templates_utils`
     """
 
@@ -150,7 +149,7 @@ class StellarRVPrimitive(BasePrimitive):
         "template_wavelength": None,
         "template_flux": None,
         # Mask-only algorithm inputs (used when algorithm="ccf_mask_kpf").
-        # If mask_path is None, ccf_mask_kpf_utils uses its packaged SPIROU default.
+        # If mask_path is None, resolve_mask_path uses packaged SPIROU default.
         "mask_path": None,
         # Optional wavelength segment half-width for KPF-style 2-col masks.
         # Ignored for SPIROU-style .mas files which already provide start/end.
@@ -161,13 +160,12 @@ class StellarRVPrimitive(BasePrimitive):
         # None: use all CPUs for Numba order-parallel CCF; set to 1 to force single-thread.
         "max_cores": None,
         "debug_ccf": False,
-        # Preview export: Kaleido PNG is slow. Env HISPEC_DRP_SHOW_CCF_PREVIEW
-        # forces HTML-only (no PNG). Otherwise preview_save_png=False skips PNG;
-        # preview_png_scale lowers pixel count (e.g. 1.0) for faster PNGs.
+        # Previews: (1) default Plotly RV/CCF/residual figure; (2) optional mask-overlay
+        # HTML for ccf_mask_kpf only. Kaleido PNG is optional/slow; env
+        # HISPEC_DRP_SHOW_CCF_PREVIEW forces HTML-only for (1).
         "preview_save_png": False,
         "preview_png_scale": 2.0,
-        # Debug-only ccf_mask_kpf overlay (separate from standard preview):
-        # order dropdown + velocity slider/number input in standalone HTML.
+        # Mask-shift overlay HTML (ccf_mask_kpf): order dropdown + velocity controls.
         "show_mask_overlay_debug": False,
         "save_mask_overlay_debug": False,
         "mask_overlay_velocity_m_s": 0.0,
@@ -487,7 +485,7 @@ class StellarRVPrimitive(BasePrimitive):
         """
         Mask-shifted KPF-style CCF + Gaussian RV fit.
 
-        Minimal delegation to :func:`ccf_mask_kpf_utils.run_ccf_mask_kpf_for_fiber`.
+        Minimal delegation to :func:`run_ccf_mask_kpf_for_fiber`.
         """
         want_preview = bool(
             getattr(self, "save_preview", False) or getattr(self, "show_preview", False)
@@ -539,6 +537,9 @@ class StellarRVPrimitive(BasePrimitive):
                 input_model=input_model,
                 fiber=fiber,
                 order_vec=order_vec,
+                chunk_rv_m_s=all_rvs,
+                chunk_rv_err_m_s=all_rv_errs,
+                chunk_echelle_order=all_orders,
             )
             if payload is not None:
                 self._mask_overlay_by_fiber[fiber] = payload
@@ -826,17 +827,21 @@ class StellarRVPrimitive(BasePrimitive):
                     "Stellar RV: building preview from Numba flat CCF fiber=%s",
                     fiber,
                 )
+                v_grid_np = np.asarray(v_grid, dtype=np.float64)
+                v_step_meta = (
+                    float(v_grid_np[1] - v_grid_np[0]) if v_grid_np.size > 1 else float(_V_STEP)
+                )
                 preview_detail = ccf_preview_dict_from_numba_flat(
                     order_tasks,
                     order_indices,
                     n_chunks_per_order,
                     chunk_start,
                     all_ccf,
-                    v_grid,
+                    v_grid_np,
                     wave_2d,
-                    _V_MIN,
-                    _V_MAX,
-                    _V_STEP,
+                    float(v_grid_np[0]),
+                    float(v_grid_np[-1]),
+                    v_step_meta,
                 )
                 logger.info(
                     "Stellar RV: preview from Numba flat complete fiber=%s",
@@ -1026,6 +1031,10 @@ class StellarRVPrimitive(BasePrimitive):
         orders : np.ndarray, optional
             Echelle order number per chunk (same length as ``rvs``). -1 if unknown.
         """
+        # TODO: Replace placeholder MBJDW, BERVW, RESOLUTION, and TELL_ABS (per-chunk
+        # and RVCCFAVG row) with values from the pipeline once other Stage 2 methods
+        # supply barycentric/MJD metadata, spectrograph resolution, and telluric
+        # absorption context.
         n = len(rvs)
         logger.info(
             "Stellar RV: _write_rv_tables fiber=%s spectrograph=%s n_per_chunk_rows=%d "
