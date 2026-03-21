@@ -115,31 +115,110 @@ class StellarRVPrimitive(BasePrimitive):
     All RVs are in **m s\\ :sup:`−1`**. Chunks use ``window_size_um``; results go to
     RVCCF / RVCCFAVG on the output L2 model.
 
-    Parameters (primitive arguments)
-    --------------------------------
-    The full argument schema is in ``ARGUMENTS``; key fields include:
+    Primitive arguments (``ARGUMENTS``)
+    -----------------------------------
+    Defaults live in the class attribute ``ARGUMENTS``; pipeline YAML/config keys match
+    these names. Inherited keys from :class:`~hispecdrp.processing_component.ProcessingComponent`
+    (e.g. ``input``, ``save_preview``, ``show_preview``) apply as for other primitives.
 
-    algorithm : str, optional
-        One of ``STELLAR_RV_ALGORITHMS`` keys: ``ccf_stellar_template`` or
-        ``ccf_mask_kpf``.
-    template_path, template_wavelength, template_flux : optional
-        Template inputs for ``ccf_stellar_template``.
-    mask_path, mask_width_um : optional
-        Mask file and (for two-column masks) half-width in µm for ``ccf_mask_kpf``.
-    window_size_um, outlier_sigma, max_cores : optional
-        Chunk width, MAD threshold, and Numba thread count for template path.
+    **Output & naming**
+
+    suffix : str, default ``"stellar_rv"``
+        Suffix passed through the framework for derived products / bookkeeping.
+    output_model : str, default ``"L2Model"``
+        Output datamodel type passed to :meth:`~hispecdrp.primitives.base_primitive.BasePrimitive.get_output_model`
+        when cloning the input to an L2 with RV tables attached.
+
+    **Algorithm selection**
+
+    algorithm : str, default ``"ccf_stellar_template"``
+        RV driver. Must be a key of ``STELLAR_RV_ALGORITHMS``: ``ccf_stellar_template``
+        (template CCF in log wavelength) or ``ccf_mask_kpf`` (mask-shift CCF; no stellar
+        template required).
+
+    **Which spectra / orders**
+
+    do_fibers : sequence of str or None, default None
+        Fiber indices to process (e.g. ``["1", "2"]``). ``None`` means use
+        :meth:`~hispecdrp.processing_component.ProcessingComponent.get_do_traces` defaults
+        from the input model / config.
+    do_orders : sequence of int or None, default None
+        Echelle order numbers to include. ``None`` uses the same helper as other L2
+        primitives (all valid orders unless restricted in config).
+
+    **Stellar template** (``algorithm="ccf_stellar_template"``)
+
+    template_path : str or None, default None
+        Path to a template spectrum file (see
+        :func:`~hispecdrp.utils.spectral_templates_utils.resolve_stellar_template_to_log_micron`).
+    template_wavelength : array-like or None, default None
+        Wavelength grid (µm) if passing a template in memory instead of ``template_path``.
+    template_flux : array-like or None, default None
+        Template flux matching ``template_wavelength``. Together with wavelength, avoids
+        loading from disk.
+
+    **Line mask** (``algorithm="ccf_mask_kpf"``)
+
+    mask_path : str or None, default None
+        Path to a SPIROU ``.mas`` or KPF-style two-column mask file. ``None`` selects the
+        packaged default (see ``hispecdrp/data/masks/README.md``).
+    mask_width_um : float or None, default None
+        Half-width in µm for wavelength segments when using two-column masks; ignored for
+        SPIROU ``.mas`` lines that already carry start/end.
+
+    **Chunking & combined RV**
+
+    window_size_um : float, default ``0.3``
+        Approximate width in µm used to subdivide each echelle order into wavelength
+        chunks for per-chunk RVs (template path) or passed through to mask CCF chunking.
+    outlier_sigma : float, default ``4.0``
+        Median/MAD threshold (in σ) when rejecting chunk RV outliers before the
+        inverse-variance weighted mean.
+
+    **Performance & diagnostics**
+
+    max_cores : int or None, default None
+        Requested thread count for Numba parallel order processing (``ccf_stellar_template``).
+        ``None`` resolves to min(CPU count, Numba’s allowed cap). Use ``1`` for reproducible
+        single-thread runs.
+    debug_ccf : bool, default False
+        Verbose per-chunk logging and CCF diagnostics; forces a slower, non-Numba path
+        for template CCF when enabled.
+
+    **Previews (Plotly / HTML)**
+
+    preview_save_png : bool, default False
+        If True with preview enabled, also export a PNG via Kaleido (can be slow).
+    preview_png_scale : float, default ``2.0``
+        Scale factor for that PNG export.
+    show_mask_overlay_debug : bool, default False
+        For ``ccf_mask_kpf``, open interactive mask-overlay HTML in the browser after the run.
+    save_mask_overlay_debug : bool, default False
+        For ``ccf_mask_kpf``, write mask-overlay HTML files (paths may appear under
+        ``_output["mask_overlay_debug"]``).
+    mask_overlay_velocity_m_s : float, default ``0.0``
+        Starting mask-shift velocity (m/s) seeded into the overlay payload for visualization.
+
+    **Inherited preview flags** (``ProcessingComponent``)
+
+    save_preview / show_preview : bool, default False
+        Control whether the standard stellar RV Plotly preview is built and/or displayed;
+        also gates optional CCF data collection for that figure.
 
     Notes
     -----
-    ``max_cores`` affects only parallel echelle processing (``prange``); set ``1`` for
-    deterministic single-thread debugging.
+    Environment variable ``HISPEC_DRP_SHOW_CCF_PREVIEW`` can force HTML-only behavior for
+    the main CCF preview (see preview module).
 
     See Also
     --------
     :mod:`hispecdrp.primitives.utils.ccf_utils` — template CCF + mask-line CCF
     :mod:`hispecdrp.utils.spectral_templates_utils`
+    :mod:`hispecdrp.primitives.stellar_rv.stellar_rv_preview` — preview generation
     """
 
+    # Default primitive arguments (merged with ProcessingComponent at class init).
+    # Full semantics: see class docstring "Primitive arguments (ARGUMENTS)".
     ARGUMENTS = {
         "suffix": "stellar_rv",
         "algorithm": "ccf_stellar_template",
@@ -148,24 +227,15 @@ class StellarRVPrimitive(BasePrimitive):
         "template_path": None,
         "template_wavelength": None,
         "template_flux": None,
-        # Mask-only algorithm inputs (used when algorithm="ccf_mask_kpf").
-        # If mask_path is None, resolve_mask_path uses packaged SPIROU default.
         "mask_path": None,
-        # Optional wavelength segment half-width for KPF-style 2-col masks.
-        # Ignored for SPIROU-style .mas files which already provide start/end.
         "mask_width_um": None,
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
         "output_model": "L2Model",
-        # None: use all CPUs for Numba order-parallel CCF; set to 1 to force single-thread.
         "max_cores": None,
         "debug_ccf": False,
-        # Previews: (1) default Plotly RV/CCF/residual figure; (2) optional mask-overlay
-        # HTML for ccf_mask_kpf only. Kaleido PNG is optional/slow; env
-        # HISPEC_DRP_SHOW_CCF_PREVIEW forces HTML-only for (1).
         "preview_save_png": False,
         "preview_png_scale": 2.0,
-        # Mask-shift overlay HTML (ccf_mask_kpf): order dropdown + velocity controls.
         "show_mask_overlay_debug": False,
         "save_mask_overlay_debug": False,
         "mask_overlay_velocity_m_s": 0.0,
@@ -564,28 +634,31 @@ class StellarRVPrimitive(BasePrimitive):
         """
         Run the configured stellar RV algorithm for one fiber and write RVCCF/RVCCFAVG.
 
-        Dispatches to the algorithm named in self.algorithm (see STELLAR_RV_ALGORITHMS).
-        The algorithm returns (all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std);
-        this method writes RVCCF_FIB{fiber} and RVCCFAVG_FIB{fiber} to the output model.
+        Dispatches to the algorithm named in ``self.algorithm`` (see ``STELLAR_RV_ALGORITHMS``).
+        The algorithm returns seven arrays/scalars; this method writes ``RVCCF_FIB{fiber}``
+        and ``RVCCFAVG_FIB{fiber}`` to the output model.
 
         Parameters
         ----------
         input_model : DataModel
-            Input model with spectrum and wavelength arrays.
+            Open L2 (or compatible) model with per-fiber ``SPEC_FIB*`` / ``WAVE_FIB*`` (and
+            optional ERR/DQ). Used to read science data for the chosen fiber.
         output_model : DataModel
-            Output L2 model to which RV tables are written.
+            Cloned L2 output; receives Astropy tables on attributes ``rvccf_fib*`` /
+            ``rvccfavg_fib*`` (framework naming).
         fiber : str
-            Fiber number (e.g. "1").
+            Fiber id string, e.g. ``"1"``, matching attribute suffixes ``_FIB1``.
         spectrograph : str
-            "BSPEC" or "RSPEC".
-        do_orders : list
-            Order numbers to process.
-        order_vec : list
-            Full order vector (order number per row index).
+            ``"BSPEC"`` or ``"RSPEC"`` from metadata; stored in RV tables for downstream.
+        do_orders : list of int
+            Echelle order numbers to include in the CCF (subset of ``order_vec``).
+        order_vec : list of int
+            Map from echelle row index to physical order number (one entry per spectral row).
         template_ln : np.ndarray
-            Template log(wavelength) in log(micron).
+            Natural log of template wavelength in **microns**; used by template algorithm.
+            For ``ccf_mask_kpf`` this is an empty placeholder array.
         template_flux : np.ndarray
-            Template flux.
+            Template flux aligned with ``template_ln``; empty for mask-only algorithm.
         """
         if _fiber_l2_bundle(input_model, fiber) is None:
             return
@@ -670,7 +743,31 @@ class StellarRVPrimitive(BasePrimitive):
         dict (Numba path reuses the CCF stack; serial path uses one Python pass;
         debug + preview uses a separate Python CCF pass).
 
-        Returns per-chunk echelle order numbers in the fourth list (parallel to wavelengths).
+        Parameters
+        ----------
+        order_tasks : list of tuple
+            ``(row_index, order_number)`` for each echelle row to process (already filtered
+            by ``do_orders``).
+        wave, spec, err, dq : np.ndarray
+            2D echelle data for the fiber: wavelength, flux, error, and DQ (same shape).
+        do_not_use : int
+            DQ bitmask for pixels to exclude from CCF (typically ``DQ_FLAGS["DO_NOT_USE"]``).
+        template_ln, template_flux : np.ndarray
+            Template in log(µm) and flux for CCF (same length).
+        fiber : str
+            Fiber id for logging.
+        mode : str
+            ``"debug"`` (verbose diagnostics), ``"serial"``, or ``"parallel"`` (Numba).
+        max_cores : int or None, optional
+            Effective thread count for parallel mode (already resolved/capped).
+        want_preview : bool, optional
+            Whether to build the mean + per-order CCF preview structure for Plotly.
+
+        Returns
+        -------
+        tuple
+            ``(all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail)`` —
+            lists of per-chunk quantities (same length) and optional preview dict.
         """
         all_rvs: list = []
         all_rv_errs: list = []
