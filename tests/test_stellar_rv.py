@@ -20,7 +20,8 @@ Run::
   summary (``-s``).
 
 **Parallel BT-Settl BSPEC chunk test** — ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel``
-runs the same science setup via ``process_orders_rvs_numba_parallel(..., max_cores=6)`` and prints the same style of timing summary (with a parallel-specific header).
+runs the same science setup via ``process_orders_rvs_numba_parallel`` (requests ``max_cores=6``;
+actual Numba threads are clamped to the wheel/CPU limit, e.g. GitHub Actions) and prints a timing summary.
 
 **One-liner (mask overlay + default CCF/RV preview, from repo root)::
 
@@ -46,6 +47,7 @@ from hispecdrp.primitives import StellarRVPrimitive
 from hispecdrp.primitives.utils.ccf_utils import (
     _V_MAX,
     _V_MIN,
+    _resolve_stellar_rv_numba_threads,
     dv_per_pixel_m_s,
     fit_ccf_rv,
     process_orders_rvs_numba_parallel,
@@ -638,8 +640,8 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks(template_path, tmp_path):
 def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_path):
     """
     Same BT-Settl lte025 + BSPEC setup as ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks``,
-    but one call to :func:`process_orders_rvs_numba_parallel` with ``max_cores=6`` (Numba
-    ``prange`` over orders) and ``ccf_v_step=500`` m/s (matches the serial test’s velocity
+    but one call to :func:`process_orders_rvs_numba_parallel` with ``max_cores=6`` (clamped
+    to Numba’s allowed thread count on the host, e.g. 2 on small CI runners) and ``ccf_v_step=500`` m/s (matches the serial test’s velocity
     sampling, not the library default 50 m/s). Phase-B Gaussian fits run serially in Python.
 
     Assertions use the same recovery fractions as the serial test, on chunks that are eligible
@@ -694,6 +696,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
 
     ge20_flat = _bspec_btsettl_ge20_mask_flat(wave_2d, order_tasks, WINDOW_UM)
     do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
+    nthr = _resolve_stellar_rv_numba_threads(6)
     t0 = time.perf_counter()
     all_rvs, all_rv_errs, all_wl, _n_chunks_per_order, _chunk_start = (
         process_orders_rvs_numba_parallel(
@@ -714,7 +717,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     parallel_wall = time.perf_counter() - t0
     timing_rows.append(
         (
-            "lte025: process_orders_rvs_numba_parallel (numba_threads=6, ccf_v_step=500 m/s)",
+            f"lte025: process_orders_rvs_numba_parallel (numba_threads={nthr}, ccf_v_step=500 m/s)",
             parallel_wall,
             "process_orders_rvs_numba_parallel, _process_all_orders_ccf_numba (prange), "
             "process_all_orders_rvs_numba (_ccf_rv_from_ccf / fit_ccf_rv, serial)",

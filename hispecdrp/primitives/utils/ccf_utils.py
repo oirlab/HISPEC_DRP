@@ -70,6 +70,45 @@ _V_STEP = 50.0
 
 logger = logging.getLogger(__name__)
 
+# Largest ``set_num_threads(n)`` Numba accepts on this build (GitHub runners often cap at 2).
+_NUMBA_MAX_PARALLEL_THREADS: int | None = None
+
+
+def _numba_max_parallel_threads() -> int:
+    """
+    Return the maximum thread count Numba allows for ``prange`` / ``set_num_threads``.
+
+    Some wheels and small CI VMs reject ``set_num_threads`` above a low cap (e.g. 2)
+    even when ``os.cpu_count()`` is larger; probing once avoids ``ValueError``.
+    """
+    global _NUMBA_MAX_PARALLEL_THREADS
+    if _NUMBA_MAX_PARALLEL_THREADS is not None:
+        return _NUMBA_MAX_PARALLEL_THREADS
+    cpu = max(1, int(os.cpu_count() or 1))
+    if not _HAS_NUMBA:
+        _NUMBA_MAX_PARALLEL_THREADS = cpu
+        return _NUMBA_MAX_PARALLEL_THREADS
+    try:
+        from numba import get_num_threads, set_num_threads  # noqa: PLC0415
+
+        saved = int(get_num_threads())
+        hi = min(cpu, 128)
+        best = 1
+        try:
+            for candidate in range(hi, 0, -1):
+                try:
+                    set_num_threads(candidate)
+                    best = candidate
+                    break
+                except ValueError:
+                    continue
+        finally:
+            set_num_threads(saved)
+        _NUMBA_MAX_PARALLEL_THREADS = max(1, best)
+    except Exception:
+        _NUMBA_MAX_PARALLEL_THREADS = cpu
+    return _NUMBA_MAX_PARALLEL_THREADS
+
 
 def _resolve_stellar_rv_numba_threads(max_cores: int | None) -> int:
     """
@@ -78,10 +117,13 @@ def _resolve_stellar_rv_numba_threads(max_cores: int | None) -> int:
     ``None`` or ``0`` means use all logical CPUs (same as typical Numba default),
     which speeds up :func:`process_orders_rvs_numba_parallel` without changing
     the mathematical result (each order/chunk writes to distinct memory).
+    The result is never larger than :func:`_numba_max_parallel_threads` (CI-safe).
     """
+    cap = _numba_max_parallel_threads()
+    cpu = max(1, int(os.cpu_count() or 1))
     if max_cores is None or max_cores == 0:
-        return max(1, int(os.cpu_count() or 1))
-    return max(1, int(max_cores))
+        return max(1, min(cpu, cap))
+    return max(1, min(int(max_cores), cap))
 
 
 # --- CCF Gaussian fit (KPF RadialVelocityAlg.fit_ccf analog; internal km/s, public m/s) ---
