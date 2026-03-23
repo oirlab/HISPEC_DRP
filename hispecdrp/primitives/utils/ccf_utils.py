@@ -39,19 +39,12 @@ from astropy.stats import mad_std
 from pathlib import Path
 
 from ...datamodels.dqflags import DQ_FLAGS
-
-try:
-    from numba import njit, prange, set_num_threads
-    _HAS_NUMBA = True
-except ImportError:
-    _HAS_NUMBA = False
-    def njit(*args, **kwargs):
-        def dec(f):
-            return f
-        return dec
-    prange = range  # noqa: A001
-    def set_num_threads(n):  # noqa: ARG001
-        pass
+from ...utils.parallelization_utils import (
+    njit,
+    numba_thread_scope,
+    prange,
+    resolve_numba_threads,
+)
 
 # --- Physical / grid defaults (StellarRVPrimitive uses _V_* for bulk processing) ---
 # Speed of light in m/s: RV v maps to Δlnλ = v/c when shifting the template in log space.
@@ -69,62 +62,6 @@ _V_STEP = 50.0
 #   BSPEC (order 110–148): ~494–665 m/s per pixel.  RSPEC (order 60–97): ~755–1220 m/s per pixel.
 
 logger = logging.getLogger(__name__)
-
-# Largest ``set_num_threads(n)`` Numba accepts on this build (GitHub runners often cap at 2).
-_NUMBA_MAX_PARALLEL_THREADS: int | None = None
-
-
-def _numba_max_parallel_threads() -> int:
-    """
-    Return the maximum thread count Numba allows for ``prange`` / ``set_num_threads``.
-
-    Some wheels and small CI VMs reject ``set_num_threads`` above a low cap (e.g. 2)
-    even when ``os.cpu_count()`` is larger; probing once avoids ``ValueError``.
-    """
-    global _NUMBA_MAX_PARALLEL_THREADS
-    if _NUMBA_MAX_PARALLEL_THREADS is not None:
-        return _NUMBA_MAX_PARALLEL_THREADS
-    cpu = max(1, int(os.cpu_count() or 1))
-    if not _HAS_NUMBA:
-        _NUMBA_MAX_PARALLEL_THREADS = cpu
-        return _NUMBA_MAX_PARALLEL_THREADS
-    try:
-        from numba import get_num_threads, set_num_threads  # noqa: PLC0415
-
-        saved = int(get_num_threads())
-        hi = min(cpu, 128)
-        best = 1
-        try:
-            for candidate in range(hi, 0, -1):
-                try:
-                    set_num_threads(candidate)
-                    best = candidate
-                    break
-                except ValueError:
-                    continue
-        finally:
-            set_num_threads(saved)
-        _NUMBA_MAX_PARALLEL_THREADS = max(1, best)
-    except Exception:
-        _NUMBA_MAX_PARALLEL_THREADS = cpu
-    return _NUMBA_MAX_PARALLEL_THREADS
-
-
-def _resolve_stellar_rv_numba_threads(max_cores: int | None) -> int:
-    """
-    Thread count for Numba ``prange`` over orders in the stellar-RV CCF path.
-
-    ``None`` or ``0`` means use all logical CPUs (same as typical Numba default),
-    which speeds up :func:`process_orders_rvs_numba_parallel` without changing
-    the mathematical result (each order/chunk writes to distinct memory).
-    The result is never larger than :func:`_numba_max_parallel_threads` (CI-safe).
-    """
-    cap = _numba_max_parallel_threads()
-    cpu = max(1, int(os.cpu_count() or 1))
-    if max_cores is None or max_cores == 0:
-        return max(1, min(cpu, cap))
-    return max(1, min(int(max_cores), cap))
-
 
 # --- CCF Gaussian fit (KPF RadialVelocityAlg.fit_ccf analog; internal km/s, public m/s) ---
 
@@ -838,7 +775,7 @@ def process_orders_rvs_numba_parallel(
         ``(order_row_index, order_number)`` for each order to include.
     max_cores : int, optional
         Numba parallel thread count for the order-parallel CCF loop. ``None`` or
-        ``0`` uses all logical CPUs (see :func:`_resolve_stellar_rv_numba_threads`).
+        ``0`` uses all logical CPUs (see :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads`).
         ``1`` forces single-threaded execution (reproducible, slower).
     ccf_v_min, ccf_v_max, ccf_v_step : float, optional
         Override the CCF velocity grid (m/s). Defaults are ``_V_MIN``, ``_V_MAX``,
@@ -900,9 +837,7 @@ def process_orders_rvs_numba_parallel(
     for i in range(1, len(order_indices)):
         chunk_start[i] = chunk_start[i - 1] + n_chunks_per_order[i - 1]
 
-    nthr = _resolve_stellar_rv_numba_threads(max_cores)
-    if _HAS_NUMBA:
-        set_num_threads(nthr)
+    nthr = resolve_numba_threads(max_cores)
     vm = float(_V_MIN if ccf_v_min is None else ccf_v_min)
     vx = float(_V_MAX if ccf_v_max is None else ccf_v_max)
     vs = float(_V_STEP if ccf_v_step is None else ccf_v_step)
@@ -914,7 +849,7 @@ def process_orders_rvs_numba_parallel(
     logger.info(
         "CCF: process_orders_rvs_numba_parallel n_order_tasks=%d total_chunks=%d "
         "window_um=%.4f return_ccf=%s numba_threads=%d "
-        "v_grid_m_s=[%.0f, %.0f] step=%.1f numba_available=%s",
+        "v_grid_m_s=[%.0f, %.0f] step=%.1f",
         len(order_tasks),
         total_chunks_layout,
         window_size_um,
@@ -923,37 +858,37 @@ def process_orders_rvs_numba_parallel(
         vm,
         vx,
         vs,
-        _HAS_NUMBA,
     )
     # Flattened (order, chunk) RV list; parallelized over orders inside Numba.
-    if return_ccf:
-        all_rvs, all_rv_errs, all_wl, all_ccf, v_grid = process_all_orders_rvs_numba(
+    with numba_thread_scope(max_cores):
+        if return_ccf:
+            all_rvs, all_rv_errs, all_wl, all_ccf, v_grid = process_all_orders_rvs_numba(
+                wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
+                template_ln, template_flux, window_size_um,
+                order_indices, n_chunks_per_order, chunk_start,
+                vm, vx, vs,
+                return_ccf=True,
+                numba_threads=nthr,
+            )
+            return (
+                all_rvs,
+                all_rv_errs,
+                all_wl,
+                all_ccf,
+                v_grid,
+                n_chunks_per_order,
+                chunk_start,
+                order_indices,
+            )
+        all_rvs, all_rv_errs, all_wl = process_all_orders_rvs_numba(
             wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
             template_ln, template_flux, window_size_um,
             order_indices, n_chunks_per_order, chunk_start,
             vm, vx, vs,
-            return_ccf=True,
+            return_ccf=False,
             numba_threads=nthr,
         )
-        return (
-            all_rvs,
-            all_rv_errs,
-            all_wl,
-            all_ccf,
-            v_grid,
-            n_chunks_per_order,
-            chunk_start,
-            order_indices,
-        )
-    all_rvs, all_rv_errs, all_wl = process_all_orders_rvs_numba(
-        wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
-        template_ln, template_flux, window_size_um,
-        order_indices, n_chunks_per_order, chunk_start,
-        vm, vx, vs,
-        return_ccf=False,
-        numba_threads=nthr,
-    )
-    return all_rvs, all_rv_errs, all_wl, n_chunks_per_order, chunk_start
+        return all_rvs, all_rv_errs, all_wl, n_chunks_per_order, chunk_start
 
 
 def finalize_ccf_preview_dict(
@@ -1323,8 +1258,7 @@ def _masked_ccf_rv_core(
     ln_lam = _ln_lam(wave)
     ccf = np.full(len(v_grid), np.nan, dtype=np.float64)
     if (
-        _HAS_NUMBA
-        and len(v_grid) >= 2
+        len(v_grid) >= 2
         and np.allclose(np.diff(v_grid), v_grid[1] - v_grid[0], rtol=1e-5, atol=1e-3)
     ):
         _ccf_chunk_ccf_numba(

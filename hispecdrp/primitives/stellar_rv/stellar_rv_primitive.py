@@ -38,13 +38,12 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
 
+from ...utils.parallelization_utils import resolve_numba_threads
 from ..utils.ccf_utils import (
     run_ccf_mask_kpf_for_fiber,
-    _HAS_NUMBA,
     _V_MAX,
     _V_MIN,
     _V_STEP,
-    _resolve_stellar_rv_numba_threads,
     ccf_preview_dict_from_numba_flat,
     ccf_preview_dict_from_spectra_orders,
     combine_rvs_median_mad,
@@ -179,8 +178,9 @@ class StellarRVPrimitive(BasePrimitive):
 
     max_cores : int or None, default None
         Requested thread count for Numba parallel order processing (``ccf_stellar_template``).
-        ``None`` resolves to min(CPU count, Numba’s allowed cap). Use ``1`` for reproducible
-        single-thread runs.
+        Passed to :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads`
+        (``None`` → min(CPU count, Numba’s allowed cap on this build)). Use ``1`` for
+        reproducible single-thread runs.
     debug_ccf : bool, default False
         Verbose per-chunk logging and CCF diagnostics; forces a slower, non-Numba path
         for template CCF when enabled.
@@ -432,7 +432,7 @@ class StellarRVPrimitive(BasePrimitive):
         do_not_use = DQ_FLAGS.get("DO_NOT_USE", 1)
         debug_ccf = getattr(self, "debug_ccf", False)
         _mc = getattr(self, "max_cores", None)
-        max_cores = _resolve_stellar_rv_numba_threads(
+        max_cores = resolve_numba_threads(
             None if _mc is None else int(_mc)
         )
 
@@ -446,10 +446,8 @@ class StellarRVPrimitive(BasePrimitive):
         )
         if debug_ccf:
             mode = "debug"
-        elif _HAS_NUMBA:
-            mode = "parallel"
         else:
-            mode = "serial"
+            mode = "parallel"
 
         logger.info(
             "Stellar RV: ccf_stellar_template fiber=%s spectrograph=%s mode=%s "
@@ -738,10 +736,11 @@ class StellarRVPrimitive(BasePrimitive):
         want_preview: bool = False,
     ) -> tuple[list, list, list, list, dict | None]:
         """
-        Single driver for per-order chunk RVs: ``mode`` is ``debug``, ``serial``, or
-        ``parallel``. When ``want_preview`` is True, also returns a CCF preview
-        dict (Numba path reuses the CCF stack; serial path uses one Python pass;
-        debug + preview uses a separate Python CCF pass).
+        Single driver for per-order chunk RVs: ``mode`` is ``debug`` or ``parallel``
+        (Numba). Optional ``mode="serial"`` selects a legacy pure-Python per-order
+        path. When ``want_preview`` is True, also returns a CCF preview dict (Numba
+        path reuses the CCF stack; serial path uses one Python pass; debug + preview
+        uses a separate Python CCF pass).
 
         Parameters
         ----------
@@ -757,7 +756,8 @@ class StellarRVPrimitive(BasePrimitive):
         fiber : str
             Fiber id for logging.
         mode : str
-            ``"debug"`` (verbose diagnostics), ``"serial"``, or ``"parallel"`` (Numba).
+            ``"debug"`` (verbose diagnostics) or ``"parallel"`` (Numba). ``"serial"``
+            forces the legacy pure-Python path.
         max_cores : int or None, optional
             Effective thread count for parallel mode (already resolved/capped).
         want_preview : bool, optional
@@ -873,10 +873,9 @@ class StellarRVPrimitive(BasePrimitive):
 
         if mode == "parallel":
             logger.info(
-                "Stellar RV: Numba parallel path fiber=%s want_preview=%s has_numba=%s",
+                "Stellar RV: Numba parallel path fiber=%s want_preview=%s",
                 fiber,
                 want_preview,
-                _HAS_NUMBA,
             )
             spec_2d = np.asarray(spec, dtype=np.float64)
             err_2d = np.asarray(err, dtype=np.float64)
@@ -888,7 +887,7 @@ class StellarRVPrimitive(BasePrimitive):
             wave_2d = np.asarray(wave, dtype=np.float64)
 
             preview_detail = None
-            if want_preview and _HAS_NUMBA:
+            if want_preview:
                 logger.info(
                     "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=True) fiber=%s",
                     fiber,
@@ -987,7 +986,13 @@ class StellarRVPrimitive(BasePrimitive):
             )
             return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
 
-        # serial (no Numba)
+        if mode != "serial":
+            raise ValueError(
+                f"unknown stellar RV _process_fiber_orders mode: {mode!r} "
+                "(expected 'debug', 'parallel', or 'serial')"
+            )
+
+        # Legacy pure-Python per-order path (only if mode == "serial").
         logger.info(
             "Stellar RV: serial Python path (per-order process_one_order_rvs) fiber=%s",
             fiber,

@@ -44,10 +44,10 @@ import hispecdrp
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.primitives import StellarRVPrimitive
+from hispecdrp.utils.parallelization_utils import resolve_numba_threads
 from hispecdrp.primitives.utils.ccf_utils import (
     _V_MAX,
     _V_MIN,
-    _resolve_stellar_rv_numba_threads,
     dv_per_pixel_m_s,
     fit_ccf_rv,
     process_orders_rvs_numba_parallel,
@@ -696,7 +696,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
 
     ge20_flat = _bspec_btsettl_ge20_mask_flat(wave_2d, order_tasks, WINDOW_UM)
     do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
-    nthr = _resolve_stellar_rv_numba_threads(6)
+    nthr = resolve_numba_threads(6)
     t0 = time.perf_counter()
     all_rvs, all_rv_errs, all_wl, _n_chunks_per_order, _chunk_start = (
         process_orders_rvs_numba_parallel(

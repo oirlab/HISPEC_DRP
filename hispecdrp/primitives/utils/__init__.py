@@ -2,7 +2,6 @@
 # Provenance: see ``ccf_utils`` module docstring (template + mask-line CCF).
 
 from .ccf_utils import (
-    _HAS_NUMBA,
     CCFFitKpfConfig,
     MaskLines,
     combine_rvs_median_mad,
@@ -24,7 +23,6 @@ from .ccf_utils import (
 )
 
 __all__ = [
-    "_HAS_NUMBA",
     "CCFFitKpfConfig",
     "MaskLines",
     "combine_rvs_median_mad",
