@@ -54,7 +54,7 @@ Important methods that interact with the origin include:
 .. automethod:: hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.register_calibration
     :noindex:
 
-.. automethod:: hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.sync_local_db_from_local_files
+.. automethod:: hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.sync_records_from_cached_files
     :noindex:
 
 .. automethod:: hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.generate_calibration_version
