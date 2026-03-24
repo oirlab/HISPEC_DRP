@@ -57,9 +57,7 @@ For most users, once authenticated, it is sufficient to:
 
 3. Define a file called ``.env`` in the same directory as your project.
 
-If you have **existing calibration files** that you would like to work with, you can use the method :py:meth:`~hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.sync_local_db_from_local_files` to populate the local database with entries for those files.
-
-Also see :doc:`Calibration Examples <quickstart/calibration_examples>`.
+See :doc:`Calibration Examples <quickstart/calibration_examples>`.
 
 See the `Calibration database documentation <calibrations/calibration_database.html>`_ for more details on how the calibration database.
 

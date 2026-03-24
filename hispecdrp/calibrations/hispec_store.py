@@ -33,7 +33,7 @@ class HISPECCalibrationStore(CalibrationStore):
             **kwargs
         )
 
-    def sync_local_db_from_local_files(self, origin : str | None = None) -> list[dict]:
+    def sync_records_from_cached_files(self, origin : str | None = None) -> list[dict]:
         """
         Scans the local cache directory for calibration files and populates
         the local database with their metadata if they are missing.
@@ -45,7 +45,8 @@ class HISPECCalibrationStore(CalibrationStore):
         Parameters
         ----------
         origin : str, optional
-            The origin to use for the calibrations being synced. If None, defaults to the store's origin.
+            The origin to use for the calibrations being synced.
+            If None, defaults to the store's origin.
 
         Returns
         -------
@@ -66,99 +67,63 @@ class HISPECCalibrationStore(CalibrationStore):
 
         return cals_added
 
-    def generate_calibration_version(
-        self,
-        cal : DataModel | str,
-        origin : str | None = None
-    ) -> str:
+    # def generate_calibration_version(
+    #     self,
+    #     cal : DataModel | str,
+    #     origin : str | None = None
+    # ) -> str:
+    #     """
+    #     Generate the next calibration version ("001", "002", ...), scoped to
+    #     the calibration's version family and origin.
+
+    #     Parameters
+    #     ----------
+    #     cal : dict | DataModel | str
+    #         The calibration for which to generate the version.
+    #         Metadata records, datamodel, or filepath.
+    #     origin : str | None, optional
+    #         The origin to use for generating the version. If None, the origin
+    #         from the calibration metadata will be used.
+
+    #     Returns
+    #     -------
+    #     str
+    #         The calibration version string
+    #     """
+    #     if isinstance(cal, str):
+    #         model = datamodels.open(cal)
+    #         record = model.to_record()
+    #     else:
+    #         record = model.to_record()
+    #     return super().generate_calibration_version(record, origin=origin)
+
+    def save_calibration_file(self, cal: CalibrationModel, cal_record : dict | None = None) -> str:
         """
-        Generate the next calibration version ("001", "002", ...), scoped to
-        the calibration's version family and origin.
+        Saves a calibration file to the local cache directory.
 
         Parameters
         ----------
-        cal : dict | DataModel | str
-            The calibration for which to generate the version.
-            Metadata records, datamodel, or filepath.
-        origin : str | None, optional
-            The origin to use for generating the version. If None, the origin
-            from the calibration metadata will be used.
+        cal : CalibrationModel
+            The calibration data model instance to save.
+        cal_record : dict | None
+            The corresponding record.
 
         Returns
         -------
         str
-            The calibration version string
+            The absolute local file path where the calibration file was saved.
         """
 
-        model = datamodels.open(cal)
-        record = model.to_record()
-        return super().generate_calibration_version(record, origin=origin)
-    
-    def register_calibration(
-        self,
-        cal : str | DataModel,
-        origin : str | None = None,
-        new_version : bool = False
-    ) -> tuple[str, dict]:
-        """
-        Registers a calibration to the local cache and metadata database.
-
-        Parameters
-        ----------
-        calibration : str | DataModel
-            A filepath or datamodel.
-        origin : str, optional
-            The origin to register the calibration under.
-
-        Returns
-        -------
-        tuple[str, dict]
-            A tuple containing:
-                - `str`: The local file path where the calibration was saved.
-                - `dict`: The calibration metadata dictionary as added to the database.
-
-        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting.
-        """
-
-        # Open model
-        model = datamodels.open(cal)
-
-        if self.calibration_record_in_cache(model, mode='id'):
-            msg = f"Calibration already exists in cache: {cal}. Skipping registration."
-            logger.warning(msg)
-            return None, None
+        # Add cal_version and origin to cal file
+        if cal_record is not None:
+            cal.meta.cal_version = cal_record.get('cal_version')
+            cal.meta.origin = cal_record.get('origin')
         
-        if not new_version and self.calibration_record_in_cache(cal, mode='version-family'):
-            msg = f"Calibration already exists in cache: {cal}! Skipping registration."
-            logger.warning(msg)
-            return None, None
+        # Generate filename
+        cal.generate_filename()
 
-        # Add origin to metadata
-        if origin is not None:
-            model.meta.origin = origin.upper()
-        if model.meta.origin is None:
-            model.meta.origin = self.origin
-        assert model.meta.origin is not None, "origin must be specified either in the input calibration metadata or as an argument to this function."
-
-        # Generate version and add to metadata
-        model.meta.cal_version = self.generate_calibration_version(model)
-
-        # Ensure filename is up to date with version and other metadata
-        model.generate_filename()
-
-        # Convert to record
-        cal_record = model.to_record()
-        
-        # Save to local cache
-        local_filepath = model.save(output_dir=self.data_dir)
-
-        # Generate MD5 and add to record
-        cal_record['file_md5'] = generate_md5_file(local_filepath)
-
-        # Add new record to local DB
-        cal_record_added = self.local_db.add(cal_record)
-
-        return local_filepath, cal_record_added
+        # Call super to save file and return filename
+        return super().save_calibration_file(cal, cal_record)
 
     def calibration_record_in_cache(
         self,

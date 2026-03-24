@@ -9,14 +9,15 @@ class GainModel(CalibrationModel):
     """
     The detector gain specifies the conversion factor between electrons and data numbers (DN) for each pixel in the detector.
 
-    .. csv-table::
-        :header: "Hdu Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
+    Extensions
+    ----------
 
-        GAIN, Image, Float32, "4096 x 4160", "e-/DN", "Gain data."
-        GAIN_ERR, Image, Float32, "4096 x 4160", "e-/DN", "Gain error (all sources)."
-        GAIN_VAR_POISSON, Image, Float32, "4096 x 4160", "(e-/DN)^2", "Gain variance (Poisson)."
-        GAIN_VAR_RNOISE, Image, Float32, "4096 x 4160", "(e-/DN)^2", "Gain variance (read noise)."
-        DQ, Image, UInt32, "4096 x 4160", None, "Data quality."
+    HDU Name   HDU Type   Data Type   Dimensions     Units   Description
+    --------   --------   ---------   ----------     -----   -----------
+    GAIN       Image      Float32     4096 x 4160    DN      Gain map.
+    RN         Image      Float32     4096 x 4160    DN      Read noise map.
+    COV        Image      Float32     4096 x 4160    DN^2    Covariance map.
+    DQ         Image      UInt32      4096 x 4160    None    Data quality.
     """
     EXTENSIONS = {
         f'GAIN': IMAGE_FLOAT32_HDU,

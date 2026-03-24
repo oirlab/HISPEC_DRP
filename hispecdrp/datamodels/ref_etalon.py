@@ -20,18 +20,20 @@ class ReferenceEtalonModel(CalibrationModel):
     """
     Contains the reference etalon and corresponding parameters for wavelength drift corrections.
 
-    .. csv-table::
-        :header: "HDU Name", "HDU Type", "Data Type", "Dimensions", "Units", "Description"
+    Extensions
+    ----------
 
-        SPEC_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Corresponding etalon spectrum"
-        SPEC_ERR_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Etalon spectrum error."
-        SPEC_VAR_POISSON_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Etalon spectrum Poisson variance"
-        SPEC_VAR_RNOISE_FIB#, Image, Float32, "Nord x 4096", "e-/s", "Etalon spectrum read noise variance"
-        SPEC_DQ_FIB#, Image, UInt32, "Nord x 4096", None, "Etalon spectrum data quality"
-        MID_TIME_FIB#, Image, Float64, "Nord x 4096", "s", "Mid time for each exposure."
-        WAVE_FIB#, Image, Float64, "Nord x 4096", "nm", "Etalon spectrum wavelength grid"
-        ETALON_FITPARAMS_FIB#, Table, See below, See below, See below, "Etalon fit parameters for each mode, order, and fiber"
-        DRIFT_FIB#, Table, See below, See below, See below, "Drift correction table for each fiber"
+    HDU Name                HDU Type   Data Type   Dimensions      Units      Description
+    --------                --------   ---------   ----------      -----      -----------
+    SPEC_FIB#               Image      Float32     Nord x 4096     e-/s       Corresponding etalon spectrum.
+    SPEC_ERR_FIB#           Image      Float32     Nord x 4096     e-/s       Etalon spectrum error.
+    SPEC_VAR_POISSON_FIB#   Image      Float32     Nord x 4096     e-/s       Etalon spectrum Poisson variance.
+    SPEC_VAR_RNOISE_FIB#    Image      Float32     Nord x 4096     e-/s       Etalon spectrum read noise variance.
+    SPEC_DQ_FIB#            Image      UInt32      Nord x 4096     None       Etalon spectrum data quality.
+    MID_TIME_FIB#           Image      Float64     Nord x 4096     s          Mid time for each exposure.
+    WAVE_FIB#               Image      Float64     Nord x 4096     nm         Etalon spectrum wavelength grid.
+    ETALON_FITPARAMS_FIB#   Table      See below   See below       See below  Etalon fit parameters for each mode, order, and fiber.
+    DRIFT_FIB#              Table      See below   See below       See below  Drift correction table for each fiber.
     """
     CAL_TYPE = 'ref_etalon'
     def __init__(self, *args, **kwargs):

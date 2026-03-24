@@ -104,7 +104,7 @@ def test_sync_db_from_existing_files(tmp_path, datadir):
         assert len(results) == 0, f"Expected 0 files in the local DB, but found {len(results)}"
 
         # Sync from local files
-        cals_added = store.sync_local_db_from_local_files()
+        cals_added = store.sync_records_from_cached_files()
 
         # Test if the local files are registered
         results = store.query()
