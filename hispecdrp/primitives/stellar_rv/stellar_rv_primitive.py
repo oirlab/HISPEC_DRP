@@ -103,13 +103,13 @@ class StellarRVPrimitive(BasePrimitive):
     """
     Cross-correlate L2 spectra against a template or a line mask to measure RV.
 
-    **ccf_stellar_template** (default): weighted CCF in :math:`\\ln\\lambda` against a
-    stellar template; per-chunk RVs; median/MAD rejection; inverse-variance mean
-    (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
-
-    **ccf_mask_kpf**: mask-shifted CCF using SPIROU ``.mas`` or KPF-style two-column
+    **ccf_mask_kpf** (default): mask-shifted CCF using SPIROU ``.mas`` or KPF-style two-column
     masks (:mod:`~hispecdrp.primitives.utils.ccf_utils`). Default packaged
     mask and citations: ``hispecdrp/data/masks/README.md``.
+
+    **ccf_stellar_template**: weighted CCF in :math:`\\ln\\lambda` against a
+    stellar template; per-chunk RVs; median/MAD rejection; inverse-variance mean
+    (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
 
     All RVs are in **m s\\ :sup:`−1`**. Chunks use ``window_size_um``; results go to
     RVCCF / RVCCFAVG on the output L2 model.
@@ -130,7 +130,7 @@ class StellarRVPrimitive(BasePrimitive):
 
     **Algorithm selection**
 
-    algorithm : str, default ``"ccf_stellar_template"``
+    algorithm : str, default ``"ccf_mask_kpf"``
         RV driver. Must be a key of ``STELLAR_RV_ALGORITHMS``: ``ccf_stellar_template``
         (template CCF in log wavelength) or ``ccf_mask_kpf`` (mask-shift CCF; no stellar
         template required).
@@ -205,6 +205,35 @@ class StellarRVPrimitive(BasePrimitive):
         Control whether the standard stellar RV Plotly preview is built and/or displayed;
         also gates optional CCF data collection for that figure.
 
+    Workflow
+    --------
+
+    The current workflow diagram demonstrating how the ccf_mask_kpf methods are implemented and parallelized:
+
+    # Entry point for the ccf_mask_kpf algorithm on one fiber
+    StellarRVPrimitive._run_algorithm_ccf_mask_kpf
+        ->
+        # Loads mask inputs, iterates selected orders/sub-orders, combines chunk RVs
+        ccf_utils.run_ccf_mask_kpf_for_fiber(max_cores=...)
+            ->
+            # Builds chunk payloads and runs chunk-batched CCF evaluation
+            ccf_utils.rv_per_chunks_mask_kpf(..., max_cores=...)
+                ->
+                # Sets effective Numba thread count (CI-safe clamp) for this block
+                with parallelization_utils.numba_thread_scope(max_cores)
+                    ->
+                    # Numba kernel: computes CCF(v) for all chunks, parallel over chunk index
+                    ccf_utils._calc_mask_ccf_chunks_numba(..., parallel=True, prange over chunks)
+                ->
+                # Converts each chunk CCF row into RV + RV uncertainty (serial fit step)
+                ccf_utils.rv_from_ccf_mask_kpf(...)
+            ->
+            # Rejects outlier chunks and computes weighted aggregate RV
+            ccf_utils.combine_rvs_median_mad(...) + ccf_utils.weighted_mean_rv(...)
+            ->
+            # Optional preview assembly from per-order CCF products
+            ccf_utils.finalize_ccf_preview_dict(...)
+
     Notes
     -----
     Environment variable ``HISPEC_DRP_SHOW_CCF_PREVIEW`` can force HTML-only behavior for
@@ -221,7 +250,7 @@ class StellarRVPrimitive(BasePrimitive):
     # Full semantics: see class docstring "Primitive arguments (ARGUMENTS)".
     ARGUMENTS = {
         "suffix": "stellar_rv",
-        "algorithm": "ccf_stellar_template",
+        "algorithm": "ccf_mask_kpf",
         "do_fibers": None,
         "do_orders": None,
         "template_path": None,
@@ -265,7 +294,7 @@ class StellarRVPrimitive(BasePrimitive):
         else:
             raise TypeError("Input must be a DataModel, path, or sequence of these.")
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_stellar_template").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_mask_kpf").lower().strip()
         logger.info(
             "Stellar RV: starting _perform algorithm=%s n_inputs=%d suffix=%s",
             algo_key,
@@ -589,6 +618,7 @@ class StellarRVPrimitive(BasePrimitive):
             v_max_m_s=_V_MAX,
             v_step_m_s=_V_STEP,
             zb=0.0,
+            max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
             debug_ccf=bool(getattr(self, "debug_ccf", False)),
         )
@@ -661,7 +691,7 @@ class StellarRVPrimitive(BasePrimitive):
         if _fiber_l2_bundle(input_model, fiber) is None:
             return
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_stellar_template").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_mask_kpf").lower().strip()
         method_name = STELLAR_RV_ALGORITHMS.get(algo_key)
         if method_name is None:
             raise ValueError(

@@ -50,7 +50,10 @@ from hispecdrp.primitives.utils.ccf_utils import (
     _V_MIN,
     dv_per_pixel_m_s,
     fit_ccf_rv,
+    load_mask,
     process_orders_rvs_numba_parallel,
+    resolve_mask_path,
+    rv_per_chunks_mask_kpf,
     rv_per_chunks,
 )
 from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
@@ -742,6 +745,69 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
 
     assert n_fit_ok >= 0.85 * n_attempt, f"fit fraction too low: {n_fit_ok}/{n_attempt}"
     assert n_in_tol >= 0.50 * n_attempt, f"RV recovery fraction too low: {n_in_tol}/{n_attempt}"
+
+    # ------------------------------------------------------------------
+    # ccf_mask_kpf chunk-parallel benchmark (rv_per_chunks_mask_kpf path)
+    # ------------------------------------------------------------------
+    # With WINDOW_UM=0.3, many single-order calls have only 1 chunk, which can
+    # hide parallel scaling. Use a smaller benchmark window to force many chunks.
+    bench_window_um = min(0.01, WINDOW_UM / 20.0)
+    bench_orders = order_tasks[: min(12, len(order_tasks))]
+    mask_lines = load_mask(resolve_mask_path(None), mask_width_um=None)
+    bench_times: dict[int, float] = {}
+    bench_chunks: dict[int, int] = {}
+    eff_threads: dict[int, int] = {}
+    for req_cores in (1, 2, 6):
+        eff_threads[req_cores] = resolve_numba_threads(req_cores)
+        t0 = time.perf_counter()
+        n_chunks_total = 0
+        for oi, _order in bench_orders:
+            d_bad = (np.asarray(dq_2d[oi], dtype=np.uint32) & do_not_use) != 0
+            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b = rv_per_chunks_mask_kpf(
+                wave_2d[oi],
+                spec_2d[oi],
+                spec_err_2d[oi],
+                d_bad,
+                mask_lines,
+                window_size_um=bench_window_um,
+                v_min_m_s=_V_MIN,
+                v_max_m_s=_V_MAX,
+                v_step_m_s=v_step,
+                max_cores=req_cores,
+                return_ccf=False,
+            )
+            n_chunks_total += int(len(rvs_b))
+        bench_times[req_cores] = time.perf_counter() - t0
+        bench_chunks[req_cores] = n_chunks_total
+        timing_rows.append(
+            (
+                f"lte025: ccf_mask_kpf chunk benchmark req_cores={req_cores} "
+                f"(effective={eff_threads[req_cores]}, window={bench_window_um:.4f} um)",
+                bench_times[req_cores],
+                "rv_per_chunks_mask_kpf, _calc_mask_ccf_chunks_numba (prange over chunks), "
+                "numba_thread_scope, rv_from_ccf_mask_kpf",
+                True,
+            )
+        )
+
+    # Verify measurable speed-up whenever effective thread count exceeds 1.
+    t1 = bench_times[1]
+    multi = [c for c in (2, 6) if eff_threads[c] > 1]
+    if multi:
+        tbest = min(bench_times[c] for c in multi)
+        # Require at least modest speed-up relative to 1 core.
+        assert tbest < 0.98 * t1, (
+            "Expected ccf_mask_kpf chunk-parallel speed-up with >1 effective thread: "
+            f"t1={t1:.3f}s, t2={bench_times[2]:.3f}s (eff={eff_threads[2]}), "
+            f"t6={bench_times[6]:.3f}s (eff={eff_threads[6]}), "
+            f"n_chunks={bench_chunks[1]}"
+        )
+    else:
+        print(
+            "ccf_mask_kpf speed-up check skipped: host allows only one effective Numba thread "
+            f"(eff threads: 1->{eff_threads[1]}, 2->{eff_threads[2]}, 6->{eff_threads[6]}).",
+            flush=True,
+        )
 
     if _want_bspec_btsettl_all_previews():
         timing_rows.extend(_run_lte049_k2all_mask_kpf_previews(str(tmp_path)))
