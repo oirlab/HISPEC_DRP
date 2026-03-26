@@ -28,6 +28,15 @@ this package.
 | `M2_filt_allRV.mas` | Default mask when `mask_path` is unset (`ccf_mask_kpf`). |
 | `K2_filt_allRV.mas`, `K2_all.mas` | Alternate SPIROU-style masks for tests or custom runs. |
 
+### Segment widths (empirical)
+
+For each line, ``width_nm = λ_end − λ_start`` and ``mean_nm = (λ_start + λ_end)/2``.
+Across the bundled ``*.mas`` files, **width in nm increases roughly linearly with
+mean wavelength**, and **width / mean λ is nearly constant** (relative spread
+≪ 1%): segments behave like a **fixed fractional width in wavelength**, i.e. close
+to **constant Δln λ** per mask line. Regenerate the diagnostic figure with
+``python hispecdrp/data/masks/plot_mask_widths.py`` (writes ``mask_width_vs_wavelength.png``).
+
 Names and content are chosen to align with common **K2 / M2** mask naming in the
 spirou-ccf `ccf_masks` tree; verify against upstream if you need exact equivalence.
 
