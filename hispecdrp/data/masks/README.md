@@ -27,6 +27,7 @@ this package.
 |------|------|
 | `M2_filt_allRV.mas` | Default mask when `mask_path` is unset (`ccf_mask_kpf`). |
 | `K2_filt_allRV.mas`, `K2_all.mas` | Alternate SPIROU-style masks for tests or custom runs. |
+| `<template_stem>.mas` (generated) | Template-derived masks from :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`: filename matches the BT-Settl (or other) template basename with ``.mas`` replacing ``.h5``. A ``# HISPEC_DRP_MASK_META`` JSON line in the header stores all generation parameters; load it with :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`. |
 
 ### Segment widths (empirical)
 

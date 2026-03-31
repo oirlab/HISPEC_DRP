@@ -355,7 +355,7 @@ class DataModel:
             + ['RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS']
         for extname in extensions_list:
             if not include_empty_extensions \
-                and getattr(self, extname.lower(), None) is None \
+                and self._extension_missing_or_empty(extname) \
                 and extname not in ('RECEIPT', 'PRIMARY'):
                 continue
             hdu = self.make_hdu(
@@ -366,7 +366,25 @@ class DataModel:
             hdulist.append(hdu)
         
         return hdulist
-    
+
+    def _extension_missing_or_empty(self, extname: str) -> bool:
+        """
+        True if extension data is absent or an empty BinTable.
+
+        Empty :class:`astropy.table.Table` (0 rows) must be treated like missing when
+        building FITS output with ``include_empty_extensions=False``: Astropy cannot
+        serialize 0-row tables that include object columns (e.g. variable-length
+        ``CCF`` arrays) because no row exists to infer inner dtypes
+        (:func:`astropy.io.fits.table_to_hdu` / ``ColDefs._init_from_array``).
+        """
+        extl = extname.lower()
+        val = getattr(self, extl, None)
+        if val is None:
+            return True
+        if isinstance(val, astropy.table.Table) and len(val) == 0:
+            return True
+        return False
+
     def _save_fits(
         self,
         hdulist : fits.HDUList,

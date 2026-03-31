@@ -34,17 +34,38 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from ..utils.ccf_utils import (
-    _V_MAX,
-    _V_MIN,
-    _V_STEP,
     _gaussian_ccf_model,
+    build_hybrid_merged_velocity_grid,
+    effective_ccf_v_step_for_fit,
     fit_ccf_rv,
     load_mask,
+    resolve_ccf_broad_grid_m_s,
     resolve_mask_path,
     restrict_mask_to_chunk,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _preview_ccf_velocity_range_m_s(primitive) -> tuple[float, float, float]:
+    """Same velocity extent as the stellar RV CCF run for previews and overlays (m/s)."""
+    bvm, bvx, bvs = resolve_ccf_broad_grid_m_s(
+        getattr(primitive, "v_min", None),
+        getattr(primitive, "v_max", None),
+        getattr(primitive, "v_step", None),
+    )
+    vc = getattr(primitive, "ccf_input_velocity", None)
+    if vc is None or not np.isfinite(float(vc)):
+        return bvm, bvx, bvs
+    vg = build_hybrid_merged_velocity_grid(
+        bvm,
+        bvx,
+        bvs,
+        float(vc),
+        float(getattr(primitive, "ccf_velocity_window", 300.0)),
+        float(getattr(primitive, "ccf_velocity_step", 0.1)),
+    )
+    return float(vg[0]), float(vg[-1]), float(effective_ccf_v_step_for_fit(vg))
 
 
 def _iterative_sigma_clip_ylim(
@@ -218,6 +239,7 @@ def collect_mask_overlay_payload_for_primitive(
     When chunk RV arrays are supplied (same length as ``run_ccf_mask_kpf_for_fiber`` outputs),
     each order entry includes ``fit_rv_m_s`` / ``fit_rv_err_m_s`` for the velocity-slider hint.
     """
+    vm, vx, _vs = _preview_ccf_velocity_range_m_s(primitive)
     try:
         resolved_mask = resolve_mask_path(getattr(primitive, "mask_path", None))
         mask_lines = load_mask(
@@ -275,8 +297,8 @@ def collect_mask_overlay_payload_for_primitive(
             mask_lines,
             float(np.nanmin(w)),
             float(np.nanmax(w)),
-            v_min_m_s=_V_MIN,
-            v_max_m_s=_V_MAX,
+            v_min_m_s=vm,
+            v_max_m_s=vx,
             zb=0.0,
         )
         if mask_o.start_um.size > 0:
@@ -675,7 +697,7 @@ def _build_mask_overlay_debug_html(
         }},
         xaxis: {{ title: "Wavelength (um)" }},
         yaxis: {{
-          title: "Normalize flux",
+          title: "Normalized flux",
           range: [0, 1],
           zeroline: true,
         }},
@@ -770,15 +792,16 @@ def write_mask_overlay_debug_pages(primitive, output_model) -> dict[str, str]:
     )
     base_path = _fits_base_path(primitive, output_model)
     v_init = float(getattr(primitive, "mask_overlay_velocity_m_s", 0.0))
+    vm, vx, vs = _preview_ccf_velocity_range_m_s(primitive)
 
     for fiber, payload in payloads.items():
         html = _build_mask_overlay_debug_html(
             title=f"Stellar RV mask overlay debug (fiber {fiber})",
             payload=payload,
             v_init_m_s=v_init,
-            v_min_m_s=_V_MIN,
-            v_max_m_s=_V_MAX,
-            v_step_m_s=_V_STEP,
+            v_min_m_s=vm,
+            v_max_m_s=vx,
+            v_step_m_s=vs,
         )
         path = base_path.replace(".fits", f"_mask_overlay_debug_fib{fiber}.html")
         with open(path, "w", encoding="utf-8") as f:
@@ -839,6 +862,10 @@ def create_stellar_rv_preview(primitive) -> None:
         getattr(primitive, "save_preview", False),
         getattr(primitive, "show_preview", False),
     )
+
+    pv_min_m_s, pv_max_m_s, _pv_step = _preview_ccf_velocity_range_m_s(primitive)
+    v_axis_km_lo = pv_min_m_s / 1000.0
+    v_axis_km_hi = pv_max_m_s / 1000.0
 
     # Three rows per fiber: RV vs λ, CCF (dropdown), Residual (dropdown)
     row_plan: list[tuple] = []
@@ -1208,7 +1235,7 @@ def create_stellar_rv_preview(primitive) -> None:
         )
         # Share x-axis with CCF row above (velocity in km/s)
         fig.update_xaxes(
-            range=[_V_MIN / 1000.0, _V_MAX / 1000.0],
+            range=[v_axis_km_lo, v_axis_km_hi],
             matches=f"x{row - 1}",
             row=row,
             col=1,
@@ -1346,7 +1373,7 @@ def create_stellar_rv_preview(primitive) -> None:
             fig.update_yaxes(row=row, col=1, **y_kwargs)
         elif kind == "ccf":
             fig.update_xaxes(
-                range=[_V_MIN / 1000.0, _V_MAX / 1000.0],
+                range=[v_axis_km_lo, v_axis_km_hi],
                 showticklabels=False,
                 row=row,
                 col=1,
@@ -1359,7 +1386,7 @@ def create_stellar_rv_preview(primitive) -> None:
         else:
             fig.update_xaxes(
                 title_text="Velocity shift (km/s)",
-                range=[_V_MIN / 1000.0, _V_MAX / 1000.0],
+                range=[v_axis_km_lo, v_axis_km_hi],
                 row=row,
                 col=1,
             )

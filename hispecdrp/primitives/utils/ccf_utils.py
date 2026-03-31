@@ -19,10 +19,10 @@ References
 ----------
 .. [1] KPF-Pipeline radial_velocity ``src`` (mask-line tables and RV context;
        template path differs): https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
-.. [2] ``alg_rv_mask_line.py`` (mask geometry / BC bookkeeping in KPF):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+.. [2] ``alg.py`` (masking algorithms in KPF):
+       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg.py
 .. [3] spirou-ccf (SPIRou spectra / CCF ecosystem):
-       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+       https://github.com/edermartioli/spirou-ccf
 """
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ import os
 from dataclasses import dataclass
 
 import numpy as np
+from astropy.table import Table
 from astropy.modeling import fitting
 from astropy.modeling.models import Gaussian1D
 from scipy.ndimage import median_filter
@@ -39,6 +40,7 @@ from astropy.stats import mad_std
 from pathlib import Path
 
 from ...datamodels.dqflags import DQ_FLAGS
+from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
 from ...utils.parallelization_utils import (
     njit,
     numba_thread_scope,
@@ -56,12 +58,351 @@ _V_MIN = -500000.0
 _V_MAX = 500000.0
 _V_STEP = 50.0
 
+
+def resolve_ccf_broad_grid_m_s(
+    v_min: float | None = None,
+    v_max: float | None = None,
+    v_step: float | None = None,
+) -> tuple[float, float, float]:
+    """
+    Broad uniform CCF velocity grid (m/s) for stellar RV.
+
+    When a value is ``None``, uses the module defaults ``_V_MIN``, ``_V_MAX``, ``_V_STEP``.
+
+    Parameters
+    ----------
+    v_min, v_max, v_step : float or None
+        Lower bound, upper bound, and step (m/s) for the coarse grid search.
+
+    Returns
+    -------
+    v_min_m_s, v_max_m_s, v_step_m_s : float
+    """
+    vm = float(_V_MIN if v_min is None else v_min)
+    vx = float(_V_MAX if v_max is None else v_max)
+    vs = float(_V_STEP if v_step is None else v_step)
+    if not np.isfinite(vm) or not np.isfinite(vx) or not np.isfinite(vs):
+        raise ValueError("v_min, v_max, v_step must be finite when set (m/s)")
+    if vs <= 0:
+        raise ValueError("v_step must be finite and > 0 (m/s)")
+    if vx <= vm:
+        raise ValueError("v_max must be greater than v_min (m/s)")
+    return vm, vx, vs
+
+
+def resolve_ccf_velocity_grid(
+    v_center_m_s: float | None,
+    *,
+    window_m_s: float = 300.0,
+    step_m_s: float = 0.1,
+) -> tuple[float, float, float]:
+    """
+    CCF search grid in m/s for stellar RV.
+
+    When ``v_center_m_s`` is ``None``, returns the broad default
+    ``(_V_MIN, _V_MAX, _V_STEP)``.
+
+    When ``v_center_m_s`` is set, returns bounds for the **refined** leg of the
+    hybrid search: velocities from ``center - window_m_s`` to ``center + window_m_s``
+    (i.e. ``window_m_s`` is the **half-width** in m/s, so default 300 → ±300 m/s
+    span around the center), sampled every ``step_m_s``.
+
+    Parameters
+    ----------
+    v_center_m_s : float or None
+        Center of the refined velocity window (m/s), or ``None`` for the full default grid.
+    window_m_s : float, optional
+        Half-width of the refined window (m/s) when ``v_center_m_s`` is set. Default 300 m/s
+        (±300 m/s around the center).
+    step_m_s : float, optional
+        Velocity step (m/s) on the refined grid. Default 0.1 m/s (10 cm/s).
+
+    Returns
+    -------
+    v_min_m_s, v_max_m_s, v_step_m_s : float
+    """
+    if v_center_m_s is None:
+        return float(_V_MIN), float(_V_MAX), float(_V_STEP)
+    vc = float(v_center_m_s)
+    w = float(window_m_s)
+    vs = float(step_m_s)
+    if not np.isfinite(vc):
+        raise ValueError("ccf_input_velocity must be finite when set (m/s)")
+    if not np.isfinite(w) or w <= 0:
+        raise ValueError(
+            "ccf_velocity_window must be finite and > 0 when ccf_input_velocity is set (m/s)"
+        )
+    if not np.isfinite(vs) or vs <= 0:
+        raise ValueError(
+            "ccf_velocity_step must be finite and > 0 when ccf_input_velocity is set (m/s)"
+        )
+    v_min = vc - w
+    v_max = vc + w
+    if v_max <= v_min:
+        raise ValueError("ccf velocity window produces an empty or invalid v range")
+    return v_min, v_max, vs
+
+
+def combine_hybrid_broad_refined_rv(
+    rv_broad: float,
+    err_broad: float,
+    rv_refined: float,
+    err_refined: float,
+) -> tuple[float, float]:
+    """
+    Combine per-chunk RV estimates from a full broad grid search and a refined window search.
+
+    Uses an inverse-variance weighted mean when both uncertainties are finite and
+    positive; otherwise returns the refined estimate if valid, else the broad one.
+    """
+    ok_b = (
+        np.isfinite(rv_broad)
+        and np.isfinite(err_broad)
+        and float(err_broad) > 0.0
+    )
+    ok_r = (
+        np.isfinite(rv_refined)
+        and np.isfinite(err_refined)
+        and float(err_refined) > 0.0
+    )
+    if ok_b and ok_r:
+        wb = 1.0 / (float(err_broad) ** 2)
+        wr = 1.0 / (float(err_refined) ** 2)
+        wsum = wb + wr
+        mu = (wb * float(rv_broad) + wr * float(rv_refined)) / wsum
+        sig = 1.0 / math.sqrt(wsum)
+        return mu, sig
+    if ok_r:
+        return float(rv_refined), float(err_refined)
+    if ok_b:
+        return float(rv_broad), float(err_broad)
+    return float("nan"), float("nan")
+
+
+def effective_ccf_v_step_for_fit(v_grid: np.ndarray) -> float:
+    """
+    Representative velocity spacing (m/s) for Gaussian / fallback CCF fits on ``v_grid``.
+
+    Uses the median positive difference so non-uniform (merged hybrid) grids get a
+    sensible effective step near the peak.
+    """
+    vg = np.asarray(v_grid, dtype=np.float64).ravel()
+    if vg.size < 2:
+        return 1.0
+    d = np.diff(vg)
+    d = d[np.isfinite(d) & (d > 0)]
+    if d.size == 0:
+        return 1.0
+    return float(np.nanmedian(d))
+
+
+def build_hybrid_merged_velocity_grid(
+    broad_min: float,
+    broad_max: float,
+    broad_step: float,
+    center_m_s: float,
+    half_width_m_s: float,
+    refined_step_m_s: float,
+) -> np.ndarray:
+    """
+    Single CCF velocity list: full ``[broad_min, broad_max]`` sampled at ``broad_step``,
+    plus extra samples on ``[center ± half_width_m_s]`` every ``refined_step_m_s``.
+
+    Sorted unique values (rounded) so the merged grid spans the entire broad
+    range while increasing resolution around ``center_m_s``.
+    """
+    vb = float(broad_min)
+    vx = float(broad_max)
+    vsb = float(broad_step)
+    vc = float(center_m_s)
+    hw = float(half_width_m_s)
+    vsr = float(refined_step_m_s)
+    if not np.isfinite(vb) or not np.isfinite(vx) or vx <= vb:
+        raise ValueError("build_hybrid_merged_velocity_grid: invalid broad bounds")
+    if not np.isfinite(vsb) or vsb <= 0:
+        raise ValueError("build_hybrid_merged_velocity_grid: broad_step must be finite and > 0")
+    if not np.isfinite(vc) or not np.isfinite(hw) or hw <= 0:
+        raise ValueError("build_hybrid_merged_velocity_grid: center and half-width must be finite, half-width > 0")
+    if not np.isfinite(vsr) or vsr <= 0:
+        raise ValueError("build_hybrid_merged_velocity_grid: refined_step must be finite and > 0")
+    r_lo = vc - hw
+    r_hi = vc + hw
+    if r_hi <= r_lo:
+        raise ValueError("build_hybrid_merged_velocity_grid: refined window is empty")
+    broad = np.arange(vb, vx + 0.5 * vsb, vsb, dtype=np.float64)
+    refined = np.arange(r_lo, r_hi + 0.5 * vsr, vsr, dtype=np.float64)
+    merged = np.unique(np.round(np.concatenate((broad, refined)), decimals=6))
+    return merged.astype(np.float64)
+
+
 # Typical velocity scale per pixel for L2 (BSPEC/RSPEC) from wavelength sampling:
 #   Δv = c * (Δλ/λ).  With λ_center = 147/order µm and pixel size Δλ = (147/order²)/4096 µm,
 #   velocity per pixel = c / (order * 4096) m/s.
 #   BSPEC (order 110–148): ~494–665 m/s per pixel.  RSPEC (order 60–97): ~755–1220 m/s per pixel.
 
 logger = logging.getLogger(__name__)
+
+
+def build_rvccf_chunk_supplement(
+    *,
+    chunk_id: np.ndarray,
+    n_good: np.ndarray,
+    v_min: float,
+    v_max: float,
+    v_step: float,
+    ccf_2d: np.ndarray,
+) -> Table:
+    """
+    Supplement table with raw CCF(v) per chunk (columns merged into ``RVCCF_FIB*``).
+
+    Parameters
+    ----------
+    ccf_2d : np.ndarray
+        Shape ``(n_chunk, n_vel)``; row ``i`` is the CCF for chunk ``i``.
+    """
+    n = int(ccf_2d.shape[0]) if ccf_2d.ndim >= 2 else 0
+    if n == 0:
+        return Table(
+            names=["CHUNK_ID", "N_GOOD", "V_MIN", "V_MAX", "V_STEP", "N_VEL", "CCF"],
+            dtype=[np.int32, np.int32, np.float64, np.float64, np.float64, np.int32, object],
+        )
+    if len(chunk_id) != n or len(n_good) != n:
+        raise ValueError("build_rvccf_chunk_supplement: chunk_id / n_good length mismatch vs ccf_2d")
+    n_vel = int(ccf_2d.shape[1])
+    ccf_col = np.empty(n, dtype=object)
+    for i in range(n):
+        ccf_col[i] = np.asarray(ccf_2d[i], dtype=RVCCF_CCF_ELEM_DTYPE).ravel()
+    v_min_f = float(v_min)
+    v_max_f = float(v_max)
+    v_step_f = float(v_step)
+    return Table(
+        {
+            "CHUNK_ID": np.asarray(chunk_id, dtype=np.int32).ravel(),
+            "N_GOOD": np.asarray(n_good, dtype=np.int32).ravel(),
+            "V_MIN": np.full(n, v_min_f, dtype=np.float64),
+            "V_MAX": np.full(n, v_max_f, dtype=np.float64),
+            "V_STEP": np.full(n, v_step_f, dtype=np.float64),
+            "N_VEL": np.full(n, n_vel, dtype=np.int32),
+            "CCF": ccf_col,
+        }
+    )
+
+
+def assemble_rvccf_fib_table(
+    rvs: np.ndarray,
+    rv_errs: np.ndarray,
+    wavelengths: np.ndarray,
+    orders: np.ndarray,
+    inlier: np.ndarray,
+    *,
+    supplement: Table | None = None,
+) -> Table:
+    """
+    Full per-chunk ``RVCCF_FIB*`` table: RV metrics plus optional CCF supplement columns.
+
+    When ``supplement`` is None or has length 0, ``CCF`` rows are empty arrays
+    (``RVCCF_CCF_ELEM_DTYPE``), ``N_GOOD`` is -1, and velocity metadata is NaN / ``N_VEL`` 0.
+    """
+    n = len(rvs)
+    mbjd = np.zeros(n, dtype=np.float64)
+    berv = np.zeros(n, dtype=np.float64)
+    res = np.full(n, np.nan, dtype=np.float64)
+    tell_abs = np.zeros(n, dtype=np.float64)
+    bis = np.zeros(n, dtype=np.float64)
+    rv_abs = np.zeros(n, dtype=np.float64)
+    rv_abs_err = np.zeros(n, dtype=np.float64)
+    order_col = np.asarray(orders, dtype=np.int64).ravel()
+    if len(order_col) != n:
+        order_col = np.full(n, -1, dtype=np.int64)
+    order_i16 = np.clip(order_col, -32768, 32767).astype(np.int16)
+    wl = np.asarray(wavelengths, dtype=np.float64)
+    inlier_u8 = np.asarray(inlier, dtype=np.uint8)
+
+    if supplement is None or len(supplement) == 0:
+        chunk_id = np.arange(n, dtype=np.int32)
+        n_good = np.full(n, -1, dtype=np.int32)
+        v_min_a = np.full(n, np.nan, dtype=np.float64)
+        v_max_a = np.full(n, np.nan, dtype=np.float64)
+        v_step_a = np.full(n, np.nan, dtype=np.float64)
+        n_vel = np.zeros(n, dtype=np.int32)
+        ccf_col = np.empty(n, dtype=object)
+        for i in range(n):
+            ccf_col[i] = np.array([], dtype=RVCCF_CCF_ELEM_DTYPE)
+    else:
+        if len(supplement) != n:
+            raise ValueError(
+                f"assemble_rvccf_fib_table: supplement has {len(supplement)} rows, "
+                f"expected {n} to match per-chunk RV arrays"
+            )
+        chunk_id = np.asarray(supplement["CHUNK_ID"], dtype=np.int32)
+        n_good = np.asarray(supplement["N_GOOD"], dtype=np.int32)
+        v_min_a = np.asarray(supplement["V_MIN"], dtype=np.float64)
+        v_max_a = np.asarray(supplement["V_MAX"], dtype=np.float64)
+        v_step_a = np.asarray(supplement["V_STEP"], dtype=np.float64)
+        n_vel = np.asarray(supplement["N_VEL"], dtype=np.int32)
+        ccf_col = np.empty(n, dtype=object)
+        for i in range(n):
+            raw = supplement["CCF"][i]
+            if raw is None or (isinstance(raw, np.ndarray) and raw.size == 0):
+                ccf_col[i] = np.array([], dtype=RVCCF_CCF_ELEM_DTYPE)
+            else:
+                ccf_col[i] = np.asarray(raw, dtype=RVCCF_CCF_ELEM_DTYPE).ravel()
+
+    return Table(
+        {
+            "MBJDW": mbjd,
+            "BERVW": berv,
+            "RV": np.asarray(rvs, dtype=np.float64),
+            "RV_ERR": np.asarray(rv_errs, dtype=np.float64),
+            "ORDER": order_i16,
+            "WAVELENGTH": wl,
+            "RESOLUTION": res,
+            "TELL_ABS": tell_abs,
+            "BIS": bis,
+            "RV_ABS": rv_abs,
+            "RV_ABS_ERR": rv_abs_err,
+            "INLIER": inlier_u8,
+            "CHUNK_ID": chunk_id,
+            "N_GOOD": n_good,
+            "V_MIN": v_min_a,
+            "V_MAX": v_max_a,
+            "V_STEP": v_step_a,
+            "N_VEL": n_vel,
+            "CCF": ccf_col,
+        }
+    )
+
+
+def flat_chunk_wl_lo_hi(
+    wave_2d: np.ndarray,
+    order_indices: np.ndarray,
+    n_chunks_per_order: np.ndarray,
+    chunk_start: np.ndarray,
+    total_chunks: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Wavelength bounds per flattened chunk index (matches Numba chunking in
+    :func:`_process_all_orders_ccf_numba`).
+    """
+    wl_lo = np.full(total_chunks, np.nan, dtype=np.float64)
+    wl_hi = np.full(total_chunks, np.nan, dtype=np.float64)
+    for j in range(len(order_indices)):
+        oi = int(order_indices[j])
+        w = wave_2d[oi]
+        w_min = float(np.nanmin(w))
+        w_max = float(np.nanmax(w))
+        n_chunks = int(n_chunks_per_order[j])
+        if n_chunks < 1 or not np.isfinite(w_min) or not np.isfinite(w_max) or w_max <= w_min:
+            continue
+        start = int(chunk_start[j])
+        for k in range(n_chunks):
+            idx = start + k
+            if idx >= total_chunks:
+                break
+            wl_lo[idx] = w_min + k * (w_max - w_min) / n_chunks
+            wl_hi[idx] = w_min + (k + 1) * (w_max - w_min) / n_chunks
+    return wl_lo, wl_hi
+
 
 # --- CCF Gaussian fit (KPF RadialVelocityAlg.fit_ccf analog; internal km/s, public m/s) ---
 
@@ -456,6 +797,77 @@ def _ccf_chunk_ccf_numba(
     return n_good
 
 
+@njit(cache=True)
+def _ccf_chunk_ccf_numba_vgrid(
+    ln_lam: np.ndarray,
+    spec: np.ndarray,
+    spec_err: np.ndarray,
+    good: np.ndarray,
+    template_ln: np.ndarray,
+    template_flux: np.ndarray,
+    v_grid: np.ndarray,
+    ccf_out: np.ndarray,
+) -> int:
+    """Same as :func:`_ccf_chunk_ccf_numba` but samples at arbitrary ``v_grid`` (m/s)."""
+    n_good = 0
+    for i in range(len(good)):
+        if good[i]:
+            n_good += 1
+    if n_good < 10:
+        return n_good
+
+    n_pix = len(ln_lam)
+    inv_w = np.empty(n_pix)
+    for i in range(n_pix):
+        if good[i] and np.isfinite(spec_err[i]) and spec_err[i] > 0:
+            inv_w[i] = 1.0 / max(spec_err[i] * spec_err[i], 1e-30)
+        else:
+            inv_w[i] = 0.0
+
+    n_vel = len(ccf_out)
+    for i in range(n_vel):
+        ccf_out[i] = np.nan
+
+    for iv in range(n_vel):
+        v = float(v_grid[iv])
+        delta_ln = v / C_M_S
+        t_ln_shifted = template_ln + delta_ln
+        t_at_data = np.interp(ln_lam, t_ln_shifted, template_flux)
+        sum_w = 0.0
+        sum_d = 0.0
+        sum_t = 0.0
+        n_use = 0
+        for i in range(n_pix):
+            if (
+                good[i]
+                and inv_w[i] > 0.0
+                and np.isfinite(t_at_data[i])
+                and t_at_data[i] != 0.0
+            ):
+                w = inv_w[i]
+                sum_w += w
+                sum_d += spec[i] * w
+                sum_t += t_at_data[i] * w
+                n_use += 1
+        if n_use < 5:
+            continue
+        d_mean = sum_d / sum_w
+        t_mean = sum_t / sum_w
+        cov = 0.0
+        for i in range(n_pix):
+            if (
+                good[i]
+                and inv_w[i] > 0.0
+                and np.isfinite(t_at_data[i])
+                and t_at_data[i] != 0.0
+            ):
+                w = inv_w[i]
+                cov += (spec[i] - d_mean) * (t_at_data[i] - t_mean) * w
+        ccf_out[iv] = cov / sum_w
+
+    return n_good
+
+
 @njit(parallel=True, cache=True)
 def _process_all_orders_ccf_numba(
     wave_2d: np.ndarray,
@@ -557,7 +969,101 @@ def _process_all_orders_ccf_numba(
                 all_ccf[start + k, iv] = ccf_row[iv]
 
 
-def process_all_orders_rvs_numba(
+@njit(parallel=True, cache=True)
+def _process_all_orders_ccf_numba_vgrid(
+    wave_2d: np.ndarray,
+    spec_2d: np.ndarray,
+    spec_err_2d: np.ndarray,
+    dq_2d: np.ndarray,
+    do_not_use: int,
+    template_ln: np.ndarray,
+    template_flux: np.ndarray,
+    window_size_um: float,
+    order_indices: np.ndarray,
+    n_chunks_per_order: np.ndarray,
+    chunk_start: np.ndarray,
+    v_grid: np.ndarray,
+    n_vel: int,
+    all_ccf: np.ndarray,
+    all_n_good: np.ndarray,
+    all_wl: np.ndarray,
+) -> None:
+    """Same as :func:`_process_all_orders_ccf_numba` but with an explicit ``v_grid`` (m/s)."""
+    n_processed = len(order_indices)
+
+    for idx in prange(n_processed):
+        oi = order_indices[idx]
+        w = wave_2d[oi]
+        s = spec_2d[oi]
+        e = spec_err_2d[oi]
+        d = dq_2d[oi]
+        n_pix = len(w)
+        mask = np.empty(n_pix, dtype=np.bool_)
+        for i in range(n_pix):
+            mask[i] = (d[i] & do_not_use) != 0
+        good = np.empty(n_pix, dtype=np.bool_)
+        for i in range(n_pix):
+            good[i] = not mask[i] and np.isfinite(s[i]) and np.isfinite(e[i]) and e[i] > 0
+
+        w_min = np.nanmin(w)
+        w_max = np.nanmax(w)
+        ln_min = np.log(w_min) - 0.01
+        ln_max = np.log(w_max) + 0.01
+        n_tpl = 0
+        for i in range(len(template_ln)):
+            if template_ln[i] >= ln_min and template_ln[i] <= ln_max:
+                n_tpl += 1
+        if n_tpl < 20:
+            continue
+        t_ln = np.empty(n_tpl)
+        t_flux = np.empty(n_tpl)
+        j = 0
+        for i in range(len(template_ln)):
+            if template_ln[i] >= ln_min and template_ln[i] <= ln_max:
+                t_ln[j] = template_ln[i]
+                t_flux[j] = template_flux[i]
+                j += 1
+
+        ccf_row = np.empty(n_vel)
+        n_chunks = n_chunks_per_order[idx]
+        start = chunk_start[idx]
+        for k in range(n_chunks):
+            lam_lo = w_min + k * (w_max - w_min) / n_chunks
+            lam_hi = w_min + (k + 1) * (w_max - w_min) / n_chunks
+            in_chunk = np.empty(n_pix, dtype=np.bool_)
+            chunk_len = 0
+            for i in range(n_pix):
+                in_chunk[i] = w[i] >= lam_lo and w[i] < lam_hi
+                if in_chunk[i]:
+                    chunk_len += 1
+            wl_c = 0.5 * (lam_lo + lam_hi)
+            all_wl[start + k] = wl_c
+            if chunk_len < 20:
+                all_n_good[start + k] = 0
+                continue
+            ln_lam_c = np.empty(chunk_len)
+            spec_c = np.empty(chunk_len)
+            spec_err_c = np.empty(chunk_len)
+            good_c = np.empty(chunk_len, dtype=np.bool_)
+            j = 0
+            for i in range(n_pix):
+                if in_chunk[i]:
+                    ln_lam_c[j] = np.log(w[i])
+                    spec_c[j] = s[i]
+                    spec_err_c[j] = e[i]
+                    good_c[j] = good[i]
+                    j += 1
+            ng = _ccf_chunk_ccf_numba_vgrid(
+                ln_lam_c, spec_c, spec_err_c, good_c,
+                t_ln, t_flux, v_grid,
+                ccf_row,
+            )
+            all_n_good[start + k] = ng
+            for iv in range(n_vel):
+                all_ccf[start + k, iv] = ccf_row[iv]
+
+
+def _process_all_orders_rvs_numba_single_grid(
     wave_2d: np.ndarray,
     spec_2d: np.ndarray,
     spec_err_2d: np.ndarray,
@@ -577,58 +1083,9 @@ def process_all_orders_rvs_numba(
     numba_threads: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
-    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 ):
-    """
-    High-throughput per-chunk RVs: Numba CCF grid, then SciPy Gaussian per chunk.
-
-    This is the workhorse behind :func:`process_orders_rvs_numba_parallel`.  It is
-    not re-exported from ``hispecdrp.primitives.utils``; callers typically use the
-    parallel wrapper that sets thread count and packs ``order_tasks``.
-
-    **Pipeline**
-
-    #. Allocate ``all_ccf`` with shape ``(total_chunks, n_vel)`` and flatten chunk
-       indices across orders via ``chunk_start`` / ``n_chunks_per_order``.
-    #. :func:`_process_all_orders_ccf_numba` — parallel over orders (``prange``):
-       for each wavelength chunk, :func:`_ccf_chunk_ccf_numba` fills one row of
-       ``all_ccf`` (same weighted covariance as :func:`masked_ccf_rv`).
-    #. Python loop: for each row with enough good pixels, :func:`_ccf_rv_from_ccf`
-       calls :func:`fit_ccf_rv` + HWHM fallback (serial; cannot run inside Numba).
-
-    Parameters
-    ----------
-    wave_2d, spec_2d, spec_err_2d, dq_2d
-        Per-order 2-D arrays (wavelength micron, flux, error, DQ).
-    do_not_use : int
-        DQ bitmask for bad pixels.
-    template_ln, template_flux
-        Full template (log micron, flux).
-    window_size_um : float
-        Chunk width in wavelength (micron) along each order.
-    order_indices : np.ndarray
-        Row indices into ``wave_2d`` for orders to process.
-    n_chunks_per_order, chunk_start : np.ndarray
-        Chunk counts and cumulative start index into the flattened output.
-    v_min, v_max, v_step : float
-        CCF velocity grid (m/s); usually ``_V_MIN``, ``_V_MAX``, ``_V_STEP``.
-
-    Returns
-    -------
-    all_rvs : np.ndarray
-        RV per chunk (m/s), length ``total_chunks``.
-    all_rv_errs : np.ndarray
-        Uncertainty per chunk (m/s).
-    all_wl : np.ndarray
-        Chunk center wavelength (micron); ``nan`` where order skipped.
-    all_ccf, v_grid : np.ndarray, optional
-        Returned when ``return_ccf`` is True: CCF stack ``(total_chunks, n_vel)`` and
-        shared velocity axis (m/s).
-
-    See Also
-    --------
-    process_orders_rvs_numba_parallel : Public entry with ``order_tasks`` and threads.
-    """
+    """Single uniform velocity grid: Numba CCF fill + per-chunk Gaussian RV."""
     n_processed = len(order_indices)
     total_chunks = int(chunk_start[n_processed - 1] + n_chunks_per_order[n_processed - 1])
     n_vel = int((v_max - v_min) / v_step) + 1
@@ -693,8 +1150,218 @@ def process_all_orders_rvs_numba(
     )
 
     if return_ccf:
-        return all_rvs, all_rv_errs, all_wl, all_ccf, v_grid
+        return all_rvs, all_rv_errs, all_wl, all_ccf, v_grid, all_n_good
     return all_rvs, all_rv_errs, all_wl
+
+
+def _process_all_orders_rvs_numba_single_vgrid(
+    wave_2d: np.ndarray,
+    spec_2d: np.ndarray,
+    spec_err_2d: np.ndarray,
+    dq_2d: np.ndarray,
+    do_not_use: int,
+    template_ln: np.ndarray,
+    template_flux: np.ndarray,
+    window_size_um: float,
+    order_indices: np.ndarray,
+    n_chunks_per_order: np.ndarray,
+    chunk_start: np.ndarray,
+    v_grid: np.ndarray,
+    *,
+    return_ccf: bool = False,
+    numba_threads: int | None = None,
+) -> (
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+):
+    """Non-uniform ``v_grid`` (e.g. merged hybrid): Numba CCF fill + per-chunk Gaussian RV."""
+    v_grid = np.asarray(v_grid, dtype=np.float64).ravel()
+    n_vel = int(v_grid.shape[0])
+    if n_vel < 2:
+        raise ValueError("v_grid must contain at least two velocity samples (m/s)")
+    v_step_fit = effective_ccf_v_step_for_fit(v_grid)
+
+    n_processed = len(order_indices)
+    total_chunks = int(chunk_start[n_processed - 1] + n_chunks_per_order[n_processed - 1])
+    all_ccf = np.full((total_chunks, n_vel), np.nan, dtype=np.float64)
+    all_n_good = np.zeros(total_chunks, dtype=np.int32)
+    all_wl = np.empty(total_chunks, dtype=np.float64)
+    all_wl[:] = np.nan
+    all_rvs = np.empty(total_chunks, dtype=np.float64)
+    all_rvs[:] = np.nan
+    all_rv_errs = np.empty(total_chunks, dtype=np.float64)
+    all_rv_errs[:] = np.nan
+
+    nt = numba_threads if numba_threads is not None else 1
+    logger.info(
+        "CCF (Numba): starting CCF matrix fill (merged v_grid) total_chunks=%d n_vel=%d "
+        "numba_threads=%d",
+        total_chunks,
+        n_vel,
+        nt,
+    )
+    _process_all_orders_ccf_numba_vgrid(
+        wave_2d,
+        spec_2d,
+        spec_err_2d,
+        dq_2d,
+        do_not_use,
+        template_ln,
+        template_flux,
+        window_size_um,
+        order_indices,
+        n_chunks_per_order,
+        chunk_start,
+        v_grid,
+        n_vel,
+        all_ccf,
+        all_n_good,
+        all_wl,
+    )
+    logger.info(
+        "CCF (Numba): CCF matrix fill complete total_chunks=%d n_vel=%d",
+        total_chunks,
+        n_vel,
+    )
+
+    logger.info(
+        "CCF (Python): starting per-chunk Gaussian RV fits total_chunks=%d",
+        total_chunks,
+    )
+    n_fit_rows = 0
+    for i in range(total_chunks):
+        if all_n_good[i] < 10:
+            continue
+        n_fit_rows += 1
+        wl_c = float(all_wl[i])
+        vspan = dv_per_pixel_m_s(wl_c)
+        if not np.isfinite(vspan):
+            vspan = None
+        rv, rv_err = _ccf_rv_from_ccf(
+            v_grid,
+            all_ccf[i],
+            v_step_fit,
+            int(all_n_good[i]),
+            vel_span_m_s_per_pixel=vspan,
+        )
+        all_rvs[i] = rv
+        all_rv_errs[i] = rv_err
+    logger.info(
+        "CCF (Python): per-chunk Gaussian fits complete rows_fitted=%d of total_chunks=%d",
+        n_fit_rows,
+        total_chunks,
+    )
+
+    if return_ccf:
+        return all_rvs, all_rv_errs, all_wl, all_ccf, v_grid, all_n_good
+    return all_rvs, all_rv_errs, all_wl
+
+
+def process_all_orders_rvs_numba(
+    wave_2d: np.ndarray,
+    spec_2d: np.ndarray,
+    spec_err_2d: np.ndarray,
+    dq_2d: np.ndarray,
+    do_not_use: int,
+    template_ln: np.ndarray,
+    template_flux: np.ndarray,
+    window_size_um: float,
+    order_indices: np.ndarray,
+    n_chunks_per_order: np.ndarray,
+    chunk_start: np.ndarray,
+    v_min: float,
+    v_max: float,
+    v_step: float,
+    *,
+    return_ccf: bool = False,
+    numba_threads: int | None = None,
+    hybrid_center_m_s: float | None = None,
+    hybrid_half_width_m_s: float = 300.0,
+    hybrid_step_m_s: float = 0.1,
+) -> (
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+):
+    """
+    High-throughput per-chunk RVs: Numba CCF grid, then SciPy Gaussian per chunk.
+
+    Workhorse behind :func:`process_orders_rvs_numba_parallel`.
+
+    When ``hybrid_center_m_s`` is ``None``, uses a single grid ``(v_min, v_max, v_step)``.
+
+    When ``hybrid_center_m_s`` is set, uses one merged velocity list spanning the broad
+    range ``v_min`` … ``v_max`` at ``v_step``, with additional samples on
+    ``center ± hybrid_half_width_m_s`` every ``hybrid_step_m_s`` (see
+    :func:`build_hybrid_merged_velocity_grid`). A single CCF is built on that grid and
+    per-chunk RVs are fit once. Optional CCF output uses the same merged ``v_grid``.
+    """
+    if hybrid_center_m_s is None:
+        return _process_all_orders_rvs_numba_single_grid(
+            wave_2d,
+            spec_2d,
+            spec_err_2d,
+            dq_2d,
+            do_not_use,
+            template_ln,
+            template_flux,
+            window_size_um,
+            order_indices,
+            n_chunks_per_order,
+            chunk_start,
+            v_min,
+            v_max,
+            v_step,
+            return_ccf=return_ccf,
+            numba_threads=numba_threads,
+        )
+
+    vc = float(hybrid_center_m_s)
+    hw = float(hybrid_half_width_m_s)
+    vsf = float(hybrid_step_m_s)
+    if not np.isfinite(vc) or not np.isfinite(hw) or hw <= 0:
+        raise ValueError(
+            "hybrid CCF: center and half-width must be finite and half-width > 0 (m/s)"
+        )
+    if not np.isfinite(vsf) or vsf <= 0:
+        raise ValueError("hybrid CCF: refined step must be finite and > 0 (m/s)")
+    if vc + hw <= vc - hw:
+        raise ValueError("hybrid CCF: refined velocity window is empty")
+
+    v_grid = build_hybrid_merged_velocity_grid(
+        float(v_min),
+        float(v_max),
+        float(v_step),
+        vc,
+        hw,
+        vsf,
+    )
+    logger.info(
+        "CCF (Numba): hybrid merged grid — broad [%g, %g] step %g; denser [%g, %g] "
+        "step %g → n_vel=%d",
+        v_min,
+        v_max,
+        v_step,
+        vc - hw,
+        vc + hw,
+        vsf,
+        int(v_grid.shape[0]),
+    )
+    return _process_all_orders_rvs_numba_single_vgrid(
+        wave_2d,
+        spec_2d,
+        spec_err_2d,
+        dq_2d,
+        do_not_use,
+        template_ln,
+        template_flux,
+        window_size_um,
+        order_indices,
+        n_chunks_per_order,
+        chunk_start,
+        v_grid,
+        return_ccf=return_ccf,
+        numba_threads=numba_threads,
+    )
 
 
 def flat_chunk_echelle_orders(
@@ -737,9 +1404,13 @@ def process_orders_rvs_numba_parallel(
     ccf_v_min: float | None = None,
     ccf_v_max: float | None = None,
     ccf_v_step: float | None = None,
+    ccf_hybrid_center_m_s: float | None = None,
+    ccf_hybrid_half_width_m_s: float = 300.0,
+    ccf_hybrid_step_m_s: float = 0.1,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     | tuple[
+        np.ndarray,
         np.ndarray,
         np.ndarray,
         np.ndarray,
@@ -778,10 +1449,15 @@ def process_orders_rvs_numba_parallel(
         ``0`` uses all logical CPUs (see :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads`).
         ``1`` forces single-threaded execution (reproducible, slower).
     ccf_v_min, ccf_v_max, ccf_v_step : float, optional
-        Override the CCF velocity grid (m/s). Defaults are ``_V_MIN``, ``_V_MAX``,
-        ``_V_STEP`` (50 m/s steps). **Coarser** ``ccf_v_step`` (e.g. 200–500 m/s)
-        cuts Phase A and Phase B cost roughly proportional to ``_V_STEP / ccf_v_step``
-        at modest RV resolution cost.
+        Single-grid CCF velocity range (m/s). Ignored when ``ccf_hybrid_center_m_s``
+        is set. Defaults are ``_V_MIN``, ``_V_MAX``, ``_V_STEP``.
+    ccf_hybrid_center_m_s : float or None, optional
+        When set, uses a single merged velocity grid (full ``_V_*`` range plus denser
+        sampling around ``center ± ccf_hybrid_half_width_m_s``); see
+        :func:`build_hybrid_merged_velocity_grid`.
+    ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float, optional
+        Refined half-width (m/s) and step (m/s); defaults match
+        :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
 
     Returns
     -------
@@ -794,8 +1470,8 @@ def process_orders_rvs_numba_parallel(
     n_chunks_per_order, chunk_start : np.ndarray
         Chunk layout (always returned). Use with :func:`flat_chunk_echelle_orders`
         to map flat chunk index → echelle order number.
-    all_ccf, v_grid, order_indices : np.ndarray, optional
-        Extra arrays when ``return_ccf`` is True (for preview / diagnostics).
+    all_ccf, v_grid, order_indices, all_n_good : np.ndarray, optional
+        Extra arrays when ``return_ccf`` is True (for preview / RVCCF supplement columns).
 
     Notes
     -----
@@ -816,6 +1492,7 @@ def process_orders_rvs_numba_parallel(
             return empty + (
                 np.zeros((0, 0), dtype=np.float64),
                 np.array([], dtype=np.float64),
+                np.array([], dtype=np.int32),
                 z64,
                 z64,
                 z64,
@@ -841,34 +1518,73 @@ def process_orders_rvs_numba_parallel(
     vm = float(_V_MIN if ccf_v_min is None else ccf_v_min)
     vx = float(_V_MAX if ccf_v_max is None else ccf_v_max)
     vs = float(_V_STEP if ccf_v_step is None else ccf_v_step)
-    if not np.isfinite(vm) or not np.isfinite(vx) or not np.isfinite(vs) or vs <= 0:
-        raise ValueError("ccf_v_min, ccf_v_max must be finite and ccf_v_step must be finite and > 0")
-    if vx <= vm:
-        raise ValueError("ccf_v_max must be greater than ccf_v_min")
+    hyc = ccf_hybrid_center_m_s
+    hybrid = hyc is not None and np.isfinite(float(hyc))
+    if not hybrid:
+        if not np.isfinite(vm) or not np.isfinite(vx) or not np.isfinite(vs) or vs <= 0:
+            raise ValueError(
+                "ccf_v_min, ccf_v_max must be finite and ccf_v_step must be finite and > 0"
+            )
+        if vx <= vm:
+            raise ValueError("ccf_v_max must be greater than ccf_v_min")
     total_chunks_layout = int(chunk_start[-1] + n_chunks_per_order[-1])
-    logger.info(
-        "CCF: process_orders_rvs_numba_parallel n_order_tasks=%d total_chunks=%d "
-        "window_um=%.4f return_ccf=%s numba_threads=%d "
-        "v_grid_m_s=[%.0f, %.0f] step=%.1f",
-        len(order_tasks),
-        total_chunks_layout,
-        window_size_um,
-        return_ccf,
-        nthr,
-        vm,
-        vx,
-        vs,
-    )
+    if hybrid:
+        logger.info(
+            "CCF: process_orders_rvs_numba_parallel HYBRID mode n_order_tasks=%d "
+            "total_chunks=%d window_um=%.4f return_ccf=%s numba_threads=%d "
+            "center=%.2f m/s half_width=%.2f refined_step=%.4f",
+            len(order_tasks),
+            total_chunks_layout,
+            window_size_um,
+            return_ccf,
+            nthr,
+            float(hyc),
+            float(ccf_hybrid_half_width_m_s),
+            float(ccf_hybrid_step_m_s),
+        )
+    else:
+        logger.info(
+            "CCF: process_orders_rvs_numba_parallel n_order_tasks=%d total_chunks=%d "
+            "window_um=%.4f return_ccf=%s numba_threads=%d "
+            "v_grid_m_s=[%.0f, %.0f] step=%.1f",
+            len(order_tasks),
+            total_chunks_layout,
+            window_size_um,
+            return_ccf,
+            nthr,
+            vm,
+            vx,
+            vs,
+        )
     # Flattened (order, chunk) RV list; parallelized over orders inside Numba.
     with numba_thread_scope(max_cores):
+        if hybrid:
+            kw_h = dict(
+                hybrid_center_m_s=float(hyc),
+                hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
+                hybrid_step_m_s=float(ccf_hybrid_step_m_s),
+            )
+        else:
+            kw_h = {}
         if return_ccf:
-            all_rvs, all_rv_errs, all_wl, all_ccf, v_grid = process_all_orders_rvs_numba(
-                wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
-                template_ln, template_flux, window_size_um,
-                order_indices, n_chunks_per_order, chunk_start,
-                vm, vx, vs,
+            all_rvs, all_rv_errs, all_wl, all_ccf, v_grid, all_n_good = process_all_orders_rvs_numba(
+                wave_2d,
+                spec_2d,
+                spec_err_2d,
+                dq_2d,
+                do_not_use,
+                template_ln,
+                template_flux,
+                window_size_um,
+                order_indices,
+                n_chunks_per_order,
+                chunk_start,
+                vm,
+                vx,
+                vs,
                 return_ccf=True,
                 numba_threads=nthr,
+                **kw_h,
             )
             return (
                 all_rvs,
@@ -876,17 +1592,29 @@ def process_orders_rvs_numba_parallel(
                 all_wl,
                 all_ccf,
                 v_grid,
+                all_n_good,
                 n_chunks_per_order,
                 chunk_start,
                 order_indices,
             )
         all_rvs, all_rv_errs, all_wl = process_all_orders_rvs_numba(
-            wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
-            template_ln, template_flux, window_size_um,
-            order_indices, n_chunks_per_order, chunk_start,
-            vm, vx, vs,
+            wave_2d,
+            spec_2d,
+            spec_err_2d,
+            dq_2d,
+            do_not_use,
+            template_ln,
+            template_flux,
+            window_size_um,
+            order_indices,
+            n_chunks_per_order,
+            chunk_start,
+            vm,
+            vx,
+            vs,
             return_ccf=False,
             numba_threads=nthr,
+            **kw_h,
         )
         return all_rvs, all_rv_errs, all_wl, n_chunks_per_order, chunk_start
 
@@ -1221,6 +1949,7 @@ def _masked_ccf_rv_core(
     v_step: float,
     *,
     diagnostics: bool,
+    v_grid: np.ndarray | None = None,
 ) -> tuple[float, float, np.ndarray, np.ndarray, dict | None]:
     """
     Single CCF build + fit; optionally build diagnostics dict (no duplicate CCF work).
@@ -1248,7 +1977,10 @@ def _masked_ccf_rv_core(
         "wl_max": wl_max,
     }
 
-    v_grid = _make_velocity_grid(v_min, v_max, v_step)
+    if v_grid is not None:
+        v_grid = np.asarray(v_grid, dtype=np.float64).ravel()
+    else:
+        v_grid = _make_velocity_grid(v_min, v_max, v_step)
     if n_good < 10:
         nan_ccf = np.full_like(v_grid, np.nan)
         if diagnostics:
@@ -1257,6 +1989,7 @@ def _masked_ccf_rv_core(
 
     ln_lam = _ln_lam(wave)
     ccf = np.full(len(v_grid), np.nan, dtype=np.float64)
+    v_step_fit = effective_ccf_v_step_for_fit(v_grid)
     if (
         len(v_grid) >= 2
         and np.allclose(np.diff(v_grid), v_grid[1] - v_grid[0], rtol=1e-5, atol=1e-3)
@@ -1282,7 +2015,7 @@ def _masked_ccf_rv_core(
             return np.nan, np.nan, v_grid, ccf, empty_diag
         return np.nan, np.nan, v_grid, ccf, None
 
-    rv, rv_err = _ccf_rv_from_ccf(v_grid, ccf, v_step, n_good)
+    rv, rv_err = _ccf_rv_from_ccf(v_grid, ccf, v_step_fit, n_good)
     diag_out: dict | None = None
     if diagnostics:
         ccf_max = float(np.nanmax(ccf))
@@ -1375,6 +2108,8 @@ def masked_ccf_rv_full(
     v_min: float = -500000.0,
     v_max: float = 500000.0,
     v_step: float = 500.0,
+    *,
+    v_grid: np.ndarray | None = None,
 ) -> tuple[float, float, np.ndarray, np.ndarray]:
     """
     Same physics as :func:`masked_ccf_rv`, plus the CCF array for diagnostics/plots.
@@ -1384,7 +2119,9 @@ def masked_ccf_rv_full(
     wave, spec, spec_err, mask, template_ln, template_flux
         Same as :func:`masked_ccf_rv`.
     v_min, v_max, v_step : float, optional
-        Velocity grid in m/s.
+        Velocity grid in m/s. Unused for building the trial list when ``v_grid`` is passed.
+    v_grid : np.ndarray or None, optional
+        Explicit velocity samples (m/s), e.g. from :func:`build_hybrid_merged_velocity_grid`.
 
     Returns
     -------
@@ -1402,8 +2139,17 @@ def masked_ccf_rv_full(
     rv_per_chunks : Per-chunk CCFs along an order (``return_ccf=True``).
     """
     rv, rv_err, v_grid, ccf, _d = _masked_ccf_rv_core(
-        wave, spec, spec_err, mask, template_ln, template_flux,
-        v_min, v_max, v_step, diagnostics=False,
+        wave,
+        spec,
+        spec_err,
+        mask,
+        template_ln,
+        template_flux,
+        v_min,
+        v_max,
+        v_step,
+        diagnostics=False,
+        v_grid=v_grid,
     )
     return rv, rv_err, v_grid, ccf
 
@@ -1547,6 +2293,9 @@ def process_one_order_rvs(
     ccf_v_min: float | None = None,
     ccf_v_max: float | None = None,
     ccf_v_step: float | None = None,
+    ccf_hybrid_center_m_s: float | None = None,
+    ccf_hybrid_half_width_m_s: float = 300.0,
+    ccf_hybrid_step_m_s: float = 0.1,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -1556,7 +2305,8 @@ def process_one_order_rvs(
 
     Serial-friendly (picklable) path used when not using the Numba multi-order
     driver.  Returns empty arrays if the template has fewer than 20 points in the
-    order wavelength range.
+    order wavelength range. When ``ccf_hybrid_center_m_s`` is set, delegates to
+    :func:`process_orders_rvs_numba_parallel` (broad + refined hybrid).
 
     Parameters
     ----------
@@ -1632,22 +2382,50 @@ def process_one_order_rvs(
     vx = _V_MAX if ccf_v_max is None else ccf_v_max
     vs = _V_STEP if ccf_v_step is None else ccf_v_step
 
-    if return_ccf:
-        return rv_per_chunks(
-            w,
-            s,
-            e,
-            mask,
+    if ccf_hybrid_center_m_s is not None:
+        dq_1d = np.where(mask, np.uint32(do_not_use), np.uint32(0))
+        wave_2d = w.reshape(1, -1)
+        spec_2d = s.reshape(1, -1)
+        err_2d = e.reshape(1, -1)
+        dq_2d = dq_1d.reshape(1, -1)
+        out = process_orders_rvs_numba_parallel(
+            wave_2d,
+            spec_2d,
+            err_2d,
+            dq_2d,
+            do_not_use,
             t_ln,
             t_flux,
             window_size_um,
-            v_min=vm,
-            v_max=vx,
-            v_step=vs,
-            return_ccf=True,
+            [(0, 0)],
+            max_cores=1,
+            return_ccf=return_ccf,
+            ccf_v_min=vm,
+            ccf_v_max=vx,
+            ccf_v_step=vs,
+            ccf_hybrid_center_m_s=float(ccf_hybrid_center_m_s),
+            ccf_hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
+            ccf_hybrid_step_m_s=float(ccf_hybrid_step_m_s),
         )
+        if return_ccf:
+            arv, are, awl, accf, vg, ang, _nc, _cs, _oi = out
+            return arv, are, awl, vg, accf
+        arv, are, awl, _nc, _cs = out
+        return arv, are, awl
 
-    return rv_per_chunks(w, s, e, mask, t_ln, t_flux, window_size_um, return_ccf=False)
+    return rv_per_chunks(
+        w,
+        s,
+        e,
+        mask,
+        t_ln,
+        t_flux,
+        window_size_um,
+        v_min=vm,
+        v_max=vx,
+        v_step=vs,
+        return_ccf=return_ccf,
+    )
 
 
 # =============================================================================
@@ -1782,6 +2560,11 @@ def _calc_mask_ccf_chunks_numba(
         n_ln = int(n_line_arr[ic])
         if n_pix <= 0 or n_ln <= 0:
             continue
+        # Strict chunk policy: only include a shifted mask segment when it is
+        # fully contained in this chunk's wavelength support; clipped/partial
+        # edge overlaps are excluded.
+        chunk_lo = left_edges_2d[ic, 0]
+        chunk_hi = right_edges_2d[ic, n_pix - 1]
         for i_v in range(n_v):
             sh = (1.0 + v_grid_m_s[i_v] / C_M_S) / zb1
             mask_sp = np.zeros(n_pix, dtype=np.float64)
@@ -1789,6 +2572,8 @@ def _calc_mask_ccf_chunks_numba(
                 ls = line_start_2d[ic, j] * sh
                 le = line_end_2d[ic, j] * sh
                 if not (np.isfinite(ls) and np.isfinite(le)) or le <= ls:
+                    continue
+                if ls < chunk_lo or le > chunk_hi:
                     continue
                 cxp = np.searchsorted(right_edges_2d[ic, :n_pix], ls, side="left")
                 cxn = np.searchsorted(left_edges_2d[ic, :n_pix], le, side="right")
@@ -2091,115 +2876,133 @@ def restrict_mask_to_chunk(
     )
 
 
-def rv_from_ccf_mask_kpf(
+@njit(cache=True)
+def _nanmedian_numba_1d(x: np.ndarray) -> float:
+    vals = np.empty(x.size, dtype=np.float64)
+    n = 0
+    for i in range(x.size):
+        xi = x[i]
+        if np.isfinite(xi):
+            vals[n] = xi
+            n += 1
+    if n == 0:
+        return np.nan
+    vv = np.sort(vals[:n])
+    mid = n // 2
+    if (n % 2) == 1:
+        return float(vv[mid])
+    return float(0.5 * (vv[mid - 1] + vv[mid]))
+
+
+@njit(cache=True)
+def _rv_from_ccf_mask_kpf_numba_single(
     v_grid_m_s: np.ndarray,
     ccf_raw: np.ndarray,
-    *,
-    v_step_m_s: float,
     n_good: int,
-) -> tuple[float, float, np.ndarray]:
-    """
-    Estimate radial velocity and uncertainty from a mask CCF.
+) -> tuple[float, float, int]:
+    n = v_grid_m_s.size
+    if ccf_raw.size != n:
+        return np.nan, np.nan, 0
 
-    The CCF may appear as a positive peak or a negative trough depending on data and
-    mask sign conventions; the array is negated when a trough is deeper than the peak
-    is tall, so subsequent peak finding targets a maximum. RV is refined with a
-    three-point parabolic interpolation; uncertainty uses curvature and a simple
-    :math:`\\sqrt{N}` scaling heuristic (no SciPy Gaussian fit in this path).
-
-    Parameters
-    ----------
-    v_grid_m_s : np.ndarray
-        Velocity grid (m s⁻¹), same length as ``ccf_raw``.
-    ccf_raw : np.ndarray
-        CCF values on ``v_grid_m_s``.
-    v_step_m_s : float
-        Uniform grid step (m s⁻¹) for parabolic refinement.
-    n_good : int
-        Number of good pixels in the chunk (scales reported error).
-
-    Returns
-    -------
-    rv : float
-        Radial velocity (m s⁻¹).
-    rv_err : float
-        Estimated uncertainty (m s⁻¹).
-    ccf : np.ndarray
-        CCF array used for peak finding (possibly sign-flipped copy of ``ccf_raw``).
-    """
-
-    ccf_raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
-    if ccf_raw.size != v_grid_m_s.size:
-        raise ValueError("ccf_raw and v_grid must have matching lengths.")
-
-    ccf_min = float(np.nanmin(ccf_raw))
-    ccf_max = float(np.nanmax(ccf_raw))
-
+    ccf_min = np.inf
+    ccf_max = -np.inf
+    for i in range(n):
+        yi = ccf_raw[i]
+        if np.isfinite(yi):
+            if yi < ccf_min:
+                ccf_min = yi
+            if yi > ccf_max:
+                ccf_max = yi
     if not np.isfinite(ccf_min) or not np.isfinite(ccf_max):
-        return np.nan, np.nan, np.full_like(v_grid_m_s, np.nan, dtype=np.float64)
+        return np.nan, np.nan, 0
 
-    baseline = float(np.nanmedian(ccf_raw))
-    # Decide whether the alignment feature is a trough or a peak by comparing
-    # its excursion relative to the baseline.
-    height = float(ccf_max - baseline)
-    depth = float(baseline - ccf_min)
-    # If the trough is deeper than the peak is tall, flip sign so the fitter sees
-    # a positive maximum at the true RV location.
-    if depth > height:
-        ccf = -ccf_raw
-    else:
-        ccf = ccf_raw
+    baseline_raw = _nanmedian_numba_1d(ccf_raw)
+    height = float(ccf_max - baseline_raw)
+    depth = float(baseline_raw - ccf_min)
+    sign = -1.0 if depth > height else 1.0
+    flipped = 1 if sign < 0.0 else 0
 
-    # Stable (non-SciPy) RV estimation:
-    # - use quadratic interpolation across the maximum (3-point parabolic fit)
-    # - estimate a Gaussian-equivalent sigma from curvature
-    # - report rv_err from sigma scaled by sqrt(N) heuristics
-    i_peak = int(np.nanargmax(ccf))
+    i_peak = -1
+    y_peak = -np.inf
+    for i in range(n):
+        yi = sign * ccf_raw[i]
+        if np.isfinite(yi) and yi > y_peak:
+            y_peak = yi
+            i_peak = i
+    if i_peak < 0:
+        return np.nan, np.nan, flipped
+
     v_peak = float(v_grid_m_s[i_peak])
+    v_step_edge = float(abs(v_grid_m_s[1] - v_grid_m_s[0])) if n > 1 else 1.0
+    if i_peak <= 0 or i_peak >= (n - 1):
+        rv_err_edge = max(float(v_step_edge * 2.0), 1.0)
+        return v_peak, rv_err_edge, flipped
 
-    # Default fallback: grid peak only.
-    if i_peak <= 0 or i_peak >= (len(ccf) - 1):
-        rv_err = max(float(abs(v_step_m_s) * 2.0), 1.0)
-        return v_peak, rv_err, ccf
+    v0 = float(v_grid_m_s[i_peak - 1])
+    v1 = float(v_grid_m_s[i_peak])
+    v2 = float(v_grid_m_s[i_peak + 1])
+    h_m = v1 - v0
+    h_p = v2 - v1
+    v_step_eff = 0.5 * (h_m + h_p)
+    if h_m <= 0.0 or h_p <= 0.0:
+        return v_peak, max(float(abs(v_step_eff) * 2.0), 1.0), flipped
 
-    y_m1 = float(ccf[i_peak - 1])
-    y_0 = float(ccf[i_peak])
-    y_p1 = float(ccf[i_peak + 1])
-
-    baseline = float(np.nanmedian(ccf))
+    y_m1 = float(sign * ccf_raw[i_peak - 1])
+    y_0 = float(sign * ccf_raw[i_peak])
+    y_p1 = float(sign * ccf_raw[i_peak + 1])
+    baseline = float(sign * baseline_raw)
     amp = y_0 - baseline
+    if not np.isfinite(amp) or amp <= 0.0:
+        return v_peak, max(float(abs(v_step_eff) * 2.0), 1.0), flipped
 
-    # If the peak isn't clearly above baseline, uncertainty becomes very large.
-    if not np.isfinite(amp) or amp <= 0:
-        rv_err = max(float(abs(v_step_m_s) * 2.0), 1.0)
-        return v_peak, rv_err, ccf
+    # Parabola y = a*v^2 + b*v + c through (v0,y_m1), (v1,y_0), (v2,y_p1); vertex at -b/(2a).
+    A = v1 * v1 - v0 * v0
+    B = v1 - v0
+    C = y_0 - y_m1
+    D = v2 * v2 - v1 * v1
+    E = v2 - v1
+    F = y_p1 - y_0
+    det = A * E - B * D
+    if not np.isfinite(det) or abs(det) < 1e-30:
+        return v_peak, max(float(abs(v_step_eff) * 2.0), 1.0), flipped
+    a = (C * E - B * F) / det
+    b = (A * F - C * D) / det
+    if not np.isfinite(a) or abs(a) < 1e-30:
+        return v_peak, max(float(abs(v_step_eff) * 2.0), 1.0), flipped
+    rv = -b / (2.0 * a)
+    if rv < min(v0, v2) or rv > max(v0, v2):
+        rv = v_peak
 
-    # Parabolic vertex offset for uniform grid:
-    # d = (y_- - y_+) / (2*(y_- - 2*y_0 + y_+)) * v_step
-    denom = 2.0 * (y_m1 - 2.0 * y_0 + y_p1)
-    if not np.isfinite(denom) or denom == 0.0:
-        rv_err = max(float(abs(v_step_m_s) * 2.0), 1.0)
-        return v_peak, rv_err, ccf
-
-    d_v = (y_m1 - y_p1) / denom * float(v_step_m_s)
-    rv = v_peak + d_v
-
-    # Curvature-based sigma estimate:
-    # For y = baseline + amp * exp(-0.5*(x/sigma)^2), near the peak:
-    # y''(0) = -amp / sigma^2.
-    # For quadratic interpolation around a max with spacing v_step:
-    # y''(0) ~= (y_- + y_+ - 2*y_0) / v_step^2.
-    ypp = (y_m1 + y_p1 - 2.0 * y_0) / (float(v_step_m_s) ** 2)
-    if not np.isfinite(ypp) or ypp >= 0:
-        sigma_v = float(abs(v_step_m_s) * 2.0)
+    ypp = 2.0 * a
+    if not np.isfinite(ypp) or ypp >= 0.0:
+        sigma_v = float(abs(v_step_eff) * 2.0)
     else:
-        sigma_v2 = max(float(-amp / ypp), (0.1 * float(abs(v_step_m_s))) ** 2)
+        sigma_v2 = max(float(-amp / ypp), (0.1 * float(abs(v_step_eff))) ** 2)
         sigma_v = float(np.sqrt(sigma_v2))
-
-    # Error scaling heuristic: more good pixels -> smaller error.
     n_scale = max(float(n_good), 1.0) / 50.0
-    rv_err = float(max(sigma_v / np.sqrt(n_scale), float(abs(v_step_m_s))))
-    return float(rv), float(rv_err), ccf
+    rv_err = float(max(sigma_v / np.sqrt(n_scale), float(abs(v_step_eff))))
+    return float(rv), float(rv_err), flipped
+
+
+@njit(parallel=True, cache=True)
+def _rv_from_ccf_mask_kpf_rows_numba(
+    v_grid_m_s: np.ndarray,
+    ccf_rows: np.ndarray,
+    n_good_arr: np.ndarray,
+    out_rv: np.ndarray,
+    out_rv_err: np.ndarray,
+    out_flip: np.ndarray,
+) -> None:
+    n_chunk = ccf_rows.shape[0]
+    for i in prange(n_chunk):
+        rv, rv_err, flipped = _rv_from_ccf_mask_kpf_numba_single(
+            v_grid_m_s,
+            ccf_rows[i],
+            int(n_good_arr[i]),
+        )
+        out_rv[i] = rv
+        out_rv_err[i] = rv_err
+        out_flip[i] = flipped
 
 
 def rv_per_chunks_mask_kpf(
@@ -2213,18 +3016,30 @@ def rv_per_chunks_mask_kpf(
     v_min_m_s: float = _V_MIN,
     v_max_m_s: float = _V_MAX,
     v_step_m_s: float = _V_STEP,
+    v_grid_m_s: np.ndarray | None = None,
+    mask_restrict_v_min_m_s: float | None = None,
+    mask_restrict_v_max_m_s: float | None = None,
     zb: float = 0.0,
     max_cores: int | None = None,
     return_ccf: bool = False,
     min_good_pixels: int = 10,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """
     Compute per-chunk RVs and optional CCF stacks for one echelle order.
 
     Splits the order into ``n_chunk`` wavelength bins of width set by
     ``window_size_um`` (derived from full order span), then computes chunk CCF rows
     in one Numba batch via :func:`_calc_mask_ccf_chunks_numba` (parallel over chunks),
-    followed by :func:`rv_from_ccf_mask_kpf` per chunk. Returns flattened lists of
+    followed by a Numba chunk-parallel parabolic RV extraction. Returns flattened lists of
     chunk centers and RVs.
 
     Parameters
@@ -2238,7 +3053,11 @@ def rv_per_chunks_mask_kpf(
     window_size_um : float
         Target chunk width in µm (actual count adapts to order span).
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
-        Velocity search grid (m s⁻¹).
+        Velocity search grid (m s⁻¹). Ignored when ``v_grid_m_s`` is provided.
+    v_grid_m_s : np.ndarray or None, optional
+        Explicit velocity samples (m s⁻¹), e.g. from :func:`build_hybrid_merged_velocity_grid`.
+        When set, ``v_min_m_s`` / ``v_max_m_s`` / ``v_step_m_s`` are not used to build the grid
+        but still scope mask restriction unless ``mask_restrict_*`` override.
     zb : float, optional
         Barycentric factor passed to the CCF shift.
     max_cores : int or None, optional
@@ -2260,6 +3079,10 @@ def rv_per_chunks_mask_kpf(
         Velocity grid used for the CCF.
     ccf_2d : np.ndarray or None
         If ``return_ccf``, shape ``(n_chunks, n_v)`` of CCFs; else ``None``.
+    wl_lo, wl_hi : np.ndarray
+        Per-chunk wavelength bounds (µm), same length as ``rvs``.
+    n_good : np.ndarray
+        Per-chunk count of good pixels used in the mask CCF.
     """
 
     w = np.asarray(wave_um, dtype=np.float64).ravel()
@@ -2269,16 +3092,23 @@ def rv_per_chunks_mask_kpf(
 
     def _empty(v_grid_local: np.ndarray):
         ccf_out = np.empty((0, len(v_grid_local)), dtype=np.float64) if return_ccf else None
-        return (
-            np.array([], dtype=np.float64),
-            np.array([], dtype=np.float64),
-            np.array([], dtype=np.float64),
-            v_grid_local,
-            ccf_out,
-        )
+        z = np.array([], dtype=np.float64)
+        zi = np.array([], dtype=np.int32)
+        return (z, z, z, v_grid_local, ccf_out, z, z, zi)
+
+    vr_lo = float(v_min_m_s if mask_restrict_v_min_m_s is None else mask_restrict_v_min_m_s)
+    vr_hi = float(v_max_m_s if mask_restrict_v_max_m_s is None else mask_restrict_v_max_m_s)
 
     good_pix = ~d & np.isfinite(w) & np.isfinite(s) & np.isfinite(e)
-    v_grid = np.arange(v_min_m_s, v_max_m_s + 0.5 * v_step_m_s, v_step_m_s, dtype=np.float64)
+    if v_grid_m_s is not None:
+        v_grid = np.asarray(v_grid_m_s, dtype=np.float64).ravel()
+    else:
+        v_grid = np.arange(
+            v_min_m_s,
+            v_max_m_s + 0.5 * v_step_m_s,
+            v_step_m_s,
+            dtype=np.float64,
+        )
     if np.sum(good_pix) < min_good_pixels:
         return _empty(v_grid)
 
@@ -2291,6 +3121,9 @@ def rv_per_chunks_mask_kpf(
     all_rvs: list[float] = []
     all_rv_errs: list[float] = []
     all_centers: list[float] = []
+    all_wl_lo: list[float] = []
+    all_wl_hi: list[float] = []
+    all_n_good_out: list[int] = []
     all_ccf_rows: list[np.ndarray] = []
     chunk_payloads: list[
         tuple[
@@ -2302,6 +3135,8 @@ def rv_per_chunks_mask_kpf(
             np.ndarray,
             np.ndarray,
             np.ndarray,
+            float,
+            float,
             float,
             int,
         ]
@@ -2326,8 +3161,8 @@ def rv_per_chunks_mask_kpf(
             mask_lines,
             float(np.nanmin(w_c)),
             float(np.nanmax(w_c)),
-            v_min_m_s=v_min_m_s,
-            v_max_m_s=v_max_m_s,
+            v_min_m_s=vr_lo,
+            v_max_m_s=vr_hi,
             zb=zb,
         )
         if mask_c.start_um.size == 0:
@@ -2351,6 +3186,8 @@ def rv_per_chunks_mask_kpf(
                 mask_c.start_um.astype(np.float64),
                 mask_c.end_um.astype(np.float64),
                 mask_c.weight.astype(np.float64),
+                float(lam_lo),
+                float(lam_hi),
                 float(wl_center),
                 int(np.sum(in_chunk)),
             )
@@ -2374,9 +3211,11 @@ def rv_per_chunks_mask_kpf(
     n_line_arr = np.zeros(n_chunk_valid, dtype=np.int64)
     centers = np.zeros(n_chunk_valid, dtype=np.float64)
     n_good_arr = np.zeros(n_chunk_valid, dtype=np.int64)
+    wl_lo_arr = np.zeros(n_chunk_valid, dtype=np.float64)
+    wl_hi_arr = np.zeros(n_chunk_valid, dtype=np.float64)
 
     for i, payload in enumerate(chunk_payloads):
-        left_i, right_i, pwi_i, s_i, sn_i, ls_i, le_i, lw_i, wl_i, ng_i = payload
+        left_i, right_i, pwi_i, s_i, sn_i, ls_i, le_i, lw_i, lam_lo_i, lam_hi_i, wl_i, ng_i = payload
         npix = len(left_i)
         nln = len(ls_i)
         left_2d[i, :npix] = left_i
@@ -2391,6 +3230,8 @@ def rv_per_chunks_mask_kpf(
         n_line_arr[i] = nln
         centers[i] = wl_i
         n_good_arr[i] = ng_i
+        wl_lo_arr[i] = lam_lo_i
+        wl_hi_arr[i] = lam_hi_i
 
     with numba_thread_scope(max_cores):
         ccf_rows = _calc_mask_ccf_chunks_numba(
@@ -2407,33 +3248,45 @@ def rv_per_chunks_mask_kpf(
             line_w_2d,
             n_line_arr,
         )
+        rv_rows = np.empty(n_chunk_valid, dtype=np.float64)
+        rv_err_rows = np.empty(n_chunk_valid, dtype=np.float64)
+        flip_rows = np.zeros(n_chunk_valid, dtype=np.int64)
+        _rv_from_ccf_mask_kpf_rows_numba(
+            v_grid,
+            ccf_rows,
+            n_good_arr.astype(np.int64),
+            rv_rows,
+            rv_err_rows,
+            flip_rows,
+        )
 
     for i in range(n_chunk_valid):
-        ccf_raw = ccf_rows[i]
-        rv, rv_err, ccf_fit = rv_from_ccf_mask_kpf(
-            v_grid,
-            ccf_raw,
-            v_step_m_s=v_step_m_s,
-            n_good=int(n_good_arr[i]),
-        )
+        rv = float(rv_rows[i])
+        rv_err = float(rv_err_rows[i])
         if not np.isfinite(rv):
             continue
         all_rvs.append(float(rv))
         all_rv_errs.append(float(rv_err) if np.isfinite(rv_err) and rv_err > 0 else np.nan)
         all_centers.append(float(centers[i]))
+        all_wl_lo.append(float(wl_lo_arr[i]))
+        all_wl_hi.append(float(wl_hi_arr[i]))
+        all_n_good_out.append(int(n_good_arr[i]))
         if return_ccf:
-            all_ccf_rows.append(ccf_fit)
+            all_ccf_rows.append(-ccf_rows[i] if int(flip_rows[i]) == 1 else ccf_rows[i].copy())
     if not all_rvs:
         return _empty(v_grid)
 
     rvs_arr = np.asarray(all_rvs, dtype=np.float64)
     rv_errs_arr = np.asarray(all_rv_errs, dtype=np.float64)
     centers_arr = np.asarray(all_centers, dtype=np.float64)
+    wl_lo_out = np.asarray(all_wl_lo, dtype=np.float64)
+    wl_hi_out = np.asarray(all_wl_hi, dtype=np.float64)
+    n_good_out = np.asarray(all_n_good_out, dtype=np.int32)
     if return_ccf:
         ccf_2d = np.vstack(all_ccf_rows).astype(np.float64) if all_ccf_rows else np.empty((0, len(v_grid)))
     else:
         ccf_2d = None
-    return rvs_arr, rv_errs_arr, centers_arr, v_grid, ccf_2d
+    return rvs_arr, rv_errs_arr, centers_arr, v_grid, ccf_2d, wl_lo_out, wl_hi_out, n_good_out
 
 
 def run_ccf_mask_kpf_for_fiber(
@@ -2449,6 +3302,9 @@ def run_ccf_mask_kpf_for_fiber(
     v_min_m_s: float = _V_MIN,
     v_max_m_s: float = _V_MAX,
     v_step_m_s: float = _V_STEP,
+    ccf_hybrid_center_m_s: float | None = None,
+    ccf_hybrid_half_width_m_s: float = 300.0,
+    ccf_hybrid_step_m_s: float = 0.1,
     zb: float = 0.0,
     max_cores: int | None = None,
     want_preview: bool = False,
@@ -2462,6 +3318,7 @@ def run_ccf_mask_kpf_for_fiber(
     float,
     np.ndarray,
     dict | None,
+    Table,
 ]:
     """
     Run mask-line CCF RV for one fiber (``algorithm="ccf_mask_kpf"``).
@@ -2490,7 +3347,13 @@ def run_ccf_mask_kpf_for_fiber(
     mask_width_um : float or None, optional
         Segment half-width for two-column masks only.
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
-        Velocity grid (m s⁻¹).
+        **Broad** uniform velocity search (m s⁻¹). When ``ccf_hybrid_center_m_s`` is set,
+        these define the coarse leg of a **merged** grid (see
+        :func:`build_hybrid_merged_velocity_grid`); when unset, they define the sole CCF grid.
+    ccf_hybrid_center_m_s, ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float or None
+        When ``ccf_hybrid_center_m_s`` is finite, CCF is evaluated once on the merged velocity
+        list (broad ``v_min_m_s`` … ``v_max_m_s`` at ``v_step_m_s`` plus dense samples around
+        the center). When ``None`` / not finite, only the broad grid is used.
     zb : float, optional
         Barycentric factor for mask shift.
     max_cores : int or None, optional
@@ -2518,6 +3381,9 @@ def run_ccf_mask_kpf_for_fiber(
         Echelle order index per chunk (-1 if length mismatch).
     preview_detail : dict or None
         Payload for stellar RV preview, or None.
+    rvccf_chunk_supplement : astropy.table.Table
+        Columns ``CHUNK_ID``, ``N_GOOD``, ``V_MIN``, ``V_MAX``, ``V_STEP``, ``N_VEL``, ``CCF``
+        merged into ``RVCCF_FIB*`` via :func:`assemble_rvccf_fib_table`.
 
     Notes
     -----
@@ -2536,6 +3402,24 @@ def run_ccf_mask_kpf_for_fiber(
     )
     if not np.isfinite(window_size_um) or float(window_size_um) <= 0:
         raise ValueError("window_size_um must be finite and > 0 for ccf_mask_kpf")
+    hybrid = bool(
+        ccf_hybrid_center_m_s is not None
+        and np.isfinite(float(ccf_hybrid_center_m_s))
+    )
+    if hybrid:
+        logger.info(
+            "CCF mask_kpf: HYBRID mode center=%.2f half_width=%.2f refined_step=%.4f (m/s)",
+            float(ccf_hybrid_center_m_s),
+            float(ccf_hybrid_half_width_m_s),
+            float(ccf_hybrid_step_m_s),
+        )
+    else:
+        logger.info(
+            "CCF mask_kpf: velocity grid (m/s) v_min=%.2f v_max=%.2f step=%.4f",
+            float(v_min_m_s),
+            float(v_max_m_s),
+            float(v_step_m_s),
+        )
 
     spec_attr = f"SPEC_FIB{fiber}"
     err_attr = f"SPEC_ERR_FIB{fiber}"
@@ -2552,7 +3436,26 @@ def run_ccf_mask_kpf_for_fiber(
     if dq is None:
         dq = np.zeros_like(spec, dtype=np.uint32)
 
-    v_grid = np.arange(v_min_m_s, v_max_m_s + 0.5 * v_step_m_s, v_step_m_s, dtype=np.float64)
+    if hybrid:
+        _h_vc = float(ccf_hybrid_center_m_s)
+        _h_hw = float(ccf_hybrid_half_width_m_s)
+        _h_vsf = float(ccf_hybrid_step_m_s)
+        v_grid = build_hybrid_merged_velocity_grid(
+            float(v_min_m_s),
+            float(v_max_m_s),
+            float(v_step_m_s),
+            _h_vc,
+            _h_hw,
+            _h_vsf,
+        )
+    else:
+        _h_vc = _h_hw = _h_vsf = float("nan")
+        v_grid = np.arange(
+            v_min_m_s,
+            v_max_m_s + 0.5 * v_step_m_s,
+            v_step_m_s,
+            dtype=np.float64,
+        )
 
     # Load mask once per fiber run (mask does not depend on order).
     resolved_mask = resolve_mask_path(mask_path)
@@ -2591,6 +3494,9 @@ def run_ccf_mask_kpf_for_fiber(
     order_slots: list[dict] = []
     all_ccf_rows: list[np.ndarray] = []
 
+    rvccf_rows_accum: list[np.ndarray] = []
+    rvccf_n_good_accum: list[int] = []
+
     for oi, order in order_tasks:
         w = np.asarray(wave[oi], dtype=np.float64)
         s = np.asarray(spec[oi], dtype=np.float64)
@@ -2618,20 +3524,55 @@ def run_ccf_mask_kpf_for_fiber(
             if int(np.sum(in_sub)) < 20:
                 continue
 
-            rvs_o, errs_o, centers_o, v_grid_o, ccf_2d = rv_per_chunks_mask_kpf(
-                w[in_sub],
-                s[in_sub],
-                e[in_sub],
-                d_bad[in_sub],
-                mask_lines,
-                window_size_um=window_size_um,
-                v_min_m_s=v_min_m_s,
-                v_max_m_s=v_max_m_s,
-                v_step_m_s=v_step_m_s,
-                zb=zb,
-                max_cores=max_cores,
-                return_ccf=want_preview_effective,
-            )
+            if not hybrid:
+                (
+                    rvs_o,
+                    errs_o,
+                    centers_o,
+                    v_grid_o,
+                    ccf_2d,
+                    _wl_lo_o,
+                    _wl_hi_o,
+                    ng_o,
+                ) = rv_per_chunks_mask_kpf(
+                    w[in_sub],
+                    s[in_sub],
+                    e[in_sub],
+                    d_bad[in_sub],
+                    mask_lines,
+                    window_size_um=window_size_um,
+                    v_min_m_s=v_min_m_s,
+                    v_max_m_s=v_max_m_s,
+                    v_step_m_s=v_step_m_s,
+                    zb=zb,
+                    max_cores=max_cores,
+                    return_ccf=True,
+                )
+            else:
+                (
+                    rvs_o,
+                    errs_o,
+                    centers_o,
+                    v_grid_o,
+                    ccf_2d,
+                    _wl_lo_o,
+                    _wl_hi_o,
+                    ng_o,
+                ) = rv_per_chunks_mask_kpf(
+                    w[in_sub],
+                    s[in_sub],
+                    e[in_sub],
+                    d_bad[in_sub],
+                    mask_lines,
+                    window_size_um=window_size_um,
+                    v_min_m_s=float(v_min_m_s),
+                    v_max_m_s=float(v_max_m_s),
+                    v_step_m_s=float(v_step_m_s),
+                    v_grid_m_s=v_grid,
+                    zb=zb,
+                    max_cores=max_cores,
+                    return_ccf=True,
+                )
             if rvs_o.size == 0:
                 continue
 
@@ -2640,6 +3581,11 @@ def run_ccf_mask_kpf_for_fiber(
             all_rv_errs.extend([float(x) for x in errs_o])
             all_wavelengths.extend([float(x) for x in centers_o])
             all_orders.extend([int(order)] * int(len(centers_o)))
+
+            if ccf_2d is not None and ccf_2d.size > 0:
+                for ii in range(int(rvs_o.size)):
+                    rvccf_rows_accum.append(np.asarray(ccf_2d[ii], dtype=np.float64))
+                    rvccf_n_good_accum.append(int(ng_o[ii]))
 
             if want_preview_effective and ccf_2d is not None and ccf_2d.size > 0:
                 v_now = np.asarray(v_grid_o, dtype=np.float64)
@@ -2690,6 +3636,15 @@ def run_ccf_mask_kpf_for_fiber(
         inlier, _, _ = combine_rvs_median_mad(all_rvs_arr, all_rv_errs_arr, outlier_sigma)
         rv_mean, rv_std = weighted_mean_rv(all_rvs_arr, all_rv_errs_arr, inlier)
 
+    if hybrid:
+        pv_min = float(v_grid[0])
+        pv_max = float(v_grid[-1])
+        pv_step = float(effective_ccf_v_step_for_fit(v_grid))
+    else:
+        pv_min = float(v_min_m_s)
+        pv_max = float(v_max_m_s)
+        pv_step = float(v_step_m_s)
+
     preview_detail = None
     if want_preview_effective and order_slots and all_ccf_rows:
         logger.info(
@@ -2701,9 +3656,9 @@ def run_ccf_mask_kpf_for_fiber(
             order_slots,
             all_ccf_rows,
             v_grid,
-            v_min_m_s,
-            v_max_m_s,
-            v_step_m_s,
+            pv_min,
+            pv_max,
+            pv_step,
         )
 
     logger.info(
@@ -2718,6 +3673,26 @@ def run_ccf_mask_kpf_for_fiber(
         preview_detail is not None,
     )
 
+    n_rvccf = len(rvccf_rows_accum)
+    if n_rvccf > 0:
+        rvccf_tbl = build_rvccf_chunk_supplement(
+            chunk_id=np.arange(n_rvccf, dtype=np.int32),
+            n_good=np.asarray(rvccf_n_good_accum, dtype=np.int32),
+            v_min=pv_min,
+            v_max=pv_max,
+            v_step=pv_step,
+            ccf_2d=np.stack(rvccf_rows_accum, axis=0),
+        )
+    else:
+        rvccf_tbl = build_rvccf_chunk_supplement(
+            chunk_id=np.array([], dtype=np.int32),
+            n_good=np.array([], dtype=np.int32),
+            v_min=pv_min,
+            v_max=pv_max,
+            v_step=pv_step,
+            ccf_2d=np.empty((0, 0), dtype=np.float64),
+        )
+
     return (
         all_wavelengths_arr,
         all_rvs_arr,
@@ -2727,5 +3702,6 @@ def run_ccf_mask_kpf_for_fiber(
         float(rv_std),
         all_orders_arr,
         preview_detail,
+        rvccf_tbl,
     )
 

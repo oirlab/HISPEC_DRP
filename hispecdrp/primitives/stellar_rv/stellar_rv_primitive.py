@@ -37,9 +37,15 @@ import astropy.table
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
+from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
 
 from ...utils.parallelization_utils import resolve_numba_threads
 from ..utils.ccf_utils import (
+    assemble_rvccf_fib_table,
+    build_hybrid_merged_velocity_grid,
+    build_rvccf_chunk_supplement,
+    effective_ccf_v_step_for_fit,
+    resolve_ccf_broad_grid_m_s,
     run_ccf_mask_kpf_for_fiber,
     _V_MAX,
     _V_MIN,
@@ -49,7 +55,7 @@ from ..utils.ccf_utils import (
     combine_rvs_median_mad,
     finalize_ccf_preview_dict,
     flat_chunk_echelle_orders,
-    masked_ccf_rv_diagnostics,
+    masked_ccf_rv_full,
     process_one_order_rvs,
     process_orders_rvs_numba_parallel,
     weighted_mean_rv,
@@ -92,7 +98,8 @@ def _fiber_l2_bundle(input_model, fiber: str):
 # Registry of stellar RV algorithm names -> method name on StellarRVPrimitive.
 # Each algorithm method has signature (input_model, output_model, fiber, spectrograph,
 # do_orders, order_vec, template_ln, template_flux) and returns
-# (all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std) for _write_rv_tables.
+# (all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std, all_orders, rvccf_chunk_supplement)
+# for _write_rv_tables.
 STELLAR_RV_ALGORITHMS = {
     "ccf_stellar_template": "_run_algorithm_ccf_stellar_template",
     "ccf_mask_kpf": "_run_algorithm_ccf_mask_kpf",
@@ -174,6 +181,23 @@ class StellarRVPrimitive(BasePrimitive):
         Median/MAD threshold (in σ) when rejecting chunk RV outliers before the
         inverse-variance weighted mean.
 
+    **CCF velocity grid** (both algorithms; values below are in **m s\\ :sup:`−1`**)
+
+    v_min, v_max, v_step : float or None, default None
+        Broad CCF velocity search in m/s. Each ``None`` uses the pipeline default for that
+        bound (see :func:`~hispecdrp.primitives.utils.ccf_utils.resolve_ccf_broad_grid_m_s`).
+    ccf_input_velocity : float or None, default None
+        When set, the CCF is sampled on a **merged** velocity list: the broad grid from
+        ``v_min`` / ``v_max`` / ``v_step`` (with those defaults), plus extra samples on
+        ``ccf_input_velocity ± ccf_velocity_window`` at ``ccf_velocity_step``, so plots
+        and supplements span the full search range with finer sampling near the expected
+        RV. When ``None``, only the uniform broad grid is used.
+    ccf_velocity_window : float, default ``300.0``
+        Half-width (m/s) of the refined CCF window around ``ccf_input_velocity`` (so
+        default ``300`` → ±300 m/s).
+    ccf_velocity_step : float, default ``0.1``
+        Velocity step (m/s) on the refined leg — **0.1 m/s = 10 cm s\\ :sup:`−1`**.
+
     **Performance & diagnostics**
 
     max_cores : int or None, default None
@@ -216,7 +240,7 @@ class StellarRVPrimitive(BasePrimitive):
         # Loads mask inputs, iterates selected orders/sub-orders, combines chunk RVs
         ccf_utils.run_ccf_mask_kpf_for_fiber(max_cores=...)
             ->
-            # Builds chunk payloads and runs chunk-batched CCF evaluation
+            # Builds chunk payloads and runs chunk-batched CCF/RV evaluation
             ccf_utils.rv_per_chunks_mask_kpf(..., max_cores=...)
                 ->
                 # Sets effective Numba thread count (CI-safe clamp) for this block
@@ -224,15 +248,16 @@ class StellarRVPrimitive(BasePrimitive):
                     ->
                     # Numba kernel: computes CCF(v) for all chunks, parallel over chunk index
                     ccf_utils._calc_mask_ccf_chunks_numba(..., parallel=True, prange over chunks)
+                    ->
+                    # Numba kernel: converts each chunk CCF row into RV + RV uncertainty
+                    # (same chunk-parallel pattern with prange over chunks)
+                    ccf_utils._rv_from_ccf_mask_kpf_rows_numba(..., parallel=True, prange over chunks)
                 ->
-                # Converts each chunk CCF row into RV + RV uncertainty (serial fit step)
-                ccf_utils.rv_from_ccf_mask_kpf(...)
+                # Optional preview assembly uses CCF rows (sign-normalized per chunk fit)
+                ccf_utils.finalize_ccf_preview_dict(...)
             ->
             # Rejects outlier chunks and computes weighted aggregate RV
             ccf_utils.combine_rvs_median_mad(...) + ccf_utils.weighted_mean_rv(...)
-            ->
-            # Optional preview assembly from per-order CCF products
-            ccf_utils.finalize_ccf_preview_dict(...)
 
     Notes
     -----
@@ -260,6 +285,12 @@ class StellarRVPrimitive(BasePrimitive):
         "mask_width_um": None,
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
+        "v_min": None,  # m/s; broad CCF lower bound; None -> ccf_utils._V_MIN
+        "v_max": None,  # m/s; broad CCF upper bound; None -> _V_MAX
+        "v_step": None,  # m/s; broad uniform step; None -> _V_STEP
+        "ccf_input_velocity": None,  # m/s; hybrid refined center when set
+        "ccf_velocity_window": 300.0,  # m/s; half-width ± around ccf_input_velocity
+        "ccf_velocity_step": 0.1,  # m/s; refined-grid step (10 cm/s)
         "output_model": "L2Model",
         "max_cores": None,
         "debug_ccf": False,
@@ -271,6 +302,14 @@ class StellarRVPrimitive(BasePrimitive):
     }
 
     CALIBRATIONS = {}
+
+    def _ccf_broad_grid_m_s(self) -> tuple[float, float, float]:
+        """Broad CCF velocity grid (m/s) from ``v_min`` / ``v_max`` / ``v_step`` with defaults."""
+        return resolve_ccf_broad_grid_m_s(
+            getattr(self, "v_min", None),
+            getattr(self, "v_max", None),
+            getattr(self, "v_step", None),
+        )
 
     def _perform(self):
         """
@@ -478,9 +517,11 @@ class StellarRVPrimitive(BasePrimitive):
         else:
             mode = "parallel"
 
+        vm, vx, vs = self._ccf_broad_grid_m_s()
         logger.info(
             "Stellar RV: ccf_stellar_template fiber=%s spectrograph=%s mode=%s "
-            "n_order_tasks=%d want_preview=%s max_cores=%s window_um=%.4f",
+            "n_order_tasks=%d want_preview=%s max_cores=%s window_um=%.4f "
+            "ccf_v_m_s=[%.2f, %.2f] step=%.4f refined=%s",
             fiber,
             spectrograph,
             mode,
@@ -488,9 +529,20 @@ class StellarRVPrimitive(BasePrimitive):
             want_preview,
             max_cores,
             float(getattr(self, "window_size_um", 0.3)),
+            vm,
+            vx,
+            vs,
+            getattr(self, "ccf_input_velocity", None) is not None,
         )
 
-        all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail = self._process_fiber_orders(
+        (
+            all_rvs,
+            all_rv_errs,
+            all_wavelengths,
+            all_orders,
+            preview_detail,
+            rvccf_chunk_supplement,
+        ) = self._process_fiber_orders(
             order_tasks,
             wave,
             spec,
@@ -503,6 +555,16 @@ class StellarRVPrimitive(BasePrimitive):
             mode=mode,
             max_cores=max_cores,
             want_preview=want_preview,
+            v_min_m_s=vm,
+            v_max_m_s=vx,
+            v_step_m_s=vs,
+            ccf_hybrid_center_m_s=(
+                float(getattr(self, "ccf_input_velocity"))
+                if getattr(self, "ccf_input_velocity", None) is not None
+                else None
+            ),
+            ccf_hybrid_half_width_m_s=float(getattr(self, "ccf_velocity_window", 300.0)),
+            ccf_hybrid_step_m_s=float(getattr(self, "ccf_velocity_step", 0.1)),
         )
         if preview_detail is not None:
             self._ccf_preview_by_fiber[fiber] = preview_detail
@@ -566,6 +628,7 @@ class StellarRVPrimitive(BasePrimitive):
             rv_mean,
             rv_std,
             all_orders,
+            rvccf_chunk_supplement,
         )
 
     def _run_algorithm_ccf_mask_kpf(
@@ -587,15 +650,21 @@ class StellarRVPrimitive(BasePrimitive):
         want_preview = bool(
             getattr(self, "save_preview", False) or getattr(self, "show_preview", False)
         )
+        vm, vx, vs = self._ccf_broad_grid_m_s()
         logger.info(
             "Stellar RV: dispatching ccf_mask_kpf fiber=%s spectrograph=%s "
-            "n_do_orders=%d want_preview=%s",
+            "n_do_orders=%d want_preview=%s ccf_v_m_s=[%.2f, %.2f] step=%.4f refined=%s",
             fiber,
             spectrograph,
             len(do_orders) if do_orders is not None else 0,
             want_preview,
+            vm,
+            vx,
+            vs,
+            getattr(self, "ccf_input_velocity", None) is not None,
         )
         preview_detail = None
+        h_center = getattr(self, "ccf_input_velocity", None)
         (
             all_wavelengths,
             all_rvs,
@@ -605,6 +674,7 @@ class StellarRVPrimitive(BasePrimitive):
             rv_std,
             all_orders,
             preview_detail,
+            rvccf_chunk_supplement,
         ) = run_ccf_mask_kpf_for_fiber(
             input_model=input_model,
             fiber=fiber,
@@ -614,9 +684,12 @@ class StellarRVPrimitive(BasePrimitive):
             outlier_sigma=float(getattr(self, "outlier_sigma", 4.0)),
             mask_path=getattr(self, "mask_path", None),
             mask_width_um=getattr(self, "mask_width_um", None),
-            v_min_m_s=_V_MIN,
-            v_max_m_s=_V_MAX,
-            v_step_m_s=_V_STEP,
+            v_min_m_s=vm,
+            v_max_m_s=vx,
+            v_step_m_s=vs,
+            ccf_hybrid_center_m_s=(float(h_center) if h_center is not None else None),
+            ccf_hybrid_half_width_m_s=float(getattr(self, "ccf_velocity_window", 300.0)),
+            ccf_hybrid_step_m_s=float(getattr(self, "ccf_velocity_step", 0.1)),
             zb=0.0,
             max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
@@ -646,7 +719,16 @@ class StellarRVPrimitive(BasePrimitive):
                     fiber,
                     len(payload.get("orders", [])),
                 )
-        return all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std, all_orders
+        return (
+            all_wavelengths,
+            all_rvs,
+            all_rv_errs,
+            inlier,
+            rv_mean,
+            rv_std,
+            all_orders,
+            rvccf_chunk_supplement,
+        )
 
     def _process_fiber(
         self,
@@ -663,7 +745,8 @@ class StellarRVPrimitive(BasePrimitive):
         Run the configured stellar RV algorithm for one fiber and write RVCCF/RVCCFAVG.
 
         Dispatches to the algorithm named in ``self.algorithm`` (see ``STELLAR_RV_ALGORITHMS``).
-        The algorithm returns seven arrays/scalars; this method writes ``RVCCF_FIB{fiber}``
+        The algorithm returns per-chunk arrays, aggregate RV, and optional per-chunk CCF
+        supplement columns; this method writes ``RVCCF_FIB{fiber}`` (merged RV + CCF)
         and ``RVCCFAVG_FIB{fiber}`` to the output model.
 
         Parameters
@@ -715,6 +798,7 @@ class StellarRVPrimitive(BasePrimitive):
             rv_mean,
             rv_std,
             all_orders,
+            rvccf_chunk_supplement,
         ) = runner(
             input_model,
             output_model,
@@ -743,6 +827,7 @@ class StellarRVPrimitive(BasePrimitive):
             rv_std,
             inlier=inlier,
             orders=all_orders,
+            rvccf_chunk_supplement=rvccf_chunk_supplement,
         )
         logger.info(
             "Stellar RV: RV tables written fiber=%s (RVCCF + RVCCFAVG)",
@@ -764,7 +849,13 @@ class StellarRVPrimitive(BasePrimitive):
         mode: str,
         max_cores: int | None = None,
         want_preview: bool = False,
-    ) -> tuple[list, list, list, list, dict | None]:
+        v_min_m_s: float = _V_MIN,
+        v_max_m_s: float = _V_MAX,
+        v_step_m_s: float = _V_STEP,
+        ccf_hybrid_center_m_s: float | None = None,
+        ccf_hybrid_half_width_m_s: float = 300.0,
+        ccf_hybrid_step_m_s: float = 0.1,
+    ) -> tuple[list, list, list, list, dict | None, astropy.table.Table | None]:
         """
         Single driver for per-order chunk RVs: ``mode`` is ``debug`` or ``parallel``
         (Numba). Optional ``mode="serial"`` selects a legacy pure-Python per-order
@@ -792,18 +883,27 @@ class StellarRVPrimitive(BasePrimitive):
             Effective thread count for parallel mode (already resolved/capped).
         want_preview : bool, optional
             Whether to build the mean + per-order CCF preview structure for Plotly.
+        v_min_m_s, v_max_m_s, v_step_m_s : float, optional
+            Single-grid CCF velocity (m/s) for non-hybrid debug/serial paths and logging.
+            When ``ccf_hybrid_center_m_s`` is set, the Numba driver uses
+            :func:`~hispecdrp.primitives.utils.ccf_utils.build_hybrid_merged_velocity_grid`.
+        ccf_hybrid_center_m_s, ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s
+            When ``ccf_hybrid_center_m_s`` is not ``None``, use merged broad + dense window
+            sampling (see ``build_hybrid_merged_velocity_grid``).
 
         Returns
         -------
         tuple
-            ``(all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail)`` —
-            lists of per-chunk quantities (same length) and optional preview dict.
+            ``(all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail, rvccf_chunk_supplement)`` —
+            lists of per-chunk quantities (same length), optional preview dict, and
+            optional CCF supplement table (merged into ``RVCCF_FIB*`` by ``_write_rv_tables``).
         """
         all_rvs: list = []
         all_rv_errs: list = []
         all_wavelengths: list = []
         all_orders: list = []
         preview_detail: dict | None = None
+        rvccf_chunk_supplement: astropy.table.Table | None = None
 
         logger.info(
             "Stellar RV: _process_fiber_orders fiber=%s mode=%s n_order_tasks=%d "
@@ -817,9 +917,11 @@ class StellarRVPrimitive(BasePrimitive):
 
         if mode == "debug":
             logger.info(
-                "Stellar RV: debug mode — per-chunk masked_ccf_rv_diagnostics fiber=%s",
+                "Stellar RV: debug mode — per-chunk masked_ccf_rv_full fiber=%s",
                 fiber,
             )
+            dbg_chunk_rows: list[np.ndarray] = []
+            dbg_n_good: list[int] = []
             for oi, order in order_tasks:
                 w = np.asarray(wave[oi], dtype=np.float64)
                 s = np.asarray(spec[oi], dtype=np.float64)
@@ -842,32 +944,49 @@ class StellarRVPrimitive(BasePrimitive):
                     if np.sum(in_chunk) < 20:
                         continue
                     wl_center = 0.5 * (lam_lo + lam_hi)
-                    rv, rv_err, diag = masked_ccf_rv_diagnostics(
-                        w[in_chunk],
-                        s[in_chunk],
-                        e[in_chunk],
-                        mask[in_chunk],
-                        t_ln,
-                        t_flux,
-                    )
+                    if ccf_hybrid_center_m_s is not None:
+                        v_merged = build_hybrid_merged_velocity_grid(
+                            float(v_min_m_s),
+                            float(v_max_m_s),
+                            float(v_step_m_s),
+                            float(ccf_hybrid_center_m_s),
+                            float(ccf_hybrid_half_width_m_s),
+                            float(ccf_hybrid_step_m_s),
+                        )
+                        rv, rv_err, v_grid_c, ccf_c = masked_ccf_rv_full(
+                            w[in_chunk],
+                            s[in_chunk],
+                            e[in_chunk],
+                            mask[in_chunk],
+                            t_ln,
+                            t_flux,
+                            v_grid=v_merged,
+                        )
+                    else:
+                        rv, rv_err, v_grid_c, ccf_c = masked_ccf_rv_full(
+                            w[in_chunk],
+                            s[in_chunk],
+                            e[in_chunk],
+                            mask[in_chunk],
+                            t_ln,
+                            t_flux,
+                            v_min=v_min_m_s,
+                            v_max=v_max_m_s,
+                            v_step=v_step_m_s,
+                        )
+                    n_good = int(np.sum(~mask[in_chunk]))
                     logger.info(
                         "CCF fiber=%s order=%s chunk=%s wl_center=%.4f um wl_range=[%.4f, %.4f] "
-                        "n_good=%s n_use_at_peak=%s ccf_max=%.6f ccf_min=%.6f "
-                        "spec_mean=%.4e spec_std=%.4e tpl_mean=%.4e tpl_std=%.4e rv=%.1f m/s rv_err=%.1f",
+                        "n_good=%s ccf_max=%.6f ccf_min=%.6f rv=%.1f m/s rv_err=%.1f",
                         fiber,
                         order,
                         k,
                         wl_center,
-                        diag["wl_min"],
-                        diag["wl_max"],
-                        diag["n_good"],
-                        diag["n_use_at_peak"],
-                        diag["ccf_max"],
-                        diag["ccf_min"],
-                        diag["spec_mean"],
-                        diag["spec_std"],
-                        diag["template_mean_at_peak"],
-                        diag["template_std_at_peak"],
+                        lam_lo,
+                        lam_hi,
+                        n_good,
+                        float(np.nanmax(ccf_c)),
+                        float(np.nanmin(ccf_c)),
                         rv,
                         rv_err,
                     )
@@ -875,11 +994,51 @@ class StellarRVPrimitive(BasePrimitive):
                     all_rv_errs.append(rv_err)
                     all_wavelengths.append(wl_center)
                     all_orders.append(int(order))
+                    dbg_chunk_rows.append(np.asarray(ccf_c, dtype=RVCCF_CCF_ELEM_DTYPE))
+                    dbg_n_good.append(n_good)
+            if dbg_chunk_rows:
+                if ccf_hybrid_center_m_s is not None:
+                    _vg_dbg = build_hybrid_merged_velocity_grid(
+                        float(v_min_m_s),
+                        float(v_max_m_s),
+                        float(v_step_m_s),
+                        float(ccf_hybrid_center_m_s),
+                        float(ccf_hybrid_half_width_m_s),
+                        float(ccf_hybrid_step_m_s),
+                    )
+                    _pv0 = float(_vg_dbg[0])
+                    _pv1 = float(_vg_dbg[-1])
+                    _pvs = float(effective_ccf_v_step_for_fit(_vg_dbg))
+                else:
+                    _pv0 = float(v_min_m_s)
+                    _pv1 = float(v_max_m_s)
+                    _pvs = float(v_step_m_s)
+                rvccf_chunk_supplement = build_rvccf_chunk_supplement(
+                    chunk_id=np.arange(len(dbg_chunk_rows), dtype=np.int32),
+                    n_good=np.asarray(dbg_n_good, dtype=np.int32),
+                    v_min=_pv0,
+                    v_max=_pv1,
+                    v_step=_pvs,
+                    ccf_2d=np.stack(dbg_chunk_rows, axis=0),
+                )
             if want_preview:
                 logger.info(
                     "Stellar RV: building CCF preview dict (spectra_orders path) fiber=%s",
                     fiber,
                 )
+                if ccf_hybrid_center_m_s is not None:
+                    _vg_pr = build_hybrid_merged_velocity_grid(
+                        float(v_min_m_s),
+                        float(v_max_m_s),
+                        float(v_step_m_s),
+                        float(ccf_hybrid_center_m_s),
+                        float(ccf_hybrid_half_width_m_s),
+                        float(ccf_hybrid_step_m_s),
+                    )
+                    _pmin, _pmax = float(_vg_pr[0]), float(_vg_pr[-1])
+                    _pst = float(effective_ccf_v_step_for_fit(_vg_pr))
+                else:
+                    _pmin, _pmax, _pst = v_min_m_s, v_max_m_s, v_step_m_s
                 preview_detail = ccf_preview_dict_from_spectra_orders(
                     order_tasks,
                     wave,
@@ -890,18 +1049,27 @@ class StellarRVPrimitive(BasePrimitive):
                     template_ln,
                     template_flux,
                     self.window_size_um,
-                    _V_MIN,
-                    _V_MAX,
-                    _V_STEP,
+                    _pmin,
+                    _pmax,
+                    _pst,
                 )
                 logger.info(
                     "Stellar RV: CCF preview dict ready (debug path) fiber=%s slots=%s",
                     fiber,
                     len(preview_detail.get("slots", [])) if preview_detail else 0,
                 )
-            return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
+            return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail, rvccf_chunk_supplement
 
-        if mode == "parallel":
+        use_numba_driver = mode == "parallel" or (
+            mode == "serial" and ccf_hybrid_center_m_s is not None
+        )
+        if use_numba_driver:
+            if mode == "serial":
+                logger.info(
+                    "Stellar RV: serial+hybrid — using Numba driver (broad+refined CCF) "
+                    "fiber=%s",
+                    fiber,
+                )
             logger.info(
                 "Stellar RV: Numba parallel path fiber=%s want_preview=%s",
                 fiber,
@@ -917,45 +1085,61 @@ class StellarRVPrimitive(BasePrimitive):
             wave_2d = np.asarray(wave, dtype=np.float64)
 
             preview_detail = None
+            logger.info(
+                "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=True) fiber=%s",
+                fiber,
+            )
+            (
+                all_rvs_arr,
+                all_rv_errs_arr,
+                all_wl_arr,
+                all_ccf,
+                v_grid,
+                all_n_good,
+                n_chunks_per_order,
+                chunk_start,
+                order_indices,
+            ) = process_orders_rvs_numba_parallel(
+                wave_2d,
+                spec_2d,
+                err_2d,
+                dq_2d,
+                do_not_use,
+                template_ln,
+                template_flux,
+                self.window_size_um,
+                order_tasks,
+                max_cores=max_cores,
+                return_ccf=True,
+                **(
+                    dict(
+                        ccf_hybrid_center_m_s=ccf_hybrid_center_m_s,
+                        ccf_hybrid_half_width_m_s=ccf_hybrid_half_width_m_s,
+                        ccf_hybrid_step_m_s=ccf_hybrid_step_m_s,
+                    )
+                    if ccf_hybrid_center_m_s is not None
+                    else dict(
+                        ccf_v_min=v_min_m_s,
+                        ccf_v_max=v_max_m_s,
+                        ccf_v_step=v_step_m_s,
+                    )
+                ),
+            )
+            logger.info(
+                "Stellar RV: Numba parallel CCF+RV done fiber=%s n_flat_chunks=%d",
+                fiber,
+                len(all_rvs_arr),
+            )
+            v_grid_np = np.asarray(v_grid, dtype=np.float64)
+            v_step_meta = (
+                float(v_grid_np[1] - v_grid_np[0])
+                if v_grid_np.size > 1
+                else float(v_step_m_s)
+            )
             if want_preview:
-                logger.info(
-                    "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=True) fiber=%s",
-                    fiber,
-                )
-                (
-                    all_rvs_arr,
-                    all_rv_errs_arr,
-                    all_wl_arr,
-                    all_ccf,
-                    v_grid,
-                    n_chunks_per_order,
-                    chunk_start,
-                    order_indices,
-                ) = process_orders_rvs_numba_parallel(
-                    wave_2d,
-                    spec_2d,
-                    err_2d,
-                    dq_2d,
-                    do_not_use,
-                    template_ln,
-                    template_flux,
-                    self.window_size_um,
-                    order_tasks,
-                    max_cores=max_cores,
-                    return_ccf=True,
-                )
-                logger.info(
-                    "Stellar RV: Numba parallel CCF+RV done fiber=%s n_flat_chunks=%d",
-                    fiber,
-                    len(all_rvs_arr),
-                )
                 logger.info(
                     "Stellar RV: building preview from Numba flat CCF fiber=%s",
                     fiber,
-                )
-                v_grid_np = np.asarray(v_grid, dtype=np.float64)
-                v_step_meta = (
-                    float(v_grid_np[1] - v_grid_np[0]) if v_grid_np.size > 1 else float(_V_STEP)
                 )
                 preview_detail = ccf_preview_dict_from_numba_flat(
                     order_tasks,
@@ -973,37 +1157,16 @@ class StellarRVPrimitive(BasePrimitive):
                     "Stellar RV: preview from Numba flat complete fiber=%s",
                     fiber,
                 )
-            else:
-                logger.info(
-                    "Stellar RV: process_orders_rvs_numba_parallel (return_ccf=False) fiber=%s",
-                    fiber,
-                )
-                (
-                    all_rvs_arr,
-                    all_rv_errs_arr,
-                    all_wl_arr,
-                    n_chunks_per_order,
-                    chunk_start,
-                ) = process_orders_rvs_numba_parallel(
-                    wave_2d,
-                    spec_2d,
-                    err_2d,
-                    dq_2d,
-                    do_not_use,
-                    template_ln,
-                    template_flux,
-                    self.window_size_um,
-                    order_tasks,
-                    max_cores=max_cores,
-                    return_ccf=False,
-                )
-                logger.info(
-                    "Stellar RV: Numba parallel RV only done fiber=%s n_flat_chunks=%d",
-                    fiber,
-                    len(all_rvs_arr),
-                )
-
             ao_flat = flat_chunk_echelle_orders(order_tasks, chunk_start, len(all_rvs_arr))
+            if len(all_rvs_arr) > 0:
+                rvccf_chunk_supplement = build_rvccf_chunk_supplement(
+                    chunk_id=np.arange(len(all_rvs_arr), dtype=np.int32),
+                    n_good=np.asarray(all_n_good, dtype=np.int32),
+                    v_min=float(v_grid_np[0]),
+                    v_max=float(v_grid_np[-1]),
+                    v_step=v_step_meta,
+                    ccf_2d=all_ccf,
+                )
             all_rvs.extend(all_rvs_arr)
             all_rv_errs.extend(all_rv_errs_arr)
             all_wavelengths.extend(all_wl_arr)
@@ -1014,7 +1177,7 @@ class StellarRVPrimitive(BasePrimitive):
                 len(all_rvs),
                 preview_detail is not None,
             )
-            return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
+            return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail, rvccf_chunk_supplement
 
         if mode != "serial":
             raise ValueError(
@@ -1022,96 +1185,94 @@ class StellarRVPrimitive(BasePrimitive):
                 "(expected 'debug', 'parallel', or 'serial')"
             )
 
-        # Legacy pure-Python per-order path (only if mode == "serial").
+        # Legacy pure-Python per-order path (mode == "serial" without hybrid CCF).
         logger.info(
             "Stellar RV: serial Python path (per-order process_one_order_rvs) fiber=%s",
             fiber,
         )
-        if want_preview:
-            order_slots: list[dict] = []
-            all_rows: list[np.ndarray] = []
-            v_ref: np.ndarray | None = None
-            for oi, order in order_tasks:
-                w = wave[oi]
-                s = spec[oi]
-                e = err[oi] if err.ndim >= 2 else err
-                d = dq[oi] if dq.ndim >= 2 else dq
-                rvs, rv_errs, chunk_centers, v_grid, ccf_2d = process_one_order_rvs(
-                    w,
-                    s,
-                    e,
-                    d,
-                    do_not_use,
-                    template_ln,
-                    template_flux,
-                    self.window_size_um,
-                    return_ccf=True,
-                )
-                if len(rvs) == 0:
-                    continue
-                for i in range(len(rvs)):
-                    all_rvs.append(rvs[i])
-                    all_rv_errs.append(rv_errs[i])
-                    all_wavelengths.append(chunk_centers[i])
-                    all_orders.append(int(order))
+        preview_detail = None
+        order_slots: list[dict] = []
+        all_rows: list[np.ndarray] = []
+        v_ref: np.ndarray | None = None
+        ser_chunk_rows: list[np.ndarray] = []
+        for oi, order in order_tasks:
+            w = wave[oi]
+            s = spec[oi]
+            e = err[oi] if err.ndim >= 2 else err
+            d = dq[oi] if dq.ndim >= 2 else dq
+            rvs, rv_errs, chunk_centers, v_grid, ccf_2d = process_one_order_rvs(
+                w,
+                s,
+                e,
+                d,
+                do_not_use,
+                template_ln,
+                template_flux,
+                self.window_size_um,
+                return_ccf=True,
+                ccf_v_min=v_min_m_s,
+                ccf_v_max=v_max_m_s,
+                ccf_v_step=v_step_m_s,
+                ccf_hybrid_center_m_s=ccf_hybrid_center_m_s,
+                ccf_hybrid_half_width_m_s=ccf_hybrid_half_width_m_s,
+                ccf_hybrid_step_m_s=ccf_hybrid_step_m_s,
+            )
+            if len(rvs) == 0:
+                continue
+            w_arr = np.asarray(w, dtype=np.float64)
+            w_min, w_max = float(np.nanmin(w_arr)), float(np.nanmax(w_arr))
+            for i in range(len(rvs)):
+                all_rvs.append(rvs[i])
+                all_rv_errs.append(rv_errs[i])
+                all_wavelengths.append(chunk_centers[i])
+                all_orders.append(int(order))
+                ser_chunk_rows.append(np.asarray(ccf_2d[i], dtype=RVCCF_CCF_ELEM_DTYPE))
+            if want_preview:
                 if v_ref is None:
                     v_ref = v_grid
                 elif v_ref.shape != v_grid.shape or not np.allclose(v_ref, v_grid):
                     continue
                 ccf_m = np.nanmean(ccf_2d, axis=0)
-                w_arr = np.asarray(w, dtype=np.float64)
                 order_slots.append(
                     {
                         "kind": "order",
                         "order": int(order),
                         "v": np.asarray(v_grid, dtype=np.float64),
-                        "ccf": np.asarray(ccf_m, dtype=np.float64),
-                        "wl_lo": float(np.nanmin(w_arr)),
-                        "wl_hi": float(np.nanmax(w_arr)),
+                        "ccf": np.asarray(ccf_m, dtype=RVCCF_CCF_ELEM_DTYPE),
+                        "wl_lo": float(w_min),
+                        "wl_hi": float(w_max),
                     }
                 )
                 all_rows.append(ccf_2d)
-            if order_slots and v_ref is not None:
-                logger.info(
-                    "Stellar RV: finalize_ccf_preview_dict (serial+preview) fiber=%s "
-                    "n_order_slots=%d",
-                    fiber,
-                    len(order_slots),
-                )
-                preview_detail = finalize_ccf_preview_dict(
-                    order_slots,
-                    all_rows,
-                    v_ref,
-                    _V_MIN,
-                    _V_MAX,
-                    _V_STEP,
-                )
-                logger.info(
-                    "Stellar RV: serial preview dict complete fiber=%s total_slots=%s",
-                    fiber,
-                    len(preview_detail.get("slots", [])) if preview_detail else 0,
-                )
-        else:
-            for oi, order in order_tasks:
-                w = wave[oi]
-                s = spec[oi]
-                e = err[oi] if err.ndim >= 2 else err
-                d = dq[oi] if dq.ndim >= 2 else dq
-                rvs, rv_errs, chunk_centers = process_one_order_rvs(
-                    w,
-                    s,
-                    e,
-                    d,
-                    do_not_use,
-                    template_ln,
-                    template_flux,
-                    self.window_size_um,
-                )
-                for i in range(len(rvs)):
-                    all_rvs.append(rvs[i])
-                    all_rv_errs.append(rv_errs[i])
-                    all_wavelengths.append(chunk_centers[i])
-                    all_orders.append(int(order))
+        if ser_chunk_rows:
+            rvccf_chunk_supplement = build_rvccf_chunk_supplement(
+                chunk_id=np.arange(len(ser_chunk_rows), dtype=np.int32),
+                n_good=np.full(len(ser_chunk_rows), -1, dtype=np.int32),
+                v_min=float(v_min_m_s),
+                v_max=float(v_max_m_s),
+                v_step=float(v_step_m_s),
+                ccf_2d=np.stack(ser_chunk_rows, axis=0),
+            )
+        if want_preview and order_slots and v_ref is not None:
+            logger.info(
+                "Stellar RV: finalize_ccf_preview_dict (serial+preview) fiber=%s "
+                "n_order_slots=%d",
+                fiber,
+                len(order_slots),
+            )
+            preview_detail = finalize_ccf_preview_dict(
+                order_slots,
+                all_rows,
+                v_ref,
+                v_min_m_s,
+                v_max_m_s,
+                v_step_m_s,
+            )
+            logger.info(
+                "Stellar RV: serial preview dict complete fiber=%s total_slots=%s",
+                fiber,
+                len(preview_detail.get("slots", [])) if preview_detail else 0,
+            )
 
         logger.info(
             "Stellar RV: serial path done fiber=%s n_chunks=%d preview=%s",
@@ -1119,7 +1280,7 @@ class StellarRVPrimitive(BasePrimitive):
             len(all_rvs),
             preview_detail is not None,
         )
-        return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail
+        return all_rvs, all_rv_errs, all_wavelengths, all_orders, preview_detail, rvccf_chunk_supplement
 
     def _write_rv_tables(
         self,
@@ -1133,9 +1294,11 @@ class StellarRVPrimitive(BasePrimitive):
         rv_agg_err: float,
         inlier: np.ndarray | None = None,
         orders: np.ndarray | None = None,
+        *,
+        rvccf_chunk_supplement=None,
     ):
         """
-        Write RVCCF_FIB{fiber} and RVCCFAVG_FIB{fiber} extensions.
+        Write RVCCF_FIB{fiber} (per-chunk RV plus optional CCF columns) and RVCCFAVG_FIB{fiber}.
 
         Creates table extensions on the output L2 model with per-chunk RVs and
         the aggregated RV (mean and std). All velocities are in m/s.
@@ -1183,28 +1346,20 @@ class StellarRVPrimitive(BasePrimitive):
             order_col = np.asarray(orders, dtype=np.int64).ravel()
         else:
             order_col = np.full(n, -1, dtype=np.int64)
-        mbjd = np.zeros(n, dtype=np.float64)
-        berv = np.zeros(n, dtype=np.float64)
-        res = np.full(n, np.nan, dtype=np.float64)
-        tell_abs = np.zeros(n, dtype=np.float64)
-        bis = np.zeros(n, dtype=np.float64)
-        rv_abs = np.zeros(n, dtype=np.float64)
-        rv_abs_err = np.zeros(n, dtype=np.float64)
         inlier_col = np.asarray(inlier, dtype=np.uint8)
-        tbl = astropy.table.Table({
-            "MBJDW": mbjd,
-            "BERVW": berv,
-            "RV": np.asarray(rvs, dtype=np.float64),
-            "RV_ERR": np.asarray(rv_errs, dtype=np.float64),
-            "ORDER": order_col,
-            "WAVELENGTH": wl,
-            "RESOLUTION": res,
-            "TELL_ABS": tell_abs,
-            "BIS": bis,
-            "RV_ABS": rv_abs,
-            "RV_ABS_ERR": rv_abs_err,
-            "INLIER": inlier_col,
-        })
+        supp = (
+            rvccf_chunk_supplement
+            if rvccf_chunk_supplement is not None and len(rvccf_chunk_supplement) > 0
+            else None
+        )
+        tbl = assemble_rvccf_fib_table(
+            np.asarray(rvs, dtype=np.float64),
+            np.asarray(rv_errs, dtype=np.float64),
+            wl,
+            order_col,
+            inlier_col,
+            supplement=supp,
+        )
         def _ext(name: str) -> str:
             return (f"{name}_FIB{fiber}").lower()
 
