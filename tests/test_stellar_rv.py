@@ -15,20 +15,56 @@ Run::
 - ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1`` — after ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks`` /
   ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel`` assertions, run lte049 + template-derived
   ``lte049.0*.mas`` ``ccf_mask_kpf`` (serial chunk test previews still use ``K2_all.mas``): **HTML-only** previews (no ``fig.show()``):
-  mask-overlay via ``write_mask_overlay_debug_pages`` (auto-open) and unified RV/CCF preview via
-  ``create_stellar_rv_preview`` → ``fig.write_html`` then ``webbrowser.open`` on that file. Prints a step timing
+  mask-overlay via ``write_mask_overlay_debug_pages`` (auto-open) and stellar RV preview via
+  ``create_stellar_rv_preview`` → unified ``*_preview.html`` (RV vs λ, CCF, residual per fiber; CCF slot
+  dropdown), then ``webbrowser.open``. Prints a step timing
   summary (``-s``).
 
 **Parallel BT-Settl BSPEC chunk test** — ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel``
 runs the same science setup via ``process_orders_rvs_numba_parallel`` (requests ``max_cores=6``;
 actual Numba threads are clamped to the wheel/CPU limit, e.g. GitHub Actions) and prints a timing summary.
+By default it uses **one** echelle order (**139**). To run on **all** BSPEC echelle orders from
+``HISPECConfig``, either set ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` or pass pytest flag
+``--bspec-all-orders`` (the flag sets that env var). Use ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER=<n>``
+to pick a different single order instead.
 
-**One-liner (mask overlay + default CCF/RV preview, from repo root)::
+Simulated ``spec_err`` uses a center-to-edge throughput taper so SNR is high in the order center
+and degrades toward the blue/red ends (see ``_bspec_simulated_flux_err``).
+
+**One-liner — mask-KPF parallel test + both previews (mask overlay + unified CCF/RV HTML), from repo root**::
+
+  HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s
+
+**Same, but all BSPEC echelle orders** (longer runtime)::
+
+  HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s --bspec-all-orders
+
+  # Equivalent:
+  HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1 HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s
+
+**One-liner — same test, JSON + NPZ CCF debug dump only** (no mask-overlay / Plotly HTML; patched no-op preview)::
+
+  HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s
+
+Serial template-CCF test + same preview toggles (optional)::
 
   HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks -s
 
 ``HISPEC_DRP_SAVE_CCF_PLOTS=1`` sets ``save_preview`` and ``output_dir`` for the echelle test so the
-primitive writes a single default preview HTML under ``tests/output/stellar_rv_plots/`` (no extra figures).
+primitive writes the unified preview HTML under ``tests/output/stellar_rv_plots/`` (no extra figures).
+
+``HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF=1`` — during ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel``,
+after the lte049 ``ccf_mask_kpf`` preview path (or a lightweight variant if previews are off), write JSON + NPZ
+debug dumps of per-order/mean ``v`` (m/s), ``ccf``, ``ccf_err`` (if present), and ``kpf_fit`` (Gaussian RV / err /
+params). Prints ``HISPEC_DRP_BSPEC_BTSETTL_MASK_CCF_SERIALIZE=`` with the JSON path (the JSON references the NPZ).
+
+**Post-process CCF JSON (optional)** — ``examples/mask_kpf_ccf_postprocess_uncertainty.py`` re-runs the high-pass
+σ estimate and ``fit_ccf_rv`` on serialized debug files (e.g. different Savitzky–Golay settings or archived runs). Mask-KPF
+order-mean ``ccf_err`` in the pipeline is already produced by
+:func:`~hispecdrp.primitives.utils.ccf_utils.estimate_ccf_uncertainty_highpass_residual` inside
+:func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_mask_kpf_for_fiber`. Prints ``HISPEC_DRP_MASK_CCF_POSTPROCESS_JSON=``::
+
+  PYTHONPATH=. python examples/mask_kpf_ccf_postprocess_uncertainty.py /path/to/lte049_mask_kpf_ccf_rv_debug.json
 
 **BT-Settl RV injection sweep (Plotly)** — ``test_btsettl_rv_injection_sweep_recovery`` uses the
 **lte049** BT-Settl template with the template-derived ``lte049.0*.mas`` mask: per-order
@@ -42,6 +78,8 @@ annotation; second HTML is two-panel CCF + Gaussian fits). Both HTML files are o
 from __future__ import annotations
 
 import glob
+import json
+import math
 import os
 import time
 import webbrowser
@@ -57,6 +95,7 @@ from hispecdrp.datamodels.extensions import RVCCF_HDU
 from hispecdrp.primitives import StellarRVPrimitive
 from hispecdrp.utils.parallelization_utils import resolve_numba_threads
 from hispecdrp.primitives.utils.ccf_utils import (
+    CCFFitKpfConfig,
     MaskLines,
     _V_MAX,
     _V_MIN,
@@ -88,6 +127,11 @@ WINDOW_UM = 0.3
 _BTSETTL_WL_RANGE_UM = (0.95, 1.4)
 # Popup test: single-order sweep + CCF figure (BSPEC echelle order must be in HISPECConfig list).
 _BTSETTL_RV_SWEEP_PLOT_ECHELLE_ORDER = 132
+
+# Mask-line ``ccf_mask_kpf`` BT-Settl tests: default to this echelle order unless
+# ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` (use full BSPEC list) or
+# ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER=<n>`` (override default).
+_DEFAULT_BSPEC_BTSETTL_CCF_MASK_KPF_ORDER = 139
 _BTSETTL_RV_SWEEP_PLOT_CCF_DEMO_KM_S = -115.0
 # lte049 + polynomial L2 (same construction as mask-KPF smoke scripts)
 _BTSETTL_LTE049_POLY_COEFS = np.array([0.0001, -0.001, 0.01, 0.05, 1.0])
@@ -106,6 +150,7 @@ def _lte049_btsettl_template_mask_path() -> str | None:
 # ---------------------------------------------------------------------------
 SHOW_PRIMITIVE_CCF_PREVIEW: bool | None = None
 SHOW_BSPEC_BTSETTL_PREVIEWS: bool | None = None
+SERIALIZE_BSPEC_BTSETTL_MASK_CCF: bool | None = None
 
 
 def _truthy_env(name: str) -> bool:
@@ -123,6 +168,52 @@ def _want_bspec_btsettl_all_previews() -> bool:
     if SHOW_BSPEC_BTSETTL_PREVIEWS is not None:
         return SHOW_BSPEC_BTSETTL_PREVIEWS
     return _truthy_env("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS")
+
+
+def _want_bspec_btsettl_serialize_mask_ccf() -> bool:
+    """Serialize mask-KPF CCF preview arrays (``v``, ``ccf``, ``ccf_err``, ``kpf_fit``) to JSON+NPZ."""
+    if SERIALIZE_BSPEC_BTSETTL_MASK_CCF is not None:
+        return SERIALIZE_BSPEC_BTSETTL_MASK_CCF
+    return _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF")
+
+
+def _bspec_btsettl_ccf_mask_kpf_order_ids() -> list[int]:
+    """Echelle orders for BSPEC mask-KPF tests (default single order: :data:`_DEFAULT_BSPEC_BTSETTL_CCF_MASK_KPF_ORDER`)."""
+    full = hispec_config.HISPECConfig.get_order_list("BSPEC")
+    if not full:
+        pytest.skip("No BSPEC orders in HISPECConfig")
+    if _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS"):
+        return list(full)
+    raw = os.environ.get(
+        "HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER",
+        str(_DEFAULT_BSPEC_BTSETTL_CCF_MASK_KPF_ORDER),
+    ).strip()
+    o = int(raw)
+    if o not in full:
+        pytest.skip(
+            f"BSPEC echelle order {o} not in configured list ({full[0]} … {full[-1]})"
+        )
+    return [o]
+
+
+def _mask_kpf_preview_do_orders() -> list[int] | None:
+    """``do_orders`` for :class:`StellarRVPrimitive` previews: ``None`` means all echelle orders."""
+    if _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS"):
+        return None
+    return _bspec_btsettl_ccf_mask_kpf_order_ids()
+
+
+def _btsettl_ccf_mask_kpf_window_um(wave_first_order_1d: np.ndarray) -> float:
+    """
+    Wavelength chunk width for mask-KPF BT-Settl tests. Single-order runs use a smaller window
+    so one echelle order produces many chunks (keeps ``n_attempt`` assertions meaningful).
+    """
+    if _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS"):
+        return WINDOW_UM
+    span = float(np.ptp(np.asarray(wave_first_order_1d, dtype=np.float64)))
+    if not np.isfinite(span) or span <= 0:
+        return WINDOW_UM
+    return float(min(WINDOW_UM, max(1e-6, span / 16.0)))
 
 
 def _print_btsettl_test_timing_summary(
@@ -188,6 +279,47 @@ def _order_wavelength_grid(order: int, n_pix: int) -> tuple[np.ndarray, float]:
     return wave, lam_center
 
 
+# Echelle throughput → 0 at order edges: scale σ so effective SNR is high in the center only.
+_BSPEC_EDGE_THROUGHPUT_FLOOR = 0.02
+
+
+def _bspec_order_edge_snr_loss_factor(n_pix: int) -> np.ndarray:
+    """
+    Length-``n_pix`` multiplier (≥1) applied to flux errors at the blue/red ends of the order.
+
+    Uses :math:`T(u)=\\sin^2(\\pi u)` along normalized pixel coordinate :math:`u\\in[0,1]`,
+    with a floor so σ grows by up to :math:`\\sim 1/` :data:`_BSPEC_EDGE_THROUGHPUT_FLOOR` at the edges.
+    """
+    n = int(n_pix)
+    u = np.linspace(0.0, 1.0, n, dtype=np.float64)
+    throughput = np.sin(np.pi * u) ** 2
+    return 1.0 / np.maximum(throughput, float(_BSPEC_EDGE_THROUGHPUT_FLOOR))
+
+
+def _bspec_simulated_flux_err(
+    spec: np.ndarray,
+    *,
+    rel_floor: float = 0.01,
+    abs_floor: float = 0.1,
+    dtype_out=np.float64,
+) -> np.ndarray:
+    """
+    Simulated flux uncertainty for BSPEC-style echelle tests: proportional noise + constant
+    floor in the order center, inflated toward pixels 0 and ``n_pix-1`` (poor SNR at edges).
+    """
+    s = np.asarray(spec, dtype=np.float64)
+    base = np.maximum(np.abs(s) * float(rel_floor), float(abs_floor))
+    npix = int(s.shape[-1])
+    edge = _bspec_order_edge_snr_loss_factor(npix)
+    if s.ndim == 1:
+        out = base * edge
+    elif s.ndim == 2:
+        out = base * edge[np.newaxis, :]
+    else:
+        raise ValueError("spec must be 1-D or 2-D")
+    return np.asarray(out, dtype=dtype_out)
+
+
 def _sigma_lambda_um(lam_center_um: float, sigma_v_km_s: float) -> float:
     return lam_center_um * (sigma_v_km_s / C_KM_S)
 
@@ -241,7 +373,7 @@ def make_synthetic_l2_spectrum(
             w, lam_obs, _sigma_lambda_um(lam_center, sigma_v_km_s), depth, flat_flux
         )
     model.spec_fib1 = spec
-    model.spec_err_fib1 = np.maximum(spec * 0.01, 0.1).astype(np.float32)
+    model.spec_err_fib1 = _bspec_simulated_flux_err(spec, dtype_out=np.float32)
     model.wave_fib1 = wave
     model.spec_dq_fib1 = np.zeros((n_orders, n_pix), dtype=np.uint32)
     return model
@@ -311,7 +443,7 @@ def _build_bspec_l2_btsettl_doppler_poly(
         fl = np.interp(wave_ord / beta, w_rest, flux_rest).astype(np.float32)
         spec[oi] = (fl * poly(wave_ord)).astype(np.float32)
     model.spec_fib1 = spec
-    model.spec_err_fib1 = np.maximum(spec * 0.01, 0.1).astype(np.float32)
+    model.spec_err_fib1 = _bspec_simulated_flux_err(spec, dtype_out=np.float32)
     model.wave_fib1 = wave
     model.spec_dq_fib1 = np.zeros((n_orders, n_pix), dtype=np.uint32)
     return model
@@ -353,10 +485,113 @@ def _print_rvccf_hdu_validation_report(tbl, *, label: str = "rvccf_fib1") -> Non
     print("\n".join(lines), flush=True)
 
 
+def _jsonify_mask_ccf_debug(obj: object) -> object:
+    """Convert preview payloads (numpy, nested dicts) to JSON-safe structures."""
+    if obj is None:
+        return None
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        x = float(obj)
+        return x if math.isfinite(x) else None
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {str(k): _jsonify_mask_ccf_debug(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonify_mask_ccf_debug(x) for x in obj]
+    if isinstance(obj, int):
+        return int(obj)
+    return str(obj)
+
+
+def _serialize_mask_kpf_ccf_preview_debug(prim: StellarRVPrimitive, out_dir: str) -> str | None:
+    """
+    Write per-fiber mask-KPF CCF preview data: large arrays in ``.npz``, metadata + ``kpf_fit`` in ``.json``.
+
+    Returns absolute path to the JSON sidecar, or ``None`` if there is nothing to save.
+    """
+    by_fiber = getattr(prim, "_ccf_preview_by_fiber", None) or {}
+    if not by_fiber:
+        print(
+            "HISPEC_DRP_BSPEC_BTSETTL_MASK_CCF_SERIALIZE=<empty: no _ccf_preview_by_fiber; "
+            "use save_preview or mask-overlay debug so mask-KPF collects CCF preview>",
+            flush=True,
+        )
+        return None
+    os.makedirs(out_dir, exist_ok=True)
+    base = os.path.join(out_dir, "lte049_mask_kpf_ccf_rv_debug")
+    npz_path = base + ".npz"
+    json_path = base + ".json"
+
+    npz_arrays: dict[str, np.ndarray] = {}
+    fibers_meta: dict[str, object] = {}
+    for fib_key, detail in by_fiber.items():
+        fib_s = str(fib_key)
+        slots_out: list[dict[str, object]] = []
+        slots = (detail or {}).get("slots") or []
+        for si, sl in enumerate(slots):
+            if not isinstance(sl, dict):
+                continue
+            kind = sl.get("kind")
+            order = sl.get("order")
+            prefix = f"fib{fib_s}_s{si}_{kind}_order{order}"
+            v = np.asarray(sl.get("v"), dtype=np.float64)
+            ccf = np.asarray(sl.get("ccf"), dtype=np.float64)
+            npz_arrays[f"{prefix}_v_m_s"] = v
+            npz_arrays[f"{prefix}_ccf"] = ccf
+            if sl.get("ccf_err") is not None:
+                npz_arrays[f"{prefix}_ccf_err"] = np.asarray(sl["ccf_err"], dtype=np.float64)
+            kpf = sl.get("kpf_fit")
+            slot_meta: dict[str, object] = {
+                "kind": kind,
+                "order": None if order is None else int(order),
+                "wl_lo": float(sl["wl_lo"]) if sl.get("wl_lo") is not None else None,
+                "wl_hi": float(sl["wl_hi"]) if sl.get("wl_hi") is not None else None,
+                "npz_keys": {
+                    "v_m_s": f"{prefix}_v_m_s",
+                    "ccf": f"{prefix}_ccf",
+                    **(
+                        {"ccf_err": f"{prefix}_ccf_err"}
+                        if f"{prefix}_ccf_err" in npz_arrays
+                        else {}
+                    ),
+                },
+                "kpf_fit": _jsonify_mask_ccf_debug(kpf) if kpf is not None else None,
+            }
+            slots_out.append(slot_meta)
+        fibers_meta[fib_s] = {
+            "v_step": (detail or {}).get("v_step"),
+            "v_min": (detail or {}).get("v_min"),
+            "v_max": (detail or {}).get("v_max"),
+            "slots": slots_out,
+        }
+
+    payload = {
+        "schema": "hispecdrp.mask_kpf_ccf_preview.v1",
+        "npz_path": os.path.abspath(npz_path),
+        "fibers": fibers_meta,
+    }
+    np.savez_compressed(npz_path, **npz_arrays)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(_jsonify_mask_ccf_debug(payload), f, indent=2, allow_nan=False)
+    ap = os.path.abspath(json_path)
+    print(f"HISPEC_DRP_BSPEC_BTSETTL_MASK_CCF_SERIALIZE={ap}", flush=True)
+    return ap
+
+
 def _run_lte049_k2all_mask_kpf_previews(
     tmp_path: str,
     *,
     mask_path: str | None = None,
+    do_orders: list[int] | None = None,
+    serialize_only: bool = False,
 ) -> list[tuple[str, float, str, bool]]:
     """
     BSPEC L2 from lte049 + Doppler + polynomial; ``ccf_mask_kpf`` with a packaged ``.mas`` mask.
@@ -364,9 +599,18 @@ def _run_lte049_k2all_mask_kpf_previews(
     ``mask_path`` defaults to ``K2_all.mas`` (serial BT-Settl preview). Pass the template-derived
     ``lte049.0*.mas`` path for the parallel test.
 
-    HTML-only: ``save_preview=True``, ``show_preview=False`` so ``create_stellar_rv_preview`` writes
-    ``*_preview.html`` without ``fig.show()``; the test then ``webbrowser.open``s that file. Mask overlay uses
-    ``write_mask_overlay_debug_pages`` (HTML + auto-open when ``show_mask_overlay_debug=True``).
+    ``do_orders`` is forwarded to :class:`StellarRVPrimitive` (``None`` = all echelle orders). When
+    ``None``, uses :func:`_mask_kpf_preview_do_orders` (same selection as mask-KPF BT-Settl tests:
+    default single order 139 unless ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1``).
+
+    When ``serialize_only`` is False (default): HTML-only — ``save_preview=True``, ``show_preview=False``
+    so ``create_stellar_rv_preview`` writes ``*_preview.html`` without ``fig.show()``;
+    the test then ``webbrowser.open``s that file. Mask overlay uses ``write_mask_overlay_debug_pages`` (HTML + auto-open
+    when ``show_mask_overlay_debug=True``).
+
+    When ``serialize_only`` is True: ``save_preview=True`` so mask-KPF collects CCF preview arrays, but
+    ``create_stellar_rv_preview`` is patched to a no-op (no unified Plotly HTML); mask-overlay HTML is not
+    written. Used when ``HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF=1`` without full previews.
 
     Returns timing rows ``(label, seconds, functions, include_in_total)`` for merge into the test summary.
     """
@@ -437,26 +681,49 @@ def _run_lte049_k2all_mask_kpf_previews(
             t_unified_html += time.perf_counter() - t1
 
     prev_env = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW")
+    if do_orders is None:
+        do_orders = _mask_kpf_preview_do_orders()
     try:
         os.environ["HISPEC_DRP_SHOW_CCF_PREVIEW"] = "1"
-        prim = StellarRVPrimitive(
-            algorithm="ccf_mask_kpf",
-            mask_path=mask_path,
-            do_fibers=["1"],
-            window_size_um=WINDOW_UM,
-            show_preview=False,
-            save_preview=True,
-            save_mask_overlay_debug=True,
-            show_mask_overlay_debug=True,
-            output_dir=out_dir,
-            suffix="lte049_mask_kpf",
-            max_cores=6,
-        )
-        t0 = time.perf_counter()
-        with patch.object(srv_prev, "write_mask_overlay_debug_pages", _timed_mask):
-            with patch.object(srv_prev, "create_stellar_rv_preview", _timed_create):
+        if serialize_only:
+            prim = StellarRVPrimitive(
+                algorithm="ccf_mask_kpf",
+                mask_path=mask_path,
+                do_fibers=["1"],
+                do_orders=do_orders,
+                window_size_um=WINDOW_UM,
+                show_preview=False,
+                save_preview=True,
+                save_mask_overlay_debug=False,
+                show_mask_overlay_debug=False,
+                output_dir=out_dir,
+                suffix="lte049_mask_kpf",
+                max_cores=6,
+            )
+            t0 = time.perf_counter()
+            with patch.object(srv_prev, "create_stellar_rv_preview", lambda _p: None):
                 out = prim.apply(model)
-        apply_wall = time.perf_counter() - t0
+            apply_wall = time.perf_counter() - t0
+        else:
+            prim = StellarRVPrimitive(
+                algorithm="ccf_mask_kpf",
+                mask_path=mask_path,
+                do_fibers=["1"],
+                do_orders=do_orders,
+                window_size_um=WINDOW_UM,
+                show_preview=False,
+                save_preview=True,
+                save_mask_overlay_debug=True,
+                show_mask_overlay_debug=True,
+                output_dir=out_dir,
+                suffix="lte049_mask_kpf",
+                max_cores=6,
+            )
+            t0 = time.perf_counter()
+            with patch.object(srv_prev, "write_mask_overlay_debug_pages", _timed_mask):
+                with patch.object(srv_prev, "create_stellar_rv_preview", _timed_create):
+                    out = prim.apply(model)
+            apply_wall = time.perf_counter() - t0
     finally:
         if prev_env is None:
             os.environ.pop("HISPEC_DRP_SHOW_CCF_PREVIEW", None)
@@ -484,7 +751,7 @@ def _run_lte049_k2all_mask_kpf_previews(
     )
     rows.append(
         (
-            "  └ subset: unified stellar RV preview HTML (Plotly write_html only)",
+            "  └ subset: stellar RV preview HTML (Plotly write_html ×2)",
             t_unified_html,
             "create_stellar_rv_preview, fig.write_html",
             False,
@@ -500,15 +767,15 @@ def _run_lte049_k2all_mask_kpf_previews(
     )
 
     prev = (prim._output or {}).get("preview") or {}
-    html_ccf = prev.get("html")
-    if html_ccf and os.path.isfile(html_ccf):
-        ap = os.path.abspath(html_ccf)
-        print(f"LTE049_K2ALL_CCF_PREVIEW_HTML={ap}", flush=True)
+    html_unified = prev.get("html")
+    if html_unified and os.path.isfile(html_unified):
+        ap = os.path.abspath(html_unified)
+        print(f"LTE049_K2ALL_STELLAR_RV_PREVIEW_HTML={ap}", flush=True)
         t0 = time.perf_counter()
         webbrowser.open(f"file://{ap}")
         rows.append(
             (
-                "open unified preview HTML in default browser (post-apply)",
+                "open unified stellar RV preview HTML in default browser (post-apply)",
                 time.perf_counter() - t0,
                 "webbrowser.open (file://…*_preview.html)",
                 True,
@@ -519,6 +786,9 @@ def _run_lte049_k2all_mask_kpf_previews(
     for _fib, p in (mod.get("mask_overlay_debug") or {}).items():
         if p and os.path.isfile(p):
             print(f"LTE049_K2ALL_MASK_OVERLAY_HTML={os.path.abspath(p)}", flush=True)
+
+    if _want_bspec_btsettl_serialize_mask_ccf():
+        _serialize_mask_kpf_ccf_preview_debug(prim, out_dir)
 
     return rows
 
@@ -554,6 +824,37 @@ def btsettl_rv_sweep_template_path():
     if not os.path.isfile(path):
         pytest.skip(f"Template not found: {path}")
     return path
+
+
+def test_fit_ccf_rv_failure_includes_debug_context():
+    """Failed :func:`fit_ccf_rv` runs attach ``debug_context`` (and log a JSON suffix)."""
+    vm_short = np.array([0.0, 1.0], dtype=np.float64)
+    ccf_short = np.array([1.0, 1.0], dtype=np.float64)
+    _, _, _, d_ins = fit_ccf_rv(
+        vm_short,
+        ccf_short,
+        1.0,
+        return_params=True,
+        config=CCFFitKpfConfig(),
+    )
+    assert d_ins.get("message") == "insufficient valid points"
+    dc_ins = d_ins.get("debug_context") or {}
+    assert dc_ins.get("fit_stage") == "input_grid"
+    assert dc_ins.get("n_finite_pairs") == 2
+
+    vm = np.linspace(-200, 200, 120) * 1000.0
+    ccf = np.linspace(0.0, 1.0, vm.size)
+    _, _, _, d_mean = fit_ccf_rv(vm, ccf, 1000.0, return_params=True)
+    assert d_mean.get("message") == "mean outside window"
+    dc_mean = d_mean.get("debug_context") or {}
+    assert dc_mean.get("fit_stage") == "pass1_post_lm"
+    assert dc_mean.get("mean_side") in (
+        "below_sample_min",
+        "above_sample_max",
+        "non_finite_mean",
+    )
+    assert "fitted_mean_km_s" in dc_mean
+    assert "fit_samples_v_km_min" in dc_mean and "fit_samples_v_km_max" in dc_mean
 
 
 @pytest.mark.parametrize("spectrograph", ["BSPEC", "RSPEC"])
@@ -665,7 +966,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks(template_path, tmp_path):
         spec = np.interp(
             wave_ord / (1.0 + INPUT_RV_KM_S / C_KM_S), w_rest, flux_rest
         ).astype(np.float64)
-        spec_err = np.maximum(spec * 0.01, 0.1)
+        spec_err = _bspec_simulated_flux_err(spec)
         _rvs, _e, _centers, v_grid, ccf_2d = rv_per_chunks(
             wave_ord,
             spec,
@@ -728,7 +1029,13 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     Same BT-Settl lte025 + BSPEC setup as ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks``,
     but one call to :func:`process_orders_rvs_numba_parallel` with ``max_cores=6`` (clamped
     to Numba’s allowed thread count on the host, e.g. 2 on small CI runners) and ``ccf_v_step=50`` m/s
-    (same as the serial test and ``ccf_utils._V_STEP``). Phase-B Gaussian fits run serially in Python.
+    (explicit in this test; default broad step is ``ccf_utils._V_STEP``, currently 50 m/s). Phase-B Gaussian fits run serially in Python.
+
+    By default only **one** BSPEC echelle order is used (default **139**). For all echelle orders
+    from ``HISPECConfig``, set ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` or pass pytest
+    ``--bspec-all-orders``. Use ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER=n`` to override the
+    default single order. A narrower chunk window is applied in the single-order case so the
+    order still contributes many wavelength bins.
 
     ``ccf_mask_kpf`` RVCCF validation and the mask-KPF chunk benchmark use the template-derived
     ``lte049.0*.mas`` mask in ``data/masks`` (paired with the lte049 BT-Settl template), not the
@@ -736,6 +1043,10 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
 
     Assertions use the same recovery fractions as the serial test, on chunks that are eligible
     (>=20 pixels in the bin and written by the parallel path, ``np.isfinite(all_wl)``).
+
+    After building the synthetic spectra, zero-flux pixels (including forced order endpoints)
+    are assigned ``DQ`` ``DO_NOT_USE`` so CCF and mask-KPF paths exclude them via the standard
+    bad-pixel mask.
     """
     timing_rows: list[tuple[str, float, str, bool]] = []
     mas_lte049 = _lte049_btsettl_template_mask_path()
@@ -749,13 +1060,12 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
     assert len(w_rest) > 50
     template_ln = np.log(w_rest)
-    orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
-    assert orders
+    orders = _bspec_btsettl_ccf_mask_kpf_order_ids()
     timing_rows.append(
         (
-            "lte025: load BT-Settl + ln(template) + BSPEC order list",
+            "lte025: load BT-Settl + ln(template) + BSPEC mask-KPF order selection",
             time.perf_counter() - t0,
-            "_load_btsettl_sorted_micron, load_btsettl_spectrum, HISPECConfig.get_order_list",
+            "_load_btsettl_sorted_micron, load_btsettl_spectrum, _bspec_btsettl_ccf_mask_kpf_order_ids",
             True,
         )
     )
@@ -776,8 +1086,20 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
             w_rest,
             flux_rest,
         ).astype(np.float64)
-        spec_err_2d[oi] = np.maximum(spec_2d[oi] * 0.01, 0.1)
+        spec_err_2d[oi] = _bspec_simulated_flux_err(spec_2d[oi])
         order_tasks.append((oi, m))
+
+    # Zero-flux pixels: DO_NOT_USE so template CCF + mask-KPF skip them (``d_bad`` / DQ gate).
+    # Force order endpoints to flux 0 and mark bad; also flag any non-finite or non-positive flux.
+    do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
+    do_not_use_u = np.uint32(do_not_use)
+    for oi in range(n_orders):
+        spec_2d[oi, 0] = 0.0
+        spec_2d[oi, -1] = 0.0
+    bad_flux = ~np.isfinite(spec_2d) | (spec_2d <= 0.0)
+    dq_2d[bad_flux] |= do_not_use_u
+
+    window_um_eff = _btsettl_ccf_mask_kpf_window_um(wave_2d[0])
     timing_rows.append(
         (
             "lte025: stack BSPEC 2-D model (interp Doppler-shifted BT-Settl per order)",
@@ -787,8 +1109,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
         )
     )
 
-    ge20_flat = _bspec_btsettl_ge20_mask_flat(wave_2d, order_tasks, WINDOW_UM)
-    do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
+    ge20_flat = _bspec_btsettl_ge20_mask_flat(wave_2d, order_tasks, window_um_eff)
     nthr = resolve_numba_threads(6)
     t0 = time.perf_counter()
     all_rvs, all_rv_errs, all_wl, _n_chunks_per_order, _chunk_start = (
@@ -800,7 +1121,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
             do_not_use,
             template_ln,
             flux_rest,
-            WINDOW_UM,
+            window_um_eff,
             order_tasks,
             max_cores=6,
             return_ccf=False,
@@ -810,7 +1131,8 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     parallel_wall = time.perf_counter() - t0
     timing_rows.append(
         (
-            f"lte025: process_orders_rvs_numba_parallel (numba_threads={nthr}, ccf_v_step=50 m/s)",
+            f"lte025: process_orders_rvs_numba_parallel (numba_threads={nthr}, ccf_v_step=50 m/s, "
+            f"window_um={window_um_eff:.6f})",
             parallel_wall,
             "process_orders_rvs_numba_parallel, _process_all_orders_ccf_numba (prange), "
             "process_all_orders_rvs_numba (_ccf_rv_from_ccf / fit_ccf_rv, serial)",
@@ -821,7 +1143,9 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     assert len(all_rvs) == len(ge20_flat), "flat chunk layout mismatch"
     eligible = ge20_flat & np.isfinite(all_wl)
     n_attempt = int(np.sum(eligible))
-    assert n_attempt > 10, "Expected many wavelength chunks across BSPEC orders"
+    assert n_attempt > 10, (
+        "Expected many wavelength chunks (raise HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS or widen wl window)"
+    )
 
     sel_fit = eligible & np.isfinite(all_rvs) & np.isfinite(all_rv_errs) & (all_rv_errs > 0)
     n_fit_ok = int(np.sum(sel_fit))
@@ -860,7 +1184,8 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
         algorithm="ccf_mask_kpf",
         mask_path=mas_lte049,
         do_fibers=["1"],
-        window_size_um=WINDOW_UM,
+        do_orders=orders,
+        window_size_um=window_um_eff,
         outlier_sigma=4.0,
         max_cores=6,
         save_preview=False,
@@ -913,7 +1238,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
         n_chunks_total = 0
         for oi, _order in bench_orders:
             d_bad = (np.asarray(dq_2d[oi], dtype=np.uint32) & do_not_use) != 0
-            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng = rv_per_chunks_mask_kpf(
+            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng, _, _ = rv_per_chunks_mask_kpf(
                 wave_2d[oi],
                 spec_2d[oi],
                 spec_err_2d[oi],
@@ -959,9 +1284,17 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
             flush=True,
         )
 
-    if _want_bspec_btsettl_all_previews():
+    if _want_bspec_btsettl_all_previews() or _want_bspec_btsettl_serialize_mask_ccf():
         timing_rows.extend(
-            _run_lte049_k2all_mask_kpf_previews(str(tmp_path), mask_path=mas_lte049)
+            _run_lte049_k2all_mask_kpf_previews(
+                str(tmp_path),
+                mask_path=mas_lte049,
+                do_orders=orders,
+                serialize_only=(
+                    _want_bspec_btsettl_serialize_mask_ccf()
+                    and not _want_bspec_btsettl_all_previews()
+                ),
+            )
         )
 
     _print_btsettl_test_timing_summary(
@@ -1046,7 +1379,7 @@ def _collect_btsettl_rv_injection_sweep(
             wave_ord, _lam_c = _order_wavelength_grid(m, n_pix)
             wave_2d[oi] = wave_ord
             spec_2d[oi] = np.interp(wave_ord / beta, w_rest, flux_rest).astype(np.float64)
-            spec_err_2d[oi] = np.maximum(spec_2d[oi] * 0.01, 0.1)
+            spec_err_2d[oi] = _bspec_simulated_flux_err(spec_2d[oi])
 
         if use_ccf_input_velocity_supersample:
             inj_m_s = float(rv_km_s) * 1000.0
@@ -1064,7 +1397,7 @@ def _collect_btsettl_rv_injection_sweep(
         chunk_errs: list[np.ndarray] = []
         for oi in range(n_orders):
             d_bad = (np.asarray(dq_2d[oi], dtype=np.uint32) & do_not_use) != 0
-            rvs_o, errs_o, _cen, _vg, _ccf, _wlo, _whi, _ng = rv_per_chunks_mask_kpf(
+            rvs_o, errs_o, _cen, _vg, _ccf, _wlo, _whi, _ng, _, _ = rv_per_chunks_mask_kpf(
                 wave_2d[oi],
                 spec_2d[oi],
                 spec_err_2d[oi],
@@ -1149,7 +1482,7 @@ def _btsettl_single_order_ccf_snapshot(
     beta = 1.0 + float(rv_km_s) / C_KM_S
     wave_ord, _lam_c = _order_wavelength_grid(echelle_order, n_pix)
     spec_1d = np.interp(wave_ord / beta, w_rest, flux_rest).astype(np.float64)
-    spec_err_1d = np.maximum(spec_1d * 0.01, 0.1)
+    spec_err_1d = _bspec_simulated_flux_err(spec_1d)
 
     do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
     nthr = resolve_numba_threads(6)
@@ -1168,20 +1501,26 @@ def _btsettl_single_order_ccf_snapshot(
             v_step_m_s=vs_broad,
         )
 
-    _rvs, _errs, _cen, v_grid, all_ccf, _wlo, _whi, all_n_good = rv_per_chunks_mask_kpf(
-        wave_ord,
-        spec_1d,
-        spec_err_1d,
-        d_bad,
-        mask_lines,
-        window_size_um=WINDOW_UM,
-        max_cores=nthr,
-        return_ccf=True,
-        **vg_kw,
+    _rvs, _errs, _cen, v_grid, _ccf_det, _wlo, _whi, all_n_good, all_ccf_std, all_ccf = (
+        rv_per_chunks_mask_kpf(
+            wave_ord,
+            spec_1d,
+            spec_err_1d,
+            d_bad,
+            mask_lines,
+            window_size_um=WINDOW_UM,
+            max_cores=nthr,
+            return_ccf=True,
+            **vg_kw,
+        )
     )
 
     vg = np.asarray(v_grid, dtype=np.float64)
     ac = np.asarray(all_ccf, dtype=np.float64)
+    assert all_ccf_std is not None and np.asarray(all_ccf_std).shape == ac.shape
+    _std = np.asarray(all_ccf_std, dtype=np.float64)
+    _ok = np.isfinite(_std)
+    assert np.all(_std[_ok] >= 0.0)
     ccf_mean = np.nanmean(ac, axis=0)
     v_step = (
         float(effective_ccf_v_step_for_fit(vg))
@@ -1639,25 +1978,68 @@ def test_btsettl_rv_injection_sweep_plotly_popup(btsettl_rv_sweep_template_path,
     webbrowser.open("file://" + os.path.abspath(out_ccf), new=2)
 
 
+def test_to_serializable_order_payload_includes_mask_weight_raw():
+    """Mask overlay JSON carries raw weights for drawing and tapered weights for CCF."""
+    from hispecdrp.primitives.stellar_rv.stellar_rv_preview import (
+        _to_serializable_order_payload,
+    )
+
+    payload = {
+        "fiber": "1",
+        "orders": [
+            {
+                "order": 1,
+                "wl_lo_um": 1.0,
+                "wl_hi_um": 1.1,
+                "wave": [1.0, 1.05],
+                "spec": [1.0, 1.0],
+                "mask_start_um": [1.02],
+                "mask_end_um": [1.02],
+                "mask_weight_raw": [1.0],
+                "mask_weight": [0.1],
+            }
+        ]
+    }
+    out = _to_serializable_order_payload(payload)
+    row = out["orders"][0]
+    assert row["mask_weight_raw"] == [1.0]
+    assert row["mask_weight"] == [0.1]
+
+
+def test_mask_order_edge_taper_multipliers_center_vs_edges():
+    """ccf_mask_kpf edge deweight: unity at ±N pixels from edges, ~0 at order ends."""
+    from hispecdrp.primitives.utils.ccf_utils import _mask_line_order_edge_taper_multipliers
+
+    w = np.linspace(1.0, 1.1, 201, dtype=np.float64)
+    lam = np.array([w[100], w[0], w[-1]], dtype=np.float64)
+    m = _mask_line_order_edge_taper_multipliers(
+        w, lam, edge_taper_pixels=100.0, exp_shape=5.0
+    )
+    assert m[0] >= 0.999
+    assert m[1] < 1e-10 and m[2] < 1e-10
+
+
 def test_ccf_mask_kpf_excludes_partial_edge_line_overlap():
     """
-    For mask CCF, a line is counted only when its shifted segment is fully inside
-    the chunk wavelength support; partially clipped edge overlaps are excluded.
+    For mask CCF (narrow-line model), a line contributes only when its **center**
+    wavelength (mean of start and end) after Doppler shift lies inside the chunk
+    pixel-edge span. A segment whose endpoints straddle the chunk but whose center
+    falls outside does not contribute.
     """
     wave = np.linspace(1.0, 1.1, 512, dtype=np.float64)
     spec = np.ones_like(wave)
     spec_err = np.ones_like(wave)
     dq_bad = np.zeros_like(wave, dtype=bool)
 
-    # One fully contained line and one partially overlapping edge line.
+    # One line with center inside the chunk; a second line with center below the chunk
+    # (segment endpoints could overlap the blue edge in a finite-width model, but the
+    # narrow-line kernel uses center only).
     full_only = MaskLines(
-        start_um=np.array([1.020], dtype=np.float64),
-        end_um=np.array([1.030], dtype=np.float64),
+        line_lambda_um=np.array([1.025], dtype=np.float64),
         weight=np.array([1.0], dtype=np.float64),
     )
     full_plus_partial = MaskLines(
-        start_um=np.array([1.020, 0.995], dtype=np.float64),
-        end_um=np.array([1.030, 1.005], dtype=np.float64),
+        line_lambda_um=np.array([1.025, 0.995], dtype=np.float64),
         weight=np.array([1.0, 1.0], dtype=np.float64),
     )
 
@@ -1673,6 +2055,7 @@ def test_ccf_mask_kpf_excludes_partial_edge_line_overlap():
         v_step_m_s=50.0,
         max_cores=2,
         return_ccf=True,
+        mask_ccf_detrend=False,
     )
     out_mix = rv_per_chunks_mask_kpf(
         wave,
@@ -1686,13 +2069,111 @@ def test_ccf_mask_kpf_excludes_partial_edge_line_overlap():
         v_step_m_s=50.0,
         max_cores=2,
         return_ccf=True,
+        mask_ccf_detrend=False,
     )
 
-    _rvs_a, _errs_a, _centers_a, v_a, ccf_a, _wla, _wha, _nga = out_full
-    _rvs_b, _errs_b, _centers_b, v_b, ccf_b, _wlb, _whb, _ngb = out_mix
+    _rvs_a, _errs_a, _centers_a, v_a, ccf_a, _wla, _wha, _nga, std_a, _pv_a = out_full
+    _rvs_b, _errs_b, _centers_b, v_b, ccf_b, _wlb, _whb, _ngb, std_b, _pv_b = out_mix
     assert ccf_a is not None and ccf_b is not None
+    assert std_a is not None and std_b is not None
+    assert std_a.shape == ccf_a.shape and std_b.shape == ccf_b.shape
+    assert np.all(std_a >= 0.0) and np.all(std_b >= 0.0)
     assert ccf_a.shape == ccf_b.shape == (1, len(v_a))
     assert np.allclose(v_a, v_b)
     assert np.allclose(ccf_a, ccf_b, rtol=0.0, atol=1e-12), (
         "Partially overlapping edge line should not contribute to ccf_mask_kpf CCF."
     )
+
+
+def test_mask_kpf_ccf_peak_prefers_prominent_local_maximum():
+    """
+    RV extraction must not always use the raw global CCF extremum. Mask-line CCF uses a
+    **fixed absorption convention** (minimum of weighted flux×mask near true RV): we fit on
+    ``-CCF``, so the physical signal is a **broad minimum** vs a tall narrow wrong feature.
+
+    A tall narrow spike in raw CCF (misleading local maximum in ``-CCF`` with low prominence)
+    should lose to the broader absorption dip at the true velocity.
+    """
+    from hispecdrp.primitives.utils.ccf_utils import _rv_from_ccf_mask_kpf_numba_single
+
+    n = 2001
+    v = np.linspace(-1.0e6, 1.0e6, n, dtype=np.float64)
+    j = np.arange(n, dtype=np.float64)
+    j_true = 1550
+    sig = 28.0
+    # Absorption-shaped mask CCF: broad dip at j_true; competing plateau + narrow bump elsewhere.
+    ccf = np.zeros(n, dtype=np.float64)
+    ccf[100:200] = 90.0
+    ccf[155] = 110.0
+    ccf = ccf + 200.0 - 85.0 * np.exp(-0.5 * ((j - float(j_true)) / sig) ** 2)
+
+    rv, _err, flip = _rv_from_ccf_mask_kpf_numba_single(v, ccf, 4096)
+    assert flip == 1
+    assert np.isfinite(rv)
+    assert abs(rv - float(v[j_true])) < abs(rv - float(v[155]))
+
+
+def test_nanmean_axis0_ignore_empty_columns_matches_nanmean_no_runtime_warning():
+    """Stacked CCF columns can be all-NaN; avoid numpy nanmean empty-slice RuntimeWarning."""
+    import warnings
+
+    from hispecdrp.primitives.utils.ccf_utils import _nanmean_axis0_ignore_empty_columns
+
+    x = np.array([[1.0, np.nan], [np.nan, np.nan], [3.0, np.nan]], dtype=np.float64)
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always", RuntimeWarning)
+        y = _nanmean_axis0_ignore_empty_columns(x)
+    assert not rec, f"unexpected warnings: {[str(w.message) for w in rec]}"
+    np.testing.assert_allclose(y, np.array([2.0, np.nan]), rtol=0, atol=0, equal_nan=True)
+
+
+def test_refine_ccf_rv_coarse_grid_parabolic_default_rv_err_is_bouchy_scale():
+    """
+    Coarse-grid parabolic refinement should report a Bouchy-style σ on the smoothed CCF,
+    not the order-10 m/s scatter from diagonal per-bin bootstrap on the raw grid.
+    """
+    from hispecdrp.primitives.utils.ccf_utils import (
+        CCFFitKpfConfig,
+        refine_ccf_rv_coarse_grid_parabolic,
+    )
+
+    v = np.arange(-150000, 150000, 50.0, dtype=np.float64)
+    v0 = 1234.5
+    sig = 2800.0
+    ccf = np.exp(-0.5 * ((v - v0) / sig) ** 2) * 1e-15
+    ccf_err = np.full_like(ccf, 1e-18)
+
+    rv, meta = refine_ccf_rv_coarse_grid_parabolic(
+        v,
+        ccf,
+        50.0,
+        ccf_err=ccf_err,
+        gaussian_sigma_m_s=sig,
+        mask_method="stellar",
+        config=CCFFitKpfConfig(),
+        bootstrap_rv_err_samples=0,
+    )
+    assert meta["ok"]
+    assert abs(rv - v0) < 0.02
+    err = float(meta["rv_err_m_s"])
+    assert np.isfinite(err) and 0.05 < err < 0.5
+    assert not np.isfinite(meta["rv_err_bootstrap_m_s"])
+
+    _rv2, meta_bs = refine_ccf_rv_coarse_grid_parabolic(
+        v,
+        ccf,
+        50.0,
+        ccf_err=ccf_err,
+        gaussian_sigma_m_s=sig,
+        mask_method="stellar",
+        config=CCFFitKpfConfig(),
+        bootstrap_rv_err_samples=32,
+        bootstrap_seed=0,
+    )
+    assert np.isfinite(meta_bs["rv_err_m_s"]) and meta_bs["rv_err_m_s"] < 0.5
+    assert np.isfinite(meta_bs["rv_err_bootstrap_m_s"])
+    assert meta_bs["rv_err_bootstrap_m_s"] > 5.0 * meta_bs["rv_err_m_s"]
+
+    assert meta["refine_curve_v_m_s"].shape == meta["refine_curve_ccf_smoothed"].shape
+    assert meta["refine_parabola_v_dense_m_s"].size >= 3
+    assert np.isfinite(meta["parabola_a"]) and meta["parabola_a"] < 0

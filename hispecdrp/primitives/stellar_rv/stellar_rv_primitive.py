@@ -41,6 +41,7 @@ from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
 
 from ...utils.parallelization_utils import resolve_numba_threads
 from ..utils.ccf_utils import (
+    DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM,
     assemble_rvccf_fib_table,
     build_hybrid_merged_velocity_grid,
     build_rvccf_chunk_supplement,
@@ -168,9 +169,23 @@ class StellarRVPrimitive(BasePrimitive):
     mask_path : str or None, default None
         Path to a SPIROU ``.mas`` or KPF-style two-column mask file. ``None`` selects the
         packaged default (see ``hispecdrp/data/masks/README.md``).
-    mask_width_um : float or None, default None
-        Half-width in µm for wavelength segments when using two-column masks; ignored for
-        SPIROU ``.mas`` lines that already carry start/end.
+    mask_width_um : float or None, default :data:`~hispecdrp.primitives.utils.ccf_utils.DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM`
+        Ignored by :func:`~hispecdrp.primitives.utils.ccf_utils.load_mask` (delta-line
+        model: two-column files use the listed wavelength as ``line_lambda_um``). Retained
+        for backward-compatible primitive configuration only.
+    mask_order_edge_taper_pixels : float, default ``100.0``
+        For ``ccf_mask_kpf``, multiply each mask line weight by an exponential taper when
+        the line lies within this many pixels of either end of the echelle order (full
+        weight from 100 pixels inward; weight tends to 0 at the edges). Use ``0`` to
+        disable. See :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`.
+    mask_order_edge_taper_exp_shape : float, default ``5.0``
+        Shape parameter for the exponential edge taper (see
+        :func:`~hispecdrp.primitives.utils.ccf_utils._mask_line_order_edge_taper_multipliers`).
+    mask_ccf_detrend : bool, default ``False``
+        For ``ccf_mask_kpf``, if True apply piecewise baseline removal to each mask CCF row
+        before RV extraction (:func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`).
+        Default ``False``: RV fit, RVCCF HDU, and Plotly preview use the undetrended
+        weight-normalized CCF.
 
     **Chunking & combined RV**
 
@@ -197,8 +212,15 @@ class StellarRVPrimitive(BasePrimitive):
         default ``300`` → ±300 m/s).
     ccf_velocity_step : float, default ``0.1``
         Velocity step (m/s) on the refined leg — **0.1 m/s = 10 cm s\\ :sup:`−1`**.
+        When an approximate RV is known, setting ``ccf_input_velocity`` (hybrid grid) is
+        strongly recommended: per-chunk ``RV_ERR`` uses the finest grid spacing near the
+        peak (see :mod:`hispecdrp.primitives.utils.ccf_utils`).
 
     **Performance & diagnostics**
+
+    Default broad CCF step is **50 m s\\ :sup:`−1`** (see ``ccf_utils._V_STEP``); set ``v_step`` to override.
+    Gaussian fits subsample very long velocity grids internally (see :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv` ``max_velocity_samples``).
+    Preview HTML downsamples CCF marker/residual traces for faster ``write_html``.
 
     max_cores : int or None, default None
         Requested thread count for Numba parallel order processing (``ccf_stellar_template``).
@@ -222,6 +244,12 @@ class StellarRVPrimitive(BasePrimitive):
         ``_output["mask_overlay_debug"]``).
     mask_overlay_velocity_m_s : float, default ``0.0``
         Starting mask-shift velocity (m/s) seeded into the overlay payload for visualization.
+    mask_overlay_max_spectrum_points : int or None, default None
+        Cap wavelength samples per order in mask-overlay HTML (uniform stride). ``None`` uses
+        ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS`` or built-in default (~2800).
+    mask_overlay_max_ccf_points : int or None, default None
+        Cap embedded ``ccf_v_m_s`` / ``ccf_err`` length per order. ``None`` uses
+        ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS`` or built-in default (~4000).
 
     **Inherited preview flags** (``ProcessingComponent``)
 
@@ -246,14 +274,15 @@ class StellarRVPrimitive(BasePrimitive):
                 # Sets effective Numba thread count (CI-safe clamp) for this block
                 with parallelization_utils.numba_thread_scope(max_cores)
                     ->
-                    # Numba kernel: computes CCF(v) for all chunks, parallel over chunk index
+                    # Numba kernel: delta-line mask CCF(v) for all chunks (parallel over chunk index)
                     ccf_utils._calc_mask_ccf_chunks_numba(..., parallel=True, prange over chunks)
                     ->
                     # Numba kernel: converts each chunk CCF row into RV + RV uncertainty
                     # (same chunk-parallel pattern with prange over chunks)
                     ccf_utils._rv_from_ccf_mask_kpf_rows_numba(..., parallel=True, prange over chunks)
                 ->
-                # Optional preview assembly uses CCF rows (sign-normalized per chunk fit)
+                # Preview uses the same weight-normalized mask CCF rows as the pipeline when
+                # mask_ccf_detrend is False (default); set mask_ccf_detrend True for detrended rows.
                 ccf_utils.finalize_ccf_preview_dict(...)
             ->
             # Rejects outlier chunks and computes weighted aggregate RV
@@ -282,12 +311,15 @@ class StellarRVPrimitive(BasePrimitive):
         "template_wavelength": None,
         "template_flux": None,
         "mask_path": None,
-        "mask_width_um": None,
+        "mask_width_um": DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM,
+        "mask_order_edge_taper_pixels": 100.0,
+        "mask_order_edge_taper_exp_shape": 5.0,
+        "mask_ccf_detrend": False,
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
         "v_min": None,  # m/s; broad CCF lower bound; None -> ccf_utils._V_MIN
         "v_max": None,  # m/s; broad CCF upper bound; None -> _V_MAX
-        "v_step": None,  # m/s; broad uniform step; None -> _V_STEP
+        "v_step": None,  # m/s; broad uniform step; None -> ccf_utils._V_STEP (default 50 m/s)
         "ccf_input_velocity": None,  # m/s; hybrid refined center when set
         "ccf_velocity_window": 300.0,  # m/s; half-width ± around ccf_input_velocity
         "ccf_velocity_step": 0.1,  # m/s; refined-grid step (10 cm/s)
@@ -299,6 +331,8 @@ class StellarRVPrimitive(BasePrimitive):
         "show_mask_overlay_debug": False,
         "save_mask_overlay_debug": False,
         "mask_overlay_velocity_m_s": 0.0,
+        "mask_overlay_max_spectrum_points": None,
+        "mask_overlay_max_ccf_points": None,
     }
 
     CALIBRATIONS = {}
@@ -648,7 +682,10 @@ class StellarRVPrimitive(BasePrimitive):
         Minimal delegation to :func:`run_ccf_mask_kpf_for_fiber`.
         """
         want_preview = bool(
-            getattr(self, "save_preview", False) or getattr(self, "show_preview", False)
+            getattr(self, "save_preview", False)
+            or getattr(self, "show_preview", False)
+            or getattr(self, "show_mask_overlay_debug", False)
+            or getattr(self, "save_mask_overlay_debug", False)
         )
         vm, vx, vs = self._ccf_broad_grid_m_s()
         logger.info(
@@ -694,6 +731,16 @@ class StellarRVPrimitive(BasePrimitive):
             max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
             debug_ccf=bool(getattr(self, "debug_ccf", False)),
+            mask_order_edge_taper_pixels=float(
+                getattr(self, "mask_order_edge_taper_pixels", 100.0)
+            ),
+            mask_order_edge_taper_exp_shape=float(
+                getattr(self, "mask_order_edge_taper_exp_shape", 5.0)
+            ),
+            ccf_mask_kpf_auto_hybrid_scout=bool(
+                getattr(self, "ccf_mask_kpf_auto_hybrid_scout", True)
+            ),
+            mask_ccf_detrend=bool(getattr(self, "mask_ccf_detrend", False)),
         )
         if preview_detail is not None:
             self._ccf_preview_by_fiber[fiber] = preview_detail
@@ -1255,7 +1302,7 @@ class StellarRVPrimitive(BasePrimitive):
             )
         if want_preview and order_slots and v_ref is not None:
             logger.info(
-                "Stellar RV: finalize_ccf_preview_dict (serial+preview) fiber=%s "
+                "Stellar RV: finalize_ccf_preview_dict (Gaussian slots + preview) fiber=%s "
                 "n_order_slots=%d",
                 fiber,
                 len(order_slots),
@@ -1269,7 +1316,7 @@ class StellarRVPrimitive(BasePrimitive):
                 v_step_m_s,
             )
             logger.info(
-                "Stellar RV: serial preview dict complete fiber=%s total_slots=%s",
+                "Stellar RV: preview dict complete fiber=%s total_slots=%s",
                 fiber,
                 len(preview_detail.get("slots", [])) if preview_detail else 0,
             )
