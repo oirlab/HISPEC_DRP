@@ -8,6 +8,20 @@ def pytest_addoption(parser):
         default=None,
         help="Directory to store test data"
     )
+    parser.addoption(
+        "--bspec-all-orders",
+        action="store_true",
+        default=False,
+        help=(
+            "BSPEC BT-Settl mask-KPF tests: use every echelle order from HISPECConfig "
+            "(sets HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1). Same as exporting that env var."
+        ),
+    )
+
+
+def pytest_configure(config):
+    if config.getoption("--bspec-all-orders", default=False):
+        os.environ["HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS"] = "1"
 
 @pytest.fixture(scope="session")
 def datadir(request):
