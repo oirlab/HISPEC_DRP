@@ -1,14 +1,13 @@
 from __future__ import annotations
-from pyexpat import model
-from koa_middleware import CalibrationStore
 import glob
+from koa_middleware import CalibrationStore, CalibrationSelector
 import os
 from .. import datamodels
-from koa_middleware.utils import generate_md5_file, is_valid_uuid
+from koa_middleware.utils import is_valid_uuid
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
-    from datamodels.base_model import DataModel, CalibrationModel
+    from datamodels.base_model import CalibrationModel
 
 import logging
 logger = logging.getLogger(__name__)
@@ -33,132 +32,115 @@ class HISPECCalibrationStore(CalibrationStore):
             **kwargs
         )
 
-    def sync_local_db_from_local_files(self, origin : str | None = None) -> list[dict]:
-        """
-        Scans the local cache directory for calibration files and populates
-        the local database with their metadata if they are missing.
-
-        This is a utility function to assist during development.
-
-        **May change in future versions**
-
-        Parameters
-        ----------
-        origin : str, optional
-            The origin to use for the calibrations being synced. If None, defaults to the store's origin.
-
-        Returns
-        -------
-        list[dict]
-            A list of calibration metadata dictionaries that were added to the local database.
-        """
-        if origin is None:
-            origin = self.origin
-        cals_added = []
-        local_files = glob.glob(os.path.join(self.data_dir, '*.fits'))
-        for filepath in local_files:
-            model = datamodels.open(filepath, meta_only=True)
-            cal_id = model.meta.cal_id
-            if not self.calibration_record_in_cache(cal_id, mode='id'):
-                _, cal_record_added = self.register_calibration(model, origin=origin)
-                cals_added.append(cal_record_added)
-                logger.info(f"Added calibration to local DB: {cal_record_added['filename']}")
-
-        return cals_added
-
-    def generate_calibration_version(
+    # Select and get calibration
+    def select_and_get_calibration(
         self,
-        cal : DataModel | str,
-        origin : str | None = None
-    ) -> str:
-        """
-        Generate the next calibration version ("001", "002", ...), scoped to
-        the calibration's version family and origin.
-
-        Parameters
-        ----------
-        cal : dict | DataModel | str
-            The calibration for which to generate the version.
-            Metadata records, datamodel, or filepath.
-        origin : str | None, optional
-            The origin to use for generating the version. If None, the origin
-            from the calibration metadata will be used.
-
-        Returns
-        -------
-        str
-            The calibration version string
-        """
-
-        model = datamodels.open(cal)
-        record = model.to_record()
-        return super().generate_calibration_version(record, origin=origin)
-    
-    def register_calibration(
-        self,
-        cal : str | DataModel,
-        origin : str | None = None,
-        new_version : bool = False
+        input,
+        selector : CalibrationSelector,
     ) -> tuple[str, dict]:
         """
-        Registers a calibration to the local cache and metadata database.
+        Selects the best calibration based on input data and a selection rule, then retrieves it.
+
+        This method uses a `CalibrationSelector` to identify the most appropriate calibration
+        for the given input data. Once selected, it retrieves the calibration file,
+        downloading it if it's not already cached locally.
 
         Parameters
         ----------
-        calibration : str | DataModel
-            A filepath or datamodel.
-        origin : str, optional
-            The origin to register the calibration under.
+        input
+            The input data product for which a calibration is needed.
+        selector : CalibrationSelector
+            An instance of a ``CalibrationSelector`` class.
 
         Returns
         -------
         tuple[str, dict]
-            A tuple containing:
-                - `str`: The local file path where the calibration was saved.
-                - `dict`: The calibration metadata dictionary as added to the database.
+            - ``str``: The local file path of the retrieved calibration file.
+            - ``dict``: The record of the selected calibration from the local database.
 
-        TODO: Consider refactoring. This is largely redundant with the parent class method. It sets additional metadata fields before converting to a record, but needs to perform the same prelimiary checks as the parent method before converting.
+        Example:
+            >>> # Assuming ``my_input_data`` and ``my_selector`` are defined
+            >>> local_filepath, calibration_record = store.select_and_get_calibration(my_input_data, my_selector)
+            >>> print(f"Calibration file: {local_filepath}")
+            >>> print(f"Calibration ID: {calibration_record['id']}")
+        """
+        if isinstance(input, datamodels.DataModel):
+            input = input.meta
+        elif isinstance(input, str):
+            if os.path.isfile(input):
+                model = datamodels.open(input, meta_only=True)
+                input = model.meta
+            else:
+                raise ValueError(f"Input string is not a valid file path: {input}")
+
+        return super().select_and_get_calibration(input, selector)
+
+    def save_calibration_file(self, cal: CalibrationModel, cal_record : dict | None = None) -> str:
+        """
+        Saves a calibration file to the local cache directory.
+
+        Parameters
+        ----------
+        cal : CalibrationModel
+            The calibration data model instance to save.
+        cal_record : dict | None
+            The corresponding record.
+
+        Returns
+        -------
+        str
+            The absolute local file path where the calibration file was saved.
         """
 
-        # Open model
-        model = datamodels.open(cal)
-
-        if self.calibration_record_in_cache(model, mode='id'):
-            msg = f"Calibration already exists in cache: {cal}. Skipping registration."
-            logger.warning(msg)
-            return None, None
+        # Add cal_version and origin to cal file
+        if cal_record is not None:
+            cal.meta.cal_version = cal_record.get('cal_version')
+            cal.meta.origin = cal_record.get('origin')
         
-        if not new_version and self.calibration_record_in_cache(cal, mode='version-family'):
-            msg = f"Calibration already exists in cache: {cal}! Skipping registration."
-            logger.warning(msg)
-            return None, None
+        # Generate filename
+        cal.generate_filename()
 
-        # Add origin to metadata
-        if origin is not None:
-            model.meta.origin = origin.upper()
-        if model.meta.origin is None:
-            model.meta.origin = self.origin
-        assert model.meta.origin is not None, "origin must be specified either in the input calibration metadata or as an argument to this function."
+        # Call super to save file and return filename
+        return super().save_calibration_file(cal, cal_record)
 
-        # Generate version and add to metadata
-        model.meta.cal_version = self.generate_calibration_version(model)
+    def sync_records_from_cached_files(
+        self,
+        cals : str | CalibrationModel | Sequence[str | CalibrationModel] | None = None,
+    ) -> None:
+        """
+        Populates the local database from existing cached calibration files.
 
-        # Ensure filename is up to date with version and other metadata
-        model.generate_filename()
+        Parameters
+        ----------
+        cals : str | CalibrationModel | Sequence[str | CalibrationModel]
+            A single calibration metadata dictionary or a data model instance,
+            or a list of these.
 
-        # Convert to record
-        cal_record = model.to_record()
-        
-        # Save to local cache
-        local_filepath = model.save(output_dir=self.data_dir)
+        Notes
+        -----
+        This method may be removed in the future if not found useful.
+        """
+        if cals is None:
+            cals = [
+                f for f in glob.glob(os.path.join(self.data_dir, "*"))
+                if os.path.isfile(f) and not os.path.basename(f).startswith(".")
+            ]
+        if isinstance(cals, (str, datamodels.CalibrationModel)):
+            cals = [cals]
+        cal_records_added = []
+        for cal in cals:
+            # Add new record (one at a time in case memory issues for many files)
+            if isinstance(cal, str):
+                cal_model = datamodels.open(cal, meta_only=True)
+            else:
+                cal_model = cal
 
-        # Generate MD5 and add to record
-        cal_record['file_md5'] = generate_md5_file(local_filepath)
+            cal_record = self._prepare_cal_record(cal_model, origin='LOCAL')
+            cal_record_added = self.local_db.add(cal_record)
+            cal_records_added.append(cal_record_added)
 
-        # Add new record to local DB
-        cal_record_added = self.local_db.add(cal_record)
-
-        return local_filepath, cal_record_added
+        # Return new new records
+        return cal_records_added
 
     def calibration_record_in_cache(
         self,
@@ -247,14 +229,3 @@ class HISPECCalibrationStore(CalibrationStore):
         new_local_filepath, new_record = self.register_calibration(model_out)
 
         return new_local_filepath, new_record
-    
-    #### Misc. ####
-    def __repr__(self):
-        return (
-            f"{self.__class__.__name__}(\n"
-            f"  instrument_name={self.instrument_name!r},\n"
-            f"  origin={self.origin!r},\n"
-            f"  local_db={self.local_db!r},\n"
-            f"  remote_db={self.remote_db!r}\n"
-            f")"
-        )

@@ -3,10 +3,12 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import re
 import sys, os
 sys.path.insert(0, os.path.abspath("../.."))
 
 import hispecdrp
+from hispecdrp import datamodels
 
 
 # -- Project information -----------------------------------------------------
@@ -88,5 +90,58 @@ def autodoc_skip_member(app, what, name, obj, skip, options):
         return True
     return skip
 
+def parse_literal_table(lines):
+    """
+    Detect a fixed-width table starting with 'HDU Name ... Description'.
+    Returns header and rows.
+    """
+    table_started = False
+    rows = []
+    header = None
+    for line in lines:
+        if re.match(r"HDU Name\s+HDU Type\s+Data Type", line):
+            table_started = True
+            header = re.split(r'\s{2,}', line.strip())
+            continue
+        if table_started:
+            if not line.strip() or re.match(r"-{2,}", line):
+                continue
+            row = re.split(r'\s{2,}', line.strip())
+            rows.append(row)
+    return (header, rows) if header and rows else (None, None)
+
+def convert_table_to_csv_directive(header, rows):
+    """
+    Build a .. csv-table:: directive from header + rows
+    """
+    lines = ['.. csv-table::',
+             '    :header: ' + ', '.join(f'"{h}"' for h in header),
+             '']
+    for row in rows:
+        lines.append("    " + ", ".join(f'"{c}"' for c in row))
+    return lines
+
+def replace_literal_table_for_html(app, what, name, obj, options, lines):
+    # Only HTML build
+    if app.builder.name != "html":
+        return
+    # Only classes
+    if not isinstance(obj, type):
+        return
+    # Only subclasses of CalibrationModel
+    if isinstance(obj, type) and not issubclass(obj, datamodels.DataModel):
+        return
+
+    header, rows = parse_literal_table(lines)
+    if header and rows:
+        csv_lines = convert_table_to_csv_directive(header, rows)
+        # Find the start of the literal table
+        start_index = next((i for i, l in enumerate(lines) if "HDU Name" in l), None)
+        if start_index is not None:
+            # Remove original table (header + separator + rows)
+            end_index = start_index + len(rows) + 2  # +2 for header & separator
+            lines[start_index:end_index] = csv_lines
+
 def setup(app):
     app.connect("autodoc-skip-member", autodoc_skip_member)
+    app.connect("autodoc-process-docstring", replace_literal_table_for_html)
