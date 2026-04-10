@@ -86,6 +86,9 @@ hispecdrp = ["datamodels/metadata/*.yaml", "configs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: optional long-running integration tests (see test docstrings).",
+]
 addopts = """
 --rootdir=.
 --ignore=tests/test_etalon_drift.py

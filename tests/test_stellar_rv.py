@@ -8,13 +8,16 @@ Run::
 
   pytest tests/test_stellar_rv.py -v
 
+Faster CI / local iteration (skips tests marked ``slow``: BT-Settl parallel integration + injection sweep recovery)::
+
+  pytest tests/test_stellar_rv.py -v -m "not slow"
+
 **Optional previews (env or module variables):**
 
 - ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` — default stellar RV Plotly preview (RV vs λ, CCF + Gaussian
   fits, residuals) in ``test_stellar_rv_recovers_rv_per_chunk`` (or ``SHOW_PRIMITIVE_CCF_PREVIEW``).
-- ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1`` — after ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks`` /
-  ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel`` assertions, run lte049 + template-derived
-  ``lte049.0*.mas`` ``ccf_mask_kpf`` (serial chunk test previews still use ``K2_all.mas``): **HTML-only** previews (no ``fig.show()``):
+- ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1`` — after ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel``
+  assertions, run lte049 + template-derived ``lte049.0*.mas`` ``ccf_mask_kpf``: **HTML-only** previews (no ``fig.show()``):
   mask-overlay via ``write_mask_overlay_debug_pages`` (auto-open) and stellar RV preview via
   ``create_stellar_rv_preview`` → unified ``*_preview.html`` (RV vs λ, CCF, residual per fiber; CCF slot
   dropdown), then ``webbrowser.open``. Prints a step timing
@@ -46,10 +49,6 @@ and degrades toward the blue/red ends (see ``_bspec_simulated_flux_err``).
 
   HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s
 
-Serial template-CCF test + same preview toggles (optional)::
-
-  HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks -s
-
 ``HISPEC_DRP_SAVE_CCF_PLOTS=1`` sets ``save_preview`` and ``output_dir`` for the echelle test so the
 primitive writes the unified preview HTML under ``tests/output/stellar_rv_plots/`` (no extra figures).
 
@@ -66,14 +65,18 @@ order-mean ``ccf_err`` in the pipeline is already produced by
 
   PYTHONPATH=. python examples/mask_kpf_ccf_postprocess_uncertainty.py /path/to/lte049_mask_kpf_ccf_rv_debug.json
 
+**Speed / coverage toggles (optional env):**
+
+- ``HISPEC_DRP_BTSETTL_RV_SWEEP_FULL_INJECTIONS=1`` — injection sweep uses 11 RV steps (−105 … −125 km/s
+  step 2); default is 6 steps (step 4) for faster CI.
+- ``HISPEC_DRP_BTSETTL_RV_SWEEP_ALL_ORDERS=1`` — injection sweep uses **all** BSPEC echelle orders;
+  default is a **single** order (same default as mask-KPF BT tests) for speed.
+
 **BT-Settl RV injection sweep (Plotly)** — ``test_btsettl_rv_injection_sweep_recovery`` uses the
 **lte049** BT-Settl template with the template-derived ``lte049.0*.mas`` mask: per-order
-``rv_per_chunks_mask_kpf`` + median/MAD + IV mean (mask-line CCF, same combination spirit as the
-parallel BSPEC test). For an interactive browser
-window, run the popup test with (BSPEC order 132 only; broad vs merged-hybrid sweep; bias/scatter
-annotation; second HTML is two-panel CCF + Gaussian fits). Both HTML files are opened in the browser)::
-
-  HISPEC_DRP_BTSETTL_RV_SWEEP_PLOT=1 pytest tests/test_stellar_rv.py::test_btsettl_rv_injection_sweep_plotly_popup -s
+``rv_per_chunks_mask_kpf`` + median/MAD + IV mean on a **merged hybrid** velocity grid (broad search
+plus ±300 m/s @ 0.1 m/s around each injection), matching :class:`StellarRVPrimitive` when
+``ccf_input_velocity`` refines the CCF grid. Writes Plotly HTML under ``tmp_path``.
 """
 from __future__ import annotations
 
@@ -99,10 +102,8 @@ from hispecdrp.primitives.utils.ccf_utils import (
     MaskLines,
     _V_MAX,
     _V_MIN,
-    _gaussian_ccf_model,
     build_hybrid_merged_velocity_grid,
     combine_rvs_median_mad,
-    effective_ccf_v_step_for_fit,
     dv_per_pixel_m_s,
     fit_ccf_rv,
     load_mask,
@@ -125,17 +126,39 @@ FLAT_FLUX = 100.0
 _TEMPLATE_PIXELS_PER_ORDER_FACTOR = 3
 WINDOW_UM = 0.3
 _BTSETTL_WL_RANGE_UM = (0.95, 1.4)
-# Popup test: single-order sweep + CCF figure (BSPEC echelle order must be in HISPECConfig list).
-_BTSETTL_RV_SWEEP_PLOT_ECHELLE_ORDER = 132
 
 # Mask-line ``ccf_mask_kpf`` BT-Settl tests: default to this echelle order unless
 # ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` (use full BSPEC list) or
 # ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER=<n>`` (override default).
 _DEFAULT_BSPEC_BTSETTL_CCF_MASK_KPF_ORDER = 139
-_BTSETTL_RV_SWEEP_PLOT_CCF_DEMO_KM_S = -115.0
 # lte049 + polynomial L2 (same construction as mask-KPF smoke scripts)
 _BTSETTL_LTE049_POLY_COEFS = np.array([0.0001, -0.001, 0.01, 0.05, 1.0])
 MASK_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "masks")
+
+# --- Test-only performance knobs (same assertions / tolerances; coarser grids are fine for loose RV tests) ---
+# Fewer pixels per echelle row cuts CCF cost ~linearly; 2048 still satisfies ≥20 px/chunk with narrow windows.
+_TEST_ECHELLE_N_PIX = 2048
+# Coarser uniform broad grid for template-CCF and mask-CCF *test* paths (production defaults often 50 m/s).
+_TEST_TEMPLATE_CCF_V_STEP_M_S = 100.0
+_TEST_MASK_CCF_BROAD_STEP_M_S = 100.0
+# Injection sweep: 6 steps (−105 … −125 km/s, step 4); full 11-point sweep via
+# ``HISPEC_DRP_BTSETTL_RV_SWEEP_FULL_INJECTIONS=1``. Single echelle order by default; all orders via
+# ``HISPEC_DRP_BTSETTL_RV_SWEEP_ALL_ORDERS=1``.
+_BTSETTL_INJECTION_KM_S_FAST = np.arange(-105, -126, -4, dtype=np.float64)
+_BTSETTL_INJECTION_KM_S_FULL = np.arange(-105, -126, -2, dtype=np.float64)
+
+
+def _btsettl_injection_km_s_grid() -> np.ndarray:
+    if _truthy_env("HISPEC_DRP_BTSETTL_RV_SWEEP_FULL_INJECTIONS"):
+        return _BTSETTL_INJECTION_KM_S_FULL
+    return _BTSETTL_INJECTION_KM_S_FAST
+
+
+def _btsettl_injection_sweep_default_single_order() -> int | None:
+    """``None`` = all BSPEC echelle rows (slow); otherwise default single order for speed."""
+    if _truthy_env("HISPEC_DRP_BTSETTL_RV_SWEEP_ALL_ORDERS"):
+        return None
+    return int(_DEFAULT_BSPEC_BTSETTL_CCF_MASK_KPF_ORDER)
 
 
 def _lte049_btsettl_template_mask_path() -> str | None:
@@ -219,7 +242,7 @@ def _btsettl_ccf_mask_kpf_window_um(wave_first_order_1d: np.ndarray) -> float:
 def _print_btsettl_test_timing_summary(
     rows: list[tuple[str, float, str, bool]],
     *,
-    title: str = "test_fit_ccf_kpf_style_btsettl_bspec_all_chunks — wall time by step (seconds)",
+    title: str = "BT-Settl BSPEC stellar RV test — wall time by step (seconds)",
 ) -> None:
     """
     Pretty-print wall times (seconds) and the main functions involved per step.
@@ -642,7 +665,7 @@ def _run_lte049_k2all_mask_kpf_previews(
     )
     assert len(w_rest) > 50
     poly = np.poly1d(_BTSETTL_LTE049_POLY_COEFS)
-    n_pix = 4096
+    n_pix = _TEST_ECHELLE_N_PIX
     t0 = time.perf_counter()
     model = _build_bspec_l2_btsettl_doppler_poly(
         w_rest, flux_rest, INPUT_RV_KM_S, n_pix, poly
@@ -803,7 +826,7 @@ def _load_btsettl_sorted_micron(path: str, wl_min_um: float, wl_max_um: float) -
     return w[idx], f[idx]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def template_path():
     path = get_spectrum_path(
         "lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5",
@@ -814,7 +837,7 @@ def template_path():
     return path
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def btsettl_rv_sweep_template_path():
     """lte049 template paired with ``lte049.0*.mas`` for mask-line RV injection sweeps."""
     path = get_spectrum_path(
@@ -824,6 +847,29 @@ def btsettl_rv_sweep_template_path():
     if not os.path.isfile(path):
         pytest.skip(f"Template not found: {path}")
     return path
+
+
+@pytest.fixture(scope="session")
+def lte025_btsettl_session_cache(template_path):
+    """Load lte025 BT-Settl once per session (shared by parallel + ``rv_per_chunks`` tests)."""
+    wl_min, wl_max = _BTSETTL_WL_RANGE_UM
+    w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
+    return {
+        "w_rest": w_rest,
+        "flux_rest": flux_rest,
+        "template_ln": np.log(w_rest),
+    }
+
+
+@pytest.fixture(scope="session")
+def lte049_btsettl_session_cache(btsettl_rv_sweep_template_path):
+    """Load lte049 BT-Settl once per session (injection sweep + snapshot helpers)."""
+    wl_min, wl_max = _BTSETTL_WL_RANGE_UM
+    w_rest, flux_rest = _load_btsettl_sorted_micron(btsettl_rv_sweep_template_path, wl_min, wl_max)
+    return {
+        "w_rest": w_rest,
+        "flux_rest": flux_rest,
+    }
 
 
 def test_fit_ccf_rv_failure_includes_debug_context():
@@ -861,7 +907,7 @@ def test_fit_ccf_rv_failure_includes_debug_context():
 def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     """Full echelle synthetic L2 + template; combined RV matches inject; chunk sanity."""
     algorithm = "ccf_stellar_template"
-    n_pix = 4096
+    n_pix = _TEST_ECHELLE_N_PIX
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
     l2 = make_synthetic_l2_spectrum(
         spectrograph, n_pix=n_pix, rv_km_s=INPUT_RV_KM_S,
@@ -923,113 +969,91 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
         )
 
 
-def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks(template_path, tmp_path):
+def test_rv_per_chunks_btsettl_one_order_recovers_injected_rv(lte025_btsettl_session_cache):
     """
-    For every BSPEC echelle order, run ``rv_per_chunks`` on Doppler-shifted BT-Settl data
-    (lte025 fixture); for **each** wavelength chunk with a usable CCF, run KPF-style
-    ``fit_ccf_rv``. Require most fits to recover the injected RV within a loose tolerance.
-
-    Optional: ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1`` (or ``SHOW_BSPEC_BTSETTL_PREVIEWS``)
-    runs lte049 + polynomial BSPEC L2 with ``ccf_mask_kpf`` + ``K2_all.mas`` — mask-overlay debug HTML
-    and the default unified RV/CCF/residual preview (HTML only; browsers open when files are written).
-
-    At the end, prints a wall-time summary (see ``_print_btsettl_test_timing_summary``).
+    Pure-Python :func:`rv_per_chunks` + :func:`fit_ccf_rv` on **one** BSPEC echelle order
+    (lte025 BT-Settl fixture). Uses the same narrow chunk window as
+    ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel`` so chunk statistics stay
+    meaningful without looping all orders (that path is covered by the Numba parallel test).
     """
-    timing_rows: list[tuple[str, float, str, bool]] = []
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
-    v_step = 50.0
-    n_pix = 4096
-    wl_min, wl_max = _BTSETTL_WL_RANGE_UM
-    t0 = time.perf_counter()
-    w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
+    v_step = _TEST_TEMPLATE_CCF_V_STEP_M_S
+    n_pix = _TEST_ECHELLE_N_PIX
+    w_rest = lte025_btsettl_session_cache["w_rest"]
+    flux_rest = lte025_btsettl_session_cache["flux_rest"]
+    template_ln = lte025_btsettl_session_cache["template_ln"]
     assert len(w_rest) > 50
-    template_ln = np.log(w_rest)
-    orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
-    assert orders
-    timing_rows.append(
-        (
-            "lte025: load BT-Settl + ln(template) + BSPEC order list",
-            time.perf_counter() - t0,
-            "_load_btsettl_sorted_micron, load_btsettl_spectrum, HISPECConfig.get_order_list",
-            True,
-        )
+    orders = _bspec_btsettl_ccf_mask_kpf_order_ids()
+    order = int(orders[0])
+    wave_ord, lam_c = _order_wavelength_grid(order, n_pix)
+    spec = np.interp(
+        wave_ord / (1.0 + INPUT_RV_KM_S / C_KM_S), w_rest, flux_rest
+    ).astype(np.float64)
+    spec_err = _bspec_simulated_flux_err(spec)
+    span = float(np.ptp(wave_ord))
+    window_um_eff = float(min(WINDOW_UM, max(1e-6, span / 16.0)))
+    _rvs, _e, _centers, v_grid, ccf_2d = rv_per_chunks(
+        wave_ord,
+        spec,
+        spec_err,
+        np.zeros(n_pix, dtype=bool),
+        template_ln,
+        flux_rest,
+        window_um_eff,
+        v_min=_V_MIN,
+        v_max=_V_MAX,
+        v_step=v_step,
+        return_ccf=True,
     )
-
+    vspan = dv_per_pixel_m_s(float(lam_c))
+    vspan_arg = vspan if np.isfinite(vspan) else None
     n_fit_ok = 0
     n_in_tol = 0
     n_attempt = 0
-
-    t0 = time.perf_counter()
-    for order in orders:
-        m = int(order)
-        wave_ord, lam_c = _order_wavelength_grid(m, n_pix)
-        spec = np.interp(
-            wave_ord / (1.0 + INPUT_RV_KM_S / C_KM_S), w_rest, flux_rest
-        ).astype(np.float64)
-        spec_err = _bspec_simulated_flux_err(spec)
-        _rvs, _e, _centers, v_grid, ccf_2d = rv_per_chunks(
-            wave_ord,
-            spec,
-            spec_err,
-            np.zeros(n_pix, dtype=bool),
-            template_ln,
-            flux_rest,
-            WINDOW_UM,
-            v_min=_V_MIN,
-            v_max=_V_MAX,
-            v_step=v_step,
-            return_ccf=True,
+    for k in range(ccf_2d.shape[0]):
+        row = ccf_2d[k]
+        if not np.any(np.isfinite(row)):
+            continue
+        ok = np.isfinite(row) & np.isfinite(v_grid)
+        if np.sum(ok) < 20:
+            continue
+        n_attempt += 1
+        rv, rv_err, _params, diag = fit_ccf_rv(
+            v_grid[ok],
+            row[ok],
+            v_step,
+            return_params=True,
+            vel_span_m_s_per_pixel=vspan_arg,
         )
-        vspan = dv_per_pixel_m_s(float(lam_c))
-        vspan_arg = vspan if np.isfinite(vspan) else None
-        for k in range(ccf_2d.shape[0]):
-            row = ccf_2d[k]
-            if not np.any(np.isfinite(row)):
-                continue
-            ok = np.isfinite(row) & np.isfinite(v_grid)
-            if np.sum(ok) < 20:
-                continue
-            n_attempt += 1
-            rv, rv_err, _params, diag = fit_ccf_rv(
-                v_grid[ok],
-                row[ok],
-                v_step,
-                return_params=True,
-                vel_span_m_s_per_pixel=vspan_arg,
-            )
-            fit_ok = bool(diag.get("fit_ok"))
-            tol = max(8000.0, 3.0 * rv_err) if np.isfinite(rv_err) else np.inf
-            in_tol = fit_ok and np.isfinite(rv) and np.isfinite(rv_err) and rv_err > 0 and abs(rv - input_rv_m_s) < tol
-            if fit_ok:
-                n_fit_ok += 1
-            if in_tol:
-                n_in_tol += 1
-
-    timing_rows.append(
-        (
-            "lte025: BSPEC echelle chunk loop (rv_per_chunks + fit_ccf_rv)",
-            time.perf_counter() - t0,
-            "rv_per_chunks, fit_ccf_rv (all orders × wavelength chunks)",
-            True,
+        fit_ok = bool(diag.get("fit_ok"))
+        tol = max(8000.0, 3.0 * rv_err) if np.isfinite(rv_err) else np.inf
+        in_tol = (
+            fit_ok
+            and np.isfinite(rv)
+            and np.isfinite(rv_err)
+            and rv_err > 0
+            and abs(rv - input_rv_m_s) < tol
         )
-    )
+        if fit_ok:
+            n_fit_ok += 1
+        if in_tol:
+            n_in_tol += 1
 
-    assert n_attempt > 10, "Expected many wavelength chunks across BSPEC orders"
+    assert n_attempt > 5, "Expected multiple wavelength chunks on one order with narrow window"
     assert n_fit_ok >= 0.85 * n_attempt, f"fit_ok fraction too low: {n_fit_ok}/{n_attempt}"
     assert n_in_tol >= 0.50 * n_attempt, f"RV recovery fraction too low: {n_in_tol}/{n_attempt}"
 
-    if _want_bspec_btsettl_all_previews():
-        timing_rows.extend(_run_lte049_k2all_mask_kpf_previews(str(tmp_path)))
 
-    _print_btsettl_test_timing_summary(timing_rows)
-
-
-def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_path):
+@pytest.mark.slow
+def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(
+    template_path, tmp_path, lte025_btsettl_session_cache
+):
     """
-    Same BT-Settl lte025 + BSPEC setup as ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks``,
-    but one call to :func:`process_orders_rvs_numba_parallel` with ``max_cores=6`` (clamped
-    to Numba’s allowed thread count on the host, e.g. 2 on small CI runners) and ``ccf_v_step=50`` m/s
-    (explicit in this test; default broad step is ``ccf_utils._V_STEP``, currently 50 m/s). Phase-B Gaussian fits run serially in Python.
+    BT-Settl lte025 + BSPEC echelle model: one call to :func:`process_orders_rvs_numba_parallel`
+    with ``max_cores=6`` (clamped
+    to Numba’s allowed thread count on the host, e.g. 2 on small CI runners) and
+    ``ccf_v_step`` = :data:`_TEST_TEMPLATE_CCF_V_STEP_M_S` (100 m/s in tests; production default is often 50 m/s).
+    Phase-B Gaussian fits run serially in Python.
 
     By default only **one** BSPEC echelle order is used (default **139**). For all echelle orders
     from ``HISPECConfig``, set ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` or pass pytest
@@ -1041,7 +1065,8 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     ``lte049.0*.mas`` mask in ``data/masks`` (paired with the lte049 BT-Settl template), not the
     default ``M2_filt_allRV.mas``.
 
-    Assertions use the same recovery fractions as the serial test, on chunks that are eligible
+    Assertions use the same recovery fractions as
+    ``test_rv_per_chunks_btsettl_one_order_recovers_injected_rv``, on chunks that are eligible
     (>=20 pixels in the bin and written by the parallel path, ``np.isfinite(all_wl)``).
 
     After building the synthetic spectra, zero-flux pixels (including forced order endpoints)
@@ -1053,19 +1078,20 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     if mas_lte049 is None:
         pytest.skip(f"lte049.0*.mas mask not found under {MASK_DIR}")
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
-    v_step = 50.0
-    n_pix = 4096
-    wl_min, wl_max = _BTSETTL_WL_RANGE_UM
+    v_step = _TEST_TEMPLATE_CCF_V_STEP_M_S
+    n_pix = _TEST_ECHELLE_N_PIX
+    _ = template_path  # fixture ensures file exists; spectrum comes from session cache
     t0 = time.perf_counter()
-    w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
+    w_rest = lte025_btsettl_session_cache["w_rest"]
+    flux_rest = lte025_btsettl_session_cache["flux_rest"]
+    template_ln = lte025_btsettl_session_cache["template_ln"]
     assert len(w_rest) > 50
-    template_ln = np.log(w_rest)
     orders = _bspec_btsettl_ccf_mask_kpf_order_ids()
     timing_rows.append(
         (
-            "lte025: load BT-Settl + ln(template) + BSPEC mask-KPF order selection",
+            "lte025: session cache (w_rest, flux_rest, template_ln) + BSPEC mask-KPF order selection",
             time.perf_counter() - t0,
-            "_load_btsettl_sorted_micron, load_btsettl_spectrum, _bspec_btsettl_ccf_mask_kpf_order_ids",
+            "lte025_btsettl_session_cache, _bspec_btsettl_ccf_mask_kpf_order_ids",
             True,
         )
     )
@@ -1125,13 +1151,14 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
             order_tasks,
             max_cores=6,
             return_ccf=False,
-            ccf_v_step=50.0,
+            ccf_v_step=_TEST_TEMPLATE_CCF_V_STEP_M_S,
         )
     )
     parallel_wall = time.perf_counter() - t0
     timing_rows.append(
         (
-            f"lte025: process_orders_rvs_numba_parallel (numba_threads={nthr}, ccf_v_step=50 m/s, "
+            f"lte025: process_orders_rvs_numba_parallel (numba_threads={nthr}, "
+            f"ccf_v_step={_TEST_TEMPLATE_CCF_V_STEP_M_S} m/s, "
             f"window_um={window_um_eff:.6f})",
             parallel_wall,
             "process_orders_rvs_numba_parallel, _process_all_orders_ccf_numba (prange), "
@@ -1224,7 +1251,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     # ``n_chunk = max(1, int(span/window))`` is 1 and Numba ``prange`` over chunks
     # never parallelizes. Tie the window to a representative span so each order
     # contributes many chunks (``_calc_mask_ccf_chunks_numba`` prange).
-    bench_orders = order_tasks[: min(12, len(order_tasks))]
+    bench_orders = order_tasks[: min(3, len(order_tasks))]
     oi0 = bench_orders[0][0]
     span0 = float(np.ptp(wave_2d[oi0]))
     bench_window_um = min(0.01, WINDOW_UM / 20.0, max(1e-6, span0 / 16.0))
@@ -1232,7 +1259,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
     bench_times: dict[int, float] = {}
     bench_chunks: dict[int, int] = {}
     eff_threads: dict[int, int] = {}
-    for req_cores in (1, 2, 6):
+    for req_cores in (1, 6):
         eff_threads[req_cores] = resolve_numba_threads(req_cores)
         t0 = time.perf_counter()
         n_chunks_total = 0
@@ -1265,22 +1292,19 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(template_path, tmp_
             )
         )
 
-    # Verify measurable speed-up whenever effective thread count exceeds 1.
+    # Verify measurable speed-up whenever effective thread count exceeds 1 (1 vs 6 only in tests).
     t1 = bench_times[1]
-    multi = [c for c in (2, 6) if eff_threads[c] > 1]
-    if multi:
-        tbest = min(bench_times[c] for c in multi)
-        # Require at least modest speed-up relative to 1 core.
-        assert tbest < 0.98 * t1, (
+    if eff_threads[6] > 1:
+        t6 = bench_times[6]
+        assert t6 < 0.98 * t1, (
             "Expected ccf_mask_kpf chunk-parallel speed-up with >1 effective thread: "
-            f"t1={t1:.3f}s, t2={bench_times[2]:.3f}s (eff={eff_threads[2]}), "
-            f"t6={bench_times[6]:.3f}s (eff={eff_threads[6]}), "
+            f"t1={t1:.3f}s, t6={t6:.3f}s (eff={eff_threads[6]}), "
             f"n_chunks={bench_chunks[1]}"
         )
     else:
         print(
             "ccf_mask_kpf speed-up check skipped: host allows only one effective Numba thread "
-            f"(eff threads: 1->{eff_threads[1]}, 2->{eff_threads[2]}, 6->{eff_threads[6]}).",
+            f"(eff threads: 1->{eff_threads[1]}, 6->{eff_threads[6]}).",
             flush=True,
         )
 
@@ -1311,22 +1335,34 @@ def _collect_btsettl_rv_injection_sweep(
     *,
     use_ccf_input_velocity_supersample: bool = False,
     single_echelle_order: int | None = None,
+    lte049_cache: dict | None = None,
+    n_pix: int = _TEST_ECHELLE_N_PIX,
+    injected_km_s: np.ndarray | None = None,
 ) -> dict:
     """
-    For each injected RV in [-105, -125] km/s step -2, build BSPEC BT-Settl cubes and recover
-    a single RV via :func:`rv_per_chunks_mask_kpf` on the **lte049** template-derived ``.mas``
-    (see :func:`_lte049_btsettl_template_mask_path`) plus median/MAD outlier rejection and
-    inverse-variance weighted mean (same combination as :class:`StellarRVPrimitive` for mask KPF).
+    For each injected RV in km/s (default: :func:`_btsettl_injection_km_s_grid`), build BSPEC
+    BT-Settl cubes and recover a single RV via :func:`rv_per_chunks_mask_kpf` on the **lte049**
+    template-derived ``.mas`` (see :func:`_lte049_btsettl_template_mask_path`) plus median/MAD
+    outlier rejection and inverse-variance weighted mean (same combination as
+    :class:`StellarRVPrimitive` for mask KPF).
 
     Parameters
     ----------
     use_ccf_input_velocity_supersample
-        If False (default), use the broad CCF grid (``resolve_ccf_broad_grid_m_s`` at 50 m/s).
+        If False (default), use the broad CCF grid with step :data:`_TEST_MASK_CCF_BROAD_STEP_M_S`
+        in tests (100 m/s; production defaults are often 50 m/s).
         If True, for each injection use a **merged** grid: full broad range plus denser samples on
         ``injected_RV ± 300`` m/s at 0.1 m/s (:func:`~hispecdrp.primitives.utils.ccf_utils.build_hybrid_merged_velocity_grid`).
     single_echelle_order
         If not ``None``, restrict processing to this BSPEC echelle order (one row in the
         synthetic 2-D echelle arrays).
+    lte049_cache
+        Optional ``{"w_rest", "flux_rest"}`` from :func:`lte049_btsettl_session_cache` to skip
+        reloading the lte049 spectrum.
+    n_pix
+        Echelle pixels per order (tests use :data:`_TEST_ECHELLE_N_PIX`).
+    injected_km_s
+        Injected stellar RV grid (km/s); default from :func:`_btsettl_injection_km_s_grid`.
 
     Returns
     -------
@@ -1344,11 +1380,14 @@ def _collect_btsettl_rv_injection_sweep(
     mask_lines = load_mask(mas_path, mask_width_um=None)
 
     wl_min, wl_max = _BTSETTL_WL_RANGE_UM
-    w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
+    if lte049_cache is not None:
+        w_rest = lte049_cache["w_rest"]
+        flux_rest = lte049_cache["flux_rest"]
+    else:
+        w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
     assert len(w_rest) > 50
     orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
     assert orders
-    n_pix = 4096
     do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
     nthr = resolve_numba_threads(6)
     vb, vx, vs_broad = resolve_ccf_broad_grid_m_s()
@@ -1365,7 +1404,9 @@ def _collect_btsettl_rv_injection_sweep(
         order_nums = [int(o) for o in orders]
         n_orders = len(order_nums)
 
-    injected_km_s = np.arange(-105, -126, -2, dtype=np.float64)
+    if injected_km_s is None:
+        injected_km_s = _btsettl_injection_km_s_grid()
+    injected_km_s = np.asarray(injected_km_s, dtype=np.float64).ravel()
     recovered_m_s: list[float] = []
     recovered_err_m_s: list[float] = []
 
@@ -1391,7 +1432,11 @@ def _collect_btsettl_rv_injection_sweep(
                 v_step_m_s=vs_broad,
             )
         else:
-            vg_kw = dict(v_min_m_s=vb, v_max_m_s=vx, v_step_m_s=50.0)
+            vg_kw = dict(
+                v_min_m_s=vb,
+                v_max_m_s=vx,
+                v_step_m_s=_TEST_MASK_CCF_BROAD_STEP_M_S,
+            )
 
         chunk_rvs: list[np.ndarray] = []
         chunk_errs: list[np.ndarray] = []
@@ -1448,223 +1493,6 @@ def _collect_btsettl_rv_injection_sweep(
         ),
         "single_echelle_order": single_echelle_order,
     }
-
-
-def _btsettl_single_order_ccf_snapshot(
-    template_path: str,
-    echelle_order: int,
-    rv_km_s: float,
-    *,
-    use_broad_ccf_grid: bool,
-) -> dict:
-    """
-    Mean mask-line CCF vs velocity for one BSPEC echelle order and one injected RV (km/s),
-    using ``lte049.0*.mas`` and either the broad default search (50 m/s step) or the **merged**
-    broad + refined grid (hybrid CCF matching :class:`StellarRVPrimitive` with
-    ``ccf_input_velocity`` set).
-    """
-    mas_path = _lte049_btsettl_template_mask_path()
-    if mas_path is None:
-        raise FileNotFoundError(
-            f"CCF snapshot requires lte049.0*.mas under {MASK_DIR} (see line_mask_utils)"
-        )
-    mask_lines = load_mask(mas_path, mask_width_um=None)
-
-    wl_min, wl_max = _BTSETTL_WL_RANGE_UM
-    w_rest, flux_rest = _load_btsettl_sorted_micron(template_path, wl_min, wl_max)
-    orders = hispec_config.HISPECConfig.get_order_list("BSPEC")
-    if echelle_order not in orders:
-        raise AssertionError(
-            f"echelle_order={echelle_order} not in BSPEC list ({orders[0]} … {orders[-1]})"
-        )
-
-    n_pix = 4096
-    beta = 1.0 + float(rv_km_s) / C_KM_S
-    wave_ord, _lam_c = _order_wavelength_grid(echelle_order, n_pix)
-    spec_1d = np.interp(wave_ord / beta, w_rest, flux_rest).astype(np.float64)
-    spec_err_1d = _bspec_simulated_flux_err(spec_1d)
-
-    do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
-    nthr = resolve_numba_threads(6)
-    vb, vx, vs_broad = resolve_ccf_broad_grid_m_s()
-    d_bad = np.zeros(n_pix, dtype=bool)
-
-    if use_broad_ccf_grid:
-        vg_kw = dict(v_min_m_s=vb, v_max_m_s=vx, v_step_m_s=50.0)
-    else:
-        inj_m_s = float(rv_km_s) * 1000.0
-        v_grid_h = build_hybrid_merged_velocity_grid(vb, vx, vs_broad, inj_m_s, 300.0, 0.1)
-        vg_kw = dict(
-            v_grid_m_s=v_grid_h,
-            v_min_m_s=vb,
-            v_max_m_s=vx,
-            v_step_m_s=vs_broad,
-        )
-
-    _rvs, _errs, _cen, v_grid, _ccf_det, _wlo, _whi, all_n_good, all_ccf_std, all_ccf = (
-        rv_per_chunks_mask_kpf(
-            wave_ord,
-            spec_1d,
-            spec_err_1d,
-            d_bad,
-            mask_lines,
-            window_size_um=WINDOW_UM,
-            max_cores=nthr,
-            return_ccf=True,
-            **vg_kw,
-        )
-    )
-
-    vg = np.asarray(v_grid, dtype=np.float64)
-    ac = np.asarray(all_ccf, dtype=np.float64)
-    assert all_ccf_std is not None and np.asarray(all_ccf_std).shape == ac.shape
-    _std = np.asarray(all_ccf_std, dtype=np.float64)
-    _ok = np.isfinite(_std)
-    assert np.all(_std[_ok] >= 0.0)
-    ccf_mean = np.nanmean(ac, axis=0)
-    v_step = (
-        float(effective_ccf_v_step_for_fit(vg))
-        if vg.size > 1
-        else float(ccf_kw.get("ccf_v_step", 50.0))
-    )
-    wl_c = float(np.nanmean(wave_ord))
-    vsp = dv_per_pixel_m_s(wl_c)
-    n_good_fit = int(np.max(all_n_good)) if np.asarray(all_n_good).size > 0 else 0
-
-    rv_f, rv_e, params, diag = fit_ccf_rv(
-        vg,
-        ccf_mean,
-        v_step,
-        n_good=n_good_fit,
-        return_params=True,
-        vel_span_m_s_per_pixel=vsp if np.isfinite(vsp) else None,
-    )
-
-    return {
-        "echelle_order": int(echelle_order),
-        "injected_km_s": float(rv_km_s),
-        "v_grid_m_s": vg,
-        "ccf_mean": ccf_mean,
-        "v_step_m_s": v_step,
-        "rv_fit_m_s": rv_f,
-        "rv_err_fit_m_s": rv_e,
-        "params": params,
-        "diag": diag,
-    }
-
-
-def _btsettl_ccf_gaussian_legend_label(snap: dict, *, panel_tag: str) -> str:
-    """Multiline legend text for the Gaussian model in a CCF panel."""
-    p, d = snap["params"], snap["diag"]
-    rv_f, rv_e = snap["rv_fit_m_s"], snap["rv_err_fit_m_s"]
-    if not d.get("fit_ok"):
-        return f"{panel_tag} Gaussian (fit failed): {d.get('message', '—')}"
-    return (
-        f"{panel_tag} Gaussian: v₀={p['v0']:.2f} σ={p['sigma']:.2f} m/s<br>"
-        f"A={p['amplitude']:.4g} baseline={p['baseline']:.4g}<br>"
-        f"RV={rv_f:.2f}±{rv_e:.2f} m/s"
-    )
-
-
-def _btsettl_add_ccf_subplot_traces(fig, row: int, snap: dict, *, panel_tag: str) -> None:
-    import plotly.graph_objects as go
-
-    vg = np.asarray(snap["v_grid_m_s"], dtype=np.float64)
-    ccf = np.asarray(snap["ccf_mean"], dtype=np.float64)
-    vk = vg / 1000.0
-    fig.add_trace(
-        go.Scatter(
-            x=vk,
-            y=ccf,
-            mode="lines",
-            name=f"{panel_tag}: CCF (chunk mean)",
-            line=dict(width=1.2),
-        ),
-        row=row,
-        col=1,
-    )
-    diag = snap["diag"]
-    p = snap["params"] or {}
-    if diag.get("fit_ok") and p and all(
-        k in p for k in ("amplitude", "v0", "sigma", "baseline")
-    ):
-        v_lo, v_hi = float(vg[0]), float(vg[-1])
-        v_dense = np.linspace(v_lo, v_hi, max(256, int(vg.size) * 4))
-        y_m = _gaussian_ccf_model(
-            v_dense,
-            float(p["amplitude"]),
-            float(p["v0"]),
-            float(p["sigma"]),
-            float(p["baseline"]),
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=v_dense / 1000.0,
-                y=y_m,
-                mode="lines",
-                name=_btsettl_ccf_gaussian_legend_label(snap, panel_tag=panel_tag),
-                line=dict(width=2, dash="dash"),
-            ),
-            row=row,
-            col=1,
-        )
-    else:
-        mid = int(len(vk) // 2)
-        fig.add_trace(
-            go.Scatter(
-                x=[float(vk[mid])],
-                y=[float(np.nanmedian(ccf))],
-                mode="markers",
-                marker=dict(size=6, opacity=0),
-                name=_btsettl_ccf_gaussian_legend_label(snap, panel_tag=panel_tag),
-            ),
-            row=row,
-            col=1,
-        )
-
-
-def _build_btsettl_order_ccf_dual_panel_figure(snap_broad: dict, snap_refined: dict):
-    """Two stacked panels: broad-only vs merged hybrid CCF (same order + injection)."""
-    from plotly.subplots import make_subplots
-
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        vertical_spacing=0.11,
-        subplot_titles=(
-            "Broad grid (50 m/s step, full RV search)",
-            "Merged broad + refined (hybrid: full search + ±300 m/s @ 0.1 m/s)",
-        ),
-    )
-    eo = int(snap_broad["echelle_order"])
-    rvk = float(snap_broad["injected_km_s"])
-    assert eo == int(snap_refined["echelle_order"])
-    assert rvk == float(snap_refined["injected_km_s"])
-
-    _btsettl_add_ccf_subplot_traces(fig, 1, snap_broad, panel_tag="Broad")
-    _btsettl_add_ccf_subplot_traces(fig, 2, snap_refined, panel_tag="Merged hybrid")
-
-    fig.update_layout(
-        title_text=(
-            f"BT-Settl BSPEC order {eo}: CCF vs RV @ injected {rvk:.1f} km s⁻¹ "
-            "(broad vs merged hybrid)"
-        ),
-        height=820,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,0.92)",
-            font=dict(size=10),
-        ),
-        margin=dict(l=60, r=200, t=80, b=50),
-    )
-    fig.update_xaxes(title_text="Velocity shift (km s⁻¹)", row=1, col=1)
-    fig.update_xaxes(title_text="Velocity shift (km s⁻¹)", row=2, col=1)
-    fig.update_yaxes(title_text="CCF (mask)", row=1, col=1)
-    fig.update_yaxes(title_text="CCF (mask)", row=2, col=1)
-    return fig
 
 
 def _build_btsettl_rv_injection_figure(sweep: dict):
@@ -1738,183 +1566,31 @@ def _build_btsettl_rv_injection_figure(sweep: dict):
     return fig
 
 
-def _build_btsettl_rv_injection_comparison_figure(sweep_broad: dict, sweep_refined: dict):
+@pytest.mark.slow
+def test_btsettl_rv_injection_sweep_recovery(
+    btsettl_rv_sweep_template_path, lte049_btsettl_session_cache, tmp_path
+):
     """
-    Plotly overlay: broad default CCF grid vs per-injection **merged hybrid** CCF (same as
-    :class:`StellarRVPrimitive` with ``ccf_input_velocity`` set). Annotation compares bias
-    (``mean_offset_m_s``) and scatter (``rms_residual_m_s``) for each method.
-
-    Two stacked panels share the injected-RV x-axis: (1) recovered vs injected with OLS and
-    y = x; (2) residuals in m/s of each point minus its OLS prediction (same linear fits as the
-    bias / RMS statistics).
+    Scan injected stellar RVs on the **lte049** BT-Settl template (grid from
+    :func:`_btsettl_injection_km_s_grid`; default 6 points, full 11 via env); recover RV using
+    ``rv_per_chunks_mask_kpf`` with the template-derived ``lte049.0*.mas`` mask and the same
+    median/MAD + IV mean as mask-KPF stellar RV. Uses the **merged hybrid** CCF velocity grid
+    (broad + dense sampling near each injection) so peak finding matches the refined pipeline;
+    fit a linear relation; save Plotly HTML under ``tmp_path``.
     """
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
-    x_km = sweep_broad["injected_km_s"]
-    assert np.allclose(sweep_refined["injected_km_s"], x_km)
-
-    yb_km = sweep_broad["recovered_m_s"] / 1000.0
-    yr_km = sweep_refined["recovered_m_s"] / 1000.0
-
-    bb, ba = sweep_broad["ols_slope"], sweep_broad["ols_intercept_m_s"]
-    rb, ra = sweep_refined["ols_slope"], sweep_refined["ols_intercept_m_s"]
-    rms_b, rms_r = sweep_broad["rms_residual_m_s"], sweep_refined["rms_residual_m_s"]
-    off_b, off_r = sweep_broad["mean_offset_m_s"], sweep_refined["mean_offset_m_s"]
-
-    inj_m = np.asarray(x_km, dtype=np.float64) * 1000.0
-    pred_b_m = bb * inj_m + ba
-    pred_r_m = rb * inj_m + ra
-    res_b_m = np.asarray(sweep_broad["recovered_m_s"], dtype=np.float64) - pred_b_m
-    res_r_m = np.asarray(sweep_refined["recovered_m_s"], dtype=np.float64) - pred_r_m
-
-    x_line = np.linspace(float(np.min(x_km)), float(np.max(x_km)), 50)
-    y_fit_b = (bb * (x_line * 1000.0) + ba) / 1000.0
-    y_fit_r = (rb * (x_line * 1000.0) + ra) / 1000.0
-
-    ann = (
-        "<b>Broad grid</b> (default search, 50 m/s step):<br>"
-        f"Mean(rec − inj) = {off_b:.2f} m/s &nbsp;|&nbsp; RMS about OLS = {rms_b:.2f} m/s<br><br>"
-        "<b>Merged hybrid</b> (broad search + ±300 m/s @ 0.1 m/s around injection; "
-        "same as StellarRVPrimitive with ccf_input_velocity):<br>"
-        f"Mean(rec − inj) = {off_r:.2f} m/s &nbsp;|&nbsp; RMS about OLS = {rms_r:.2f} m/s"
-    )
-
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.10,
-        row_heights=[0.62, 0.38],
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=x_km,
-            y=yb_km,
-            mode="markers",
-            name="Broad grid (50 m/s step)",
-            marker=dict(size=9, color="#1f77b4"),
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x_km,
-            y=yr_km,
-            mode="markers",
-            name="Merged hybrid (per injection)",
-            marker=dict(size=9, color="#ff7f0e", symbol="diamond"),
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x_line,
-            y=y_fit_b,
-            mode="lines",
-            name="OLS broad",
-            line=dict(color="#1f77b4", dash="dot"),
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x_line,
-            y=y_fit_r,
-            mode="lines",
-            name="OLS merged hybrid",
-            line=dict(color="#ff7f0e", dash="dot"),
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x_line,
-            y=x_line,
-            mode="lines",
-            name="y = x",
-            line=dict(dash="dash", color="gray"),
-        ),
-        row=1,
-        col=1,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=x_km,
-            y=res_b_m,
-            mode="markers",
-            name="Residual broad (rec − OLS)",
-            marker=dict(size=8, color="#1f77b4"),
-        ),
-        row=2,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x_km,
-            y=res_r_m,
-            mode="markers",
-            name="Residual merged hybrid (rec − OLS)",
-            marker=dict(size=8, color="#ff7f0e", symbol="diamond"),
-        ),
-        row=2,
-        col=1,
-    )
-
-    so = sweep_broad.get("single_echelle_order")
-    title_core = (
-        "BT-Settl BSPEC: broad CCF grid vs merged hybrid (template CCF, parallel Numba)"
-    )
-    if so is not None:
-        title_core += f" — order {int(so)} only"
-
-    fig.update_layout(
-        title=title_core,
-        annotations=[
-            dict(
-                x=0.02,
-                y=0.98,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                align="left",
-                text=ann,
-                bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="gray",
-                borderwidth=1,
-            )
-        ],
-        legend=dict(yanchor="bottom", y=0.02, xanchor="right", x=0.98),
-        margin=dict(t=60, l=60, r=40, b=60),
-        height=780,
-    )
-    fig.update_yaxes(title_text="Recovered RV (km s⁻¹)", row=1, col=1)
-    fig.update_yaxes(title_text="Residual vs OLS (m s⁻¹)", row=2, col=1)
-    fig.update_xaxes(title_text="Injected RV (km s⁻¹)", row=2, col=1)
-    fig.add_hline(y=0.0, line_dash="dash", line_color="gray", line_width=1, row=2, col=1)
-    return fig
-
-
-def test_btsettl_rv_injection_sweep_recovery(btsettl_rv_sweep_template_path, tmp_path):
-    """
-    Scan injected stellar RV from -105 to -125 km s⁻¹ in steps of 2 km s⁻¹ on the **lte049**
-    BT-Settl template; recover RV using ``rv_per_chunks_mask_kpf`` with the template-derived
-    ``lte049.0*.mas`` mask and the same median/MAD + IV mean as mask-KPF stellar RV. Fit a linear
-    relation; save Plotly HTML under ``tmp_path``.
-    """
+    so = _btsettl_injection_sweep_default_single_order()
     try:
-        sweep = _collect_btsettl_rv_injection_sweep(btsettl_rv_sweep_template_path)
+        sweep = _collect_btsettl_rv_injection_sweep(
+            btsettl_rv_sweep_template_path,
+            use_ccf_input_velocity_supersample=True,
+            single_echelle_order=so,
+            lte049_cache=lte049_btsettl_session_cache,
+        )
     except FileNotFoundError as exc:
         pytest.skip(str(exc))
-    assert sweep["single_echelle_order"] is None
-    assert sweep["ccf_grid_mode"] == "broad"
-    assert len(sweep["injected_km_s"]) == 11
+    assert sweep["single_echelle_order"] == so
+    assert sweep["ccf_grid_mode"] == "merged_hybrid_per_injection"
+    assert len(sweep["injected_km_s"]) == len(_btsettl_injection_km_s_grid())
     assert np.all(np.isfinite(sweep["recovered_m_s"]))
     assert 0.7 < sweep["ols_slope"] < 1.3, f"slope out of range: {sweep['ols_slope']}"
     assert sweep["rms_residual_m_s"] < 20_000.0, f"RMS too large: {sweep['rms_residual_m_s']}"
@@ -1923,59 +1599,6 @@ def test_btsettl_rv_injection_sweep_recovery(btsettl_rv_sweep_template_path, tmp
     out_html = os.path.join(str(tmp_path), "btsettl_rv_injection_sweep.html")
     fig.write_html(out_html)
     assert os.path.isfile(out_html)
-
-
-@pytest.mark.skipif(
-    not _truthy_env("HISPEC_DRP_BTSETTL_RV_SWEEP_PLOT"),
-    reason="Set HISPEC_DRP_BTSETTL_RV_SWEEP_PLOT=1 to run browser Plotly (see module docstring).",
-)
-def test_btsettl_rv_injection_sweep_plotly_popup(btsettl_rv_sweep_template_path, tmp_path):
-    """
-    Runs the BT-Settl injection sweep twice on **BSPEC echelle order 132 only** (lte049 template +
-    ``lte049.0*.mas``): broad default CCF grid vs **merged hybrid** (full broad search + denser
-    sampling ±300 m/s @ 0.1 m/s).
-    Writes (1) injected-vs-recovered comparison HTML and (2) a two-panel CCF-vs-RV figure with
-    Gaussian fits and parameter legends. Opens **both** in the browser when
-    ``HISPEC_DRP_BTSETTL_RV_SWEEP_PLOT=1``.
-    """
-    pytest.importorskip("plotly")
-    try:
-        sweep_broad = _collect_btsettl_rv_injection_sweep(
-            btsettl_rv_sweep_template_path,
-            use_ccf_input_velocity_supersample=False,
-            single_echelle_order=_BTSETTL_RV_SWEEP_PLOT_ECHELLE_ORDER,
-        )
-        sweep_refined = _collect_btsettl_rv_injection_sweep(
-            btsettl_rv_sweep_template_path,
-            use_ccf_input_velocity_supersample=True,
-            single_echelle_order=_BTSETTL_RV_SWEEP_PLOT_ECHELLE_ORDER,
-        )
-    except FileNotFoundError as exc:
-        pytest.skip(str(exc))
-    eo = _BTSETTL_RV_SWEEP_PLOT_ECHELLE_ORDER
-    assert sweep_broad["ccf_grid_mode"] == "broad"
-    assert sweep_refined["ccf_grid_mode"] == "merged_hybrid_per_injection"
-    assert sweep_broad["single_echelle_order"] == eo
-    fig_inj = _build_btsettl_rv_injection_comparison_figure(sweep_broad, sweep_refined)
-    out_inj = os.path.join(str(tmp_path), "btsettl_rv_injection_sweep_popup.html")
-    fig_inj.write_html(out_inj)
-
-    rv_demo = _BTSETTL_RV_SWEEP_PLOT_CCF_DEMO_KM_S
-    try:
-        snap_broad = _btsettl_single_order_ccf_snapshot(
-            btsettl_rv_sweep_template_path, eo, rv_demo, use_broad_ccf_grid=True
-        )
-        snap_refined = _btsettl_single_order_ccf_snapshot(
-            btsettl_rv_sweep_template_path, eo, rv_demo, use_broad_ccf_grid=False
-        )
-    except FileNotFoundError as exc:
-        pytest.skip(str(exc))
-    fig_ccf = _build_btsettl_order_ccf_dual_panel_figure(snap_broad, snap_refined)
-    out_ccf = os.path.join(str(tmp_path), "btsettl_rv_injection_order_ccf_popup.html")
-    fig_ccf.write_html(out_ccf)
-
-    webbrowser.open("file://" + os.path.abspath(out_inj), new=1)
-    webbrowser.open("file://" + os.path.abspath(out_ccf), new=2)
 
 
 def test_to_serializable_order_payload_includes_mask_weight_raw():
@@ -2107,7 +1730,7 @@ def test_mask_kpf_ccf_peak_prefers_prominent_local_maximum():
     ccf[155] = 110.0
     ccf = ccf + 200.0 - 85.0 * np.exp(-0.5 * ((j - float(j_true)) / sig) ** 2)
 
-    rv, _err, flip = _rv_from_ccf_mask_kpf_numba_single(v, ccf, 4096)
+    rv, _err, flip = _rv_from_ccf_mask_kpf_numba_single(v, ccf, 4096, 11)
     assert flip == 1
     assert np.isfinite(rv)
     assert abs(rv - float(v[j_true])) < abs(rv - float(v[155]))

@@ -22,6 +22,13 @@ There are **two** preview surfaces:
 Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
 mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
 
+**Entry points.** :func:`create_stellar_rv_preview` builds the standard multi-panel HTML;
+:func:`write_mask_overlay_debug_pages` writes interactive mask-overlay debug pages;
+:func:`collect_mask_overlay_payload_for_primitive` and related helpers assemble mask/spectrum
+payloads from ``ccf_utils`` and the L2 model. Environment variables
+``HISPEC_DRP_MASK_OVERLAY_*`` and ``HISPEC_DRP_SHOW_CCF_PREVIEW`` adjust downsampling and
+browser behavior (see in-file constants and call sites).
+
 Notes
 -----
 Plotly layout code is **HISPEC DRP–original**. For mask file format and upstream
@@ -545,11 +552,41 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
         return trace_indices
 
 
-def _format_rv_mean_m_s(v: float) -> str:
-    """Format pipeline mean RV (signed, m/s) for preview text."""
+def _format_rv_value(v: float, *, kind: str) -> str:
+    """
+    Format RV-related numbers for Plotly annotations.
+
+    * ``mean_ms`` — signed pipeline mean RV (m/s).
+    * ``sigma_ms`` — uncertainty in m/s.
+    * ``sigma_cm`` — uncertainty in cm/s (e.g. aggregate σ × 100).
+    """
+    if kind == "sigma_cm":
+        if not np.isfinite(v) or v < 0:
+            return "—"
+        x = float(v)
+        ax = abs(x)
+        if ax >= 1000.0:
+            return f"{x:.2f} cm/s"
+        if ax >= 10.0:
+            return f"{x:.3f} cm/s"
+        return f"{x:.5f} cm/s"
     if not np.isfinite(v):
         return "—"
     a = float(v)
+    if kind == "sigma_ms":
+        if a < 0:
+            return "—"
+        if a == 0.0:
+            return "0 m/s"
+        aval = abs(a)
+        if aval >= 10.0:
+            return f"{a:.3f} m/s"
+        if aval >= 0.1:
+            return f"{a:.4f} m/s"
+        if aval >= 1e-4:
+            return f"{a:.6f} m/s"
+        return f"{a:.3e} m/s"
+    # mean_ms
     if a == 0.0:
         return "0 m/s"
     aval = abs(a)
@@ -564,36 +601,6 @@ def _format_rv_mean_m_s(v: float) -> str:
     if aval >= 1e-4:
         return f"{a:.6f} m/s"
     return f"{a:.3e} m/s"
-
-
-def _format_rv_uncertainty_m_s(e: float) -> str:
-    """Format RV uncertainty in m/s without collapsing small values to ``0.0``."""
-    if not np.isfinite(e) or e < 0:
-        return "—"
-    a = float(e)
-    if a == 0.0:
-        return "0 m/s"
-    aval = abs(a)
-    if aval >= 10.0:
-        return f"{a:.3f} m/s"
-    if aval >= 0.1:
-        return f"{a:.4f} m/s"
-    if aval >= 1e-4:
-        return f"{a:.6f} m/s"
-    return f"{a:.3e} m/s"
-
-
-def _format_rv_uncertainty_cm_s(e_cm: float) -> str:
-    """Format aggregate RV uncertainty (cm/s) for the top-panel legend."""
-    if not np.isfinite(e_cm) or e_cm < 0:
-        return "—"
-    x = float(e_cm)
-    ax = abs(x)
-    if ax >= 1000.0:
-        return f"{x:.2f} cm/s"
-    if ax >= 10.0:
-        return f"{x:.3f} cm/s"
-    return f"{x:.5f} cm/s"
 
 
 def _pipeline_rv_avg_from_tables(output_model, fiber: str) -> tuple[float, float]:
@@ -1731,6 +1738,291 @@ def write_mask_overlay_debug_pages(primitive, output_model) -> dict[str, str]:
     return out
 
 
+def _preview_gaussian_cache_and_slot_legends(
+    primitive,
+    output_model,
+    fibers_with_ccf: list[str],
+) -> tuple[
+    dict[str, tuple[float, float, dict[int, tuple[float, float]]]],
+    dict[int, tuple],
+    dict[str, list[str]],
+]:
+    """Pipeline RV summaries, per-slot Gaussian cache, and CCF-panel HTML legend strings."""
+    pipeline_rv_by_fiber: dict[str, tuple[float, float, dict[int, tuple[float, float]]]] = {}
+    for fib in fibers_with_ccf:
+        tbl_rv = getattr(output_model, f"rvccf_fib{fib}", None)
+        rag, rae = _pipeline_rv_avg_from_tables(output_model, fib)
+        po: dict[int, tuple[float, float]] = {}
+        if tbl_rv is not None:
+            po = _per_order_pipeline_rv_iv_mean_m_s(tbl_rv)
+        pipeline_rv_by_fiber[fib] = (rag, rae, po)
+
+    fit_slot_cache: dict[int, tuple] = {}
+    slot_metadata: dict[str, list[str]] = {}
+    for fiber in fibers_with_ccf:
+        detail = primitive._ccf_preview_by_fiber.get(fiber)
+        if not detail:
+            slot_metadata[fiber] = []
+            continue
+        rv_agg_tbl, rv_agg_err_tbl, per_order_rv = pipeline_rv_by_fiber[fiber]
+        v_step = float(detail["v_step"])
+        slots = detail["slots"]
+        slot_metadata[fiber] = []
+        for sl in slots:
+            sid = id(sl)
+            if sid not in fit_slot_cache:
+                kpf = sl.get("kpf_fit")
+                if kpf and isinstance(kpf, dict) and kpf.get("params"):
+                    params = kpf.get("params") or {}
+                    diag = kpf.get("diagnostics") or {}
+                    rv_err = float(kpf.get("rv_err", np.nan))
+                    fit_slot_cache[sid] = (params, diag, rv_err)
+                else:
+                    _ce = sl.get("ccf_err")
+                    _ce_arr = (
+                        np.asarray(_ce, dtype=np.float64) if _ce is not None else None
+                    )
+                    _ccf_arr = np.asarray(sl["ccf"], dtype=np.float64)
+                    _rv, _re, params, diag = fit_ccf_rv(
+                        sl["v"],
+                        _ccf_arr,
+                        v_step,
+                        return_params=True,
+                        ccf_err=_ce_arr,
+                    )
+                    rv_err = float(_re) if _re is not None and np.isfinite(_re) else np.nan
+                    fit_slot_cache[sid] = (params, diag, rv_err)
+            params, diag, rv_err = fit_slot_cache[sid]
+            is_mask_kpf = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+            if sl.get("kind") == "mean":
+                meta = "Mean · all ord"
+                if np.isfinite(rv_agg_tbl):
+                    src = "IV" if is_mask_kpf else "RVCCFAVG"
+                    meta += (
+                        f"<br>⟨RV⟩ ({src}): {rv_agg_tbl / 1000.0:.4f} km/s · "
+                        f"σ={_format_rv_value(rv_agg_err_tbl, kind='sigma_ms')}"
+                    )
+                _ce_mn = sl.get("ccf_err")
+                if _ce_mn is not None:
+                    _ceam = np.asarray(_ce_mn, dtype=np.float64).ravel()
+                    _okm = np.isfinite(_ceam) & (_ceam > 0)
+                    if np.any(_okm):
+                        meta += f"<br>median σ_CCF ≈ {float(np.median(_ceam[_okm])):.3g}"
+            else:
+                o = sl.get("order", "?")
+                wl_lo, wl_hi = sl.get("wl_lo", np.nan), sl.get("wl_hi", np.nan)
+                if np.isfinite(wl_lo) and np.isfinite(wl_hi):
+                    meta = f"Ord {o} · λ{wl_lo:.3f}–{wl_hi:.3f} µm"
+                else:
+                    meta = f"Ord {o}"
+                oo: int | None
+                try:
+                    oo = int(o) if o is not None and str(o).strip() != "?" else None
+                except (TypeError, ValueError):
+                    oo = None
+                if oo is not None and oo in per_order_rv:
+                    rp, rpe = per_order_rv[oo]
+                    if is_mask_kpf:
+                        meta += (
+                            f"<br>RV (Gauss=table): {rp / 1000.0:.4f} km/s · "
+                            f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
+                        )
+                    else:
+                        meta += (
+                            f"<br>Pipe RVCCF: {rp / 1000.0:.4f} km/s · "
+                            f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
+                        )
+                elif oo is not None:
+                    lbl = "RV" if is_mask_kpf else "Pipe"
+                    meta += f"<br>{lbl}: —"
+            if params and diag.get("fit_ok"):
+                v0 = float(params["v0"])
+                sig = float(params["sigma"])
+                amp = float(params["amplitude"])
+                if is_mask_kpf and sl.get("kind") != "mean":
+                    meta += (
+                        f"<br>Gauss σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                    )
+                    try:
+                        oi = int(sl.get("order"))
+                    except (TypeError, ValueError):
+                        oi = None
+                    if oi is not None and oi in per_order_rv:
+                        rp = float(per_order_rv[oi][0])
+                        if np.isfinite(rp) and abs(v0 - rp) > 0.5:
+                            meta += f"<br><i>ΔRV refit {v0 - rp:+.2f} m/s</i>"
+                    meta += f"<br>σ_RV: {_preview_abbrev_ccf_uncertainty(diag)}"
+                else:
+                    meta += (
+                        f"<br>Gauss RV={v0 / 1000.0:.4f} km/s · "
+                        f"σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                    )
+                    if sl.get("kind") == "mean" and np.isfinite(rv_agg_tbl):
+                        dvp = v0 - rv_agg_tbl
+                        if np.isfinite(dvp) and abs(dvp) > 250.0:
+                            meta += f"<br><i>Gauss−⟨RV⟩tbl {dvp:+.0f} m/s</i>"
+                    elif sl.get("kind") != "mean" and not is_mask_kpf:
+                        try:
+                            oi = int(sl.get("order"))
+                        except (TypeError, ValueError):
+                            oi = None
+                        if oi is not None and oi in per_order_rv:
+                            rp = float(per_order_rv[oi][0])
+                            if np.isfinite(rp):
+                                meta += f"<br><i>Gauss−IV {v0 - rp:+.1f} m/s</i>"
+                    meta += (
+                        f"<br>formal σ_RV={_format_rv_value(float(rv_err), kind='sigma_ms')} · "
+                        f"{_preview_abbrev_ccf_uncertainty(diag)}"
+                    )
+                    _ce_sl = sl.get("ccf_err")
+                    if _ce_sl is not None:
+                        _cea = np.asarray(_ce_sl, dtype=np.float64).ravel()
+                        _okc = np.isfinite(_cea) & (_cea > 0)
+                        if np.any(_okc):
+                            meta += f"<br>median σ_CCF ≈ {float(np.median(_cea[_okc])):.3g}"
+            else:
+                meta += "<br><i>Gauss fit fail</i>"
+                fail_msg = (diag.get("message") or "").strip()
+                if fail_msg:
+                    tail = fail_msg[:40] + "…" if len(fail_msg) > 40 else fail_msg
+                    meta += f" · {tail}"
+            slot_metadata[fiber].append(meta)
+
+    logger.info(
+        "Stellar RV preview: CCF slot metadata and Gaussian cache ready "
+        "(cached distinct slot objects=%d)",
+        len(fit_slot_cache),
+    )
+    return pipeline_rv_by_fiber, fit_slot_cache, slot_metadata
+
+
+def _preview_export_combined_html(
+    primitive,
+    output_model,
+    fig_rv: go.Figure,
+    fig_ccf: go.Figure,
+    title_unified: str,
+) -> tuple[str, str, bool, str]:
+    """
+    Write unified HTML (and optional stacked PNG), optionally open browser.
+
+    Returns
+    -------
+    output_path_html, output_path_png, wrote_png, combined_html
+    """
+    base_path = _fits_base_path(primitive, output_model)
+    output_path_html = base_path.replace(".fits", "_preview.html")
+    output_path_png = base_path.replace(".fits", "_preview.png")
+    wrote_png = False
+
+    esc_title = html_module.escape(title_unified)
+    div_rv = pio.to_html(
+        fig_rv,
+        include_plotlyjs="cdn",
+        full_html=False,
+        config=PREVIEW_PLOTLY_HTML_CONFIG,
+    )
+    div_ccf = pio.to_html(
+        fig_ccf,
+        include_plotlyjs=False,
+        full_html=False,
+        config=PREVIEW_PLOTLY_HTML_CONFIG,
+    )
+    combined_html = (
+        "<!DOCTYPE html>\n"
+        '<html lang="en"><head><meta charset="utf-8">'
+        f"<title>{esc_title}</title>\n"
+        "<style>body{margin:0;font-family:system-ui,sans-serif;}"
+        "hr{border:none;border-top:1px solid #ccc;margin:0;}</style>\n"
+        "</head><body>\n"
+        f'<p style="margin:12px 16px 4px;font-size:14px;">{esc_title}</p>\n'
+        f"{div_rv}<hr>\n{div_ccf}\n"
+        "</body></html>\n"
+    )
+
+    if primitive.save_preview:
+        logger.info("Stellar RV preview: writing HTML path=%s", output_path_html)
+        Path(output_path_html).write_text(combined_html, encoding="utf-8")
+        logger.info("Stellar RV preview: HTML write complete")
+        if _preview_should_write_png(primitive):
+            try:
+                import kaleido
+
+                scale = float(getattr(primitive, "preview_png_scale", 2.0))
+                scale = max(0.25, min(scale, 8.0))
+                logger.info(
+                    "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f",
+                    output_path_png,
+                    scale,
+                )
+                try:
+                    from PIL import Image
+
+                    br = fig_rv.to_image(
+                        format="png", engine="kaleido", scale=scale
+                    )
+                    bc = fig_ccf.to_image(
+                        format="png", engine="kaleido", scale=scale
+                    )
+                    im_rv = Image.open(io.BytesIO(br)).convert("RGBA")
+                    im_ccf = Image.open(io.BytesIO(bc)).convert("RGBA")
+                    w = max(im_rv.width, im_ccf.width)
+                    h = im_rv.height + im_ccf.height
+                    stacked = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+                    stacked.paste(im_rv, (0, 0))
+                    stacked.paste(im_ccf, (0, im_rv.height))
+                    stacked.convert("RGB").save(output_path_png)
+                    wrote_png = True
+                except Exception:
+                    kaleido.write_fig_sync(
+                        fig_ccf, path=output_path_png, opts={"scale": scale}
+                    )
+                    wrote_png = True
+                logger.info("Stellar RV preview: PNG write complete")
+            except Exception as e:
+                logger.debug(
+                    "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
+                )
+        else:
+            if _env_flag("HISPEC_DRP_SHOW_CCF_PREVIEW"):
+                skip_reason = "HISPEC_DRP_SHOW_CCF_PREVIEW (HTML-only preview)"
+            elif not getattr(primitive, "preview_save_png", True):
+                skip_reason = "preview_save_png=False"
+            else:
+                skip_reason = "disabled"
+            logger.info(
+                "Stellar RV preview: skipping Kaleido PNG (%s)",
+                skip_reason,
+            )
+    if primitive.save_preview:
+        logger.info(
+            "Stellar RV preview: save_preview phase done html=%s png=%s",
+            output_path_html,
+            output_path_png if wrote_png else None,
+        )
+    if primitive.show_preview:
+        if primitive.save_preview and os.path.isfile(output_path_html):
+            uri = Path(output_path_html).resolve().as_uri()
+            logger.info("Stellar RV preview: opening browser %s", uri)
+            webbrowser.open(uri)
+        else:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix="_stellar_rv_preview.html",
+                delete=False,
+                encoding="utf-8",
+            ) as tf:
+                tf.write(combined_html)
+                tmp_path = tf.name
+            logger.info(
+                "Stellar RV preview: opening browser (temp HTML) path=%s", tmp_path
+            )
+            webbrowser.open(Path(tmp_path).resolve().as_uri())
+        logger.info("Stellar RV preview: browser open returned")
+
+    return output_path_html, output_path_png, wrote_png, combined_html
+
+
 def create_stellar_rv_preview(primitive) -> None:
     """
     Writes ``*_preview.html`` with **two** Plotly embeds:
@@ -1837,154 +2129,8 @@ def create_stellar_rv_preview(primitive) -> None:
         shared_yaxes=False,
     )
 
-    # Pipeline RV summaries (must match top RV panel and RVCCF tables).
-    pipeline_rv_by_fiber: dict[str, tuple[float, float, dict[int, tuple[float, float]]]] = {}
-    for fib in fibers_with_ccf:
-        tbl_rv = getattr(output_model, f"rvccf_fib{fib}", None)
-        rag, rae = _pipeline_rv_avg_from_tables(output_model, fib)
-        po: dict[int, tuple[float, float]] = {}
-        if tbl_rv is not None:
-            po = _per_order_pipeline_rv_iv_mean_m_s(tbl_rv)
-        pipeline_rv_by_fiber[fib] = (rag, rae, po)
-
-    # Precompute Gaussian fits and metadata text per (fiber, slot)
-    fit_slot_cache: dict[int, tuple] = {}
-    slot_metadata: dict[str, list[str]] = {}
-    for fiber in fibers_with_ccf:
-        detail = primitive._ccf_preview_by_fiber.get(fiber)
-        if not detail:
-            slot_metadata[fiber] = []
-            continue
-        rv_agg_tbl, rv_agg_err_tbl, per_order_rv = pipeline_rv_by_fiber[fiber]
-        v_step = float(detail["v_step"])
-        slots = detail["slots"]
-        slot_metadata[fiber] = []
-        for sl in slots:
-            sid = id(sl)
-            if sid not in fit_slot_cache:
-                kpf = sl.get("kpf_fit")
-                if kpf and isinstance(kpf, dict) and kpf.get("params"):
-                    params = kpf.get("params") or {}
-                    diag = kpf.get("diagnostics") or {}
-                    rv_err = float(kpf.get("rv_err", np.nan))
-                    fit_slot_cache[sid] = (params, diag, rv_err)
-                else:
-                    _ce = sl.get("ccf_err")
-                    _ce_arr = (
-                        np.asarray(_ce, dtype=np.float64) if _ce is not None else None
-                    )
-                    _ccf_arr = np.asarray(sl["ccf"], dtype=np.float64)
-                    _rv, _re, params, diag = fit_ccf_rv(
-                        sl["v"],
-                        _ccf_arr,
-                        v_step,
-                        return_params=True,
-                        ccf_err=_ce_arr,
-                    )
-                    rv_err = float(_re) if _re is not None and np.isfinite(_re) else np.nan
-                    fit_slot_cache[sid] = (params, diag, rv_err)
-            params, diag, rv_err = fit_slot_cache[sid]
-            is_mask_kpf = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
-            # Legend: for ccf_mask_kpf, RVCCF per order is defined as the Gaussian fit to the
-            # order-mean mask CCF (same as this panel's curve); template CCF keeps Numba chunk RVs.
-            if sl.get("kind") == "mean":
-                meta = "Mean · all ord"
-                if np.isfinite(rv_agg_tbl):
-                    src = "IV" if is_mask_kpf else "RVCCFAVG"
-                    meta += (
-                        f"<br>⟨RV⟩ ({src}): {rv_agg_tbl / 1000.0:.4f} km/s · "
-                        f"σ={_format_rv_uncertainty_m_s(rv_agg_err_tbl)}"
-                    )
-                _ce_mn = sl.get("ccf_err")
-                if _ce_mn is not None:
-                    _ceam = np.asarray(_ce_mn, dtype=np.float64).ravel()
-                    _okm = np.isfinite(_ceam) & (_ceam > 0)
-                    if np.any(_okm):
-                        meta += f"<br>median σ_CCF ≈ {float(np.median(_ceam[_okm])):.3g}"
-            else:
-                o = sl.get("order", "?")
-                wl_lo, wl_hi = sl.get("wl_lo", np.nan), sl.get("wl_hi", np.nan)
-                if np.isfinite(wl_lo) and np.isfinite(wl_hi):
-                    meta = f"Ord {o} · λ{wl_lo:.3f}–{wl_hi:.3f} µm"
-                else:
-                    meta = f"Ord {o}"
-                oo: int | None
-                try:
-                    oo = int(o) if o is not None and str(o).strip() != "?" else None
-                except (TypeError, ValueError):
-                    oo = None
-                if oo is not None and oo in per_order_rv:
-                    rp, rpe = per_order_rv[oo]
-                    if is_mask_kpf:
-                        meta += (
-                            f"<br>RV (Gauss=table): {rp / 1000.0:.4f} km/s · "
-                            f"σ={_format_rv_uncertainty_m_s(rpe)}"
-                        )
-                    else:
-                        meta += (
-                            f"<br>Pipe RVCCF: {rp / 1000.0:.4f} km/s · "
-                            f"σ={_format_rv_uncertainty_m_s(rpe)}"
-                        )
-                elif oo is not None:
-                    lbl = "RV" if is_mask_kpf else "Pipe"
-                    meta += f"<br>{lbl}: —"
-            if params and diag.get("fit_ok"):
-                v0 = float(params["v0"])
-                sig = float(params["sigma"])
-                amp = float(params["amplitude"])
-                if is_mask_kpf and sl.get("kind") != "mean":
-                    meta += (
-                        f"<br>Gauss σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
-                    )
-                    try:
-                        oi = int(sl.get("order"))
-                    except (TypeError, ValueError):
-                        oi = None
-                    if oi is not None and oi in per_order_rv:
-                        rp = float(per_order_rv[oi][0])
-                        if np.isfinite(rp) and abs(v0 - rp) > 0.5:
-                            meta += f"<br><i>ΔRV refit {v0 - rp:+.2f} m/s</i>"
-                    meta += f"<br>σ_RV: {_preview_abbrev_ccf_uncertainty(diag)}"
-                else:
-                    meta += (
-                        f"<br>Gauss RV={v0 / 1000.0:.4f} km/s · "
-                        f"σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
-                    )
-                    if sl.get("kind") == "mean" and np.isfinite(rv_agg_tbl):
-                        dvp = v0 - rv_agg_tbl
-                        if np.isfinite(dvp) and abs(dvp) > 250.0:
-                            meta += f"<br><i>Gauss−⟨RV⟩tbl {dvp:+.0f} m/s</i>"
-                    elif sl.get("kind") != "mean" and not is_mask_kpf:
-                        try:
-                            oi = int(sl.get("order"))
-                        except (TypeError, ValueError):
-                            oi = None
-                        if oi is not None and oi in per_order_rv:
-                            rp = float(per_order_rv[oi][0])
-                            if np.isfinite(rp):
-                                meta += f"<br><i>Gauss−IV {v0 - rp:+.1f} m/s</i>"
-                    meta += (
-                        f"<br>formal σ_RV={_format_rv_uncertainty_m_s(float(rv_err))} · "
-                        f"{_preview_abbrev_ccf_uncertainty(diag)}"
-                    )
-                    _ce_sl = sl.get("ccf_err")
-                    if _ce_sl is not None:
-                        _cea = np.asarray(_ce_sl, dtype=np.float64).ravel()
-                        _okc = np.isfinite(_cea) & (_cea > 0)
-                        if np.any(_okc):
-                            meta += f"<br>median σ_CCF ≈ {float(np.median(_cea[_okc])):.3g}"
-            else:
-                meta += "<br><i>Gauss fit fail</i>"
-                fail_msg = (diag.get("message") or "").strip()
-                if fail_msg:
-                    tail = fail_msg[:40] + "…" if len(fail_msg) > 40 else fail_msg
-                    meta += f" · {tail}"
-            slot_metadata[fiber].append(meta)
-
-    logger.info(
-        "Stellar RV preview: CCF slot metadata and Gaussian cache ready "
-        "(cached distinct slot objects=%d)",
-        len(fit_slot_cache),
+    pipeline_rv_by_fiber, fit_slot_cache, slot_metadata = (
+        _preview_gaussian_cache_and_slot_legends(primitive, output_model, fibers_with_ccf)
     )
 
     rv_panel_y_title: dict[str, str] = {}
@@ -2111,12 +2257,12 @@ def create_stellar_rv_preview(primitive) -> None:
                         col=1,
                     )
                 x_range = [float(np.nanmin(wl)), float(np.nanmax(wl))] if len(wl) else [0.0, 1.0]
-                mean_ms_str = _format_rv_mean_m_s(float(rv_agg))
+                mean_ms_str = _format_rv_value(float(rv_agg), kind="mean_ms")
                 mean_line = f"⟨RV⟩ = {mean_ms_str}"
                 if np.isfinite(rv_agg_err):
                     leg = (
-                        f"{mean_line}<br>σ(⟨RV⟩) = {_format_rv_uncertainty_m_s(float(rv_agg_err))} "
-                        f"({_format_rv_uncertainty_cm_s(float(rv_agg_err) * 100.0)})"
+                        f"{mean_line}<br>σ(⟨RV⟩) = {_format_rv_value(float(rv_agg_err), kind='sigma_ms')} "
+                        f"({_format_rv_value(float(rv_agg_err) * 100.0, kind='sigma_cm')})"
                     )
                 else:
                     leg = f"{mean_line}<br>uncertainty = —"
@@ -2128,8 +2274,8 @@ def create_stellar_rv_preview(primitive) -> None:
                     rms_bias_m_s = float(np.sqrt(np.sum(biases_m_s**2) / n_good))
                     rms_bias_cm_s = rms_bias_m_s * 100.0
                     leg += (
-                        f"<br>RMS(⟨RV⟩) = {_format_rv_uncertainty_m_s(rms_bias_m_s)} "
-                        f"({_format_rv_uncertainty_cm_s(rms_bias_cm_s)})"
+                        f"<br>RMS(⟨RV⟩) = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')} "
+                        f"({_format_rv_value(rms_bias_cm_s, kind='sigma_cm')})"
                     )
                 n_chunks_tbl = int(len(rv))
                 sb_lines = [
@@ -2140,8 +2286,8 @@ def create_stellar_rv_preview(primitive) -> None:
                 if np.isfinite(rv_agg_err):
                     sb_lines.append(
                         f"σ(⟨RV⟩) (aggregate uncertainty) = "
-                        f"{_format_rv_uncertainty_m_s(float(rv_agg_err))} "
-                        f"({_format_rv_uncertainty_cm_s(float(rv_agg_err) * 100.0)})"
+                        f"{_format_rv_value(float(rv_agg_err), kind='sigma_ms')} "
+                        f"({_format_rv_value(float(rv_agg_err) * 100.0, kind='sigma_cm')})"
                     )
                 else:
                     sb_lines.append("σ(⟨RV⟩) (aggregate uncertainty) = —")
@@ -2149,8 +2295,8 @@ def create_stellar_rv_preview(primitive) -> None:
                     rms_bias_cm_s2 = rms_bias_m_s * 100.0
                     sb_lines.append(
                         f"RMS scatter vs ⟨RV⟩ (inlier chunks) = "
-                        f"{_format_rv_uncertainty_m_s(rms_bias_m_s)} "
-                        f"({_format_rv_uncertainty_cm_s(rms_bias_cm_s2)})"
+                        f"{_format_rv_value(rms_bias_m_s, kind='sigma_ms')} "
+                        f"({_format_rv_value(rms_bias_cm_s2, kind='sigma_cm')})"
                     )
                     if n_good > 1:
                         std_c = float(np.std(rv[inlier], ddof=1))
@@ -2165,19 +2311,19 @@ def create_stellar_rv_preview(primitive) -> None:
                 )
                 thr_m_s = osig * mad_gate if np.isfinite(mad_gate) else float("nan")
                 sb_lines.append(
-                    f"MAD (chunk RVs, for gate) = {_format_rv_uncertainty_m_s(mad_gate)} · "
-                    f"cut = σ×MAD = {_format_rv_uncertainty_m_s(thr_m_s)} (σ={osig:g})"
+                    f"MAD (chunk RVs, for gate) = {_format_rv_value(mad_gate, kind='sigma_ms')} · "
+                    f"cut = σ×MAD = {_format_rv_value(thr_m_s, kind='sigma_ms')} (σ={osig:g})"
                 )
                 sb_lines.append(f"Chunks flagged outlier (MAD gate): {int(np.sum(~inl_c))}")
                 if np.isfinite(sig_iv):
                     sb_lines.append(
                         f"σ_IV (inverse-variance SE, inliers) = "
-                        f"{_format_rv_uncertainty_m_s(sig_iv)}"
+                        f"{_format_rv_value(sig_iv, kind='sigma_ms')}"
                     )
                 if np.isfinite(scatter_se):
                     sb_lines.append(
                         f"scatter_SE (MAD of inlier RVs / √N) = "
-                        f"{_format_rv_uncertainty_m_s(scatter_se)}"
+                        f"{_format_rv_value(scatter_se, kind='sigma_ms')}"
                     )
                 rv_sidebar_by_fiber[fiber] = "<br>".join(sb_lines)
                 if np.any(in_ok):
@@ -2213,7 +2359,7 @@ def create_stellar_rv_preview(primitive) -> None:
                 )
                 if np.isfinite(rv_agg_err) and rv_agg_err > 0:
                     sig_cm = float(rv_agg_err) * 100.0
-                    sig_cm_lbl = _format_rv_uncertainty_cm_s(sig_cm)
+                    sig_cm_lbl = _format_rv_value(sig_cm, kind="sigma_cm")
                     for y_val, label in [(sig_cm, f"+1σ ({sig_cm_lbl})"), (-sig_cm, f"-1σ ({sig_cm_lbl})")]:
                         fig_rv.add_trace(
                             go.Scatter(
@@ -2719,115 +2865,9 @@ def create_stellar_rv_preview(primitive) -> None:
         len(fig_ccf.data),
     )
 
-    base_path = _fits_base_path(primitive, output_model)
-    output_path_html = base_path.replace(".fits", "_preview.html")
-    output_path_png = base_path.replace(".fits", "_preview.png")
-    wrote_png = False
-
-    esc_title = html_module.escape(title_unified)
-    div_rv = pio.to_html(
-        fig_rv,
-        include_plotlyjs="cdn",
-        full_html=False,
-        config=PREVIEW_PLOTLY_HTML_CONFIG,
+    output_path_html, output_path_png, wrote_png, _combined_html = (
+        _preview_export_combined_html(primitive, output_model, fig_rv, fig_ccf, title_unified)
     )
-    div_ccf = pio.to_html(
-        fig_ccf,
-        include_plotlyjs=False,
-        full_html=False,
-        config=PREVIEW_PLOTLY_HTML_CONFIG,
-    )
-    combined_html = (
-        "<!DOCTYPE html>\n"
-        '<html lang="en"><head><meta charset="utf-8">'
-        f"<title>{esc_title}</title>\n"
-        "<style>body{margin:0;font-family:system-ui,sans-serif;}"
-        "hr{border:none;border-top:1px solid #ccc;margin:0;}</style>\n"
-        "</head><body>\n"
-        f'<p style="margin:12px 16px 4px;font-size:14px;">{esc_title}</p>\n'
-        f"{div_rv}<hr>\n{div_ccf}\n"
-        "</body></html>\n"
-    )
-
-    if primitive.save_preview:
-        logger.info("Stellar RV preview: writing HTML path=%s", output_path_html)
-        Path(output_path_html).write_text(combined_html, encoding="utf-8")
-        logger.info("Stellar RV preview: HTML write complete")
-        if _preview_should_write_png(primitive):
-            try:
-                import kaleido
-
-                scale = float(getattr(primitive, "preview_png_scale", 2.0))
-                scale = max(0.25, min(scale, 8.0))
-                logger.info(
-                    "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f",
-                    output_path_png,
-                    scale,
-                )
-                try:
-                    from PIL import Image
-
-                    br = fig_rv.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
-                    bc = fig_ccf.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
-                    im_rv = Image.open(io.BytesIO(br)).convert("RGBA")
-                    im_ccf = Image.open(io.BytesIO(bc)).convert("RGBA")
-                    w = max(im_rv.width, im_ccf.width)
-                    h = im_rv.height + im_ccf.height
-                    stacked = Image.new("RGBA", (w, h), (255, 255, 255, 255))
-                    stacked.paste(im_rv, (0, 0))
-                    stacked.paste(im_ccf, (0, im_rv.height))
-                    stacked.convert("RGB").save(output_path_png)
-                    wrote_png = True
-                except Exception:
-                    kaleido.write_fig_sync(
-                        fig_ccf, path=output_path_png, opts={"scale": scale}
-                    )
-                    wrote_png = True
-                logger.info("Stellar RV preview: PNG write complete")
-            except Exception as e:
-                logger.debug(
-                    "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
-                )
-        else:
-            if _env_flag("HISPEC_DRP_SHOW_CCF_PREVIEW"):
-                skip_reason = "HISPEC_DRP_SHOW_CCF_PREVIEW (HTML-only preview)"
-            elif not getattr(primitive, "preview_save_png", True):
-                skip_reason = "preview_save_png=False"
-            else:
-                skip_reason = "disabled"
-            logger.info(
-                "Stellar RV preview: skipping Kaleido PNG (%s)",
-                skip_reason,
-            )
-    if primitive.save_preview:
-        logger.info(
-            "Stellar RV preview: save_preview phase done html=%s png=%s",
-            output_path_html,
-            output_path_png if wrote_png else None,
-        )
-    if primitive.show_preview:
-        if primitive.save_preview and os.path.isfile(output_path_html):
-            uri = Path(output_path_html).resolve().as_uri()
-            logger.info("Stellar RV preview: opening browser %s", uri)
-            webbrowser.open(uri)
-        else:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix="_stellar_rv_preview.html",
-                delete=False,
-                encoding="utf-8",
-            ) as tf:
-                tf.write(combined_html)
-                tmp_path = tf.name
-            logger.info(
-                "Stellar RV preview: opening browser (temp HTML) path=%s", tmp_path
-            )
-            webbrowser.open(Path(tmp_path).resolve().as_uri())
-        logger.info("Stellar RV preview: browser open returned")
     logger.info("Stellar RV preview: create_stellar_rv_preview finished")
 
     primitive._output["preview"] = {
