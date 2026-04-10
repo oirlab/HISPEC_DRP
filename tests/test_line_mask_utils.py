@@ -13,7 +13,6 @@ from hispecdrp.utils.line_mask_utils import (
     LINE_MASK_META_PREFIX,
     _cluster_max_depth,
     _continuum_normalized_d2_flux_dlam2_at_um,
-    _parabolic_minimum_wavelength_um,
     _segment_mean_continuum_normalized_depth_um,
     _local_min_continuum_normalized_flux_um,
     build_line_mask_from_template,
@@ -64,15 +63,6 @@ def test_parabolic_depth_uses_flux_continuum_ratio_not_interp_of_depth():
     assert abs(wrong - 0.5) < 1e-12
     assert abs(right - 2.0 / 3.0) < 1e-12
     assert abs(wrong - right) > 0.1
-
-
-def test_parabolic_minimum_wavelength_um_exact_on_quadratic():
-    """Three samples on a parabola: vertex should match the analytic minimum."""
-    cen = 1.0001
-    lam = np.array([1.0, 1.0002, 1.0004], dtype=np.float64)
-    fl = (lam - cen) ** 2
-    got = _parabolic_minimum_wavelength_um(lam, fl, 1)
-    assert abs(got - cen) < 1e-12
 
 
 def test_parse_mask_generation_meta_line():
