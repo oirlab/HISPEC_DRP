@@ -89,9 +89,14 @@ class HISPECConfig:
             model.meta.instrument_mode = 'YJHK'
         if model.meta.spectrograph is None:
             model.meta.spectrograph = 'BSPEC'
+        # Only fill echelle order bounds when unset. Unconditional overwrite breaks
+        # models whose 2-D spectra cover a subset of orders: meta must stay aligned
+        # with ``wave_fib*`` axis 0 (e.g. L2Model.from_datamodels + StellarRVPrimitive).
         if model.meta.spectrograph in cls.echelle_orders:
-            model.meta.order_start = cls.echelle_orders[model.meta.spectrograph]['order_start']
-            model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
+            if model.meta.order_start is None:
+                model.meta.order_start = cls.echelle_orders[model.meta.spectrograph]['order_start']
+            if model.meta.order_end is None:
+                model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
         # TODO: Defaults need to know which LFC, ignore until we have a more robust way to determine this from the metadata

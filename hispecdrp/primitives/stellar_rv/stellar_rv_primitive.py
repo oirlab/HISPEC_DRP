@@ -57,6 +57,7 @@ from ..utils.ccf_utils import (
     DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM,
     assemble_rvccf_fib_table,
     build_hybrid_merged_velocity_grid,
+    ccf_order_n_chunks_for_span,
     build_rvccf_chunk_supplement,
     effective_ccf_v_step_for_fit,
     resolve_ccf_broad_grid_m_s,
@@ -182,23 +183,6 @@ class StellarRVPrimitive(BasePrimitive):
     mask_order_edge_taper_exp_shape : float
         **Default:** ``5.0``. Positive shape parameter :math:`s` in the exponential taper
         (see :func:`~hispecdrp.primitives.utils.ccf_utils._mask_line_order_edge_taper_multipliers`).
-    mask_ccf_detrend : bool
-        **Default:** ``False``. If ``True``, subtract a piecewise baseline from each mask CCF row
-        before RV extraction. If ``False``, RV fits, RVCCF columns, and previews use the
-        **weight-normalized** mask CCF without that detrending.
-    mask_ccf_detrend_breaks : str
-        **Default:** ``"mask"``. How to choose segment boundaries for piecewise detrend when
-        ``mask_ccf_detrend`` is ``True``: ``"mask"`` uses mask-line / chunk-edge crossing
-        velocities; ``"empirical"`` uses legacy |ΔCCF| jump detection. Passed to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`.
-    mask_ccf_detrend_jump_mad_sigma : float
-        **Default:** ``8.0``. MAD multiplier for empirical jump detection when
-        ``mask_ccf_detrend_breaks="empirical"`` (see :func:`~hispecdrp.primitives.utils.ccf_utils._detrend_mask_ccf_piecewise`).
-    mask_ccf_detrend_base_percentile : float
-        **Default:** ``35.0``. Percentile used as baseline reference within each RV segment when
-        detrending (see ``rv_per_chunks_mask_kpf`` / ``_detrend_mask_ccf_piecewise``).
-    mask_ccf_detrend_min_segment_pixels : int
-        **Default:** ``5``. Minimum number of velocity samples per segment for piecewise detrend.
     ccf_mask_kpf_auto_hybrid_scout : bool
         **Default:** ``True``. Passed to
         :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_mask_kpf_for_fiber`. When ``True``,
@@ -236,9 +220,13 @@ class StellarRVPrimitive(BasePrimitive):
     ccf_velocity_step : float
         **Default:** ``0.1``. Spacing (m/s) on the refined hybrid leg — **10 cm s\\ :sup:`−1`** per step.
     mask_kpf_parabolic_vertex_n_samples : int
-        **Default:** ``11``. For ``ccf_mask_kpf``, odd count (≥ 3) of coarse CCF samples used in the
-        local parabolic vertex fit around the smoothed peak per chunk; even inputs are rounded up,
-        small values clamped (see :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`).
+        **Default:** ``31``. For ``ccf_mask_kpf``, **odd** count (≥ 3) of coarse velocity samples in
+        the LSTSQ parabolic vertex window. Tuned on the packaged lte049 BT-Settl mask test
+        (sub-m/s bias vs injected RV on the default BSPEC order sweep; see
+        ``tests/_scan_btsettl_parabolic_vertex_n_samples.py``). Per-chunk RVs center on a
+        smoothed-CCF peak; the order-mean pipeline centers on the grid point nearest the Gaussian
+        mean from :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`. Even values raise
+        :class:`ValueError` (see :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`).
     mask_kpf_zb : float
         **Default:** ``0.0``. Barycentric redshift factor :math:`z_b` in the mask Doppler mapping
         :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` passed as ``zb`` to
@@ -326,8 +314,7 @@ class StellarRVPrimitive(BasePrimitive):
                     # (same chunk-parallel pattern with prange over chunks)
                     ccf_utils._rv_from_ccf_mask_kpf_rows_numba(..., parallel=True, prange over chunks)
                 ->
-                # Preview uses the same weight-normalized mask CCF rows as the pipeline when
-                # mask_ccf_detrend is False (default); set mask_ccf_detrend True for detrended rows.
+                # Preview uses the same weight-normalized mask CCF rows as the pipeline.
                 ccf_utils.finalize_ccf_preview_dict(...)
             ->
             # Rejects outlier chunks and computes weighted aggregate RV
@@ -359,11 +346,6 @@ class StellarRVPrimitive(BasePrimitive):
         "mask_width_um": DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM,
         "mask_order_edge_taper_pixels": 100.0,
         "mask_order_edge_taper_exp_shape": 5.0,
-        "mask_ccf_detrend": False,
-        "mask_ccf_detrend_breaks": "mask",
-        "mask_ccf_detrend_jump_mad_sigma": 8.0,
-        "mask_ccf_detrend_base_percentile": 35.0,
-        "mask_ccf_detrend_min_segment_pixels": 5,
         "ccf_mask_kpf_auto_hybrid_scout": True,
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
@@ -373,7 +355,7 @@ class StellarRVPrimitive(BasePrimitive):
         "ccf_input_velocity": None,  # m/s; hybrid refined center when set
         "ccf_velocity_window": 300.0,  # m/s; half-width ± around ccf_input_velocity
         "ccf_velocity_step": 0.1,  # m/s; refined-grid step (10 cm/s)
-        "mask_kpf_parabolic_vertex_n_samples": 11,
+        "mask_kpf_parabolic_vertex_n_samples": 31,
         "mask_kpf_zb": 0.0,
         "mask_kpf_min_good_pixels": 10,
         "mask_restrict_v_min_m_s": None,
@@ -795,7 +777,6 @@ class StellarRVPrimitive(BasePrimitive):
             ccf_mask_kpf_auto_hybrid_scout=bool(
                 getattr(self, "ccf_mask_kpf_auto_hybrid_scout", True)
             ),
-            mask_ccf_detrend=bool(getattr(self, "mask_ccf_detrend", False)),
             mask_kpf_parabolic_vertex_n_samples=int(
                 getattr(self, "mask_kpf_parabolic_vertex_n_samples", 11)
             ),
@@ -809,18 +790,6 @@ class StellarRVPrimitive(BasePrimitive):
                 float(x)
                 if (x := getattr(self, "mask_restrict_v_max_m_s", None)) is not None
                 else None
-            ),
-            mask_ccf_detrend_breaks=str(
-                getattr(self, "mask_ccf_detrend_breaks", "mask")
-            ),
-            mask_ccf_detrend_jump_mad_sigma=float(
-                getattr(self, "mask_ccf_detrend_jump_mad_sigma", 8.0)
-            ),
-            mask_ccf_detrend_base_percentile=float(
-                getattr(self, "mask_ccf_detrend_base_percentile", 35.0)
-            ),
-            mask_ccf_detrend_min_segment_pixels=int(
-                getattr(self, "mask_ccf_detrend_min_segment_pixels", 5)
             ),
         )
         if preview_detail is not None:
@@ -1064,11 +1033,15 @@ class StellarRVPrimitive(BasePrimitive):
                     continue
                 t_ln = template_ln[in_range]
                 t_flux = template_flux[in_range]
-                n_chunk = max(1, int((w_max - w_min) / self.window_size_um))
+                span_o = float(w_max - w_min)
+                n_chunk = ccf_order_n_chunks_for_span(span_o, float(self.window_size_um))
                 for k in range(n_chunk):
-                    lam_lo = w_min + k * (w_max - w_min) / n_chunk
-                    lam_hi = w_min + (k + 1) * (w_max - w_min) / n_chunk
-                    in_chunk = (w >= lam_lo) & (w < lam_hi)
+                    lam_lo = w_min + k * span_o / n_chunk
+                    lam_hi = w_min + (k + 1) * span_o / n_chunk
+                    if k == n_chunk - 1:
+                        in_chunk = (w >= lam_lo) & (w <= lam_hi)
+                    else:
+                        in_chunk = (w >= lam_lo) & (w < lam_hi)
                     if np.sum(in_chunk) < 20:
                         continue
                     wl_center = 0.5 * (lam_lo + lam_hi)

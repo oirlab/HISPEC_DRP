@@ -8,7 +8,8 @@ There are **two** preview surfaces:
    fiber), second mode bar, slot dropdown. For ``ccf_mask_kpf`` with
    mask-overlay payload, the top row is the same spectrum/mask content as the standalone
    ``*_mask_overlay_debug_fib*.html`` (fixed ``mask_overlay_velocity_m_s``; order dropdown uses
-   ``restyle``). CCF slot dropdown + annotations target the middle and bottom rows only.
+   ``restyle``). CCF slot dropdown aligns with the CCF legend (``x``), below the legend box
+   per fiber (with extra vertical offset so it sits lower in the panel); slot metadata annotations stay in each CCF panel.
 2. **Mask-shift debug HTML** (``write_mask_overlay_debug_pages``): per-order spectrum with
    mask segment overlay and velocity slider, for ``algorithm="ccf_mask_kpf"`` only. When the
    pipeline built ``_ccf_preview_by_fiber`` (preview and/or mask-overlay flags), each order
@@ -59,6 +60,7 @@ from plotly.subplots import make_subplots
 
 from ..utils.ccf_utils import (
     CCFFitKpfConfig,
+    MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
     _gaussian_ccf_model,
     _mask_line_order_edge_taper_multipliers,
     build_hybrid_merged_velocity_grid,
@@ -66,6 +68,7 @@ from ..utils.ccf_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
     effective_ccf_v_step_for_fit,
+    ensure_mask_kpf_lstsq_preview_plot_metadata,
     fit_ccf_rv,
     load_mask,
     refine_ccf_rv_coarse_grid_parabolic,
@@ -131,6 +134,46 @@ def _rv_sidebar_paper_xy(fig: go.Figure, row_1based: int, y_frac: float) -> tupl
     y0, y1 = float(dom[0]), float(dom[1])
     y_paper = y0 + float(y_frac) * (y1 - y0)
     return 1.0, y_paper
+
+
+# Extra downward shift in normalized paper coordinates (smaller ``y`` = lower on the figure).
+_CCF_SLOT_DROPDOWN_EXTRA_DROP_PAPER = 0.10
+
+
+def _ccf_slot_dropdown_paper_xy(
+    fig_ccf: go.Figure,
+    ccf_row_1based: int,
+    *,
+    legend: dict,
+) -> tuple[float, float]:
+    """
+    Paper ``(x, y)`` for the CCF slot ``updatemenus`` dropdown (``xref`` / ``yref``: ``paper``).
+
+    Matches the CCF panel legend’s horizontal placement (``legend["x"]``, ``xanchor="left"``).
+    Vertically, sits **below** the legend box when the legend overlaps this CCF subplot row;
+    otherwise in the **upper** part of the row (but not flush to the top) so each fiber’s control
+    stays in the same corner as the legend. A fixed extra drop moves the control lower than
+    the legacy placement.
+    """
+    legend_x = float(legend.get("x", 1.01))
+    legend_y = float(legend.get("y", 0.88))
+    leg_h = 0.09
+    gap = 0.032
+    # When the global legend does not overlap this row, place lower in the panel (still upper half).
+    top_inset_frac = 0.58
+    yn = "yaxis" if int(ccf_row_1based) <= 1 else f"yaxis{int(ccf_row_1based)}"
+    dom = getattr(fig_ccf.layout, yn).domain
+    y0, y1 = float(dom[0]), float(dom[1])
+    leg_bottom = legend_y - leg_h
+    overlaps_row = (leg_bottom <= y1 + 1e-9) and (legend_y >= y0 - 1e-9)
+    if overlaps_row:
+        y = leg_bottom - gap
+        y = max(y0 + 0.02, min(y, y1 - 0.02))
+    else:
+        y = y0 + top_inset_frac * (y1 - y0)
+    y -= _CCF_SLOT_DROPDOWN_EXTRA_DROP_PAPER
+    y = max(y0 + 0.02, min(y, y1 - 0.02))
+    return legend_x, y
 
 
 # Mask-overlay debug HTML: full echelle pixels × many orders + long CCF(v) grids inflate inline JSON.
@@ -258,7 +301,13 @@ def _iterative_sigma_clip_ylim(
 
 
 def _preview_ccf_y_limits(ccf: np.ndarray) -> tuple[float, float]:
-    """Y-limits for CCF panel: central ~99.9% of finite values plus pad."""
+    """
+    Y-limits for CCF / residual panels: robust data range plus symmetric padding.
+
+    Uses the central ~99.9% of finite values as the data span, then expands by
+    **10% of that span** (5% margin on each side) so traces do not sit on the
+    axis edges.
+    """
     c = np.asarray(ccf, dtype=np.float64).ravel()
     v = c[np.isfinite(c)]
     if v.size == 0:
@@ -273,7 +322,7 @@ def _preview_ccf_y_limits(ccf: np.ndarray) -> tuple[float, float]:
         m = float(np.median(v))
         span = max(float(np.nanstd(v)), abs(m) * 1e-9, 1e-12)
         return m - span, m + span
-    pad = 0.025 * span
+    pad = 0.05 * span
     return float(lo - pad), float(hi + pad)
 
 
@@ -327,9 +376,98 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
         )
         trace_indices.append(len(fig.data) - 1)
 
+    def _final_rv_vertical_line() -> None:
+        rv_line = float(rv_r_m_s)
+        if isinstance(rmeta, dict) and rmeta.get("ok"):
+            rv_meta = rmeta.get("rv_refined_m_s")
+            if rv_meta is not None and math.isfinite(float(rv_meta)):
+                rv_line = float(rv_meta)
+        rv_km = rv_line / 1000.0
+        err_m = float(rmeta.get("rv_err_m_s", float("nan")))
+        v_label = f"Final refined RV = {rv_line:.2f} m/s"
+        if math.isfinite(err_m) and err_m > 0:
+            v_label += f" (σ={err_m * 100.0:.2f} cm/s)"
+        fig.add_trace(
+            go.Scatter(
+                x=[rv_km, rv_km],
+                y=[ylim_lo, ylim_hi],
+                mode="lines",
+                name=v_label,
+                line=dict(width=1.5, color="black", dash="dash"),
+                legendgroup="mask_kpf_refine",
+                showlegend=False,
+                visible=visible,
+            ),
+            row=row,
+            col=1,
+        )
+        trace_indices.append(len(fig.data) - 1)
+
     if not rmeta.get("ok"):
         for _ in range(5):
             _placeholder()
+        return trace_indices
+
+    # Without coarse-grid Gaussian-smooth refine metadata: LSTSQ path may still carry
+    # ``refine_parabola_*`` / ``lstsq_parabola_*`` from :func:`refine_ccf_rv_mask_kpf_lstsq_from_stored`.
+    if "refine_curve_v_m_s" not in rmeta:
+        if (
+            rmeta.get("refine_method") == "mask_kpf_lstsq_parabolic_vertex"
+            and rmeta.get("refine_parabola_v_dense_m_s") is not None
+            and rmeta.get("lstsq_parabola_v_samples_m_s") is not None
+        ):
+            for _ in range(2):
+                _placeholder()
+            vd = np.asarray(rmeta["refine_parabola_v_dense_m_s"], dtype=np.float64) / 1000.0
+            zd = np.asarray(rmeta["refine_parabola_ccf_dense"], dtype=np.float64)
+            if vd.size > 1 and zd.size == vd.size:
+                fig.add_trace(
+                    go.Scatter(
+                        x=vd,
+                        y=zd,
+                        mode="lines",
+                        name="Parabola refine (LSTSQ)",
+                        line=dict(width=2.0, color="rgb(204, 51, 102)", dash="dash"),
+                        legendgroup="mask_kpf_refine",
+                        showlegend=show_legend,
+                        visible=visible,
+                    ),
+                    row=row,
+                    col=1,
+                )
+                trace_indices.append(len(fig.data) - 1)
+            else:
+                _placeholder()
+            vs_m = np.asarray(rmeta["lstsq_parabola_v_samples_m_s"], dtype=np.float64)
+            zs = np.asarray(rmeta["lstsq_parabola_ccf_plot_samples"], dtype=np.float64)
+            if vs_m.size > 0 and zs.size == vs_m.size:
+                fig.add_trace(
+                    go.Scatter(
+                        x=vs_m / 1000.0,
+                        y=zs,
+                        mode="markers",
+                        name="LSTSQ vertex samples",
+                        marker=dict(
+                            size=12,
+                            color="rgb(204, 51, 102)",
+                            symbol="diamond",
+                            line=dict(width=1.5, color="white"),
+                        ),
+                        legendgroup="mask_kpf_refine",
+                        showlegend=show_legend,
+                        visible=visible,
+                    ),
+                    row=row,
+                    col=1,
+                )
+                trace_indices.append(len(fig.data) - 1)
+            else:
+                _placeholder()
+            _final_rv_vertical_line()
+            return trace_indices
+        for _ in range(4):
+            _placeholder()
+        _final_rv_vertical_line()
         return trace_indices
 
     vk = np.asarray(rmeta["refine_curve_v_m_s"], dtype=np.float64) / 1000.0
@@ -420,31 +558,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
     else:
         _placeholder()
 
-    rv_line = float(rv_r_m_s)
-    if isinstance(rmeta, dict) and rmeta.get("ok"):
-        rv_meta = rmeta.get("rv_refined_m_s")
-        if rv_meta is not None and math.isfinite(float(rv_meta)):
-            rv_line = float(rv_meta)
-    rv_km = rv_line / 1000.0
-    err_m = float(rmeta.get("rv_err_m_s", float("nan")))
-    v_label = f"Final refined RV = {rv_line:.2f} m/s"
-    if math.isfinite(err_m) and err_m > 0:
-        v_label += f" (σ={err_m * 100.0:.2f} cm/s)"
-    fig.add_trace(
-        go.Scatter(
-            x=[rv_km, rv_km],
-            y=[ylim_lo, ylim_hi],
-            mode="lines",
-            name=v_label,
-            line=dict(width=1.5, color="black", dash="dash"),
-            legendgroup="mask_kpf_refine",
-            showlegend=False,
-            visible=visible,
-        ),
-        row=row,
-        col=1,
-    )
-    trace_indices.append(len(fig.data) - 1)
+    _final_rv_vertical_line()
     return trace_indices
 
 
@@ -492,11 +606,14 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
         and rv_slot is not None
         and np.isfinite(float(rv_slot))
     ):
+        rmeta_use = ensure_mask_kpf_lstsq_preview_plot_metadata(cached, vg, ccf)
+        if rmeta_use is None:
+            rmeta_use = cached
         return _mask_kpf_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
             rv_r_m_s=float(rv_slot),
-            rmeta=cached,
+            rmeta=rmeta_use,
             visible=visible,
             show_legend=show_legend,
             ylim_lo=ylim_lo,
@@ -641,6 +758,77 @@ def _per_order_pipeline_rv_iv_mean_m_s(tbl) -> dict[int, tuple[float, float]]:
         sig = float(1.0 / np.sqrt(sw))
         out[int(o)] = (mu, sig)
     return out
+
+
+def _collapse_mask_kpf_rv_scatter_rows(
+    wl_um: np.ndarray,
+    rv_m_s: np.ndarray,
+    rv_err_m_s: np.ndarray,
+    inlier: np.ndarray,
+    order_col: np.ndarray,
+    *,
+    rv_dup_atol_m_s: float = 1e-3,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
+    """
+    Collapse RV vs wavelength preview points when ``ccf_mask_kpf`` duplicated the **same**
+    order-level RV/ERR at every wavelength chunk center.
+
+    Mask-KPF **evaluates** the mask statistic on overlapping wavelength segments of width
+    ``window_size_um`` along each order (multiple chunks per order). When the order-mean
+    Gaussian + refine path succeeds, the pipeline **stores one RV per echelle order** on
+    every chunk row of ``RVCCF``. The RV panel should show **one marker per order** (λ =
+    mean of chunk centers for that order), not one marker per chunk.
+    """
+    n = int(wl_um.size)
+    if n == 0 or order_col.size != n:
+        return wl_um, rv_m_s, rv_err_m_s, inlier, np.asarray([], dtype=np.int64), False
+    wl_l: list[float] = []
+    rv_l: list[float] = []
+    er_l: list[float] = []
+    in_l: list[bool] = []
+    ord_l: list[int] = []
+    collapsed = False
+    for o in np.unique(order_col):
+        m = order_col == o
+        idx = np.flatnonzero(m)
+        if idx.size == 0:
+            continue
+        if o < 0:
+            for i in idx:
+                wl_l.append(float(wl_um[i]))
+                rv_l.append(float(rv_m_s[i]))
+                er_l.append(float(rv_err_m_s[i]))
+                in_l.append(bool(inlier[i]))
+                ord_l.append(int(o))
+            continue
+        r_o = rv_m_s[m]
+        if r_o.size > 1 and np.allclose(
+            r_o,
+            r_o[0],
+            rtol=0.0,
+            atol=float(rv_dup_atol_m_s),
+        ):
+            wl_l.append(float(np.nanmean(wl_um[m])))
+            rv_l.append(float(r_o[0]))
+            er_l.append(float(rv_err_m_s[m][0]))
+            in_l.append(bool(np.all(inlier[m])))
+            ord_l.append(int(o))
+            collapsed = True
+        else:
+            for i in idx:
+                wl_l.append(float(wl_um[i]))
+                rv_l.append(float(rv_m_s[i]))
+                er_l.append(float(rv_err_m_s[i]))
+                in_l.append(bool(inlier[i]))
+                ord_l.append(int(order_col[i]))
+    return (
+        np.asarray(wl_l, dtype=np.float64),
+        np.asarray(rv_l, dtype=np.float64),
+        np.asarray(er_l, dtype=np.float64),
+        np.asarray(in_l, dtype=bool),
+        np.asarray(ord_l, dtype=np.int64),
+        collapsed,
+    )
 
 
 def _preview_abbrev_ccf_uncertainty(diag: dict) -> str:
@@ -1776,7 +1964,13 @@ def _preview_gaussian_cache_and_slot_legends(
                     params = kpf.get("params") or {}
                     diag = kpf.get("diagnostics") or {}
                     rv_err = float(kpf.get("rv_err", np.nan))
-                    fit_slot_cache[sid] = (params, diag, rv_err)
+                    rv_fit = kpf.get("rv")
+                    rv_final = (
+                        float(rv_fit)
+                        if rv_fit is not None and np.isfinite(float(rv_fit))
+                        else float(params.get("v0", np.nan))
+                    )
+                    fit_slot_cache[sid] = (params, diag, rv_err, rv_final)
                 else:
                     _ce = sl.get("ccf_err")
                     _ce_arr = (
@@ -1789,17 +1983,23 @@ def _preview_gaussian_cache_and_slot_legends(
                         v_step,
                         return_params=True,
                         ccf_err=_ce_arr,
+                        ccf_mask_kpf_stored_negated=(
+                            MASK_KPF_STORED_CCF_NEGATED_FROM_RAW
+                            if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+                            else None
+                        ),
                     )
                     rv_err = float(_re) if _re is not None and np.isfinite(_re) else np.nan
-                    fit_slot_cache[sid] = (params, diag, rv_err)
-            params, diag, rv_err = fit_slot_cache[sid]
+                    rv_final = float(_rv) if _rv is not None and np.isfinite(float(_rv)) else float(params.get("v0", np.nan))
+                    fit_slot_cache[sid] = (params, diag, rv_err, rv_final)
+            params, diag, rv_err, rv_final = fit_slot_cache[sid]
+            v_report = rv_final if np.isfinite(rv_final) else float(params.get("v0", np.nan))
             is_mask_kpf = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
             if sl.get("kind") == "mean":
                 meta = "Mean · all ord"
                 if np.isfinite(rv_agg_tbl):
-                    src = "IV" if is_mask_kpf else "RVCCFAVG"
                     meta += (
-                        f"<br>⟨RV⟩ ({src}): {rv_agg_tbl / 1000.0:.4f} km/s · "
+                        f"<br>⟨RV⟩ (RVCCFAVG): {rv_agg_tbl / 1000.0:.4f} km/s · "
                         f"σ={_format_rv_value(rv_agg_err_tbl, kind='sigma_ms')}"
                     )
                 _ce_mn = sl.get("ccf_err")
@@ -1841,7 +2041,11 @@ def _preview_gaussian_cache_and_slot_legends(
                 amp = float(params["amplitude"])
                 if is_mask_kpf and sl.get("kind") != "mean":
                     meta += (
-                        f"<br>Gauss σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                        f"<br>LM Gauss center={v0 / 1000.0:.4f} km/s · "
+                        f"σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                    )
+                    meta += (
+                        f"<br>RV (fit+refine, table): {v_report / 1000.0:.4f} km/s"
                     )
                     try:
                         oi = int(sl.get("order"))
@@ -1849,18 +2053,18 @@ def _preview_gaussian_cache_and_slot_legends(
                         oi = None
                     if oi is not None and oi in per_order_rv:
                         rp = float(per_order_rv[oi][0])
-                        if np.isfinite(rp) and abs(v0 - rp) > 0.5:
-                            meta += f"<br><i>ΔRV refit {v0 - rp:+.2f} m/s</i>"
+                        if np.isfinite(rp) and abs(v_report - rp) > 0.5:
+                            meta += f"<br><i>ΔRV vs table {v_report - rp:+.2f} m/s</i>"
                     meta += f"<br>σ_RV: {_preview_abbrev_ccf_uncertainty(diag)}"
                 else:
                     meta += (
-                        f"<br>Gauss RV={v0 / 1000.0:.4f} km/s · "
-                        f"σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                        f"<br>RV (fit+refine)={v_report / 1000.0:.4f} km/s · "
+                        f"LM σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
                     )
                     if sl.get("kind") == "mean" and np.isfinite(rv_agg_tbl):
-                        dvp = v0 - rv_agg_tbl
+                        dvp = v_report - rv_agg_tbl
                         if np.isfinite(dvp) and abs(dvp) > 250.0:
-                            meta += f"<br><i>Gauss−⟨RV⟩tbl {dvp:+.0f} m/s</i>"
+                            meta += f"<br><i>RV−⟨RV⟩tbl {dvp:+.0f} m/s</i>"
                     elif sl.get("kind") != "mean" and not is_mask_kpf:
                         try:
                             oi = int(sl.get("order"))
@@ -1869,7 +2073,7 @@ def _preview_gaussian_cache_and_slot_legends(
                         if oi is not None and oi in per_order_rv:
                             rp = float(per_order_rv[oi][0])
                             if np.isfinite(rp):
-                                meta += f"<br><i>Gauss−IV {v0 - rp:+.1f} m/s</i>"
+                                meta += f"<br><i>Gauss−IV {v_report - rp:+.1f} m/s</i>"
                     meta += (
                         f"<br>formal σ_RV={_format_rv_value(float(rv_err), kind='sigma_ms')} · "
                         f"{_preview_abbrev_ccf_uncertainty(diag)}"
@@ -2027,8 +2231,10 @@ def create_stellar_rv_preview(primitive) -> None:
     """
     Writes ``*_preview.html`` with **two** Plotly embeds:
 
-    1. **RV figure** — Per-chunk pipeline RV vs wavelength (Δ vs ⟨RV⟩) and derived-RV / plot-key
-       annotations (own mode bar).
+    1. **RV figure** — Pipeline RV vs wavelength (Δ vs ⟨RV⟩). For ``ccf_mask_kpf`` with the
+       order-mean+refine path, **one marker per echelle order** (λ = mean of mask chunk centers)
+       when RVCCF repeats the same RV on every chunk row; otherwise one marker per chunk. Own
+       mode bar.
     2. **CCF figure** — Per fiber, CCF vs velocity (y-axis ``CCF``) then **Residual CCF**
        (raw CCF minus the Gaussian model on the full grid, same units). The Gaussian trace is
        drawn over a **narrow symmetric** span around ``v₀`` (not the full LevMar window). For
@@ -2071,6 +2277,51 @@ def create_stellar_rv_preview(primitive) -> None:
         getattr(primitive, "show_preview", False),
     )
 
+    # Per fiber: RV vs λ scatter (optionally one point per echelle order for mask-KPF
+    # order-mean duplicate rows) + metadata for subplot titles.
+    rv_plot_by_fiber: dict[str, dict] = {}
+    for fiber in fibers_with_ccf:
+        tbl = getattr(output_model, f"rvccf_fib{fiber}", None)
+        avg_tbl = getattr(output_model, f"rvccfavg_fib{fiber}", None)
+        entry: dict = {"tbl": tbl, "avg_tbl": avg_tbl, "collapsed": False}
+        if tbl is None:
+            rv_plot_by_fiber[fiber] = entry
+            continue
+        wl0 = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
+        rv0 = np.asarray(tbl["RV"], dtype=np.float64)
+        rv_e0 = np.asarray(tbl["RV_ERR"], dtype=np.float64)
+        inl0 = (
+            np.asarray(tbl["INLIER"], dtype=bool)
+            if "INLIER" in tbl.colnames
+            else np.ones(len(rv0), dtype=bool)
+        )
+        valid0 = np.isfinite(wl0) & np.isfinite(rv0)
+        if not np.any(valid0):
+            rv_plot_by_fiber[fiber] = entry
+            continue
+        wl = wl0[valid0]
+        rv = rv0[valid0]
+        rv_err = rv_e0[valid0]
+        inlier = inl0[valid0]
+        order_col = (
+            np.asarray(tbl["ORDER"], dtype=np.int64)[valid0]
+            if "ORDER" in tbl.colnames
+            else np.full(len(wl), -1, dtype=np.int64)
+        )
+        collapsed = False
+        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf" and "ORDER" in tbl.colnames:
+            wl, rv, rv_err, inlier, order_col, collapsed = _collapse_mask_kpf_rv_scatter_rows(
+                wl, rv, rv_err, inlier, order_col
+            )
+        entry["wl"] = wl
+        entry["rv"] = rv
+        entry["rv_err"] = rv_err
+        entry["inlier"] = inlier
+        entry["order_col"] = order_col
+        entry["collapsed"] = collapsed
+        entry["n_rvccf_rows"] = int(np.count_nonzero(valid0))
+        rv_plot_by_fiber[fiber] = entry
+
     pv_min_m_s, pv_max_m_s, _pv_step = _preview_ccf_velocity_range_m_s(primitive)
     v_axis_km_lo = pv_min_m_s / 1000.0
     v_axis_km_hi = pv_max_m_s / 1000.0
@@ -2099,7 +2350,14 @@ def create_stellar_rv_preview(primitive) -> None:
     subplot_titles_rv: list[str] = []
     subplot_titles_ccf: list[str] = []
     for fiber in fibers_with_ccf:
-        subplot_titles_rv.append(f"Fiber {fiber} - per chunk RV")
+        _rp = rv_plot_by_fiber.get(fiber) or {}
+        if _rp.get("collapsed"):
+            subplot_titles_rv.append(
+                f"Fiber {fiber} — RV per echelle order (λ = mean of {int(_rp.get('n_rvccf_rows', 0))} "
+                f"mask chunks)"
+            )
+        else:
+            subplot_titles_rv.append(f"Fiber {fiber} — per chunk RV")
         subplot_titles_ccf.append(
             f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; mask-KPF parabolic refine; slot ↓)"
         )
@@ -2144,28 +2402,38 @@ def create_stellar_rv_preview(primitive) -> None:
     for fi, fiber in enumerate(fibers_with_ccf):
         row_rv = fiber_row_map[fiber]["rv"]
 
-        tbl = getattr(output_model, f"rvccf_fib{fiber}", None)
-        avg_tbl = getattr(output_model, f"rvccfavg_fib{fiber}", None)
-        if tbl is not None:
-            wl = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
-            rv = np.asarray(tbl["RV"], dtype=np.float64)
-            rv_err = np.asarray(tbl["RV_ERR"], dtype=np.float64)
-            inlier = (
+        rp = rv_plot_by_fiber.get(fiber) or {}
+        tbl = rp.get("tbl")
+        avg_tbl = rp.get("avg_tbl")
+        collapsed_plot = bool(rp.get("collapsed", False))
+        if tbl is not None and rp.get("wl") is not None:
+            wl = rp["wl"]
+            rv = rp["rv"]
+            rv_err = rp["rv_err"]
+            inlier = rp["inlier"]
+            order_col = rp["order_col"]
+            # Sidebar / MAD / IV stats use every RVCCF row (chunks), not collapsed plot points.
+            wl_a = np.asarray(tbl["WAVELENGTH"], dtype=np.float64)
+            rv_a = np.asarray(tbl["RV"], dtype=np.float64)
+            rv_err_a = np.asarray(tbl["RV_ERR"], dtype=np.float64)
+            inlier_a = (
                 np.asarray(tbl["INLIER"], dtype=bool)
                 if "INLIER" in tbl.colnames
-                else np.ones(len(rv), dtype=bool)
+                else np.ones(len(rv_a), dtype=bool)
             )
-            valid = np.isfinite(wl) & np.isfinite(rv)
-            if np.any(valid):
-                wl, rv = wl[valid], rv[valid]
-                rv_err = rv_err[valid]
-                inlier = inlier[valid]
+            valid_a = np.isfinite(wl_a) & np.isfinite(rv_a)
+            rv_all = rv_a[valid_a]
+            rv_err_all = rv_err_a[valid_a]
+            inlier_a = inlier_a[valid_a]
+            if np.any(valid_a):
                 if avg_tbl is not None and len(avg_tbl) > 0 and np.isfinite(float(avg_tbl["RV"][0])):
                     rv_agg = float(avg_tbl["RV"][0])
                     rv_agg_err = float(avg_tbl["RV_ERR"][0])
                 else:
-                    rv_agg = float(np.nanmean(rv))
-                    rv_agg_err = float(np.nanmedian(rv_err[np.isfinite(rv_err) & (rv_err > 0)]))
+                    rv_agg = float(np.nanmean(rv_all))
+                    rv_agg_err = float(
+                        np.nanmedian(rv_err_all[np.isfinite(rv_err_all) & (rv_err_all > 0)])
+                    )
                     if not np.isfinite(rv_agg_err):
                         rv_agg_err = np.nan
                 rv_mean_cm = rv_agg * 100.0
@@ -2179,10 +2447,6 @@ def create_stellar_rv_preview(primitive) -> None:
                 else:
                     y_title = f"RV (cm/s) − {rv_mean_cm_r:.4e}"
                 rv_panel_y_title[fiber] = y_title
-                if "ORDER" in tbl.colnames:
-                    order_col = np.asarray(tbl["ORDER"], dtype=np.int64)[valid]
-                else:
-                    order_col = np.full(len(wl), -1, dtype=np.int64)
                 ord_lbl = np.where(order_col >= 0, order_col.astype(str), "—")
                 cd_rv = np.column_stack([ord_lbl.astype(object), rv_pt_kms, rv_err_pt_kms])
                 in_ok = inlier & np.isfinite(rv_err) & (rv_err > 0)
@@ -2235,7 +2499,7 @@ def create_stellar_rv_preview(primitive) -> None:
                         row=row_rv,
                         col=1,
                     )
-                if not np.any(in_ok) and np.any(valid):
+                if not np.any(in_ok) and len(wl) > 0:
                     fig_rv.add_trace(
                         go.Scatter(
                             x=wl,
@@ -2266,18 +2530,18 @@ def create_stellar_rv_preview(primitive) -> None:
                     )
                 else:
                     leg = f"{mean_line}<br>uncertainty = —"
-                # RMS bias from mean: sqrt(sum of squared biases over good points / n_good)
-                n_good = int(np.sum(inlier))
+                # RMS bias from mean: use all chunk rows in RVCCF (not collapsed plot points).
+                n_good = int(np.sum(inlier_a))
                 rms_bias_m_s = float("nan")
                 if n_good > 0:
-                    biases_m_s = rv[inlier] - rv_agg
+                    biases_m_s = rv_all[inlier_a] - rv_agg
                     rms_bias_m_s = float(np.sqrt(np.sum(biases_m_s**2) / n_good))
                     rms_bias_cm_s = rms_bias_m_s * 100.0
                     leg += (
                         f"<br>RMS(⟨RV⟩) = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')} "
                         f"({_format_rv_value(rms_bias_cm_s, kind='sigma_cm')})"
                     )
-                n_chunks_tbl = int(len(rv))
+                n_chunks_tbl = int(rv_all.size)
                 sb_lines = [
                     f"<b>Derived - fiber {fiber}</b>",
                     f"Chunks in RVCCF table: {n_chunks_tbl} · Inlier: {n_good}",
@@ -2299,15 +2563,15 @@ def create_stellar_rv_preview(primitive) -> None:
                         f"({_format_rv_value(rms_bias_cm_s2, kind='sigma_cm')})"
                     )
                     if n_good > 1:
-                        std_c = float(np.std(rv[inlier], ddof=1))
+                        std_c = float(np.std(rv_all[inlier_a], ddof=1))
                         if np.isfinite(std_c):
                             sb_lines.append(f"Std (inlier RV, sample) = {std_c:.2f} m/s")
                 else:
                     sb_lines.append("RMS scatter vs ⟨RV⟩ (inlier chunks) = —")
                 osig = float(getattr(primitive, "outlier_sigma", 4.0))
-                _, _, mad_gate = combine_rvs_median_mad(rv, rv_err, osig)
+                _, _, mad_gate = combine_rvs_median_mad(rv_all, rv_err_all, osig)
                 _, _, inl_c, sig_iv, scatter_se = combine_rv_estimates_median_mad_weighted(
-                    rv, rv_err, osig
+                    rv_all, rv_err_all, osig
                 )
                 thr_m_s = osig * mad_gate if np.isfinite(mad_gate) else float("nan")
                 sb_lines.append(
@@ -2327,10 +2591,17 @@ def create_stellar_rv_preview(primitive) -> None:
                     )
                 rv_sidebar_by_fiber[fiber] = "<br>".join(sb_lines)
                 if np.any(in_ok):
-                    _pk = (
-                        "<b>Plot key</b><br>"
-                        "Blue markers: inlier chunks (pipeline RV vs λ)<br>"
-                    )
+                    if collapsed_plot:
+                        _pk = (
+                            "<b>Plot key</b><br>"
+                            "Blue: one point per echelle order (RV = pipeline order-mean+refine; "
+                            "λ = mean of mask chunk centers)<br>"
+                        )
+                    else:
+                        _pk = (
+                            "<b>Plot key</b><br>"
+                            "Blue markers: inlier chunks (pipeline RV vs λ)<br>"
+                        )
                     if np.any(out_ok):
                         _pk += "Grey open circles: outlier chunks<br>"
                     _pk += (
@@ -2392,7 +2663,7 @@ def create_stellar_rv_preview(primitive) -> None:
             ccf_trace_indices[fiber] = []
             ccf_ylim_lo, ccf_ylim_hi = -1.0, 1.0
             for si, sl in enumerate(slots):
-                params, diag = fit_slot_cache.get(id(sl), (None, {}, np.nan))[:2]
+                params, diag = fit_slot_cache.get(id(sl), (None, {}, np.nan, np.nan))[:2]
                 vg = np.asarray(sl["v"], dtype=np.float64)
                 ccf = np.asarray(sl["ccf"], dtype=np.float64)
                 _ce = sl.get("ccf_err")
@@ -2416,6 +2687,26 @@ def create_stellar_rv_preview(primitive) -> None:
                 )
                 fig_ccf.add_trace(go.Scatter(**ccf_scatter_kw), row=row, col=1)
                 ccf_band_trace_idx.append(idx_data)
+                _bgp = (params or {}).get("baseline")
+                if params and diag.get("fit_ok") and _bgp is not None and np.isfinite(float(_bgp)):
+                    idx_bg = len(fig_ccf.data)
+                    _bgy = float(_bgp)
+                    vg_km_lo = float(np.nanmin(vg_km))
+                    vg_km_hi = float(np.nanmax(vg_km))
+                    fig_ccf.add_trace(
+                        go.Scatter(
+                            x=[vg_km_lo, vg_km_hi],
+                            y=[_bgy, _bgy],
+                            mode="lines",
+                            name="CCF background (σ-clipped median)",
+                            line=dict(dash="dash", width=1.5, color="black"),
+                            showlegend=True,
+                            visible=visible,
+                        ),
+                        row=row,
+                        col=1,
+                    )
+                    ccf_band_trace_idx.append(idx_bg)
                 idx_fit = len(fig_ccf.data)
                 if params and diag.get("fit_ok"):
                     # Preview: narrow symmetric window around v₀ — do not use LevMar fit_v_lo/hi
@@ -2482,30 +2773,6 @@ def create_stellar_rv_preview(primitive) -> None:
                         col=1,
                     )
                     ccf_band_trace_idx.append(idx_v0)
-                _bgp = (params or {}).get("baseline")
-                if _bgp is not None and np.isfinite(float(_bgp)):
-                    idx_bg = len(fig_ccf.data)
-                    _bgy = float(_bgp)
-                    vg_km_lo = float(np.nanmin(vg_km))
-                    vg_km_hi = float(np.nanmax(vg_km))
-                    fig_ccf.add_trace(
-                        go.Scatter(
-                            x=[vg_km_lo, vg_km_hi],
-                            y=[_bgy, _bgy],
-                            mode="lines",
-                            name="Peak-mask baseline",
-                            line=dict(
-                                dash="dash",
-                                width=1.5,
-                                color="rgba(100,100,100,0.9)",
-                            ),
-                            showlegend=True,
-                            visible=visible,
-                        ),
-                        row=row,
-                        col=1,
-                    )
-                    ccf_band_trace_idx.append(idx_bg)
                 if is_mask_kpf:
                     for ti in _mask_kpf_refine_ccf_add_plotly_traces(
                         fig_ccf,
@@ -2531,34 +2798,29 @@ def create_stellar_rv_preview(primitive) -> None:
             continue
         slots = detail["slots"]
         resid_trace_indices[fiber] = []
-        r_abs_peak = 0.0
-        for sl in slots:
-            params, diag = fit_slot_cache.get(id(sl), (None, {}, np.nan))[:2]
-            vg = np.asarray(sl["v"], dtype=np.float64)
-            ccf = np.asarray(sl["ccf"], dtype=np.float64)
-            if params and diag.get("fit_ok"):
-                model_at = _gaussian_ccf_model(
-                    vg,
-                    float(params["amplitude"]),
-                    float(params["v0"]),
-                    float(params["sigma"]),
-                    float(params["baseline"]),
+        # Match CCF row: default y-range from the first slot, same padding rule as
+        # :func:`_preview_ccf_y_limits` (~10% wider than robust data span).
+        if slots:
+            sl0 = slots[0]
+            params0, diag0 = fit_slot_cache.get(id(sl0), (None, {}, np.nan, np.nan))[:2]
+            vg0 = np.asarray(sl0["v"], dtype=np.float64)
+            ccf0 = np.asarray(sl0["ccf"], dtype=np.float64)
+            if params0 and diag0.get("fit_ok"):
+                model0 = _gaussian_ccf_model(
+                    vg0,
+                    float(params0["amplitude"]),
+                    float(params0["v0"]),
+                    float(params0["sigma"]),
+                    float(params0["baseline"]),
                 )
-                residual = ccf - model_at
-                fin = residual[np.isfinite(residual)]
-                if fin.size:
-                    r_abs_peak = max(
-                        r_abs_peak,
-                        float(np.nanpercentile(np.abs(fin), 99.5)),
-                    )
-        pad_r = max(r_abs_peak * 0.12, 1e-15)
-        if r_abs_peak > 0.0 and math.isfinite(r_abs_peak):
-            resid_ylim_by_fiber[fiber] = (-r_abs_peak - pad_r, r_abs_peak + pad_r)
+                resid_ylim_by_fiber[fiber] = _preview_ccf_y_limits(ccf0 - model0)
+            else:
+                resid_ylim_by_fiber[fiber] = (-1.0, 1.0)
         else:
             resid_ylim_by_fiber[fiber] = (-1.0, 1.0)
 
         for si, sl in enumerate(slots):
-            params, diag = fit_slot_cache.get(id(sl), (None, {}, np.nan))[:2]
+            params, diag = fit_slot_cache.get(id(sl), (None, {}, np.nan, np.nan))[:2]
             vg = np.asarray(sl["v"], dtype=np.float64)
             ccf = np.asarray(sl["ccf"], dtype=np.float64)
             visible = si == 0
@@ -2688,23 +2950,20 @@ def create_stellar_rv_preview(primitive) -> None:
             )
         if not buttons:
             continue
-        # Position dropdown inside this fiber's CCF panel (paper coords), low in the cell
-        # so it clears the figure legend (paper x≈1).
         ccf_row_1based = fiber_row_map[fiber]["ccf"]
-        row_height = (1.0 - (n_rows_ccf - 1) * v_spacing_ccf) / n_rows_ccf
-        from_top = (ccf_row_1based - 0.5) * row_height + (ccf_row_1based - 1) * v_spacing_ccf
-        y_dropdown = 1.0 - from_top - 0.90 * row_height
-        y_dropdown = max(0.03, min(0.97, y_dropdown))
+        dx, dy = _ccf_slot_dropdown_paper_xy(
+            fig_ccf, ccf_row_1based, legend=ccf_legend_dict
+        )
         updatemenus_ccf.append(
             dict(
                 active=0,
                 buttons=buttons,
                 direction="down",
                 showactive=True,
-                x=1.06,
-                xanchor="left",
-                y=y_dropdown,
-                yanchor="middle",
+                x=dx,
+                xanchor=str(ccf_legend_dict.get("xanchor", "left")),
+                y=dy,
+                yanchor="top",
                 font=dict(size=9),
                 bgcolor="rgba(255,255,255,0.9)",
                 borderwidth=1,
