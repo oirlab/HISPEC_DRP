@@ -3769,7 +3769,7 @@ def build_ccf_preview_dict(
     Returns
     -------
     dict or None
-        Structure consumed by :mod:`hispecdrp.primitives.stellar_rv.stellar_rv_preview`
+        Structure consumed by :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`
         (order slots + aggregated rows + fit metadata), or ``None`` if there is nothing
         to plot (no valid orders, empty CCF, or length mismatch between orders).
 
