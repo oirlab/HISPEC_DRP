@@ -22,6 +22,10 @@ Faster CI / local iteration (skips tests marked ``slow``: BT-Settl parallel mask
   ``create_stellar_rv_preview`` → unified ``*_preview.html`` (RV vs λ, CCF, residual per fiber; CCF slot
   dropdown), then ``webbrowser.open``. Prints a step timing
   summary (``-s``).
+- ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS=1`` — after
+  ``test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel``, run the same lte049 BSPEC stack with
+  ``algorithm="ccf_stellar_template"`` (unified Plotly ``*_preview.html`` only; no mask-overlay HTML).
+  Uses ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` during ``apply`` like the mask preview helper.
 
 **Parallel BT-Settl BSPEC chunk test** — ``test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel``
 always uses spectrum ``lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5`` and mask
@@ -50,6 +54,18 @@ the bottom of the run to read it.
 
   # Equivalent:
   HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1 HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel -s
+
+**Parallel BT-Settl BSPEC template-CCF test** — ``test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel``
+
+Same synthetic lte049 echelle stack and ``process_orders_rvs_numba_parallel`` phase as the mask-KPF
+parallel test, then ``StellarRVPrimitive`` with ``algorithm="ccf_stellar_template"`` (rest-frame
+``template_wavelength`` / ``template_flux`` from the session cache). Same order-selection env vars
+(``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS``, ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER``). Optional unified
+preview only::
+
+  HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel -s
+
+  HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1 HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel -s
 
 **One-liner — same test, JSON + NPZ CCF debug dump only** (no mask-overlay / Plotly HTML; patched no-op preview)::
 
@@ -161,6 +177,42 @@ def test_mask_kpf_parabolic_vertex_n_samples_must_be_odd():
         _require_mask_kpf_parabolic_vertex_n_samples(2)
 
 
+def test_template_overlay_json_preserves_tiny_ccf_amplitudes():
+    """
+    Template stellar CCF is a weighted covariance in flux units; fixed-decimal ``round(..., 7)``
+    in JSON would zero the embedded curve. Serialization uses significant figures instead.
+    """
+    from hispecdrp.primitives.stellar_rv.previews import stellar_rv_preview as srv_prev
+
+    cva = np.linspace(-100.0, 100.0, 5, dtype=np.float64)
+    cca = np.array([1.2e-15, -3.4e-15, 2.0e-15, 2.5e-15, 1.8e-15], dtype=np.float64)
+    rounded = srv_prev._json_round_list(cca, 7)
+    assert max(abs(float(x)) for x in rounded) == 0.0
+    sigfig = srv_prev._json_float_list_sigfig(cca, 8)
+    assert max(abs(float(x)) for x in sigfig) > 0.0
+
+    payload = {
+        "fiber": "1",
+        "orders": [
+            {
+                "order": 110,
+                "wl_lo_um": 0.95,
+                "wl_hi_um": 0.96,
+                "wave": np.array([0.951, 0.952], dtype=np.float64),
+                "spec": np.array([1.0, 1.01], dtype=np.float64),
+                "tpl_wave_um": np.array([0.951, 0.952], dtype=np.float64),
+                "tpl_flux": np.array([1.0, 1.0], dtype=np.float64),
+                "ccf_v_m_s": cva,
+                "ccf": cca,
+                "ccf_err": np.array([1e-16, 2e-16, 1e-16, 1e-16, 1e-16], dtype=np.float64),
+            }
+        ],
+    }
+    ser = srv_prev._to_serializable_template_overlay_payload(payload)
+    out_ccf = np.asarray(ser["orders"][0]["ccf"], dtype=np.float64)
+    assert np.ptp(out_ccf) > 0.0
+
+
 def test_mask_kpf_parabolic_vertex_homoscedastic_sigma_noiseless_quadratic():
     """
     Homoscedastic LSTSQ + delta-method σ collapses toward the numeric floor when the
@@ -192,6 +244,7 @@ def test_mask_kpf_parabolic_vertex_homoscedastic_sigma_noiseless_quadratic():
 # ---------------------------------------------------------------------------
 SHOW_PRIMITIVE_CCF_PREVIEW: bool | None = None
 SHOW_BSPEC_BTSETTL_PREVIEWS: bool | None = None
+SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS: bool | None = None
 SERIALIZE_BSPEC_BTSETTL_MASK_CCF: bool | None = None
 
 
@@ -217,6 +270,13 @@ def _want_bspec_btsettl_serialize_mask_ccf() -> bool:
     if SERIALIZE_BSPEC_BTSETTL_MASK_CCF is not None:
         return SERIALIZE_BSPEC_BTSETTL_MASK_CCF
     return _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF")
+
+
+def _want_bspec_btsettl_template_previews() -> bool:
+    """Unified Plotly stellar-RV preview + template-overlay debug HTML for lte049 BSPEC ``ccf_stellar_template``."""
+    if SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS is not None:
+        return SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS
+    return _truthy_env("HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS")
 
 
 def _bspec_btsettl_ccf_mask_kpf_order_ids() -> list[int]:
@@ -663,6 +723,111 @@ def _print_btsettl_mask_kpf_recovery_report(
     print("\n".join(lines), flush=True)
 
 
+def _print_btsettl_template_ccf_recovery_report(
+    output_model,
+    tbl_rvccf,
+    *,
+    injected_rv_m_s: float,
+    outlier_sigma: float,
+) -> None:
+    """
+    Same layout as :func:`_print_btsettl_mask_kpf_recovery_report` for ``ccf_stellar_template``
+    (log-λ weighted template CCF + ``fit_ccf_rv`` per chunk; no mask-line negation convention).
+    """
+    avg = getattr(output_model, "rvccfavg_fib1", None)
+    avg_rv = float(avg["RV"][0]) if avg is not None and len(avg) else float("nan")
+    avg_err = float(avg["RV_ERR"][0]) if avg is not None and len(avg) else float("nan")
+
+    ord_col = np.asarray(tbl_rvccf["ORDER"])
+    rv_col = np.asarray(tbl_rvccf["RV"], dtype=np.float64)
+    err_col = np.asarray(tbl_rvccf["RV_ERR"], dtype=np.float64)
+    inl_col = np.asarray(tbl_rvccf["INLIER"], dtype=np.uint8)
+
+    lines: list[str] = [
+        "",
+        "=" * 72,
+        "test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel — RV recovery (m/s)",
+        "=" * 72,
+        "Stellar-template CCF (log-λ): per-chunk Gaussian ``fit_ccf_rv`` on weighted template CCF.",
+        f"Injected RV (constant per order): {injected_rv_m_s:.3f}",
+        "",
+        "Per echelle ORDER (collapsed when identical RV across chunk rows):",
+        f"{'ORDER':>6}  {'inj':>14}  {'RV':>14}  {'RV_ERR':>12}  {'bias':>12}  INLIER",
+    ]
+    for o in np.unique(ord_col):
+        m = ord_col == o
+        rvs = rv_col[m]
+        ers = err_col[m]
+        inl = inl_col[m]
+        inj = injected_rv_m_s
+        if rvs.size and np.allclose(rvs, rvs[0]):
+            rv_d = float(rvs[0])
+            er_d = float(ers[0])
+        else:
+            w = np.where(np.isfinite(ers) & (ers > 0), 1.0 / (ers.astype(np.float64) ** 2), 0.0)
+            if np.sum(w) <= 0:
+                rv_d = float(np.nanmean(rvs))
+                er_d = float("nan")
+            else:
+                rv_d = float(np.sum(w * rvs) / np.sum(w))
+                er_d = float(1.0 / np.sqrt(np.sum(w)))
+        bias = rv_d - inj
+        if inl.size == 0:
+            inl_s = "?"
+        elif np.all(inl == inl[0]):
+            inl_s = "1" if inl[0] != 0 else "0"
+        else:
+            inl_s = "mixed"
+        lines.append(
+            f"{int(o):6d}  {inj:14.3f}  {rv_d:14.3f}  {er_d:12.3f}  {bias:12.3f}  {inl_s:>6s}"
+        )
+
+    agg_rv, agg_er, _agg_order = _fiber_agg_rvs_from_rvccf_table(tbl_rvccf)
+    (
+        comb_rv,
+        comb_err,
+        comb_inlier,
+        iv_se,
+        scatter_se,
+    ) = combine_rv_estimates_median_mad_weighted(agg_rv, agg_er, outlier_sigma)
+
+    n_in = int(np.sum(comb_inlier))
+    mad_inliers = float("nan")
+    if n_in > 1:
+        ins = agg_rv[comb_inlier]
+        mad_inliers = float(mad_std(ins, ignore_nan=True))
+    scatter_note = (
+        f"{scatter_se:.3f}"
+        if np.isfinite(scatter_se)
+        else "n/a (need ≥2 inlier fiber_agg inputs)"
+    )
+    mad_note = (
+        f"{mad_inliers:.3f}"
+        if np.isfinite(mad_inliers)
+        else "n/a (need ≥2 inlier fiber_agg RVs)"
+    )
+
+    lines.extend(
+        [
+            "",
+            f"RVCCFAVG (written to L2):     RV = {avg_rv:.3f}   RV_ERR = {avg_err:.3f}",
+            f"Total bias (RVCCFAVG − inj):  {avg_rv - injected_rv_m_s:.3f}",
+            "",
+            "Recomputed from RVCCF table (fiber_agg collapse → "
+            "combine_rv_estimates_median_mad_weighted):",
+            f"  RV (MAD/IV combined):     {comb_rv:.3f}",
+            f"  RV_ERR (max IV_SE, MAD/√N): {comb_err:.3f}",
+            f"  IV-only SE (1/√Σw):       {iv_se:.3f}",
+            f"  MAD/√N component:         {scatter_note}",
+            f"  n_inlier / n_fiber_agg:   {n_in} / {len(agg_rv)}",
+            "  MAD among inlier fiber_agg RVs (dispersion of order/chunk inputs): "
+            f"{mad_note}",
+            "=" * 72,
+        ]
+    )
+    print("\n".join(lines), flush=True)
+
+
 def _jsonify_mask_ccf_debug(obj: object) -> object:
     """Convert preview payloads (numpy, nested dicts) to JSON-safe structures."""
     if obj is None:
@@ -809,7 +974,7 @@ def _run_lte049_k2all_mask_kpf_previews(
 
     Returns timing rows ``(label, seconds, functions, include_in_total)`` for merge into the test summary.
     """
-    import hispecdrp.primitives.stellar_rv.stellar_rv_preview as srv_prev
+    import hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview as srv_prev
 
     rows: list[tuple[str, float, str, bool]] = []
 
@@ -993,6 +1158,126 @@ def _run_lte049_k2all_mask_kpf_previews(
 
     if _want_bspec_btsettl_serialize_mask_ccf():
         _serialize_mask_kpf_ccf_preview_debug(prim, out_dir)
+
+    return rows
+
+
+def _run_lte049_btsettl_template_previews(
+    tmp_path: str,
+    *,
+    do_orders: list[int] | None = None,
+    window_size_um: float | None = None,
+    l2_model: datamodels.L2Model,
+    template_wavelength_um: np.ndarray,
+    template_flux: np.ndarray,
+) -> list[tuple[str, float, str, bool]]:
+    """
+    Same BSPEC L2 as the parallel test + ``ccf_stellar_template`` with unified Plotly preview.
+
+    Sets ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` during ``apply`` (HTML-only; Kaleido PNG policy follows
+    preview module). Also writes ``*_template_overlay_debug_fib*.html`` (spectrum + shifted
+    stellar template + CCF), analogous to mask-overlay debug for ``ccf_mask_kpf``.
+    """
+    import hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview as srv_prev
+
+    rows: list[tuple[str, float, str, bool]] = []
+    w_um = float(window_size_um) if window_size_um is not None else float(WINDOW_UM)
+    if do_orders is None:
+        do_orders = _mask_kpf_preview_do_orders()
+
+    out_dir = os.path.join(str(tmp_path), "lte049_template_ccf_previews")
+    os.makedirs(out_dir, exist_ok=True)
+
+    t_unified_html = 0.0
+    orig_create = srv_prev.create_stellar_rv_preview
+
+    def _timed_create(*args, **kwargs):
+        nonlocal t_unified_html
+        t1 = time.perf_counter()
+        try:
+            return orig_create(*args, **kwargs)
+        finally:
+            t_unified_html += time.perf_counter() - t1
+
+    prev_env = os.environ.get("HISPEC_DRP_SHOW_CCF_PREVIEW")
+    try:
+        os.environ["HISPEC_DRP_SHOW_CCF_PREVIEW"] = "1"
+        prim = StellarRVPrimitive(
+            algorithm="ccf_stellar_template",
+            template_wavelength=np.asarray(template_wavelength_um, dtype=np.float64),
+            template_flux=np.asarray(template_flux, dtype=np.float64),
+            do_fibers=["1"],
+            do_orders=do_orders,
+            window_size_um=w_um,
+            v_step=float(_TEST_TEMPLATE_CCF_V_STEP_M_S),
+            ccf_input_velocity=None,
+            show_preview=False,
+            save_preview=True,
+            save_mask_overlay_debug=False,
+            show_mask_overlay_debug=False,
+            save_template_overlay_debug=True,
+            show_template_overlay_debug=True,
+            output_dir=out_dir,
+            suffix="lte049_template_ccf",
+            max_cores=6,
+        )
+        t0 = time.perf_counter()
+        with patch.object(srv_prev, "create_stellar_rv_preview", _timed_create):
+            out = prim.apply(l2_model, do_orders=do_orders)
+        apply_wall = time.perf_counter() - t0
+    finally:
+        if prev_env is None:
+            os.environ.pop("HISPEC_DRP_SHOW_CCF_PREVIEW", None)
+        else:
+            os.environ["HISPEC_DRP_SHOW_CCF_PREVIEW"] = prev_env
+
+    assert out is not None
+    rv_remainder = max(apply_wall - t_unified_html, 0.0)
+    rows.append(
+        (
+            "StellarRVPrimitive.apply (ccf_stellar_template) — total wall",
+            apply_wall,
+            "StellarRVPrimitive.apply → _perform, save_output, _create_preview; template CCF",
+            True,
+        )
+    )
+    rows.append(
+        (
+            "  └ subset: stellar RV preview HTML (Plotly write_html ×2)",
+            t_unified_html,
+            "create_stellar_rv_preview, fig.write_html",
+            False,
+        )
+    )
+    rows.append(
+        (
+            "  └ subset: RV computation + tables + save + overhead (approx.)",
+            rv_remainder,
+            "Numba template CCF path, save_output, etc.",
+            False,
+        )
+    )
+
+    prev = (prim._output or {}).get("preview") or {}
+    html_unified = prev.get("html")
+    if html_unified and os.path.isfile(html_unified):
+        ap = os.path.abspath(html_unified)
+        print(f"LTE049_BTSETTL_TEMPLATE_STELLAR_RV_PREVIEW_HTML={ap}", flush=True)
+        t0 = time.perf_counter()
+        webbrowser.open(f"file://{ap}")
+        rows.append(
+            (
+                "open unified stellar RV preview HTML in default browser (post-apply)",
+                time.perf_counter() - t0,
+                "webbrowser.open (file://…*_preview.html)",
+                True,
+            )
+        )
+
+    mod = prim._output or {}
+    for _fib, p in (mod.get("template_overlay_debug") or {}).items():
+        if p and os.path.isfile(p):
+            print(f"LTE049_BTSETTL_TEMPLATE_OVERLAY_HTML={os.path.abspath(p)}", flush=True)
 
     return rows
 
@@ -1407,4 +1692,286 @@ def test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel(
         tbl_rvccf,
         injected_rv_m_s=input_rv_m_s,
         outlier_sigma=float(getattr(prim_rvccf, "outlier_sigma", 4.0)),
+    )
+
+
+@pytest.mark.slow
+def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
+    tmp_path, lte049_btsettl_session_cache
+):
+    """
+    BT-Settl **lte049** + BSPEC echelle stack: same ``process_orders_rvs_numba_parallel`` phase and
+    chunk-eligibility assertions as :func:`test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel`,
+    then :class:`~hispecdrp.primitives.StellarRVPrimitive` with ``algorithm="ccf_stellar_template"``
+    (rest-frame ``template_wavelength`` / ``template_flux`` from the session cache).
+
+    Echelle order selection matches the mask-KPF test (``_bspec_btsettl_ccf_mask_kpf_order_ids``).
+    No line-mask file is required. Optional unified Plotly preview:
+    ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS=1`` (see module docstring).
+
+    Chunk-parallel benchmark uses ``process_orders_rvs_numba_parallel`` on a few orders with
+    ``max_cores`` 1 vs 6 (same windowing idea as the mask-KPF ``rv_per_chunks_mask_kpf`` benchmark).
+    """
+    timing_rows: list[tuple[str, float, str, bool]] = []
+    t0 = time.perf_counter()
+    w_rest = lte049_btsettl_session_cache["w_rest"]
+    flux_rest = lte049_btsettl_session_cache["flux_rest"]
+    template_ln = lte049_btsettl_session_cache["template_ln"]
+    assert len(w_rest) > 50
+    orders = _bspec_btsettl_ccf_mask_kpf_order_ids()
+    timing_rows.append(
+        (
+            "lte049: session cache (w_rest, flux_rest, template_ln) + BSPEC template order selection",
+            time.perf_counter() - t0,
+            "lte049_btsettl_session_cache, _bspec_btsettl_ccf_mask_kpf_order_ids",
+            True,
+        )
+    )
+
+    input_rv_m_s = INPUT_RV_KM_S * 1000.0
+    v_step = _TEST_TEMPLATE_CCF_V_STEP_M_S
+    n_pix = _TEST_ECHELLE_N_PIX
+
+    n_orders = len(orders)
+    wave_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+    spec_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+    spec_err_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+    dq_2d = np.zeros((n_orders, n_pix), dtype=np.uint32)
+    order_tasks: list[tuple[int, int]] = []
+    t0 = time.perf_counter()
+    for oi, order in enumerate(orders):
+        m = int(order)
+        wave_ord, _lam_c = _order_wavelength_grid(m, n_pix)
+        wave_2d[oi] = wave_ord
+        spec_2d[oi] = np.interp(
+            wave_ord / (1.0 + INPUT_RV_KM_S / C_KM_S),
+            w_rest,
+            flux_rest,
+        ).astype(np.float64)
+        spec_err_2d[oi] = _bspec_simulated_flux_err(spec_2d[oi])
+        order_tasks.append((oi, m))
+
+    do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
+    do_not_use_u = np.uint32(do_not_use)
+    for oi in range(n_orders):
+        spec_2d[oi, 0] = 0.0
+        spec_2d[oi, -1] = 0.0
+    bad_flux = ~np.isfinite(spec_2d) | (spec_2d <= 0.0)
+    dq_2d[bad_flux] |= do_not_use_u
+
+    window_um_eff = float(WINDOW_UM)
+    timing_rows.append(
+        (
+            "lte049: stack BSPEC 2-D model (interp Doppler-shifted BT-Settl per order)",
+            time.perf_counter() - t0,
+            "_order_wavelength_grid, np.interp (build wave_2d, spec_2d, spec_err_2d)",
+            True,
+        )
+    )
+
+    ge20_flat = _bspec_btsettl_ge20_mask_flat(wave_2d, order_tasks, window_um_eff)
+    nthr = resolve_numba_threads(6)
+    t0 = time.perf_counter()
+    all_rvs, all_rv_errs, all_wl, _n_chunks_per_order, _chunk_start = (
+        process_orders_rvs_numba_parallel(
+            wave_2d,
+            spec_2d,
+            spec_err_2d,
+            dq_2d,
+            do_not_use,
+            template_ln,
+            flux_rest,
+            window_um_eff,
+            order_tasks,
+            max_cores=6,
+            return_ccf=False,
+            ccf_v_step=_TEST_TEMPLATE_CCF_V_STEP_M_S,
+        )
+    )
+    parallel_wall = time.perf_counter() - t0
+    timing_rows.append(
+        (
+            f"lte049: process_orders_rvs_numba_parallel (numba_threads={nthr}, "
+            f"ccf_v_step={_TEST_TEMPLATE_CCF_V_STEP_M_S} m/s, "
+            f"window_um={window_um_eff:.6f})",
+            parallel_wall,
+            "process_orders_rvs_numba_parallel, _process_all_orders_ccf_numba (prange), "
+            "process_all_orders_rvs_numba (_ccf_rv_from_ccf / fit_ccf_rv, serial)",
+            True,
+        )
+    )
+
+    assert len(all_rvs) == len(ge20_flat), "flat chunk layout mismatch"
+    eligible = ge20_flat & np.isfinite(all_wl)
+    n_attempt = int(np.sum(eligible))
+    assert n_attempt >= 1, "Expected at least one eligible template CCF chunk"
+
+    sel_fit = eligible & np.isfinite(all_rvs) & np.isfinite(all_rv_errs) & (all_rv_errs > 0)
+    n_fit_ok = int(np.sum(sel_fit))
+    tol_vec = np.maximum(8000.0, 3.0 * all_rv_errs)
+    in_tol = (
+        sel_fit
+        & (np.abs(all_rvs - input_rv_m_s) < tol_vec)
+        & (all_rv_errs < 1e6)
+    )
+    n_in_tol = int(np.sum(in_tol))
+
+    assert n_fit_ok >= 0.70 * n_attempt, f"fit fraction too low: {n_fit_ok}/{n_attempt}"
+    min_in_tol = max(1, min(n_attempt, max(2, int(0.15 * n_attempt))))
+    assert n_in_tol >= min_in_tol, f"RV recovery fraction too low: {n_in_tol}/{n_attempt} (need >= {min_in_tol})"
+
+    order_start, order_end = int(min(orders)), int(max(orders))
+    tpl_l2 = datamodels.L2Model(
+        meta={
+            "order_start": order_start,
+            "order_end": order_end,
+            "spectrograph": "BSPEC",
+            "instrument_name": "HISPEC",
+        }
+    )
+    tpl_l2.meta.order_start = order_start
+    tpl_l2.meta.order_end = order_end
+    tpl_l2.spec_fib1 = spec_2d.astype(np.float32)
+    tpl_l2.spec_err_fib1 = spec_err_2d.astype(np.float32)
+    tpl_l2.wave_fib1 = wave_2d
+    tpl_l2.spec_dq_fib1 = dq_2d
+
+    t0 = time.perf_counter()
+    prim_tpl = StellarRVPrimitive(
+        algorithm="ccf_stellar_template",
+        template_wavelength=np.asarray(w_rest, dtype=np.float64),
+        template_flux=np.asarray(flux_rest, dtype=np.float64),
+        do_fibers=["1"],
+        do_orders=orders,
+        window_size_um=window_um_eff,
+        v_step=float(_TEST_TEMPLATE_CCF_V_STEP_M_S),
+        ccf_input_velocity=None,
+        outlier_sigma=4.0,
+        max_cores=6,
+        save_preview=False,
+        show_preview=False,
+        output_dir=str(tmp_path),
+        suffix="parallel_rvccf_hdu_validate_template",
+    )
+    out_tpl = prim_tpl.apply(tpl_l2, do_orders=orders)
+    timing_rows.append(
+        (
+            "RVCCF_HDU: StellarRVPrimitive ccf_stellar_template → rvccf_fib1 schema check",
+            time.perf_counter() - t0,
+            "StellarRVPrimitive.apply, _write_rv_tables, assemble_rvccf_fib_table",
+            True,
+        )
+    )
+    assert out_tpl is not None
+    tbl_tpl = getattr(out_tpl, "rvccf_fib1", None)
+    _assert_rvccf_table_matches_hdu_schema(tbl_tpl, label="rvccf_fib1")
+    _print_rvccf_hdu_validation_report(tbl_tpl, label="rvccf_fib1")
+    assert tbl_tpl is not None and len(tbl_tpl) > 0, "expected non-empty rvccf_fib1 from ccf_stellar_template"
+    for i in range(len(tbl_tpl)):
+        nv = int(tbl_tpl["N_VEL"][i])
+        ccf = tbl_tpl["CCF"][i]
+        if isinstance(ccf, np.ndarray) and ccf.size > 0:
+            assert ccf.size == nv, f"rvccf_fib1 row {i}: N_VEL={nv} vs len(CCF)={ccf.size}"
+
+    avg_tpl = getattr(out_tpl, "rvccfavg_fib1", None)
+    assert avg_tpl is not None and len(avg_tpl) > 0
+    rv_ccfavg_tpl = float(avg_tpl["RV"][0])
+    # Log-λ template CCF + chunk Gaussian fits: looser than mask-KPF order-mean LSTSQ (<1 m/s there).
+    assert abs(rv_ccfavg_tpl - input_rv_m_s) < 5000.0, (
+        "template CCF aggregate RV vs injected: expect |bias| < 5 km/s on lte049 BSPEC stack "
+        f"(got RVCCFAVG={rv_ccfavg_tpl:.4f} m/s, injected={input_rv_m_s:.4f} m/s)"
+    )
+
+    bench_orders = order_tasks[: min(3, len(order_tasks))]
+    oi0 = bench_orders[0][0]
+    span0 = float(np.ptp(wave_2d[oi0]))
+    bench_window_um = min(0.01, WINDOW_UM / 20.0, max(1e-6, span0 / 16.0))
+    oi_rows = [p[0] for p in bench_orders]
+    wave_b = wave_2d[oi_rows]
+    spec_b = spec_2d[oi_rows]
+    err_b = spec_err_2d[oi_rows]
+    dq_b = dq_2d[oi_rows]
+    order_tasks_b = [(k, p[1]) for k, p in enumerate(bench_orders)]
+    bench_times: dict[int, float] = {}
+    bench_chunks: dict[int, int] = {}
+    eff_threads: dict[int, int] = {}
+    for req_cores in (1, 6):
+        eff_threads[req_cores] = resolve_numba_threads(req_cores)
+        t0 = time.perf_counter()
+        _ar, _ae, _aw, _nc, _cs = process_orders_rvs_numba_parallel(
+            wave_b,
+            spec_b,
+            err_b,
+            dq_b,
+            do_not_use,
+            template_ln,
+            flux_rest,
+            float(bench_window_um),
+            order_tasks_b,
+            max_cores=req_cores,
+            return_ccf=False,
+            ccf_v_step=v_step,
+        )
+        bench_times[req_cores] = time.perf_counter() - t0
+        bench_chunks[req_cores] = int(len(_ar))
+        timing_rows.append(
+            (
+                f"lte049: template CCF benchmark process_orders_rvs_numba_parallel "
+                f"req_cores={req_cores} (effective={eff_threads[req_cores]}, "
+                f"n_chunks={bench_chunks[req_cores]}, window_um={bench_window_um:.4f})",
+                bench_times[req_cores],
+                "process_orders_rvs_numba_parallel, _process_all_orders_ccf_numba (prange), "
+                "process_all_orders_rvs_numba",
+                True,
+            )
+        )
+
+    t1 = bench_times[1]
+    if eff_threads[6] > 1 and bench_chunks.get(1, 0) > 1:
+        t6 = bench_times[6]
+        # Small benchmarks often show no speed-up (overhead, cache); forbid large regressions.
+        assert t6 <= t1 * 1.05, (
+            "Expected template CCF parallel path not much slower than serial: "
+            f"t1={t1:.3f}s, t6={t6:.3f}s (eff={eff_threads[6]}), "
+            f"n_chunks={bench_chunks[1]}"
+        )
+    else:
+        if eff_threads[6] <= 1:
+            print(
+                "template CCF speed-up check skipped: host allows only one effective Numba thread "
+                f"(eff threads: 1->{eff_threads[1]}, 6->{eff_threads[6]}).",
+                flush=True,
+            )
+        else:
+            print(
+                "template CCF speed-up check skipped: benchmark produced only one chunk "
+                f"(n_chunks={bench_chunks.get(1, 0)}); need >1 for meaningful prange timing.",
+                flush=True,
+            )
+
+    if _want_bspec_btsettl_template_previews():
+        timing_rows.extend(
+            _run_lte049_btsettl_template_previews(
+                str(tmp_path),
+                do_orders=orders,
+                window_size_um=window_um_eff,
+                l2_model=out_tpl,
+                template_wavelength_um=w_rest,
+                template_flux=flux_rest,
+            )
+        )
+
+    _print_btsettl_test_timing_summary(
+        timing_rows,
+        title=(
+            "test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel — "
+            "wall time by step (seconds)"
+        ),
+    )
+
+    _print_btsettl_template_ccf_recovery_report(
+        out_tpl,
+        tbl_tpl,
+        injected_rv_m_s=input_rv_m_s,
+        outlier_sigma=float(getattr(prim_tpl, "outlier_sigma", 4.0)),
     )

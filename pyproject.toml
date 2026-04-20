@@ -82,7 +82,11 @@ include = ["hispecdrp*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-hispecdrp = ["datamodels/metadata/*.yaml", "configs/*.yaml"]
+hispecdrp = [
+  "datamodels/metadata/*.yaml",
+  "configs/*.yaml",
+  "primitives/stellar_rv/previews/ccf_spectrum_overlay_unified.html.in",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
