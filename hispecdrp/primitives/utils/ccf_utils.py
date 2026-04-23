@@ -25,9 +25,10 @@ The **template CCF** implementation is specific to HISPEC DRP. The **Gaussian fi
 machinery intentionally mirrors *published* behavior of Keck **KPF** PRV-style
 two-pass Levenberg–Marquardt CCF fitting; this file is **not** a copy of KPF
 pipeline source. **Mask-line** SPIROU/KPF-style CCF is implemented below
-(:func:`run_ccf_mask_kpf_for_fiber`). Per-chunk ``RV_ERR`` written to L2 uses
-:func:`mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s` when that succeeds;
-the Numba-only heuristic in :func:`_rv_from_ccf_mask_kpf_numba_single` is the fallback.
+(:func:`run_ccf_mask_kpf_for_fiber`). Per-chunk ``RV``/``RV_ERR`` prefer the Gaussian +
+:func:`_refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf` path when it succeeds; otherwise
+:func:`mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s` and the Numba heuristic
+in :func:`_rv_from_ccf_mask_kpf_numba_single` apply as before.
 
 References
 ----------
@@ -89,6 +90,11 @@ def ccf_order_n_chunks_for_span(span_um: float, window_um: float) -> int:
 
     Used for mask-line CCF chunking (:func:`rv_per_chunks_mask_kpf`), template
     :func:`rv_per_chunks`, and Numba order layouts so chunk counts follow a single rule.
+
+    See Also
+    --------
+    :func:`build_mask_kpf_chunk_wavelength_intervals_num_lines` — alternate chunking for
+    ``ccf_mask_kpf`` when ``window_size_num_lines`` is set (see :func:`rv_per_chunks_mask_kpf`).
     """
     if not (math.isfinite(span_um) and math.isfinite(window_um)):
         return 1
@@ -97,6 +103,404 @@ def ccf_order_n_chunks_for_span(span_um: float, window_um: float) -> int:
     if span_um <= window_um:
         return 1
     return int(math.ceil(span_um / window_um))
+
+
+def mask_kpf_line_window_chunking_requested(
+    window_size_num_lines: float | int | None,
+) -> bool:
+    """
+    Return True when :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`
+    should use **line-count–based** mask-KPF chunking instead of fixed ``window_size_um``
+    bins from :func:`ccf_order_n_chunks_for_span`.
+    """
+    return window_size_num_lines is not None
+
+
+def validate_mask_kpf_line_window_chunking_config(
+    *,
+    algorithm: str,
+    window_size_num_lines: float | int | None,
+    ccf_input_velocity_m_s: float | None,
+) -> None:
+    """
+    Validate ``window_size_num_lines`` against ``algorithm`` and ``ccf_input_velocity``.
+
+    Raises
+    ------
+    ValueError
+        If ``window_size_num_lines`` is set but incompatible with the algorithm, not
+        finite / positive / non-zero, or if ``ccf_input_velocity`` is missing when line
+        windowing is requested.
+    """
+    if not mask_kpf_line_window_chunking_requested(window_size_num_lines):
+        return
+    algo = (algorithm or "").strip().lower()
+    if algo != "ccf_mask_kpf":
+        raise ValueError(
+            "window_size_num_lines is only supported for algorithm='ccf_mask_kpf' "
+            f"(got algorithm={algorithm!r})."
+        )
+    try:
+        wn = float(window_size_num_lines)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "window_size_num_lines must be convertible to a finite non-zero float."
+        ) from exc
+    if not math.isfinite(wn) or wn <= 0.0:
+        raise ValueError(
+            "window_size_num_lines must be finite, positive, and non-zero "
+            f"(got {window_size_num_lines!r})."
+        )
+    if ccf_input_velocity_m_s is None or not math.isfinite(float(ccf_input_velocity_m_s)):
+        raise ValueError(
+            "ccf_input_velocity must be set to a finite value (m/s) when "
+            "window_size_num_lines is used (hybrid / fine grid center defines the "
+            "Doppler mapping used to place mask lines against the spectrum)."
+        )
+
+
+def mask_line_observed_wavelength_um(
+    line_lambda_rest_um: np.ndarray | float,
+    *,
+    v_m_s: float,
+    zb: float,
+) -> np.ndarray:
+    """
+    Map mask **rest** wavelengths (µm) to the observed frame at trial velocity ``v_m_s``.
+
+    Intended for line-window chunking: same convention as mask-line CCF
+    :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)`.
+
+    Parameters
+    ----------
+    line_lambda_rest_um
+        Rest wavelengths of mask entries (scalar or array), µm.
+    v_m_s, zb
+        Trial RV (m s\\ :sup:`−1`) and barycentric factor :math:`z_b`.
+
+    Returns
+    -------
+    np.ndarray
+        Observed-frame wavelengths (µm), shape matching ``line_lambda_rest_um``.
+
+    Notes
+    -----
+    TODO: confirm broadcasting / dtype policy with :func:`rv_per_chunks_mask_kpf` /
+    :func:`restrict_mask_to_chunk` callers; today this is a thin outline for chunk builders.
+    """
+    # TODO: align exactly with Doppler mapping in _calc_mask_ccf_chunks_numba / restrict_mask_to_chunk.
+    lam = np.asarray(line_lambda_rest_um, dtype=np.float64)
+    zb1 = 1.0 + float(zb)
+    if not math.isfinite(zb1) or zb1 == 0.0:
+        zb1 = 1.0
+    sh = (1.0 + float(v_m_s) / C_M_S) / zb1
+    return lam * sh
+
+
+def mask_kpf_line_window_coarse_velocity_bounds_m_s(
+    wave: np.ndarray,
+    order_tasks: list[tuple[int, int]],
+    mask_lines: MaskLines,
+    *,
+    window_size_num_lines: float,
+    v_center_m_s: float,
+    zb: float,
+    min_good_pixels: int,
+    v_coarse_lo: float,
+    v_coarse_hi: float,
+    hybrid_half_width_m_s: float,
+    v_step_m_s: float,
+) -> tuple[float, float, float]:
+    """
+    Narrow the **broad** CCF velocity span for line-window mask-KPF.
+
+    Uses the largest chunk wavelength span (in velocity units
+    :math:`\\Delta v \\approx c\\,\\Delta\\lambda/\\lambda`) over all echelle rows in
+    ``order_tasks``, together with ``v_center_m_s`` (``ccf_input_velocity``), to set a
+    symmetric interval inside ``[v_coarse_lo, v_coarse_hi]`` that still contains the
+    hybrid fine window (``v_center`` :math:`\\pm` ``hybrid_half_width_m_s``).
+
+    Returns
+    -------
+    v_min_eff, v_max_eff, dv_chunk_max_m_s : float
+        Effective broad bounds for :func:`build_hybrid_merged_velocity_grid` and the
+        maximum :math:`c\\,\\Delta\\lambda/\\lambda` among chunks (m/s).
+    """
+    wn = float(window_size_num_lines)
+    v_c = float(v_center_m_s)
+    vb = float(v_coarse_lo)
+    vx = float(v_coarse_hi)
+    dv_max = 0.0
+    for oi, _order in order_tasks:
+        w_row = np.asarray(wave[oi], dtype=np.float64).ravel()
+        wlo, whi, _ctr = build_mask_kpf_chunk_wavelength_intervals_num_lines(
+            w_row,
+            mask_lines,
+            window_size_num_lines=wn,
+            v_center_m_s=v_c,
+            zb=float(zb),
+            min_good_pixels=int(min_good_pixels),
+        )
+        for k in range(int(len(wlo))):
+            lam_m = 0.5 * (float(wlo[k]) + float(whi[k]))
+            d_lam = float(whi[k]) - float(wlo[k])
+            if lam_m > 0.0 and d_lam > 0.0 and math.isfinite(lam_m) and math.isfinite(d_lam):
+                dv = C_M_S * d_lam / lam_m
+                if math.isfinite(dv):
+                    dv_max = max(dv_max, float(dv))
+    half_w = float(hybrid_half_width_m_s)
+    pad = max(half_w, 2.0 * dv_max, 5.0 * abs(float(v_step_m_s)))
+    v_lo = max(vb, v_c - pad)
+    v_hi = min(vx, v_c + pad)
+    if not math.isfinite(v_lo) or not math.isfinite(v_hi) or v_hi <= v_lo:
+        return vb, vx, dv_max
+    return float(v_lo), float(v_hi), float(dv_max)
+
+
+def mask_kpf_chunk_restrict_velocity_range_m_s(
+    wl_lo_um: float,
+    wl_hi_um: float,
+    *,
+    v_prior_m_s: float,
+    v_span_lo: float,
+    v_span_hi: float,
+) -> tuple[float, float]:
+    """
+    Velocity bounds for :func:`restrict_mask_to_chunk` on one line-window chunk.
+
+    Combines the pipeline prior ``v_prior_m_s`` (``ccf_input_velocity``) with the chunk
+    wavelength span :math:`[\\lambda_{\\rm lo},\\lambda_{\\rm hi}]` via
+    :math:`\\Delta v \\approx c\\,(\\lambda_{\\rm hi}-\\lambda_{\\rm lo})/\\bar\\lambda`,
+    intersected with ``[v_span_lo, v_span_hi]`` (already the tightened coarse span when
+    line-window mode is active).
+    """
+    lam_m = 0.5 * (float(wl_lo_um) + float(wl_hi_um))
+    d_lam = float(wl_hi_um) - float(wl_lo_um)
+    span = float(v_span_hi) - float(v_span_lo)
+    floor_pad = max(500.0, 0.02 * span) if math.isfinite(span) and span > 0.0 else 500.0
+    if lam_m > 0.0 and d_lam > 0.0 and math.isfinite(lam_m) and math.isfinite(d_lam):
+        dv = C_M_S * d_lam / lam_m
+        pad = max(floor_pad, 2.0 * dv) if math.isfinite(dv) else floor_pad
+    else:
+        pad = floor_pad
+    v_lo = max(float(v_span_lo), float(v_prior_m_s) - pad)
+    v_hi = min(float(v_span_hi), float(v_prior_m_s) + pad)
+    if not math.isfinite(v_lo) or not math.isfinite(v_hi) or v_hi <= v_lo:
+        return float(v_span_lo), float(v_span_hi)
+    return float(v_lo), float(v_hi)
+
+
+# Fractional padding on ``window_size_um`` **full width** for mask-KPF line-window spectral
+# pixels (symmetric about predicted observed line λ at ``ccf_input_velocity``).
+MASK_KPF_LINE_WINDOW_SPEC_REL_PAD = 0.02
+
+
+def mask_kpf_line_window_spectrum_band_um(
+    wl_center_um: float,
+    window_size_um: float,
+    w_min_um: float,
+    w_max_um: float,
+    *,
+    rel_pad: float | None = None,
+) -> tuple[float, float]:
+    """
+    Observed-frame µm interval for spectrum + mask-CCF pixels in line-window mask-KPF.
+
+    Band is centered on ``wl_center_um`` (predicted observed mask-line λ at the chunking
+    velocity) with total width ``window_size_um * (1 + rel_pad)``, clipped to the echelle
+    pixel support ``[w_min_um, w_max_um]``.
+    """
+    wc = float(wl_center_um)
+    wsz = float(window_size_um)
+    if not math.isfinite(wsz) or wsz <= 0.0:
+        raise ValueError("mask_kpf_line_window_spectrum_band_um: window_size_um must be finite and > 0")
+    rp = float(rel_pad) if rel_pad is not None else float(MASK_KPF_LINE_WINDOW_SPEC_REL_PAD)
+    if not math.isfinite(rp) or rp < 0.0:
+        rp = 0.0
+    half = 0.5 * wsz * (1.0 + rp)
+    w0 = float(w_min_um)
+    w1 = float(w_max_um)
+    lo = max(w0, wc - half)
+    hi = min(w1, wc + half)
+    if hi <= lo:
+        return wc, wc
+    return float(lo), float(hi)
+
+
+def count_mask_lines_in_observed_wavelength_interval(
+    mask_lines: MaskLines,
+    *,
+    wl_lo_um: float,
+    wl_hi_um: float,
+    v_center_m_s: float,
+    zb: float,
+) -> int:
+    """
+    Count mask line segments with positive weight whose observed λ lies in ``[wl_lo_um, wl_hi_um]``.
+
+    Uses the same Doppler mapping as :func:`mask_line_observed_wavelength_um` at
+    ``v_center_m_s``.
+    """
+    lam_r = np.asarray(mask_lines.line_lambda_um, dtype=np.float64).ravel()
+    wt = np.asarray(mask_lines.weight, dtype=np.float64).ravel()
+    if lam_r.size == 0:
+        return 0
+    lam_obs = mask_line_observed_wavelength_um(lam_r, v_m_s=float(v_center_m_s), zb=float(zb))
+    ok = np.isfinite(lam_obs) & np.isfinite(wt) & (wt > 0.0)
+    lam_obs = lam_obs[ok]
+    return int(np.sum((lam_obs >= float(wl_lo_um)) & (lam_obs <= float(wl_hi_um))))
+
+
+def build_mask_kpf_chunk_wavelength_intervals_num_lines(
+    wave_um: np.ndarray,
+    mask_lines: MaskLines,
+    *,
+    window_size_num_lines: float,
+    v_center_m_s: float,
+    zb: float,
+    min_good_pixels: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Build observed-wavelength chunks centered on predicted mask-line positions.
+
+    Mask rest wavelengths are mapped to the observed frame at ``v_center_m_s`` (same as
+    :func:`mask_line_observed_wavelength_um`). Distinct observed positions are sorted; consecutive
+    lines are grouped ``window_size_num_lines`` at a time. For each group, the wavelength **window**
+    is the **largest** interval that (i) contains every predicted line λ in the group, (ii) does not
+    overlap neighboring groups, and (iii) stays inside the pixel wavelength support
+    ``[w_min, w_max]`` of ``wave_um``. Neighbor boundaries are **midpoints** between adjacent
+    predicted line wavelengths (1-D Voronoi cells), which maximize extent under those constraints.
+    Spectrum outside the union of chunks is not analyzed.
+
+    Chunk **center** wavelengths are the mean predicted observed λ of lines in the group (for
+    ``window_size_num_lines == 1`` this is exactly that line’s predicted λ).
+
+    The **interval** ``[wl_lo_um, wl_hi_um]`` is a 1-D Voronoi cell between neighbor lines (midpoint
+    boundaries). It is the **largest** wavelength window that contains every line in the group
+    without overlapping other groups, but it is **not** generally symmetric about a single line’s
+    predicted λ: the line can sit off-center inside the cell unless neighbor spacings happen to match.
+
+    Parameters
+    ----------
+    wave_um
+        1-D wavelength samples (µm) for the order.
+    mask_lines
+        Mask lines for the run.
+    window_size_num_lines
+        Target number of distinct observed-line positions per chunk (≥ 1, rounded to int).
+    v_center_m_s
+        Typically ``ccf_input_velocity`` (m/s).
+    zb
+        Barycentric factor for the Doppler mapping.
+    min_good_pixels
+        Reserved for future filtering when a chunk would contain too few spectral samples.
+
+    Returns
+    -------
+    wl_lo_um, wl_hi_um, chunk_center_wavelength_um : np.ndarray
+        Per-chunk bounds (µm) and chunk-center wavelengths (µm).
+        Chunk wavelength half-open convention in :func:`rv_per_chunks_mask_kpf` matches the last
+        chunk inclusive on the right.
+    """
+    _ = int(min_good_pixels)  # reserved for future pixel-count-based merging of tiny chunks
+    w = np.asarray(wave_um, dtype=np.float64).ravel()
+    w_min, w_max = float(np.nanmin(w)), float(np.nanmax(w))
+    if not np.isfinite(w_min) or not np.isfinite(w_max) or w_max <= w_min:
+        return (
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+        )
+
+    lam_r = np.asarray(mask_lines.line_lambda_um, dtype=np.float64).ravel()
+    wt = np.asarray(mask_lines.weight, dtype=np.float64).ravel()
+    if lam_r.size == 0:
+        return (
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+        )
+
+    lam_obs = mask_line_observed_wavelength_um(lam_r, v_m_s=float(v_center_m_s), zb=float(zb))
+    ok = np.isfinite(lam_obs) & np.isfinite(wt) & (wt > 0.0)
+    ok &= (lam_obs >= w_min) & (lam_obs <= w_max)
+    lam_sel = lam_obs[ok]
+    if lam_sel.size == 0:
+        return (
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
+        )
+
+    # Merge lines that Doppler-map to the same observed wavelength (within tight rtol).
+    lam_sorted = np.sort(lam_sel)
+    if lam_sorted.size >= 2:
+        sep = np.maximum(np.abs(np.diff(lam_sorted)), np.finfo(np.float64).tiny)
+        rel = sep / np.maximum(np.abs(0.5 * (lam_sorted[1:] + lam_sorted[:-1])), 1e-15)
+        keep = np.ones(lam_sorted.size, dtype=bool)
+        keep[1:] &= rel > 1e-9
+        lam_u = lam_sorted[keep]
+    else:
+        lam_u = lam_sorted
+
+    n_line = int(lam_u.size)
+    n_per = max(1, int(round(float(window_size_num_lines))))
+    if n_per < 1:
+        n_per = 1
+
+    wl_lo_list: list[float] = []
+    wl_hi_list: list[float] = []
+    ctr_list: list[float] = []
+
+    for i0 in range(0, n_line, n_per):
+        i1 = min(n_line, i0 + n_per)
+        group = lam_u[i0:i1]
+        lam_first = float(group[0])
+        lam_last = float(group[-1])
+        if i0 == 0:
+            lo = w_min
+        else:
+            lo = 0.5 * (float(lam_u[i0 - 1]) + lam_first)
+        if i1 >= n_line:
+            hi = w_max
+        else:
+            hi = 0.5 * (lam_last + float(lam_u[i1]))
+        lo = max(lo, w_min)
+        hi = min(hi, w_max)
+        if hi > lo:
+            wl_lo_list.append(lo)
+            wl_hi_list.append(hi)
+            # Barycenter of predicted observed λ in the group (single line → that line’s λ).
+            ctr_list.append(float(np.mean(group)))
+
+    return (
+        np.asarray(wl_lo_list, dtype=np.float64),
+        np.asarray(wl_hi_list, dtype=np.float64),
+        np.asarray(ctr_list, dtype=np.float64),
+    )
+
+
+def mask_kpf_n_chunks_for_order_num_lines(
+    wave_um: np.ndarray,
+    mask_lines: MaskLines,
+    *,
+    window_size_num_lines: float,
+    v_center_m_s: float,
+    zb: float,
+    min_good_pixels: int = 10,
+) -> int:
+    """Return ``n_chunk`` for one order under :func:`build_mask_kpf_chunk_wavelength_intervals_num_lines`."""
+    wl_lo, wl_hi, _ctr = build_mask_kpf_chunk_wavelength_intervals_num_lines(
+        wave_um,
+        mask_lines,
+        window_size_num_lines=window_size_num_lines,
+        v_center_m_s=v_center_m_s,
+        zb=zb,
+        min_good_pixels=min_good_pixels,
+    )
+    return int(len(wl_lo))
+
+
 _V_MAX = 500000.0
 _V_STEP = 50.0
 
@@ -105,6 +509,9 @@ _V_STEP = 50.0
 # the line appears as a maximum near the true RV. Pass ``ccf_mask_kpf_stored_negated=True``
 # to :func:`fit_ccf_rv` when fitting those arrays; see ``diag["ccf_mask_kpf_stored_negated"]``.
 MASK_KPF_STORED_CCF_NEGATED_FROM_RAW = True
+
+# Max Lagrange degree+1 stencil for mask-line CCF sampling on L2 wavelength pixels (see ``mask_ccf_pixel_interp_order``).
+MAX_MASK_CCF_PIXEL_INTERP_ORDER = 12
 
 
 def resolve_ccf_broad_grid_m_s(
@@ -789,6 +1196,42 @@ CCF_PREVIEW_SLOT_FIT_CONFIG = CCFFitKpfConfig(
     sigma_clip_unclipped_prefit_passes=1,
     sigma_clip_max_iter=6,
 )
+
+
+def _mask_kpf_ccf_fit_free_baseline_requested(
+    *,
+    fit_ccf_baseline_free: bool | None,
+    mask_kpf_window_size_num_lines: float | None,
+    ccf_mask_kpf_stored_negated: bool | None = None,
+) -> bool:
+    """
+    True when :func:`fit_ccf_rv` should treat the CCF constant term as an LM parameter.
+
+    For mask-KPF **line-window** chunking with ``window_size_num_lines`` in ``(0, 3)``, the
+    hybrid/fine velocity span is often only a few km s\\ :sup:`−1` wide, so a robust median
+    baseline estimated from essentially the entire profile is a poor substitute for wings;
+    fitting ``Const1D`` jointly with the Gaussian avoids that bias.
+
+    For ``ccf_mask_kpf_stored_negated=True`` (``ccf_mask_kpf`` stored CCF rows) in that same
+    narrow line-window regime, the baseline is **not** a free LM parameter: a free
+    ``Gaussian1D + Const1D`` is χ²-degenerate (Gaussian amplitude collapses toward zero and
+    the line is absorbed by the constant), which breaks Plotly Gaussian overlays. Pass
+    half-width caps still apply when ``ccf_mask_kpf_stored_negated`` is true (see
+    :func:`fit_ccf_rv`), so fixed sigma-clipped baselines remain local to the hybrid grid.
+    """
+    if fit_ccf_baseline_free is not None:
+        return bool(fit_ccf_baseline_free)
+    if mask_kpf_window_size_num_lines is None:
+        return False
+    try:
+        wn = float(mask_kpf_window_size_num_lines)
+    except (TypeError, ValueError):
+        return False
+    if not (math.isfinite(wn) and 0.0 < wn < 3.0):
+        return False
+    if bool(ccf_mask_kpf_stored_negated):
+        return False
+    return True
 
 
 # Sub-pixel RV refinement on coarse velocity grids (e.g. 50 m/s CCF samples): default
@@ -1703,6 +2146,8 @@ def _bootstrap_gaussian_rv_std_m_s(
     n_samples: int,
     rng: np.random.Generator,
     maxiter: int = 400,
+    free_baseline: bool = False,
+    ccf_mask_kpf_stored_negated: bool | None = None,
 ) -> float:
     """
     Scatter of the fitted Gaussian mean (m/s) when each CCF sample is perturbed by its
@@ -1728,9 +2173,14 @@ def _bootstrap_gaussian_rv_std_m_s(
         yn = y0 + rng.standard_normal(y0.shape) * gerr
         ys = _levmar_ccf_y_scale(yn)
         yn_s = np.asarray(yn, dtype=np.float64) * ys
-        bg_raw = _ccf_background_sigma_clipped_median(np.asarray(yn, dtype=np.float64))
-        if not np.isfinite(bg_raw):
-            bg_raw = float(np.median(yn))
+        if free_baseline:
+            bg_raw = float(np.nanmedian(np.asarray(yn, dtype=np.float64)))
+            if not np.isfinite(bg_raw):
+                bg_raw = 0.0
+        else:
+            bg_raw = _ccf_background_sigma_clipped_median(np.asarray(yn, dtype=np.float64))
+            if not np.isfinite(bg_raw):
+                bg_raw = float(np.median(yn))
         bmed = float(bg_raw * ys)
         gy = yn_s - bmed
         span = abs(float(np.nanmax(gy) - np.nanmin(gy))) * 100.0
@@ -1739,11 +2189,22 @@ def _bootstrap_gaussian_rv_std_m_s(
             if profile == "emission"
             else min(1e7, float(np.nanmax(gy)) + span)
         )
+        if bool(ccf_mask_kpf_stored_negated):
+            amp = max(float(amp), 1e-30)
+        amp_floor_s = 0.0
+        if free_baseline and (bool(ccf_mask_kpf_stored_negated) or profile == "absorption"):
+            amp_floor_s = _ccf_gaussian_amp_floor_free_baseline_scaled(gy, ys)
+            amp = max(float(amp), 2.0 * amp_floor_s)
         try:
             init_b = Gaussian1D(
                 amplitude=amp, mean=float(seed_mean_km), stddev=float(seed_std_km)
             ) + Const1D(amplitude=bmed)
-            init_b.amplitude_1.fixed = True
+            if free_baseline and (bool(ccf_mask_kpf_stored_negated) or profile == "absorption"):
+                init_b.amplitude_0.min = float(amp_floor_s)
+            elif bool(ccf_mask_kpf_stored_negated):
+                init_b.amplitude_0.min = 0.0
+            if not free_baseline:
+                init_b.amplitude_1.fixed = True
             w_eff = np.asarray(w, dtype=np.float64) / (ys * ys)
             gfit = ft(init_b, gx, yn_s, weights=w_eff, maxiter=maxiter)
             means[i] = float(gfit.mean_0.value) * 1000.0
@@ -1841,6 +2302,39 @@ def _levmar_ccf_y_scale(gy: np.ndarray) -> float:
     return 1.0 / m
 
 
+def _ccf_gaussian_amp_floor_free_baseline_scaled(
+    gy_det: np.ndarray,
+    ys: float,
+    *,
+    frac_of_span: float = 0.005,
+    frac_of_peak: float = 0.05,
+    abs_scaled_floor: float = 0.0,
+) -> float:
+    """
+    Positive lower bound on Gaussian amplitude (LevMar **scaled** ``gy`` units) when the
+    compound model is ``Gaussian1D + Const1D`` with **free** ``Const1D``: otherwise the fitter
+    can drive Gaussian amplitude to **exactly zero** and absorb the line in the constant
+    (χ² degeneracy), yielding flat preview Gaussians.
+
+    Uses both a fraction of the detrended peak-to-valley span and a fraction of the
+    **positive peak** above the median-detrended baseline: span alone can be noise-dominated
+    on narrow mask-CCF grids, leaving a tiny floor that still allows an effectively flat Gaussian.
+
+    Optional ``abs_scaled_floor`` (same units as scaled ``gy``) forces a minimum when
+    peak-derived floors would otherwise be numerically negligible.
+    """
+    contr = float(np.nanmax(gy_det) - np.nanmin(gy_det))
+    if not math.isfinite(contr):
+        contr = 0.0
+    contr = max(0.0, contr)
+    span_floor = max(1e-30 * float(ys), float(frac_of_span) * contr)
+    pk = float(np.nanmax(gy_det))
+    if not math.isfinite(pk):
+        pk = 0.0
+    peak_floor = max(0.0, float(frac_of_peak) * max(0.0, pk))
+    return max(span_floor, peak_floor, float(abs_scaled_floor))
+
+
 def _ccf_background_sigma_clipped_median(
     y: np.ndarray,
     *,
@@ -1897,15 +2391,26 @@ def fit_ccf_rv(
     two_pass: bool = True,
     max_velocity_samples: int | None = 8192,
     ccf_mask_kpf_stored_negated: bool | None = None,
+    fit_ccf_baseline_free: bool | None = None,
+    mask_kpf_window_size_num_lines: float | None = None,
+    gaussian_seed_mean_m_s: float | None = None,
 ):
     """
     Fit a Gaussian plus constant baseline to a precomputed CCF and return RV ± error in m s⁻¹.
 
     Uses a robust emission/absorption profile guess, :class:`~astropy.modeling.models.Gaussian1D`
     plus :class:`~astropy.modeling.models.Const1D` on the CCF in a sliding velocity
-    window (values are scaled to ~unit magnitude before LM; RV parameters are unchanged). The
-    constant baseline is **fixed** to :func:`_ccf_background_sigma_clipped_median` of the CCF
-    samples in each fit window (not a free LM parameter).
+    window (values are scaled to ~unit magnitude before LM; RV parameters are unchanged). By
+    default the constant baseline is **fixed** to :func:`_ccf_background_sigma_clipped_median`
+    of the CCF samples in each fit window (not a free LM parameter). When
+    ``fit_ccf_baseline_free=True``, or when ``mask_kpf_window_size_num_lines`` is set and
+    ``0 < mask_kpf_window_size_num_lines < 3`` (narrow mask-KPF line-window grids) **and**
+    ``ccf_mask_kpf_stored_negated`` is not true, the baseline is a **free**
+    :class:`~astropy.modeling.models.Const1D` term fit jointly with the Gaussian, and pass
+    half-widths are capped to a fraction of the available velocity span so the fit is not
+    dominated by an artificial “global median” baseline across the whole short profile.
+    The same half-width caps apply when ``ccf_mask_kpf_stored_negated`` is true (mask-line CCF),
+    so fixed-baseline fits on short hybrid grids do not inherit multi-hundred-km pass windows.
     One or two Levenberg–Marquardt passes each use a **wide** velocity
     window (see :class:`CCFFitKpfConfig`) to stabilize the Gaussian **amplitude** and width.
     Within each window the fitter runs **unclipped** χ² passes on the full sample
@@ -1950,7 +2455,27 @@ def fit_ccf_rv(
         True) as ``"ccf_mask_kpf_stored_negated"``. Use ``True`` for mask-line CCF rows
         produced by :func:`rv_per_chunks_mask_kpf` / :func:`run_ccf_mask_kpf_for_fiber`
         (stored convention: negated from the raw weighted mask statistic so the peak is
-        near the true RV). ``None`` (default) omits the key — caller convention unknown.
+        near the true RV). When ``True``, the fitter **does not** use the data-driven
+        emission/absorption heuristic: it assumes a **peak-up** line (positive
+        :class:`~astropy.modeling.models.Gaussian1D` amplitude in scaled units, seed at the
+        discrete maximum) and sets ``Gaussian1D.amplitude`` lower bound to ``0`` so LM
+        cannot flip to a spurious negative-lobe solution on flat mask CCFs.
+        ``None`` (default) omits the key — caller convention unknown.
+    fit_ccf_baseline_free : bool or None, optional
+        When ``True``, fit the CCF constant baseline in LM (do not fix ``Const1D``). When
+        ``None`` (default), use :func:`_mask_kpf_ccf_fit_free_baseline_requested` with
+        ``mask_kpf_window_size_num_lines`` to decide.
+    mask_kpf_window_size_num_lines : float or None, optional
+        Mask-KPF line-window parameter (same meaning as on the primitive). When
+        ``fit_ccf_baseline_free`` is ``None`` and this is in ``(0, 3)``, free-baseline mode
+        is enabled automatically unless ``ccf_mask_kpf_stored_negated`` is true (see
+        :func:`_mask_kpf_ccf_fit_free_baseline_requested`).
+    gaussian_seed_mean_m_s : float or None, optional
+        When ``ccf_mask_kpf_stored_negated`` is true and this lies on the velocity grid, the
+        discrete peak seed uses **argmax(CCF)** restricted to samples within roughly the hybrid
+        core around this value (typically ``ccf_input_velocity``), instead of the global maximum
+        on the full grid. That avoids spurious seeds on stacked mean CCFs and aligns pass-1 with
+        the injected search center.
 
     Returns
     -------
@@ -2000,6 +2525,11 @@ def fit_ccf_rv(
       minimum on ``rv_err`` (no 200 km/s-style floor from ``max(rv_err, σ_slope)``).
     """
     cfg = config or CCFFitKpfConfig()
+    free_bl = _mask_kpf_ccf_fit_free_baseline_requested(
+        fit_ccf_baseline_free=fit_ccf_baseline_free,
+        mask_kpf_window_size_num_lines=mask_kpf_window_size_num_lines,
+        ccf_mask_kpf_stored_negated=ccf_mask_kpf_stored_negated,
+    )
     _ccf_kpf_diag: dict[str, bool] = {}
     if ccf_mask_kpf_stored_negated is not None:
         _ccf_kpf_diag["ccf_mask_kpf_stored_negated"] = bool(ccf_mask_kpf_stored_negated)
@@ -2062,8 +2592,38 @@ def fit_ccf_rv(
         )
     vk = vm / 1000.0
     mm = str(mask_method).lower() if mask_method else ""
+    forced_mask_kpf_peak_up = False
     if mm in cfg.cal_mask_methods:
         profile, seed_ms = "absorption", float(vm[int(np.nanargmax(y))])
+    elif bool(ccf_mask_kpf_stored_negated):
+        # Mask-line CCF rows use :data:`MASK_KPF_STORED_CCF_NEGATED_FROM_RAW`: the physical line
+        # sits at a **maximum** on the stored grid. The generic emission/absorption heuristic
+        # mislabels nearly-flat weighted mask CCFs and flips the Gaussian sign, so LM chases the
+        # wrong extremum. Fix profile to the code path that uses a **positive** Gaussian
+        # amplitude and seeds at the discrete maximum (same convention as cal-mask absorption).
+        profile = "absorption"
+        forced_mask_kpf_peak_up = True
+        v_lo, v_hi = float(np.min(vm)), float(np.max(vm))
+        v_span = float(v_hi - v_lo) if vm.size > 1 else 0.0
+        g_seed = gaussian_seed_mean_m_s
+        if (
+            g_seed is not None
+            and math.isfinite(float(g_seed))
+            and v_lo <= float(g_seed) <= v_hi
+            and v_span > 0.0
+        ):
+            g0 = float(g_seed)
+            # Wide enough to cover the coarse hybrid leg around the injected RV, narrow enough
+            # to reject a higher spurious extremum on the opposite end of a ~10 km/s grid.
+            half_w = max(3500.0, 0.38 * v_span)
+            msk = (vm >= g0 - half_w) & (vm <= g0 + half_w)
+            if int(np.count_nonzero(msk)) >= int(cfg.min_points):
+                yy, vv = y[msk], vm[msk]
+                seed_ms = float(vv[int(np.nanargmax(yy))])
+            else:
+                seed_ms = float(vm[int(np.nanargmax(y))])
+        else:
+            seed_ms = float(vm[int(np.nanargmax(y))])
     else:
         med = float(np.median(y))
         imx, imn = int(np.nanargmax(y)), int(np.nanargmin(y))
@@ -2082,6 +2642,26 @@ def fit_ccf_rv(
         if vel_span_m_s_per_pixel and np.isfinite(vel_span_m_s_per_pixel) and vel_span_m_s_per_pixel > 0
         else vstep_k
     )
+
+    vk_span_km = float(np.nanmax(vk) - np.nanmin(vk)) if vk.size > 1 else 0.0
+    # Short hybrid / line-window grids: cap LM pass half-widths to a fraction of the actual
+    # velocity span.  Otherwise default pass widths (~hundreds of km) flatten the CCF in the
+    # fit window when ``ccf_mask_kpf_stored_negated`` uses a fixed baseline, or bias free-baseline
+    # fits that relied on this cap alone.
+    narrow_v_for_hw_cap = (
+        vk_span_km > 0.0
+        and math.isfinite(vk_span_km)
+        and (free_bl or bool(ccf_mask_kpf_stored_negated))
+    )
+    if narrow_v_for_hw_cap:
+        eps_km = max(1e-6, 2.0 * vstep_k)
+        hw_cap1 = max(eps_km, 0.48 * vk_span_km)
+        hw_cap2 = max(eps_km, 0.42 * vk_span_km)
+        hw1_km = min(float(cfg.pass1_half_width_km_s), float(hw_cap1))
+        hw2_km = min(float(cfg.pass2_half_width_km_s), float(hw_cap2))
+    else:
+        hw1_km = float(cfg.pass1_half_width_km_s)
+        hw2_km = float(cfg.pass2_half_width_km_s)
 
     def _lm(mo, ft):
         if hasattr(mo, "mean_0"):
@@ -2141,9 +2721,16 @@ def fit_ccf_rv(
         def _one_fit(gx: np.ndarray, gy0: np.ndarray, wts: np.ndarray | None):
             ys = _levmar_ccf_y_scale(gy0)
             gy = np.asarray(gy0, dtype=np.float64) * ys
-            bg_raw = _ccf_background_sigma_clipped_median(np.asarray(gy0, dtype=np.float64))
-            if not np.isfinite(bg_raw):
-                bg_raw = float(np.nanmedian(gy0))
+            if free_bl:
+                bg_raw = float(np.nanmedian(np.asarray(gy0, dtype=np.float64)))
+                if not np.isfinite(bg_raw):
+                    bg_raw = 0.0
+            else:
+                bg_raw = _ccf_background_sigma_clipped_median(
+                    np.asarray(gy0, dtype=np.float64)
+                )
+                if not np.isfinite(bg_raw):
+                    bg_raw = float(np.nanmedian(gy0))
             b0 = float(bg_raw * ys)
             gy_det = gy - b0
             span = abs(float(np.nanmax(gy_det) - np.nanmin(gy_det))) * 100.0
@@ -2152,8 +2739,24 @@ def fit_ccf_rv(
                 if profile == "emission"
                 else min(1e7, float(np.nanmax(gy_det)) + span)
             )
+            if bool(ccf_mask_kpf_stored_negated):
+                amp = max(float(amp), 1e-30)
+            amp_floor_s = 0.0
+            if free_bl and (bool(ccf_mask_kpf_stored_negated) or profile == "absorption"):
+                amp_floor_s = _ccf_gaussian_amp_floor_free_baseline_scaled(gy_det, ys)
+                amp = max(float(amp), 2.0 * amp_floor_s)
             init = Gaussian1D(amplitude=amp, mean=center_km, stddev=sd0) + Const1D(amplitude=b0)
-            init.amplitude_1.fixed = True
+            if free_bl and (bool(ccf_mask_kpf_stored_negated) or profile == "absorption"):
+                init.amplitude_0.min = float(amp_floor_s)
+            elif bool(ccf_mask_kpf_stored_negated):
+                init.amplitude_0.min = 0.0
+            if not free_bl:
+                init.amplitude_1.fixed = True
+            gx_lo = float(np.min(gx))
+            gx_hi = float(np.max(gx))
+            if gx_hi > gx_lo and hasattr(init, "mean_0"):
+                init.mean_0.min = gx_lo
+                init.mean_0.max = gx_hi
             mi = int(max(50, min(int(cfg.levmar_maxiter), 50_000)))
             if wts is not None:
                 w_eff = np.asarray(wts, dtype=np.float64) / (ys * ys)
@@ -2310,7 +2913,7 @@ def fit_ccf_rv(
 
     ft1 = fitting.LevMarLSQFitter()
     g1, gx1, vlo1, vhi1, med1, pw1, clip1, gy01, ge1 = _pass(
-        rv_gk, cfg.pass1_half_width_km_s, cfg.initial_stddev_km_s, ft1
+        rv_gk, hw1_km, cfg.initial_stddev_km_s, ft1
     )
     if g1 is None or gx1.size < cfg.min_points:
         fp_ctx: dict = {
@@ -2321,7 +2924,7 @@ def fit_ccf_rv(
             "pass1_fit_sample_count": int(gx1.size),
             "min_points": int(cfg.min_points),
             "seed_mean_km_s": float(rv_gk),
-            "pass1_half_width_km_s": float(cfg.pass1_half_width_km_s),
+            "pass1_half_width_km_s": float(hw1_km),
             "fit_window_m_s_lo": float(vlo1) if np.isfinite(vlo1) else None,
             "fit_window_m_s_hi": float(vhi1) if np.isfinite(vhi1) else None,
             "ccf_profile": profile,
@@ -2330,6 +2933,7 @@ def fit_ccf_rv(
             "n_velocity_points": int(vm.size),
             "v_step_effective_m_s": float(v_step_fit),
             "velocity_subsample_stride": int(subsample_stride),
+            "ccf_fit_free_baseline": bool(free_bl),
         }
         if isinstance(clip1, dict) and clip1:
             fp_ctx["sigma_clip_iterations"] = int(clip1.get("iterations", 0))
@@ -2348,7 +2952,7 @@ def fit_ccf_rv(
             "fit_samples_v_km_max": gx_max,
             "fit_window_m_s_lo": float(vlo1),
             "fit_window_m_s_hi": float(vhi1),
-            "pass1_half_width_km_s": float(cfg.pass1_half_width_km_s),
+            "pass1_half_width_km_s": float(hw1_km),
             "n_points_in_pass1_window": int(gx1.size),
             "seed_mean_km_s": float(rv_gk),
             "ccf_profile": profile,
@@ -2359,6 +2963,7 @@ def fit_ccf_rv(
             "velocity_subsample_stride": int(subsample_stride),
             "ccf_y_min": float(np.nanmin(y)),
             "ccf_y_max": float(np.nanmax(y)),
+            "ccf_fit_free_baseline": bool(free_bl),
         }
         if not math.isfinite(m1k):
             ow_ctx["mean_side"] = "non_finite_mean"
@@ -2381,7 +2986,10 @@ def fit_ccf_rv(
     if two_pass:
         ft2 = fitting.LevMarLSQFitter()
         g2, gx2, vlo2, vhi2, med2, pw2, clip2, gy02, ge02 = _pass(
-            m1k, cfg.pass2_half_width_km_s, float(np.clip(cfg.initial_stddev_km_s, 0.05, 200.0)), ft2
+            m1k,
+            hw2_km,
+            float(np.clip(cfg.initial_stddev_km_s, 0.05, 200.0)),
+            ft2,
         )
         if g2 is not None and gx2.size >= cfg.min_points:
             m2k, _, _ = _lm(g2, ft2)
@@ -2404,7 +3012,7 @@ def fit_ccf_rv(
         if lm_width_plausible
         else max(vstep, 1e-12) if math.isfinite(vstep) and vstep > 0 else max(float(sig_ms), 1e-12)
     )
-    fw_km = 2.0 * (cfg.pass2_half_width_km_s if pw == 2 else cfg.pass1_half_width_km_s)
+    fw_km = 2.0 * (hw2_km if pw == 2 else hw1_km)
     ek = _kpf_err_km(fw_km, mk)
     ek_ms = float(ek * 1000.0)
     ek_ok = ek > 0 and np.isfinite(ek_ms) and _ok_err(ek_ms, sig_ms, vstep)
@@ -2475,6 +3083,8 @@ def fit_ccf_rv(
             n_samples=n_bs,
             rng=rng,
             maxiter=int(max(50, min(int(cfg.levmar_maxiter), 50_000))),
+            free_baseline=free_bl,
+            ccf_mask_kpf_stored_negated=ccf_mask_kpf_stored_negated,
         )
         if math.isfinite(boot_sig) and boot_sig > 0:
             used_boot = True
@@ -2492,14 +3102,31 @@ def fit_ccf_rv(
     rv_err_ms = max(rv_err_ms, _ccf_rv_err_numeric_floor(vstep))
 
     ys_snap = _levmar_ccf_y_scale(snap_y0)
+    _bg_robust = float(_ccf_background_sigma_clipped_median(snap_y0))
     if hasattr(best_g, "amplitude_0"):
         _amp = float(best_g.amplitude_0.value) / ys_snap
-        _baseline = float(_ccf_background_sigma_clipped_median(snap_y0))
-        if not np.isfinite(_baseline):
+        if free_bl and hasattr(best_g, "amplitude_1"):
             _baseline = float(best_g.amplitude_1.value) / ys_snap
+        else:
+            _baseline = _bg_robust
+            if not np.isfinite(_baseline):
+                _baseline = float(best_g.amplitude_1.value) / ys_snap
     else:
         _amp = float(best_g.amplitude.value)
         _baseline = float(best_med)
+    amplitude_from_peak_fallback = False
+    if (
+        bool(ccf_mask_kpf_stored_negated)
+        and _amp <= 0.0
+        and snap_y0.size > 0
+        and hasattr(best_g, "amplitude_0")
+    ):
+        peak = float(np.nanmax(snap_y0))
+        base = float(_baseline) if np.isfinite(float(_baseline)) else peak
+        ph = peak - base
+        if math.isfinite(ph) and ph > 0.0:
+            _amp = ph
+            amplitude_from_peak_fallback = True
     params = {
         "amplitude": _amp,
         "v0": rv_ms,
@@ -2508,6 +3135,7 @@ def fit_ccf_rv(
     }
     diag = {
         "fit_ok": True,
+        "ccf_mask_kpf_forced_peak_up_profile": bool(forced_mask_kpf_peak_up),
         "used_covariance_for_error": used_cov,
         "used_sigma_fallback": used_fb,
         "used_kpf_ccf_error": used_kpf,
@@ -2531,9 +3159,19 @@ def fit_ccf_rv(
         "rv_err_slope_propagation_m_s": slope_prop_ms,
         "applied_slope_propagation_floor": bool(applied_slope_floor),
         "velocity_fit_subsample_stride": int(subsample_stride),
-        "ccf_background_sigma_clipped_median": float(_baseline),
+        "ccf_background_sigma_clipped_median": (
+            float(_bg_robust)
+            if np.isfinite(_bg_robust) and hasattr(best_g, "amplitude_0")
+            else float(_baseline)
+        ),
+        "ccf_fit_free_baseline": bool(free_bl),
+        "ccf_amplitude_from_peak_fallback": bool(amplitude_from_peak_fallback),
     }
+    if free_bl and hasattr(best_g, "amplitude_1") and np.isfinite(_bg_robust):
+        diag["ccf_baseline_lm_median_space"] = float(_baseline)
     diag.update(_ccf_kpf_diag)
+    if gaussian_seed_mean_m_s is not None and math.isfinite(float(gaussian_seed_mean_m_s)):
+        diag["gaussian_seed_mean_m_s"] = float(gaussian_seed_mean_m_s)
     return (rv_ms, rv_err_ms, params, diag) if return_params else (rv_ms, rv_err_ms)
 
 
@@ -2548,11 +3186,14 @@ def _ccf_rv_from_ccf(
     v_step: float,
     n_good: int,
     vel_span_m_s_per_pixel: float | None = None,
+    *,
+    min_good_pixels: int = 10,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> tuple[float, float]:
-    """Gaussian fit to CCF; on failure use grid peak and HWHM-based error."""
+    """Gaussian fit to CCF; optional mask-style LSTSQ parabolic refine; else grid peak / HWHM."""
     ccf = np.asarray(ccf, dtype=np.float64)
     n_vel = len(ccf)
-    if n_good < 10 or n_vel < 3 or not np.any(np.isfinite(ccf)):
+    if n_good < int(min_good_pixels) or n_vel < 3 or not np.any(np.isfinite(ccf)):
         return np.nan, np.nan
     ccf_max = float(np.nanmax(ccf))
     ccf_min = float(np.nanmin(ccf))
@@ -2568,9 +3209,41 @@ def _ccf_rv_from_ccf(
         if vel_span_m_s_per_pixel is not None and np.isfinite(vel_span_m_s_per_pixel) and vel_span_m_s_per_pixel > 0
         else None
     )
-    rv_fit, err_fit = fit_ccf_rv(
-        v_grid, ccf, v_step, n_good=n_good, vel_span_m_s_per_pixel=vsp
+    rv_fit, err_fit, params, _diag = fit_ccf_rv(
+        v_grid,
+        ccf,
+        v_step,
+        n_good=n_good,
+        vel_span_m_s_per_pixel=vsp,
+        return_params=True,
     )
+    if ccf_parabolic_vertex_n_samples is not None and np.isfinite(rv_fit):
+        try:
+            n_par = _require_ccf_parabolic_vertex_n_samples(
+                int(ccf_parabolic_vertex_n_samples)
+            )
+        except ValueError:
+            n_par = None
+        if n_par is not None:
+            rv_ls, err_ls, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
+                v_grid,
+                -ccf,
+                float(v_step),
+                ccf_err=None,
+                params=params if isinstance(params, dict) else None,
+                ccf_parabolic_vertex_n_samples=int(n_par),
+                n_good=n_good,
+            )
+            if rv_ls is not None and math.isfinite(float(rv_ls)):
+                err_out = float(err_fit) if np.isfinite(err_fit) else float("nan")
+                if (
+                    err_ls is not None
+                    and math.isfinite(float(err_ls))
+                    and float(err_ls) > 0.0
+                ):
+                    err_out = float(err_ls)
+                return float(rv_ls), float(err_out)
+
     if np.isfinite(rv_fit) and np.isfinite(err_fit) and err_fit > 0.0:
         return float(rv_fit), float(err_fit)
 
@@ -2596,6 +3269,8 @@ def _ccf_chunk_ccf_numba(
     v_max: float,
     v_step: float,
     ccf_out: np.ndarray,
+    min_good_pixels: int,
+    zb: float,
 ) -> int:
     """
     Weighted cross-correlation CCF(v) for one chunk. Writes ``ccf_out`` (length
@@ -2605,7 +3280,7 @@ def _ccf_chunk_ccf_numba(
     for i in range(len(good)):
         if good[i]:
             n_good += 1
-    if n_good < 10:
+    if n_good < min_good_pixels:
         return n_good
 
     n_pix = len(ln_lam)
@@ -2621,10 +3296,14 @@ def _ccf_chunk_ccf_numba(
     for i in range(n_vel):
         ccf_out[i] = np.nan
 
+    zb1 = 1.0 + zb
+    if zb1 <= 0.0:
+        zb1 = 1.0
+
     # One CCF sample per trial velocity: shift template in lnλ, interpolate to data pixels.
     for iv in range(n_vel):
         v = v_min + iv * v_step
-        delta_ln = v / C_M_S
+        delta_ln = math.log((1.0 + v / C_M_S) / zb1)
         t_ln_shifted = template_ln + delta_ln
         t_at_data = np.interp(ln_lam, t_ln_shifted, template_flux)
         # Weighted means of data and template at this v (same pixels as masked_ccf_rv).
@@ -2674,13 +3353,15 @@ def _ccf_chunk_ccf_numba_vgrid(
     template_flux: np.ndarray,
     v_grid: np.ndarray,
     ccf_out: np.ndarray,
+    min_good_pixels: int,
+    zb: float,
 ) -> int:
     """Same as :func:`_ccf_chunk_ccf_numba` but samples at arbitrary ``v_grid`` (m/s)."""
     n_good = 0
     for i in range(len(good)):
         if good[i]:
             n_good += 1
-    if n_good < 10:
+    if n_good < min_good_pixels:
         return n_good
 
     n_pix = len(ln_lam)
@@ -2695,9 +3376,13 @@ def _ccf_chunk_ccf_numba_vgrid(
     for i in range(n_vel):
         ccf_out[i] = np.nan
 
+    zb1 = 1.0 + zb
+    if zb1 <= 0.0:
+        zb1 = 1.0
+
     for iv in range(n_vel):
         v = float(v_grid[iv])
-        delta_ln = v / C_M_S
+        delta_ln = math.log((1.0 + v / C_M_S) / zb1)
         t_ln_shifted = template_ln + delta_ln
         t_at_data = np.interp(ln_lam, t_ln_shifted, template_flux)
         sum_w = 0.0
@@ -2755,6 +3440,8 @@ def _process_all_orders_ccf_numba(
     all_ccf: np.ndarray,
     all_n_good: np.ndarray,
     all_wl: np.ndarray,
+    min_good_pixels: int,
+    zb: float,
 ) -> None:
     """
     Parallel per-order CCF fill: writes ``all_ccf[chunk, :]``, ``all_n_good[chunk]``,
@@ -2830,9 +3517,18 @@ def _process_all_orders_ccf_numba(
                     good_c[j] = good[i]
                     j += 1
             ng = _ccf_chunk_ccf_numba(
-                ln_lam_c, spec_c, spec_err_c, good_c,
-                t_ln, t_flux, v_min, v_max, v_step,
+                ln_lam_c,
+                spec_c,
+                spec_err_c,
+                good_c,
+                t_ln,
+                t_flux,
+                v_min,
+                v_max,
+                v_step,
                 ccf_row,
+                min_good_pixels,
+                zb,
             )
             all_n_good[start + k] = ng
             for iv in range(n_vel):
@@ -2857,6 +3553,8 @@ def _process_all_orders_ccf_numba_vgrid(
     all_ccf: np.ndarray,
     all_n_good: np.ndarray,
     all_wl: np.ndarray,
+    min_good_pixels: int,
+    zb: float,
 ) -> None:
     """Same as :func:`_process_all_orders_ccf_numba` but with an explicit ``v_grid`` (m/s)."""
     n_processed = len(order_indices)
@@ -2927,9 +3625,16 @@ def _process_all_orders_ccf_numba_vgrid(
                     good_c[j] = good[i]
                     j += 1
             ng = _ccf_chunk_ccf_numba_vgrid(
-                ln_lam_c, spec_c, spec_err_c, good_c,
-                t_ln, t_flux, v_grid,
+                ln_lam_c,
+                spec_c,
+                spec_err_c,
+                good_c,
+                t_ln,
+                t_flux,
+                v_grid,
                 ccf_row,
+                min_good_pixels,
+                zb,
             )
             all_n_good[start + k] = ng
             for iv in range(n_vel):
@@ -2954,6 +3659,9 @@ def _process_all_orders_rvs_numba_single_grid(
     *,
     return_ccf: bool = False,
     numba_threads: int | None = None,
+    min_good_pixels: int = 10,
+    zb: float = 0.0,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -2980,11 +3688,26 @@ def _process_all_orders_rvs_numba_single_grid(
         nt,
     )
     _process_all_orders_ccf_numba(
-        wave_2d, spec_2d, spec_err_2d, dq_2d, do_not_use,
-        template_ln, template_flux, window_size_um,
-        order_indices, n_chunks_per_order, chunk_start,
-        v_min, v_max, v_step, n_vel,
-        all_ccf, all_n_good, all_wl,
+        wave_2d,
+        spec_2d,
+        spec_err_2d,
+        dq_2d,
+        do_not_use,
+        template_ln,
+        template_flux,
+        window_size_um,
+        order_indices,
+        n_chunks_per_order,
+        chunk_start,
+        v_min,
+        v_max,
+        v_step,
+        n_vel,
+        all_ccf,
+        all_n_good,
+        all_wl,
+        int(min_good_pixels),
+        float(zb),
     )
     logger.info(
         "CCF (Numba): CCF matrix fill complete total_chunks=%d n_vel=%d",
@@ -2999,8 +3722,9 @@ def _process_all_orders_rvs_numba_single_grid(
         total_chunks,
     )
     n_fit_rows = 0
+    mg = int(min_good_pixels)
     for i in range(total_chunks):
-        if all_n_good[i] < 10:
+        if all_n_good[i] < mg:
             continue
         n_fit_rows += 1
         wl_c = float(all_wl[i])
@@ -3013,6 +3737,8 @@ def _process_all_orders_rvs_numba_single_grid(
             v_step,
             int(all_n_good[i]),
             vel_span_m_s_per_pixel=vspan,
+            min_good_pixels=mg,
+            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
         all_rvs[i] = rv
         all_rv_errs[i] = rv_err
@@ -3043,6 +3769,9 @@ def _process_all_orders_rvs_numba_single_vgrid(
     *,
     return_ccf: bool = False,
     numba_threads: int | None = None,
+    min_good_pixels: int = 10,
+    zb: float = 0.0,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -3090,6 +3819,8 @@ def _process_all_orders_rvs_numba_single_vgrid(
         all_ccf,
         all_n_good,
         all_wl,
+        int(min_good_pixels),
+        float(zb),
     )
     logger.info(
         "CCF (Numba): CCF matrix fill complete total_chunks=%d n_vel=%d",
@@ -3102,8 +3833,9 @@ def _process_all_orders_rvs_numba_single_vgrid(
         total_chunks,
     )
     n_fit_rows = 0
+    mg = int(min_good_pixels)
     for i in range(total_chunks):
-        if all_n_good[i] < 10:
+        if all_n_good[i] < mg:
             continue
         n_fit_rows += 1
         wl_c = float(all_wl[i])
@@ -3116,6 +3848,8 @@ def _process_all_orders_rvs_numba_single_vgrid(
             v_step_fit,
             int(all_n_good[i]),
             vel_span_m_s_per_pixel=vspan,
+            min_good_pixels=mg,
+            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
         all_rvs[i] = rv
         all_rv_errs[i] = rv_err
@@ -3151,6 +3885,9 @@ def process_all_orders_rvs_numba(
     hybrid_center_m_s: float | None = None,
     hybrid_half_width_m_s: float = 300.0,
     hybrid_step_m_s: float = 0.1,
+    min_good_pixels: int = 10,
+    zb: float = 0.0,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -3186,6 +3923,9 @@ def process_all_orders_rvs_numba(
             v_step,
             return_ccf=return_ccf,
             numba_threads=numba_threads,
+            min_good_pixels=int(min_good_pixels),
+            zb=float(zb),
+            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
 
     vc = float(hybrid_center_m_s)
@@ -3234,6 +3974,9 @@ def process_all_orders_rvs_numba(
         v_grid,
         return_ccf=return_ccf,
         numba_threads=numba_threads,
+        min_good_pixels=int(min_good_pixels),
+        zb=float(zb),
+        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
     )
 
 
@@ -3297,6 +4040,9 @@ def process_orders_rvs_numba_parallel(
     ccf_hybrid_center_m_s: float | None = None,
     ccf_hybrid_half_width_m_s: float = 300.0,
     ccf_hybrid_step_m_s: float = 0.1,
+    min_good_pixels: int = 10,
+    zb: float = 0.0,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     | tuple[
@@ -3352,6 +4098,18 @@ def process_orders_rvs_numba_parallel(
     ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float, optional
         Refined half-width (m/s) and step (m/s); defaults match
         :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
+    min_good_pixels : int, optional
+        Minimum good spectral pixels per chunk for CCF evaluation and Gaussian / parabolic
+        RV fit (same role as ``ccf_min_good_pixels`` on :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`).
+    zb : float, optional
+        Barycentric factor :math:`z_b` in :math:`\\ln\\lambda` template shifts,
+        :math:`\\Delta\\ln\\lambda = \\ln\\frac{1+v/c}{1+z_b}` (matches mask-line mapping when
+        ``z_b`` is small).
+    ccf_parabolic_vertex_n_samples : int or None, optional
+        When set (odd, :math:`\\ge 3`), after each chunk’s Gaussian fit, apply the same
+        LSTSQ parabolic vertex refinement used for mask-line CCF (see
+        :func:`_refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf`). ``None`` skips that step
+        (Gaussian-only RV per chunk).
 
     Returns
     -------
@@ -3463,6 +4221,12 @@ def process_orders_rvs_numba_parallel(
             )
         else:
             kw_h = {}
+        kw_ccf = {
+            **kw_h,
+            "min_good_pixels": int(min_good_pixels),
+            "zb": float(zb),
+            "ccf_parabolic_vertex_n_samples": ccf_parabolic_vertex_n_samples,
+        }
         if return_ccf:
             all_rvs, all_rv_errs, all_wl, all_ccf, v_grid, all_n_good = process_all_orders_rvs_numba(
                 wave_2d,
@@ -3481,7 +4245,7 @@ def process_orders_rvs_numba_parallel(
                 vs,
                 return_ccf=True,
                 numba_threads=nthr,
-                **kw_h,
+                **kw_ccf,
             )
             return (
                 all_rvs,
@@ -3511,7 +4275,7 @@ def process_orders_rvs_numba_parallel(
             vs,
             return_ccf=False,
             numba_threads=nthr,
-            **kw_h,
+            **kw_ccf,
         )
         return all_rvs, all_rv_errs, all_wl, n_chunks_per_order, chunk_start
 
@@ -3540,7 +4304,9 @@ def _fit_ccf_preview_slot_worker(
     vs: float,
     *,
     ccf_mask_kpf_stored_negated: bool | None = None,
-    mask_kpf_parabolic_vertex_n_samples: int = 11,
+    ccf_parabolic_vertex_n_samples: int = 11,
+    mask_kpf_window_size_num_lines: float | None = None,
+    mask_kpf_gaussian_seed_mean_m_s: float | None = None,
 ) -> tuple[dict, dict | None]:
     """
     One slot: :func:`fit_ccf_rv` with :data:`CCF_PREVIEW_SLOT_FIT_CONFIG` and optional
@@ -3564,6 +4330,8 @@ def _fit_ccf_preview_slot_worker(
         ccf_err=ccf_err_arg,
         config=CCF_PREVIEW_SLOT_FIT_CONFIG,
         ccf_mask_kpf_stored_negated=ccf_mask_kpf_stored_negated,
+        mask_kpf_window_size_num_lines=mask_kpf_window_size_num_lines,
+        gaussian_seed_mean_m_s=mask_kpf_gaussian_seed_mean_m_s,
     )
     refine_meta: dict | None = None
     if bool(diag.get("fit_ok")) and np.isfinite(rv) and np.isfinite(rv_err) and float(rv_err) > 0:
@@ -3575,7 +4343,7 @@ def _fit_ccf_preview_slot_worker(
                 vs,
                 ccf_err=ccf_err_arg,
                 params=params if isinstance(params, dict) else None,
-                mask_kpf_parabolic_vertex_n_samples=int(mask_kpf_parabolic_vertex_n_samples),
+                ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
                 n_good=ng,
             )
         else:
@@ -3605,13 +4373,16 @@ def finalize_ccf_preview_dict(
     all_ccf_err_rows: list[np.ndarray] | None = None,
     *,
     ccf_mask_kpf_stored_negated: bool | None = None,
-    mask_kpf_parabolic_vertex_n_samples: int = 11,
+    ccf_parabolic_vertex_n_samples: int = 11,
+    mask_kpf_window_size_num_lines: float | None = None,
+    mask_kpf_gaussian_seed_mean_m_s: float | None = None,
 ) -> dict:
     """
     Build the ``_ccf_preview_by_fiber`` structure from per-order CCF 2-D arrays.
 
-    ``order_slots`` entries must already include per-order mean CCF rows; this
-    prepends the global mean slot (mean over all chunk rows).
+    ``order_slots`` entries are typically one slot per mask-KPF chunk (or one
+    per echelle order when a row is a single chunk); this prepends the global
+    mean slot (mean over all stacked chunk rows in ``all_ccf_rows``).
 
     When ``all_ccf_err_rows`` is provided (one stacked array per order, aligned with
     ``all_ccf_rows``), the **mean** slot gets ``ccf_err`` = standard error of the
@@ -3623,9 +4394,15 @@ def finalize_ccf_preview_dict(
     ccf_mask_kpf_stored_negated : bool or None, optional
         When not ``None``, forwarded to each slot’s :func:`fit_ccf_rv` call and copied to
         the returned dict as ``"ccf_mask_kpf_stored_negated"`` (mask-line preview only).
-    mask_kpf_parabolic_vertex_n_samples : int, optional
+    ccf_parabolic_vertex_n_samples : int, optional
         **Odd** integer :math:`\\ge 3` for LSTSQ parabolic refinement after Gaussian fit
         (mask-line slots only; raises if even). Must match :func:`run_ccf_mask_kpf_for_fiber`.
+    mask_kpf_window_size_num_lines : float or None, optional
+        Forwarded to :func:`fit_ccf_rv` (see :func:`_mask_kpf_ccf_fit_free_baseline_requested`).
+    mask_kpf_gaussian_seed_mean_m_s : float or None, optional
+        When set (typically ``ccf_input_velocity`` / hybrid center), passed to :func:`fit_ccf_rv`
+        as ``gaussian_seed_mean_m_s`` for mask-line stored CCFs so the discrete peak seed is
+        taken near the search center instead of a global maximum on a nearly flat curve.
     """
     if not all_ccf_rows:
         out_empty: dict = {
@@ -3678,7 +4455,9 @@ def finalize_ccf_preview_dict(
             s,
             vs,
             ccf_mask_kpf_stored_negated=ccf_mask_kpf_stored_negated,
-            mask_kpf_parabolic_vertex_n_samples=int(mask_kpf_parabolic_vertex_n_samples),
+            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
+            mask_kpf_window_size_num_lines=mask_kpf_window_size_num_lines,
+            mask_kpf_gaussian_seed_mean_m_s=mask_kpf_gaussian_seed_mean_m_s,
         )
 
     if n_workers <= 1:
@@ -3702,6 +4481,11 @@ def finalize_ccf_preview_dict(
     }
     if ccf_mask_kpf_stored_negated is not None:
         out["ccf_mask_kpf_stored_negated"] = bool(ccf_mask_kpf_stored_negated)
+    if (
+        mask_kpf_gaussian_seed_mean_m_s is not None
+        and math.isfinite(float(mask_kpf_gaussian_seed_mean_m_s))
+    ):
+        out["mask_kpf_gaussian_seed_mean_m_s"] = float(mask_kpf_gaussian_seed_mean_m_s)
     return out
 
 
@@ -4001,11 +4785,15 @@ def _ccf_weighted_covariance_scan(
     template_ln: np.ndarray,
     template_flux: np.ndarray,
     v_grid: np.ndarray,
+    zb: float = 0.0,
 ) -> np.ndarray:
     """Python CCF(v); same statistic as ``_ccf_chunk_ccf_numba`` (fallback when Numba off)."""
     ccf = np.zeros_like(v_grid, dtype=np.float64)
+    zb1 = 1.0 + float(zb)
+    if zb1 <= 0.0:
+        zb1 = 1.0
     for i, v in enumerate(v_grid):
-        delta_ln = v / C_M_S
+        delta_ln = math.log((1.0 + float(v) / C_M_S) / zb1)
         t_at_data = np.interp(
             ln_lam,
             template_ln + delta_ln,
@@ -4044,6 +4832,9 @@ def _masked_ccf_rv_core(
     *,
     diagnostics: bool,
     v_grid: np.ndarray | None = None,
+    zb: float = 0.0,
+    min_good_pixels: int = 10,
+    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> tuple[float, float, np.ndarray, np.ndarray, dict | None]:
     """
     Single CCF build + fit; optionally build diagnostics dict (no duplicate CCF work).
@@ -4075,7 +4866,8 @@ def _masked_ccf_rv_core(
         v_grid = np.asarray(v_grid, dtype=np.float64).ravel()
     else:
         v_grid = _make_velocity_grid(v_min, v_max, v_step)
-    if n_good < 10:
+    mg = int(min_good_pixels)
+    if n_good < mg:
         nan_ccf = np.full_like(v_grid, np.nan)
         if diagnostics:
             return np.nan, np.nan, v_grid, nan_ccf, empty_diag
@@ -4099,22 +4891,41 @@ def _masked_ccf_rv_core(
             float(v_grid[-1]),
             float(v_grid[1] - v_grid[0]),
             ccf,
+            mg,
+            float(zb),
         )
     else:
         ccf[:] = _ccf_weighted_covariance_scan(
-            ln_lam, spec, spec_err, good, template_ln, template_flux, v_grid,
+            ln_lam,
+            spec,
+            spec_err,
+            good,
+            template_ln,
+            template_flux,
+            v_grid,
+            zb=float(zb),
         )
     if not np.any(np.isfinite(ccf)):
         if diagnostics:
             return np.nan, np.nan, v_grid, ccf, empty_diag
         return np.nan, np.nan, v_grid, ccf, None
 
-    rv, rv_err = _ccf_rv_from_ccf(v_grid, ccf, v_step_fit, n_good)
+    rv, rv_err = _ccf_rv_from_ccf(
+        v_grid,
+        ccf,
+        v_step_fit,
+        n_good,
+        min_good_pixels=mg,
+        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
+    )
     diag_out: dict | None = None
     if diagnostics:
         ccf_max = float(np.nanmax(ccf))
         ccf_min = float(np.nanmin(ccf))
-        delta_ln_peak = rv / C_M_S
+        zb1 = 1.0 + float(zb)
+        if zb1 <= 0.0:
+            zb1 = 1.0
+        delta_ln_peak = math.log((1.0 + float(rv) / C_M_S) / zb1)
         template_ln_shifted = template_ln + delta_ln_peak
         t_at_data = np.interp(
             ln_lam, template_ln_shifted, template_flux, left=0.0, right=0.0
@@ -4150,6 +4961,9 @@ def masked_ccf_rv(
     v_step: float = 500.0,
     *,
     v_grid: np.ndarray | None = None,
+    zb: float = 0.0,
+    min_good_pixels: int = 10,
+    ccf_parabolic_vertex_n_samples: int | None = None,
     return_ccf: bool = False,
     diagnostics: bool = False,
 ) -> (
@@ -4182,6 +4996,14 @@ def masked_ccf_rv(
     v_grid : np.ndarray or None, optional
         Explicit velocity samples (m/s), e.g. from :func:`build_hybrid_merged_velocity_grid`.
         When passed, ``v_min`` / ``v_max`` / ``v_step`` are not used to build the grid.
+    zb : float, optional
+        Barycentric factor in the template :math:`\\ln\\lambda` shift (see
+        :func:`_ccf_chunk_ccf_numba`).
+    min_good_pixels : int, optional
+        Minimum good pixels required before building the CCF and fitting.
+    ccf_parabolic_vertex_n_samples : int or None, optional
+        When set (odd, :math:`\\ge 3`), run mask-style LSTSQ parabolic refinement after the
+        Gaussian fit (see :func:`_ccf_rv_from_ccf`). ``None`` keeps Gaussian-only RVs.
     return_ccf : bool, optional
         If ``True``, also return ``v_grid`` and the 1-D CCF array on that grid.
     diagnostics : bool, optional
@@ -4217,6 +5039,9 @@ def masked_ccf_rv(
         v_step,
         diagnostics=diagnostics,
         v_grid=v_grid,
+        zb=float(zb),
+        min_good_pixels=int(min_good_pixels),
+        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
     )
     if return_ccf and diagnostics:
         assert diag is not None
@@ -4658,6 +5483,70 @@ def _linear_interp_sorted_1d(xq: float, x: np.ndarray, y: np.ndarray, n: int) ->
     return (1.0 - t) * float(y[i0]) + t * float(y[i1])
 
 
+@njit(cache=True)
+def _poly_interp_sorted_1d(
+    xq: float,
+    x: np.ndarray,
+    y: np.ndarray,
+    n: int,
+    order: int,
+) -> float:
+    """
+    Lagrange interpolation on sorted ``x[:n]`` (ascending); clamps outside ``[x[0], x[n-1]]``.
+
+    Uses ``k = min(order + 1, n)`` consecutive samples centered on the ``searchsorted``
+    bracket (degree at most ``k - 1``). ``order == 1`` matches :func:`_linear_interp_sorted_1d`
+    on interior points.
+    """
+    if n <= 0:
+        return np.nan
+    if n == 1:
+        return float(y[0])
+
+    o = int(order)
+    if o < 1:
+        o = 1
+    if o > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
+        o = MAX_MASK_CCF_PIXEL_INTERP_ORDER
+
+    k = o + 1
+    if k > n:
+        k = n
+
+    if xq <= float(x[0]):
+        return float(y[0])
+    if xq >= float(x[n - 1]):
+        return float(y[n - 1])
+
+    j = int(np.searchsorted(x, xq, side="right")) - 1
+    if j < 0:
+        j = 0
+    if j >= n - 1:
+        j = n - 2
+
+    s = j - (k - 1) // 2
+    if s < 0:
+        s = 0
+    if s + k > n:
+        s = n - k
+
+    acc = 0.0
+    for m in range(k):
+        xm = float(x[s + m])
+        ym = float(y[s + m])
+        lm = 1.0
+        for t in range(k):
+            if t == m:
+                continue
+            xt = float(x[s + t])
+            d = xm - xt
+            if d == 0.0:
+                return ym
+            lm *= (xq - xt) / d
+        acc += ym * lm
+    return acc
+
+
 @njit(cache=True, parallel=True)
 def _calc_mask_ccf_chunks_numba(
     left_edges_2d: np.ndarray,
@@ -4672,6 +5561,7 @@ def _calc_mask_ccf_chunks_numba(
     line_w_2d: np.ndarray,
     n_line_arr: np.ndarray,
     compute_line_std: bool,
+    pixel_interp_order: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Chunk-batched mask CCF(v) with parallelism over chunks.
@@ -4737,11 +5627,11 @@ def _calc_mask_ccf_chunks_numba(
                 lam0 = lam_rest * sh
                 if lam0 < chunk_lo or lam0 > chunk_hi:
                     continue
-                fv = _linear_interp_sorted_1d(
-                    lam0, centers, s_use_2d[ic, :], n_pix
+                fv = _poly_interp_sorted_1d(
+                    lam0, centers, s_use_2d[ic, :], n_pix, pixel_interp_order
                 )
-                snv = _linear_interp_sorted_1d(
-                    lam0, centers, sn_2d[ic, :], n_pix
+                snv = _poly_interp_sorted_1d(
+                    lam0, centers, sn_2d[ic, :], n_pix, pixel_interp_order
                 )
                 if not (np.isfinite(fv) and np.isfinite(snv)):
                     continue
@@ -4808,122 +5698,6 @@ class MaskLines:
 
         object.__setattr__(self, "line_lambda_um", line_lambda_um)
         object.__setattr__(self, "weight", weight)
-
-
-def _mask_line_order_edge_taper_multipliers(
-    order_wave_um: np.ndarray,
-    line_lambda_um: np.ndarray,
-    *,
-    edge_taper_pixels: float,
-    exp_shape: float = 5.0,
-) -> np.ndarray:
-    """
-    Per-line weights multipliers for :func:`rv_per_chunks_mask_kpf` deweighting mask lines
-    near echelle order edges.
-
-    For each rest wavelength, the nearest spectral pixel index :math:`j` along the order
-    (0 … :math:`n-1`) is found. With :math:`d = \\min(j, n-1-j)` the distance in pixels to
-    the nearer physical edge, full weight applies for :math:`d \\ge N`; for :math:`d < N`
-    the multiplier rises from 0 at the edge to 1 at :math:`d = N` as
-
-    .. math::
-
-        m = \\frac{e^{s \\cdot d/N} - 1}{e^{s} - 1},
-
-    with shape parameter ``exp_shape`` :math:`= s` (default 5).
-
-    Vectorized for large mask lists (``searchsorted`` on monotonic ``order_wave_um``); falls
-    back to a per-line loop if the wavelength vector is not monotone.
-
-    Parameters
-    ----------
-    order_wave_um
-        1-D wavelength samples (µm) for the **full** echelle order (or the same span used
-        for CCF); length :math:`n` defines pixel indices ``0 … n-1``.
-    line_lambda_um
-        Rest wavelengths (µm) of mask lines, same as in :class:`MaskLines`.
-    edge_taper_pixels
-        :math:`N` — taper applies for :math:`0 \\le d < N`; use ``0`` to disable (all ones).
-    exp_shape
-        :math:`s > 0` controlling how sharply the multiplier rises with :math:`d` inside
-        the edge band.
-
-    Returns
-    -------
-    np.ndarray
-        Shape matching ``line_lambda_um``, values in :math:`[0, 1]`.
-    """
-    w = np.asarray(order_wave_um, dtype=np.float64).ravel()
-    lam = np.asarray(line_lambda_um, dtype=np.float64).ravel()
-    if lam.size == 0:
-        return np.array([], dtype=np.float64)
-    out = np.ones(lam.size, dtype=np.float64)
-    n = int(w.size)
-    if n < 2 or float(edge_taper_pixels) <= 0.0:
-        return out
-    N = float(edge_taper_pixels)
-    s = float(exp_shape)
-    if not np.isfinite(s) or s <= 0.0:
-        s = 5.0
-    denom = float(np.exp(s) - 1.0)
-    if denom <= 1e-30:
-        denom = 1.0
-    inv_denom = 1.0 / denom
-
-    diff = np.diff(w)
-    mono_inc = diff.size > 0 and bool(np.all(diff >= 0))
-    mono_dec = diff.size > 0 and bool(np.all(diff <= 0))
-
-    def _nearest_index_searchsorted(lx: np.ndarray, increasing: bool) -> np.ndarray:
-        """Nearest sample index along 1-D grid ``w`` (monotone)."""
-        if increasing:
-            w_grid = w
-            jj = np.searchsorted(w_grid, lx, side="left")
-            jj = np.clip(jj, 1, n - 1)
-            jm = jj - 1
-        else:
-            w_grid = w[::-1]
-            jj = np.searchsorted(w_grid, lx, side="left")
-            jj = np.clip(jj, 1, n - 1)
-            jm = jj - 1
-            pick = np.abs(lx - w_grid[jm]) <= np.abs(lx - w_grid[jj])
-            j_rev = np.where(pick, jm, jj).astype(np.intp, copy=False)
-            return (n - 1 - j_rev).astype(np.intp, copy=False)
-        pick = np.abs(lx - w_grid[jm]) <= np.abs(lx - w_grid[jj])
-        return np.where(pick, jm, jj).astype(np.intp, copy=False)
-
-    fin = np.isfinite(lam)
-    j_idx = np.zeros(lam.shape[0], dtype=np.intp)
-    if mono_inc or mono_dec:
-        if np.any(fin):
-            lx = lam[fin]
-            j_idx[fin] = _nearest_index_searchsorted(lx, mono_inc)
-    else:
-        for i in range(lam.size):
-            lx = float(lam[i])
-            if not np.isfinite(lx):
-                out[i] = 0.0
-                continue
-            j_idx[i] = int(np.argmin(np.abs(w - lx)))
-        d = np.minimum(j_idx, n - 1 - j_idx).astype(np.float64)
-        m = d >= N
-        out[~fin] = 0.0
-        out[fin & m] = 1.0
-        inner = fin & ~m
-        if np.any(inner):
-            t = d[inner] / N
-            out[inner] = np.clip((np.exp(t * s) - 1.0) * inv_denom, 0.0, 1.0)
-        return out
-
-    d = np.minimum(j_idx, n - 1 - j_idx).astype(np.float64)
-    out[~fin] = 0.0
-    m = d >= N
-    out[fin & m] = 1.0
-    inner = fin & ~m
-    if np.any(inner):
-        t = d[inner] / N
-        out[inner] = np.clip((np.exp(t * s) - 1.0) * inv_denom, 0.0, 1.0)
-    return out
 
 
 def resolve_mask_path(mask_path: str | None) -> str:
@@ -5052,8 +5826,8 @@ def load_mask_spirou_mas(mask_file: str) -> MaskLines:
     return MaskLines(line_lambda_um=line_um, weight=weight)
 
 
-# Legacy default for ``StellarRVPrimitive(mask_width_um=...)``; two-column masks no
-# longer use a synthetic segment width (see :func:`load_mask_kpf_two_column`).
+# Legacy default for callers that still pass ``mask_width_um`` into :func:`load_mask`;
+# two-column masks ignore it (delta-line model; see :func:`load_mask_kpf_two_column`).
 DEFAULT_KPF_MASK_SEGMENT_WIDTH_UM: float = 1.0e-6
 
 
@@ -5116,6 +5890,47 @@ def load_mask(mask_path: str, *, mask_width_um: float | None = None) -> MaskLine
         return load_mask_spirou_mas(mask_path)
     except Exception:
         return load_mask_kpf_two_column(mask_path, mask_width_um=mask_width_um)
+
+
+def load_mask_lines_for_ccf_mask_kpf(
+    *,
+    mask_path: str | None,
+    mask_wavelength=None,
+    mask_weight=None,
+) -> tuple[MaskLines, str]:
+    """
+    Resolve mask lines for ``ccf_mask_kpf`` from disk or from in-memory arrays.
+
+    When ``mask_wavelength`` and ``mask_weight`` are both set, builds a :class:`MaskLines`
+    instance (rest wavelengths in µm, same length as weights). Otherwise loads from
+    ``mask_path`` (``None`` selects the packaged default via :func:`resolve_mask_path`).
+
+    Returns
+    -------
+    mask_lines : MaskLines
+    log_label : str
+        Path resolved on disk, or the literal ``in_memory_mask`` for array-backed masks.
+    """
+    has_wl = mask_wavelength is not None
+    has_wt = mask_weight is not None
+    if has_wl or has_wt:
+        if not (has_wl and has_wt):
+            raise ValueError(
+                "mask_wavelength and mask_weight must both be provided when supplying an in-memory mask"
+            )
+        wl = np.asarray(mask_wavelength, dtype=np.float64).ravel()
+        wt = np.asarray(mask_weight, dtype=np.float64).ravel()
+        if wl.size != wt.size:
+            raise ValueError(
+                "mask_wavelength and mask_weight must have the same length "
+                f"(got {wl.size} vs {wt.size})"
+            )
+        if wl.size == 0:
+            raise ValueError("in-memory mask has zero lines")
+        return MaskLines(line_lambda_um=wl, weight=wt), "in_memory_mask"
+    resolved = resolve_mask_path(mask_path)
+    ml = load_mask(resolved)
+    return ml, str(resolved)
 
 
 def pixel_edges_from_wavelength(wave_um: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -5340,7 +6155,7 @@ def _mask_kpf_peak_index_integral_and_prominence(
     return ig
 
 
-def _require_mask_kpf_parabolic_vertex_n_samples(n: int) -> int:
+def _require_ccf_parabolic_vertex_n_samples(n: int) -> int:
     """
     Odd integer :math:`\\ge 3`: number of coarse velocity samples in the LSTSQ parabolic vertex
     window (symmetric about the peak index).
@@ -5353,11 +6168,11 @@ def _require_mask_kpf_parabolic_vertex_n_samples(n: int) -> int:
     n = int(n)
     if n < 3:
         raise ValueError(
-            f"mask_kpf_parabolic_vertex_n_samples must be >= 3, got {n}"
+            f"ccf_parabolic_vertex_n_samples must be >= 3, got {n}"
         )
     if n % 2 == 0:
         raise ValueError(
-            f"mask_kpf_parabolic_vertex_n_samples must be odd, got {n}"
+            f"ccf_parabolic_vertex_n_samples must be odd, got {n}"
         )
     return n
 
@@ -5440,7 +6255,7 @@ def mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s(
              \\quad J_i = \\partial \\mathrm{RV}/\\partial \\beta_i .
 
     This targets **refinement-limited** uncertainty from the :math:`N` coarse velocity
-    samples (typically ``mask_kpf_parabolic_vertex_n_samples``), not the per-pixel count
+    samples (typically ``ccf_parabolic_vertex_n_samples``), not the per-pixel count
     :math:`n_{\\rm good}` used inside :func:`_rv_from_ccf_mask_kpf_numba_single`.
 
     **Caveats:** ignores correlated noise between CCF bins (from finite pixel sampling);
@@ -5817,16 +6632,14 @@ def rv_per_chunks_mask_kpf(
     v_max_m_s: float = _V_MAX,
     v_step_m_s: float = _V_STEP,
     v_grid_m_s: np.ndarray | None = None,
-    mask_restrict_v_min_m_s: float | None = None,
-    mask_restrict_v_max_m_s: float | None = None,
     zb: float = 0.0,
     max_cores: int | None = None,
     return_ccf: bool = False,
     min_good_pixels: int = 10,
-    mask_order_edge_taper_pixels: float = 100.0,
-    mask_order_edge_taper_exp_shape: float = 5.0,
-    order_wave_um_for_edge_taper: np.ndarray | None = None,
-    mask_kpf_parabolic_vertex_n_samples: int = 11,
+    ccf_parabolic_vertex_n_samples: int = 11,
+    mask_ccf_pixel_interp_order: int = 1,
+    window_size_num_lines: float | None = None,
+    mask_kpf_line_chunk_v_center_m_s: float | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -5842,18 +6655,25 @@ def rv_per_chunks_mask_kpf(
     """
     Compute per-chunk RVs and optional CCF stacks for one echelle order.
 
-    Splits the order into equal-wavelength bins (count from
+    By default splits the order into equal-wavelength bins (count from
     :func:`ccf_order_n_chunks_for_span` given the order span and ``window_size_um``),
-    then computes chunk CCF rows
-    in one Numba batch via :func:`_calc_mask_ccf_chunks_numba` (parallel over chunks;
+    then computes chunk CCF rows in one Numba batch via :func:`_calc_mask_ccf_chunks_numba` (parallel over chunks;
     delta-line interpolation at each Doppler-shifted rest wavelength), followed by a Numba chunk-parallel
-    parabolic RV extraction. RV extraction assumes a
+    parabolic RV extraction. Chunks on an echelle row are iterated **longest λ first**
+    (descending chunk-center wavelength, red → blue along the row), so downstream ``RVCCF`` rows
+    and mask-overlay segments follow the same ordering as ascending echelle order in the exposure.
+    RV extraction assumes a
     **fixed absorption-line convention** for all chunks and orders (fit on ``-CCF``, not
     data-driven emission/absorption guessing). Peak selection uses a 5-point smoothed CCF
     and a **combined score** (wide-window integrated excess above the global median times
     ``√prominence``) over strict local maxima—favoring the broad, physically coherent peak
-    at the true RV over narrow spurious maxima. Returns flattened lists of chunk centers
-    and RVs.
+    at the true RV over narrow spurious maxima. A fast Numba estimate is computed first;
+    then each chunk is optionally updated with :func:`fit_ccf_rv` plus
+    :func:`_refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf` (LSTSQ parabolic vertex with
+    ``ccf_parabolic_vertex_n_samples``, then Gaussian-smoothed coarse-grid fallback when
+    needed), matching the single-chunk order-mean path in :func:`run_ccf_mask_kpf_for_fiber`.
+    If that Gaussian+refine path does not return a finite RV, the Numba value is kept.
+    Returns flattened lists of chunk centers and RVs.
 
     ``ccf_2d`` is the weight-normalized mask CCF used for RV extraction and stacking;
     ``ccf_preview_2d`` holds the same rows before the per-chunk sign flip applied for
@@ -5869,12 +6689,15 @@ def rv_per_chunks_mask_kpf(
         Full-order mask; restricted per chunk via :func:`restrict_mask_to_chunk`.
     window_size_um : float
         Target maximum segment width in µm; one full-order chunk if span ≤ this value.
+        Ignored for chunk **count** when ``window_size_num_lines`` is set (still passed through
+        for API compatibility).
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
         Velocity search grid (m s⁻¹). Ignored when ``v_grid_m_s`` is provided.
     v_grid_m_s : np.ndarray or None, optional
         Explicit velocity samples (m s⁻¹), e.g. from :func:`build_hybrid_merged_velocity_grid`.
-        When set, ``v_min_m_s`` / ``v_max_m_s`` / ``v_step_m_s`` are not used to build the grid
-        but still scope mask restriction unless ``mask_restrict_*`` override.
+        When set, ``v_min_m_s`` / ``v_max_m_s`` / ``v_step_m_s`` are not used to build the grid,
+        but together with ``v_grid_m_s`` they still define the velocity span used to restrict
+        mask lines per chunk via :func:`restrict_mask_to_chunk` (same coarse bounds passed in).
     zb : float, optional
         Barycentric factor passed to the CCF shift.
     max_cores : int or None, optional
@@ -5883,32 +6706,43 @@ def rv_per_chunks_mask_kpf(
         If True, also return mean CCF rows per chunk (stacked for preview).
     min_good_pixels : int, optional
         Minimum unmasked finite pixels required per chunk.
-    mask_order_edge_taper_pixels : float, optional
-        If ``> 0``, multiply mask line weights by an exponential taper when the line’s
-        nearest pixel lies within this many pixels of either echelle edge (see
-        :func:`_mask_line_order_edge_taper_multipliers`). Default ``100`` — unity weight
-        from 100 pixels inward from each edge; weight tends to ``0`` at the edges.
-        Use ``0`` to disable.
-    mask_order_edge_taper_exp_shape : float, optional
-        Exponential shape parameter inside the edge band (default ``5``).
-    order_wave_um_for_edge_taper : np.ndarray or None, optional
-        Full-order wavelength vector for edge-distance mapping. If ``None``, uses
-        ``wave_um``. When ``wave_um`` is only a slice of an order, pass the full row so
-        tapering references the true order extent.
-    mask_kpf_parabolic_vertex_n_samples : int, optional
+    ccf_parabolic_vertex_n_samples : int, optional
         **Odd** integer :math:`\\ge 3`: number of coarse velocity samples in the LSTSQ
         parabolic vertex window. Per-chunk RVs center the window on the smoothed-CCF peak
         index. Raises :class:`ValueError` if the value is even or below ``3``. Fewer samples
         may be used automatically near the ends of the velocity grid.
+    mask_ccf_pixel_interp_order : int, optional
+        Polynomial **order** for sampling flux and the per-pixel gate array onto mask-line
+        Doppler-shifted wavelengths in :func:`_calc_mask_ccf_chunks_numba` (Lagrange stencil
+        on sorted pixel centers). ``1`` is linear (legacy); clamped to
+        ``[1, MAX_MASK_CCF_PIXEL_INTERP_ORDER]``.
+    window_size_num_lines : float or None, optional
+        When set, use :func:`build_mask_kpf_chunk_wavelength_intervals_num_lines` instead of
+        equal-µm bins: chunks partition the order by observed mask-line wavelengths at
+        ``mask_kpf_line_chunk_v_center_m_s`` (non-overlapping intervals, midpoint boundaries).
+    mask_kpf_line_chunk_v_center_m_s : float or None, optional
+        Required (finite) when ``window_size_num_lines`` is set: pipeline velocity prior in m/s
+        (typically ``ccf_input_velocity``), defining observed-frame mask-line positions.
+
+    When ``window_size_num_lines`` is set, spectral pixels per chunk are the intersection of the
+    line-window Voronoi interval with a symmetric band
+    :func:`mask_kpf_line_window_spectrum_band_um` about the chunk center (``window_size_um`` plus
+    :data:`MASK_KPF_LINE_WINDOW_SPEC_REL_PAD`). If that intersection has fewer than
+    ``min_good_pixels`` samples, the chunk falls back to the full Voronoi pixel set.
 
     Returns
     -------
     rvs : np.ndarray
-        Per-chunk RV (m s⁻¹).
+        Per-chunk RV (m s⁻¹). After the Numba estimate, each chunk is replaced by the
+        Gaussian + :func:`_refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf` RV when that
+        pipeline returns a finite value (``ccf_parabolic_vertex_n_samples`` controls the
+        LSTSQ window there); otherwise the Numba RV is kept.
     rv_errs : np.ndarray
-        Per-chunk RV uncertainty (m s\\ :sup:`−1`): homoscedastic LSTSQ residual + delta-method
-        σ from :func:`mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s` when that
-        succeeds; otherwise the Numba heuristic from :func:`_rv_from_ccf_mask_kpf_numba_single`.
+        Per-chunk RV uncertainty (m s\\ :sup:`−1`): when Gaussian+refine succeeds, its
+        reported error; else homoscedastic LSTSQ σ from
+        :func:`mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s` when that succeeds
+        on the Numba path; otherwise the Numba heuristic from
+        :func:`_rv_from_ccf_mask_kpf_numba_single`.
     centers : np.ndarray
         Chunk center wavelength (µm).
     v_grid : np.ndarray
@@ -5946,8 +6780,14 @@ def rv_per_chunks_mask_kpf(
         std_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out)
 
-    vr_lo = float(v_min_m_s if mask_restrict_v_min_m_s is None else mask_restrict_v_min_m_s)
-    vr_hi = float(v_max_m_s if mask_restrict_v_max_m_s is None else mask_restrict_v_max_m_s)
+    vr_lo = float(v_min_m_s)
+    vr_hi = float(v_max_m_s)
+
+    pio = int(mask_ccf_pixel_interp_order)
+    if pio < 1:
+        pio = 1
+    elif pio > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
+        pio = MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
     good_pix = ~d & np.isfinite(w) & np.isfinite(s) & np.isfinite(e)
     if v_grid_m_s is not None:
@@ -5967,7 +6807,52 @@ def rv_per_chunks_mask_kpf(
         return _empty(v_grid)
 
     span_um = float(w_max - w_min)
-    n_chunk = ccf_order_n_chunks_for_span(span_um, float(window_size_um))
+    use_line_chunks = window_size_num_lines is not None
+    # Wavelength tolerance for treating a chunk's upper bound as the echelle-row edge (inclusive).
+    _w_edge_eps = max(1e-15, abs(float(w_max)) * 1e-12)
+    if use_line_chunks:
+        if mask_kpf_line_chunk_v_center_m_s is None or not math.isfinite(
+            float(mask_kpf_line_chunk_v_center_m_s)
+        ):
+            raise ValueError(
+                "rv_per_chunks_mask_kpf: window_size_num_lines requires finite "
+                "mask_kpf_line_chunk_v_center_m_s (e.g. ccf_input_velocity in m/s)."
+            )
+        wl_lo_b, wl_hi_b, wl_ctr_b = build_mask_kpf_chunk_wavelength_intervals_num_lines(
+            w,
+            mask_lines,
+            window_size_num_lines=float(window_size_num_lines),
+            v_center_m_s=float(mask_kpf_line_chunk_v_center_m_s),
+            zb=float(zb),
+            min_good_pixels=int(min_good_pixels),
+        )
+        n_chunk = int(len(wl_lo_b))
+        chunk_iter_fwd: list[tuple[float, float, float, bool]] = [
+            (
+                float(wl_lo_b[k]),
+                float(wl_hi_b[k]),
+                float(wl_ctr_b[k]),
+                float(wl_hi_b[k]) >= float(w_max) - _w_edge_eps,
+            )
+            for k in range(n_chunk)
+        ]
+        chunk_iter = list(reversed(chunk_iter_fwd))
+    else:
+        n_chunk = ccf_order_n_chunks_for_span(span_um, float(window_size_um))
+        chunk_iter_fwd = [
+            (
+                w_min + k * span_um / n_chunk,
+                w_min + (k + 1) * span_um / n_chunk,
+                0.5
+                * (
+                    w_min + k * span_um / n_chunk
+                    + w_min + (k + 1) * span_um / n_chunk
+                ),
+                (w_min + (k + 1) * span_um / n_chunk) >= float(w_max) - _w_edge_eps,
+            )
+            for k in range(n_chunk)
+        ]
+        chunk_iter = list(reversed(chunk_iter_fwd))
 
     all_rvs: list[float] = []
     all_rv_errs: list[float] = []
@@ -5994,17 +6879,34 @@ def rv_per_chunks_mask_kpf(
         ]
     ] = []
 
-    for k in range(n_chunk):
-        lam_lo = w_min + k * span_um / n_chunk
-        lam_hi = w_min + (k + 1) * span_um / n_chunk
-        if k == n_chunk - 1:
-            in_chunk = (w >= lam_lo) & (w <= lam_hi) & np.isfinite(s) & np.isfinite(e) & (~d)
+    for lam_lo, lam_hi, wl_center, right_closed in chunk_iter:
+        if right_closed:
+            in_voronoi = (w >= lam_lo) & (w <= lam_hi) & np.isfinite(s) & np.isfinite(e) & (~d)
         else:
-            in_chunk = (w >= lam_lo) & (w < lam_hi) & np.isfinite(s) & np.isfinite(e) & (~d)
+            in_voronoi = (w >= lam_lo) & (w < lam_hi) & np.isfinite(s) & np.isfinite(e) & (~d)
+        band_lo = float(lam_lo)
+        band_hi = float(lam_hi)
+        v_span_lo_um = float(lam_lo)
+        v_span_hi_um = float(lam_hi)
+        if use_line_chunks:
+            band_lo, band_hi = mask_kpf_line_window_spectrum_band_um(
+                float(wl_center),
+                float(window_size_um),
+                w_min,
+                w_max,
+            )
+            in_band = (w >= band_lo) & (w <= band_hi) & np.isfinite(s) & np.isfinite(e) & (~d)
+            in_chunk = in_voronoi & in_band
+            if int(np.sum(in_chunk)) < int(min_good_pixels):
+                in_chunk = in_voronoi
+                v_span_lo_um, v_span_hi_um = float(lam_lo), float(lam_hi)
+            else:
+                v_span_lo_um, v_span_hi_um = float(band_lo), float(band_hi)
+        else:
+            in_chunk = in_voronoi
+
         if int(np.sum(in_chunk)) < min_good_pixels:
             continue
-
-        wl_center = 0.5 * (lam_lo + lam_hi)
 
         w_c = w[in_chunk]
         s_c = s[in_chunk]
@@ -6012,33 +6914,26 @@ def rv_per_chunks_mask_kpf(
 
         # Restrict mask lines so we don't waste time on lines that cannot land in this
         # chunk for any trial velocity in the search range.
+        if use_line_chunks:
+            v_r_lo, v_r_hi = mask_kpf_chunk_restrict_velocity_range_m_s(
+                v_span_lo_um,
+                v_span_hi_um,
+                v_prior_m_s=float(mask_kpf_line_chunk_v_center_m_s),
+                v_span_lo=vr_lo,
+                v_span_hi=vr_hi,
+            )
+        else:
+            v_r_lo, v_r_hi = vr_lo, vr_hi
         mask_c = restrict_mask_to_chunk(
             mask_lines,
             float(np.nanmin(w_c)),
             float(np.nanmax(w_c)),
-            v_min_m_s=vr_lo,
-            v_max_m_s=vr_hi,
+            v_min_m_s=v_r_lo,
+            v_max_m_s=v_r_hi,
             zb=zb,
         )
         if mask_c.line_lambda_um.size == 0:
             continue
-
-        if float(mask_order_edge_taper_pixels) > 0.0:
-            w_taper = (
-                order_wave_um_for_edge_taper
-                if order_wave_um_for_edge_taper is not None
-                else w
-            )
-            tap = _mask_line_order_edge_taper_multipliers(
-                np.asarray(w_taper, dtype=np.float64).ravel(),
-                mask_c.line_lambda_um,
-                edge_taper_pixels=float(mask_order_edge_taper_pixels),
-                exp_shape=float(mask_order_edge_taper_exp_shape),
-            )
-            mask_c = MaskLines(
-                line_lambda_um=mask_c.line_lambda_um,
-                weight=mask_c.weight * tap,
-            )
 
         left_edges, right_edges = pixel_edges_from_wavelength(w_c)
         pixel_width = right_edges - left_edges
@@ -6049,6 +6944,8 @@ def rv_per_chunks_mask_kpf(
         s_use = np.where(finite, s_c, 0.0).astype(np.float64)
         sn = np.where(finite, 1.0, 0.0).astype(np.float64)
         e_use = np.where(finite, e_c, 0.0).astype(np.float64)
+        w_lo_out = float(np.nanmin(w_c))
+        w_hi_out = float(np.nanmax(w_c))
         chunk_payloads.append(
             (
                 left_edges.astype(np.float64),
@@ -6058,8 +6955,8 @@ def rv_per_chunks_mask_kpf(
                 e_use,
                 mask_c.line_lambda_um.astype(np.float64),
                 mask_c.weight.astype(np.float64),
-                float(lam_lo),
-                float(lam_hi),
+                w_lo_out,
+                w_hi_out,
                 float(wl_center),
                 int(np.sum(in_chunk)),
             )
@@ -6068,8 +6965,8 @@ def rv_per_chunks_mask_kpf(
     if not chunk_payloads:
         return _empty(v_grid)
 
-    n_parabolic_norm = _require_mask_kpf_parabolic_vertex_n_samples(
-        int(mask_kpf_parabolic_vertex_n_samples)
+    n_parabolic_norm = _require_ccf_parabolic_vertex_n_samples(
+        int(ccf_parabolic_vertex_n_samples)
     )
 
     n_chunk_valid = len(chunk_payloads)
@@ -6121,6 +7018,7 @@ def rv_per_chunks_mask_kpf(
             line_w_2d,
             n_line_arr,
             bool(return_ccf),
+            int(pio),
         )
         # σ_CCF: weighted SD of x_j = F_j·SN_j about CCF(v) = Σ w_j x_j / Σ w_j (from Numba).
         if bool(return_ccf) and ccf_std_rows.size > 0:
@@ -6157,6 +7055,75 @@ def rv_per_chunks_mask_kpf(
         )
         if sig_h is not None and math.isfinite(float(sig_h)) and float(sig_h) > 0.0:
             rv_err_rows[i] = float(sig_h)
+
+    # Prefer Gaussian + mask-line parabolic refine (same stack as order-mean RV when
+    # ``n_chunks_order == 1`` and CCF preview slots) so ``ccf_parabolic_vertex_n_samples``
+    # controls the LSTSQ window; keep Numba RV/σ when the fitter path does not succeed.
+    wnum_lines = (
+        float(window_size_num_lines)
+        if window_size_num_lines is not None
+        else None
+    )
+    v_seed = (
+        float(mask_kpf_line_chunk_v_center_m_s)
+        if mask_kpf_line_chunk_v_center_m_s is not None
+        and math.isfinite(float(mask_kpf_line_chunk_v_center_m_s))
+        else None
+    )
+    for i in range(n_chunk_valid):
+        rv_nb = float(rv_rows[i])
+        if not np.isfinite(rv_nb):
+            continue
+        y_stored = np.ascontiguousarray(
+            (
+                -ccf_rows[i]
+                if int(flip_rows[i]) == 1
+                else np.asarray(ccf_rows[i], dtype=np.float64).copy()
+            ),
+            dtype=np.float64,
+        )
+        wl_i = float(centers[i])
+        vsp_i = (
+            dv_per_pixel_m_s(wl_i)
+            if np.isfinite(wl_i) and wl_i > 0.0
+            else float("nan")
+        )
+        try:
+            rv_g, err_g, par_g, diag_g = fit_ccf_rv(
+                vg_cc,
+                y_stored,
+                v_step_floor,
+                n_good=int(n_good_arr[i]),
+                return_params=True,
+                vel_span_m_s_per_pixel=vsp_i if np.isfinite(vsp_i) else None,
+                ccf_err=None,
+                config=CCF_PREVIEW_SLOT_FIT_CONFIG,
+                ccf_mask_kpf_stored_negated=MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
+                mask_kpf_window_size_num_lines=wnum_lines,
+                gaussian_seed_mean_m_s=v_seed,
+            )
+        except Exception:
+            continue
+        if not (
+            bool(diag_g.get("fit_ok"))
+            and np.isfinite(rv_g)
+            and np.isfinite(err_g)
+            and float(err_g) > 0.0
+        ):
+            continue
+        rv_ref, err_ref, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
+            vg_cc,
+            y_stored,
+            v_step_floor,
+            ccf_err=None,
+            params=par_g if isinstance(par_g, dict) else None,
+            ccf_parabolic_vertex_n_samples=int(n_parabolic_norm),
+            n_good=int(n_good_arr[i]),
+        )
+        if rv_ref is not None and math.isfinite(float(rv_ref)):
+            rv_rows[i] = float(rv_ref)
+            if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0.0:
+                rv_err_rows[i] = float(err_ref)
 
     for i in range(n_chunk_valid):
         rv = float(rv_rows[i])
@@ -6291,7 +7258,7 @@ def refine_ccf_rv_mask_kpf_lstsq_from_stored(
     ccf_stored: np.ndarray,
     *,
     n_good: int,
-    mask_kpf_parabolic_vertex_n_samples: int,
+    ccf_parabolic_vertex_n_samples: int,
     v_gaussian_mean_m_s: float | None = None,
 ) -> tuple[float | None, float | None, dict | None]:
     """
@@ -6324,8 +7291,8 @@ def refine_ccf_rv_mask_kpf_lstsq_from_stored(
         ccf_raw = np.ascontiguousarray(-ys, dtype=np.float64)
     else:
         ccf_raw = np.ascontiguousarray(ys, dtype=np.float64)
-    n_par = _require_mask_kpf_parabolic_vertex_n_samples(
-        int(mask_kpf_parabolic_vertex_n_samples)
+    n_par = _require_ccf_parabolic_vertex_n_samples(
+        int(ccf_parabolic_vertex_n_samples)
     )
     i_prior = -1
     if v_gaussian_mean_m_s is not None and math.isfinite(float(v_gaussian_mean_m_s)):
@@ -6343,7 +7310,7 @@ def refine_ccf_rv_mask_kpf_lstsq_from_stored(
     meta: dict = {
         "ok": True,
         "refine_method": "mask_kpf_lstsq_parabolic_vertex",
-        "mask_kpf_parabolic_vertex_n_samples": int(n_par),
+        "ccf_parabolic_vertex_n_samples": int(n_par),
         "rv_err_m_s": err_m,
         "rv_refined_m_s": float(rv),
         "parabolic_peak_index_prior": int(i_prior),
@@ -6420,8 +7387,13 @@ def ensure_mask_kpf_lstsq_preview_plot_metadata(
     if vg.size != ys.size or vg.size < 3:
         return rmeta
     try:
-        n_par = _require_mask_kpf_parabolic_vertex_n_samples(
-            int(rmeta.get("mask_kpf_parabolic_vertex_n_samples", 11))
+        n_par = _require_ccf_parabolic_vertex_n_samples(
+            int(
+                rmeta.get(
+                    "ccf_parabolic_vertex_n_samples",
+                    rmeta.get("mask_kpf_parabolic_vertex_n_samples", 11),
+                )
+            )
         )
     except ValueError:
         return rmeta
@@ -6498,7 +7470,7 @@ def _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
     *,
     ccf_err: np.ndarray | None,
     params: dict | None,
-    mask_kpf_parabolic_vertex_n_samples: int = 11,
+    ccf_parabolic_vertex_n_samples: int = 11,
     n_good: int | None = None,
 ) -> tuple[float | None, float | None, dict | None]:
     """
@@ -6508,7 +7480,7 @@ def _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
 
     The parabolic vertex uses the Gaussian fit mean ``params["v0"]`` (m s\\ :sup:`−1`) as a
     prior: the LSTSQ window is centered on the velocity sample nearest ``v0``, with
-    ``mask_kpf_parabolic_vertex_n_samples`` points along the grid (odd, :math:`\\ge 3`).
+    ``ccf_parabolic_vertex_n_samples`` points along the grid (odd, :math:`\\ge 3`).
     """
     ng = (
         int(n_good)
@@ -6524,7 +7496,7 @@ def _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
         v_grid_m_s,
         ccf_mean,
         n_good=max(1, ng),
-        mask_kpf_parabolic_vertex_n_samples=mask_kpf_parabolic_vertex_n_samples,
+        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         v_gaussian_mean_m_s=v_prior,
     )
     if rv_ls is not None and math.isfinite(float(rv_ls)):
@@ -6543,7 +7515,8 @@ def run_ccf_mask_kpf_for_fiber(
     window_size_um: float,
     outlier_sigma: float,
     mask_path: str | None,
-    mask_width_um: float | None = None,
+    mask_wavelength=None,
+    mask_weight=None,
     v_min_m_s: float = _V_MIN,
     v_max_m_s: float = _V_MAX,
     v_step_m_s: float = _V_STEP,
@@ -6554,13 +7527,11 @@ def run_ccf_mask_kpf_for_fiber(
     max_cores: int | None = None,
     want_preview: bool = False,
     debug_ccf: bool = False,
-    mask_order_edge_taper_pixels: float = 100.0,
-    mask_order_edge_taper_exp_shape: float = 5.0,
-    ccf_mask_kpf_auto_hybrid_scout: bool = True,
-    mask_kpf_parabolic_vertex_n_samples: int = 11,
+    mask_auto_hybrid_scout: bool = True,
+    ccf_parabolic_vertex_n_samples: int = 11,
     min_good_pixels: int = 10,
-    mask_restrict_v_min_m_s: float | None = None,
-    mask_restrict_v_max_m_s: float | None = None,
+    mask_ccf_pixel_interp_order: int = 1,
+    window_size_num_lines: float | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -6576,25 +7547,19 @@ def run_ccf_mask_kpf_for_fiber(
     Run mask-line CCF RV for one fiber (``algorithm="ccf_mask_kpf"``).
 
     Reads ``SPEC_FIB*``, ``SPEC_ERR_FIB*``, ``SPEC_DQ_FIB*``, ``WAVE_FIB*`` from
-    ``input_model``, loads the mask (see :func:`resolve_mask_path`), and processes
-    each requested echelle order with :func:`rv_per_chunks_mask_kpf`. For every
-    echelle order, all chunk rows in ``RVCCF`` are assigned the **same** RV and
-    ``RV_ERR``, taken from :func:`fit_ccf_rv` on the **order-mean** mask CCF
-    (nanmean over chunk CCF rows on the velocity grid), then refined with
-    :func:`refine_ccf_rv_mask_kpf_lstsq_from_stored` (homoscedastic LSTSQ σ when valid): an odd-length LSTSQ parabolic vertex
-    centered on the velocity grid index nearest the Gaussian mean :math:`v_0` from that fit
-    (``mask_kpf_parabolic_vertex_n_samples`` points), unlike per-chunk extraction which
-    centers on a smoothed-CCF prominence peak. Falls back to
-    :func:`refine_ccf_rv_coarse_grid_parabolic`
-    if the vertex is ill-conditioned. Chunk
-    wavelengths stay as chunk centers. Those
-    Fiber-level RV and uncertainty use :func:`combine_rv_estimates_median_mad_weighted`
-    on **one aggregate sample per echelle order** when the order-mean Gaussian succeeds
-    (so duplicate chunk rows are not treated as independent measurements). That
-    returns an inverse-variance mean and ``max(internal stderr, MAD/√N)`` on the
-    aggregates. Per-chunk ``INLIER`` flags map the aggregate mask back to each row.
-    If the Gaussian fit fails, Numba per-chunk RVs are kept and each chunk remains its
-    own aggregate for combination.
+    ``input_model``, resolves mask lines via :func:`load_mask_lines_for_ccf_mask_kpf`, and processes
+    each requested echelle order with :func:`rv_per_chunks_mask_kpf`. When an echelle
+    row has **only one** mask-KPF wavelength chunk, all chunk rows in ``RVCCF`` (one row)
+    use the Gaussian + parabolic path on the **order-mean** mask CCF (nanmean over chunk CCF
+    rows on the velocity grid), same as before. When an order has **multiple** chunks
+    (e.g. ``window_size_num_lines`` line-window bins), **per-chunk** Numba RVs and
+    uncertainties are kept on each ``RVCCF`` row. Fiber-level RV and uncertainty use
+    :func:`combine_rv_estimates_median_mad_weighted` on **one aggregate sample per echelle
+    order** only in the single-chunk Gaussian-success case; with multiple chunks per order,
+    **each chunk** contributes its own aggregate sample so ``RVCCFAVG`` combines all
+    chunks across the fiber. Per-chunk ``INLIER`` flags map the aggregate mask back to each
+    row. If the single-chunk Gaussian fit fails, Numba per-chunk RVs are kept and each chunk
+    remains its own aggregate for combination.
 
     Parameters
     ----------
@@ -6611,9 +7576,12 @@ def run_ccf_mask_kpf_for_fiber(
     outlier_sigma : float
         Median/MAD outlier threshold for chunk RV combination.
     mask_path : str or None
-        Path to mask file; ``None`` selects packaged default (see README).
-    mask_width_um : float or None, optional
-        Segment half-width for two-column masks only.
+        Path to mask file when not using in-memory ``mask_wavelength`` / ``mask_weight``;
+        ``None`` selects the packaged default (see README). Loaded via :func:`load_mask`
+        (KPF-style two-column masks use a **delta-line** model).
+    mask_wavelength, mask_weight : array-like or None, optional
+        When **both** are set, build the mask in memory (rest wavelengths in µm, weights same
+        length) and ignore ``mask_path`` for loading. See :func:`load_mask_lines_for_ccf_mask_kpf`.
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
         **Broad** uniform velocity search (m s⁻¹). When ``ccf_hybrid_center_m_s`` is set,
         these define the coarse leg of a **merged** grid (see
@@ -6630,19 +7598,14 @@ def run_ccf_mask_kpf_for_fiber(
         If True, build order-averaged CCF data for Plotly preview.
     debug_ccf : bool, optional
         Extra logging per order.
-    mask_order_edge_taper_pixels : float, optional
-        Deweight mask lines near echelle order edges (default ``100``); ``0`` disables.
-        See :func:`rv_per_chunks_mask_kpf`.
-    mask_order_edge_taper_exp_shape : float, optional
-        Exponential shape parameter for the edge taper (default ``5``).
-    ccf_mask_kpf_auto_hybrid_scout : bool, optional
+    mask_auto_hybrid_scout : bool, optional
         When ``ccf_hybrid_center_m_s`` is unset and **exactly one** echelle order is processed,
         run a **full-order** coarse mask CCF (one chunk spanning the echelle row), take the
         sub-pixel peak on the order-mean CCF (same basis as the pipeline fit), build
         :func:`build_hybrid_merged_velocity_grid` at that center, and evaluate all wavelength
         sub-bins on the merged grid. Multi-order runs skip this so preview stacking keeps one
         velocity axis.
-    mask_kpf_parabolic_vertex_n_samples : int, optional
+    ccf_parabolic_vertex_n_samples : int, optional
         **Odd** integer :math:`\\ge 3` (raises if even). For the **order-mean** path, the LSTSQ
         window is centered on the grid point nearest the Gaussian mean from :func:`fit_ccf_rv`;
         for per-chunk Numba RVs (when the order-mean Gaussian path does not apply), the window
@@ -6650,9 +7613,13 @@ def run_ccf_mask_kpf_for_fiber(
         :func:`refine_ccf_rv_mask_kpf_lstsq_from_stored`.
     min_good_pixels : int, optional
         Minimum unmasked finite spectral pixels required per chunk (see ``rv_per_chunks_mask_kpf``).
-    mask_restrict_v_min_m_s, mask_restrict_v_max_m_s : float or None, optional
-        Override velocity bounds when restricting mask lines to chunks (``None`` uses the CCF
-        grid ``v_min_m_s`` / ``v_max_m_s``).
+    mask_ccf_pixel_interp_order : int, optional
+        Lagrange interpolation **order** on the echelle wavelength axis when evaluating mask
+        CCFs (``1`` = linear). Forwarded to :func:`rv_per_chunks_mask_kpf`.
+    window_size_num_lines : float or None, optional
+        When set, spectral chunks follow mask lines in the observed frame at
+        ``ccf_hybrid_center_m_s`` (requires hybrid mode / finite ``ccf_hybrid_center_m_s``).
+        Forwarded to :func:`rv_per_chunks_mask_kpf`.
 
     Returns
     -------
@@ -6728,35 +7695,17 @@ def run_ccf_mask_kpf_for_fiber(
     if dq is None:
         dq = np.zeros_like(spec, dtype=np.uint32)
 
-    if hybrid:
-        _h_vc = float(ccf_hybrid_center_m_s)
-        _h_hw = float(ccf_hybrid_half_width_m_s)
-        _h_vsf = float(ccf_hybrid_step_m_s)
-        v_grid = build_hybrid_merged_velocity_grid(
-            float(v_min_m_s),
-            float(v_max_m_s),
-            float(v_step_m_s),
-            _h_vc,
-            _h_hw,
-            _h_vsf,
-        )
-    else:
-        _h_vc = _h_hw = _h_vsf = float("nan")
-        v_grid = np.arange(
-            v_min_m_s,
-            v_max_m_s + 0.5 * v_step_m_s,
-            v_step_m_s,
-            dtype=np.float64,
-        )
-
-    # Load mask once per fiber run (mask does not depend on order).
-    resolved_mask = resolve_mask_path(mask_path)
-    mask_lines = load_mask(resolved_mask, mask_width_um=mask_width_um)
+    # Load mask before building the velocity grid so line-window mode can tighten broad ``v``.
+    mask_lines, mask_src_label = load_mask_lines_for_ccf_mask_kpf(
+        mask_path=mask_path,
+        mask_wavelength=mask_wavelength,
+        mask_weight=mask_weight,
+    )
     if mask_lines.line_lambda_um.size == 0:
-        raise ValueError(f"Mask loaded no lines: {resolved_mask}")
+        raise ValueError(f"Mask loaded no lines: {mask_src_label}")
     logger.info(
-        "CCF mask_kpf: loaded mask path=%s n_line_segments=%d",
-        resolved_mask,
+        "CCF mask_kpf: loaded mask source=%s n_line_segments=%d",
+        mask_src_label,
         int(mask_lines.line_lambda_um.size),
     )
 
@@ -6776,13 +7725,82 @@ def run_ccf_mask_kpf_for_fiber(
     single_order_mask_kpf = len(order_tasks) == 1
     fiber_merged_v_grid: np.ndarray | None = None
 
+    if window_size_num_lines is not None:
+        if not hybrid or ccf_hybrid_center_m_s is None:
+            raise ValueError(
+                "run_ccf_mask_kpf_for_fiber: window_size_num_lines requires finite "
+                "ccf_hybrid_center_m_s (set ccf_input_velocity on the primitive)."
+            )
+        wn = float(window_size_num_lines)
+        if not math.isfinite(wn) or wn <= 0.0:
+            raise ValueError("window_size_num_lines must be finite and > 0 when set.")
+        kw_rv_line_chunking: dict[str, float] = {
+            "window_size_num_lines": wn,
+            "mask_kpf_line_chunk_v_center_m_s": float(ccf_hybrid_center_m_s),
+        }
+        logger.info(
+            "CCF mask_kpf: line-window chunking window_size_num_lines=%g v_center_m_s=%.2f",
+            wn,
+            float(ccf_hybrid_center_m_s),
+        )
+    else:
+        kw_rv_line_chunking = {}
+
+    v_min_use = float(v_min_m_s)
+    v_max_use = float(v_max_m_s)
+    if window_size_num_lines is not None and hybrid:
+        v_min_use, v_max_use, dv_chunk_max = mask_kpf_line_window_coarse_velocity_bounds_m_s(
+            wave,
+            order_tasks,
+            mask_lines,
+            window_size_num_lines=float(window_size_num_lines),
+            v_center_m_s=float(ccf_hybrid_center_m_s),
+            zb=float(zb),
+            min_good_pixels=int(min_good_pixels),
+            v_coarse_lo=float(v_min_m_s),
+            v_coarse_hi=float(v_max_m_s),
+            hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
+            v_step_m_s=float(v_step_m_s),
+        )
+        logger.info(
+            "CCF mask_kpf: line-window coarse V bounds tightened to [%.2f, %.2f] m/s "
+            "(from [%.2f, %.2f]; max c·Δλ/λ over chunks ≈ %.2f m/s)",
+            v_min_use,
+            v_max_use,
+            float(v_min_m_s),
+            float(v_max_m_s),
+            float(dv_chunk_max),
+        )
+
+    if hybrid:
+        _h_vc = float(ccf_hybrid_center_m_s)
+        _h_hw = float(ccf_hybrid_half_width_m_s)
+        _h_vsf = float(ccf_hybrid_step_m_s)
+        v_grid = build_hybrid_merged_velocity_grid(
+            v_min_use,
+            v_max_use,
+            float(v_step_m_s),
+            _h_vc,
+            _h_hw,
+            _h_vsf,
+        )
+    else:
+        _h_vc = _h_hw = _h_vsf = float("nan")
+        v_grid = np.arange(
+            v_min_use,
+            v_max_use + 0.5 * v_step_m_s,
+            v_step_m_s,
+            dtype=np.float64,
+        )
+
     all_rvs: list[float] = []
     all_rv_errs: list[float] = []
     all_wavelengths: list[float] = []
     all_orders: list[int] = []
 
     # Per-chunk RVs and RVCCF table CCF rows use ``ccf_2d`` from :func:`rv_per_chunks_mask_kpf`.
-    # The order-mean Gaussian + parabolic refine stacks the same chunk rows as chunk RV extraction.
+    # Order-mean Gaussian + parabolic refine applies only for **one** chunk per echelle row;
+    # otherwise per-chunk Numba RVs are kept and preview still stacks chunk CCF rows per order.
     want_preview_effective = bool(want_preview)
 
     order_slots: list[dict] = []
@@ -6816,23 +7834,17 @@ def run_ccf_mask_kpf_for_fiber(
         v_auto_grid: np.ndarray | None = None
         order_auto_hybrid_merged = False
 
-        kw_edge = dict(
-            mask_order_edge_taper_pixels=float(mask_order_edge_taper_pixels),
-            mask_order_edge_taper_exp_shape=float(mask_order_edge_taper_exp_shape),
-            order_wave_um_for_edge_taper=w,
-        )
         kw_rv = {
-            **kw_edge,
-            "mask_kpf_parabolic_vertex_n_samples": int(mask_kpf_parabolic_vertex_n_samples),
+            "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
             "min_good_pixels": int(min_good_pixels),
-            "mask_restrict_v_min_m_s": mask_restrict_v_min_m_s,
-            "mask_restrict_v_max_m_s": mask_restrict_v_max_m_s,
+            "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
+            **kw_rv_line_chunking,
         }
         # Single-order auto-hybrid: full-order CCF (one chunk spanning the echelle row) for scout.
         span_um = float(w_max - w_min)
         window_um_scout = max(float(window_size_um), span_um * (1.0 + 1e-12))
         if (
-            bool(ccf_mask_kpf_auto_hybrid_scout)
+            bool(mask_auto_hybrid_scout)
             and single_order_mask_kpf
             and not hybrid
         ):
@@ -6843,8 +7855,8 @@ def run_ccf_mask_kpf_for_fiber(
                 d_bad,
                 mask_lines,
                 window_size_um=window_um_scout,
-                v_min_m_s=v_min_m_s,
-                v_max_m_s=v_max_m_s,
+                v_min_m_s=v_min_use,
+                v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
                 max_cores=max_cores,
@@ -6872,8 +7884,8 @@ def run_ccf_mask_kpf_for_fiber(
 
                 if math.isfinite(v_c):
                     v_auto_grid = build_hybrid_merged_velocity_grid(
-                        float(v_min_m_s),
-                        float(v_max_m_s),
+                        float(v_min_use),
+                        float(v_max_use),
                         float(v_step_m_s),
                         float(v_c),
                         float(ccf_hybrid_half_width_m_s),
@@ -6912,8 +7924,8 @@ def run_ccf_mask_kpf_for_fiber(
                 d_bad,
                 mask_lines,
                 window_size_um=window_size_um,
-                v_min_m_s=float(v_min_m_s),
-                v_max_m_s=float(v_max_m_s),
+                v_min_m_s=float(v_min_use),
+                v_max_m_s=float(v_max_use),
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_grid,
                 zb=zb,
@@ -6940,8 +7952,8 @@ def run_ccf_mask_kpf_for_fiber(
                 d_bad,
                 mask_lines,
                 window_size_um=window_size_um,
-                v_min_m_s=float(v_min_m_s),
-                v_max_m_s=float(v_max_m_s),
+                v_min_m_s=float(v_min_use),
+                v_max_m_s=float(v_max_use),
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_auto_grid,
                 zb=zb,
@@ -6968,14 +7980,15 @@ def run_ccf_mask_kpf_for_fiber(
                 d_bad,
                 mask_lines,
                 window_size_um=window_size_um,
-                v_min_m_s=v_min_m_s,
-                v_max_m_s=v_max_m_s,
+                v_min_m_s=v_min_use,
+                v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
                 max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
+        rvccf_order_start = len(rvccf_rows_accum)
         if rvs_o.size != 0:
             for ii in range(int(rvs_o.size)):
                 order_chunk_rvs.append(float(rvs_o[ii]))
@@ -7029,40 +8042,56 @@ def run_ccf_mask_kpf_for_fiber(
             wl_c = 0.5 * (w_min + w_max)
             vsp = dv_per_pixel_m_s(float(wl_c))
             n_good_fit = max(int(np.nansum(order_chunk_ng)), 1)
-            rv_g, err_g, _par_g, diag_g = fit_ccf_rv(
-                v_fit,
-                ccf_mean_order,
-                vstep_fit,
-                n_good=n_good_fit,
-                return_params=True,
-                vel_span_m_s_per_pixel=vsp if np.isfinite(vsp) else None,
-                ccf_err=ccf_err_mean_order,
-                ccf_mask_kpf_stored_negated=MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
-            )
-            if (
-                bool(diag_g.get("fit_ok"))
-                and np.isfinite(rv_g)
-                and np.isfinite(err_g)
-                and float(err_g) > 0.0
-            ):
-                rv_gf = float(rv_g)
-                err_gf = float(err_g)
-                rv_ref, err_ref, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
+            # Duplicate the order-mean Gaussian RV onto every chunk row only when this echelle
+            # row has a **single** mask-KPF chunk. Multiple chunks per order (e.g. line-window
+            # Voronoi bins) keep per-chunk Numba RVs so RVCCF / outlier / RVCCFAVG aggregate over
+            # all chunks; Plotly preview uses one CCF slot per chunk (see ``want_preview`` block).
+            if n_chunks_order == 1:
+                _gauss_seed = (
+                    float(ccf_hybrid_center_m_s)
+                    if hybrid
+                    and ccf_hybrid_center_m_s is not None
+                    and math.isfinite(float(ccf_hybrid_center_m_s))
+                    else None
+                )
+                rv_g, err_g, _par_g, diag_g = fit_ccf_rv(
                     v_fit,
                     ccf_mean_order,
                     vstep_fit,
+                    n_good=n_good_fit,
+                    return_params=True,
+                    vel_span_m_s_per_pixel=vsp if np.isfinite(vsp) else None,
                     ccf_err=ccf_err_mean_order,
-                    params=_par_g if isinstance(_par_g, dict) else None,
-                    mask_kpf_parabolic_vertex_n_samples=int(mask_kpf_parabolic_vertex_n_samples),
-                    n_good=int(n_good_fit),
+                    ccf_mask_kpf_stored_negated=MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
+                    mask_kpf_window_size_num_lines=float(window_size_num_lines)
+                    if window_size_num_lines is not None
+                    else None,
+                    gaussian_seed_mean_m_s=_gauss_seed,
                 )
-                if rv_ref is not None and math.isfinite(float(rv_ref)):
-                    rv_gf = float(rv_ref)
-                    if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0:
-                        err_gf = float(err_ref)
-                order_chunk_rvs = [rv_gf] * n_chunks_order
-                order_chunk_errs = [err_gf] * n_chunks_order
-                order_used_gaussian_mean = True
+                if (
+                    bool(diag_g.get("fit_ok"))
+                    and np.isfinite(rv_g)
+                    and np.isfinite(err_g)
+                    and float(err_g) > 0.0
+                ):
+                    rv_gf = float(rv_g)
+                    err_gf = float(err_g)
+                    rv_ref, err_ref, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(
+                        v_fit,
+                        ccf_mean_order,
+                        vstep_fit,
+                        ccf_err=ccf_err_mean_order,
+                        params=_par_g if isinstance(_par_g, dict) else None,
+                        ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
+                        n_good=int(n_good_fit),
+                    )
+                    if rv_ref is not None and math.isfinite(float(rv_ref)):
+                        rv_gf = float(rv_ref)
+                        if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0:
+                            err_gf = float(err_ref)
+                    order_chunk_rvs = [rv_gf] * n_chunks_order
+                    order_chunk_errs = [err_gf] * n_chunks_order
+                    order_used_gaussian_mean = True
 
         if order_used_gaussian_mean:
             fiber_agg_rvs.append(float(order_chunk_rvs[0]))
@@ -7080,32 +8109,99 @@ def run_ccf_mask_kpf_for_fiber(
         all_wavelengths.extend(order_chunk_wl)
         all_orders.extend([int(order)] * n_chunks_order)
 
-        if want_preview_effective and stacked_order is not None and order_v_grid is not None and ccf_mean_order is not None:
-            slot_payload: dict = {
-                "kind": "order",
-                "order": int(order),
-                "v": order_v_grid,
-                "ccf": np.asarray(ccf_mean_order, dtype=np.float64),
-                "wl_lo": float(w_min),
-                "wl_hi": float(w_max),
-                "n_good": max(1, int(np.nansum(np.asarray(order_chunk_ng, dtype=np.int64)))),
-            }
-            if ccf_err_mean_order is not None and np.any(np.isfinite(ccf_err_mean_order)):
-                slot_payload["ccf_err"] = np.asarray(ccf_err_mean_order, dtype=np.float64)
-            if np.isfinite(sigma_hp_order) and sigma_hp_order > 0.0:
-                err_stack = np.full_like(stacked_order, float(sigma_hp_order), dtype=np.float64)
-            else:
-                err_stack = np.full_like(stacked_order, np.nan, dtype=np.float64)
-            all_ccf_err_rows.append(err_stack)
-            order_slots.append(slot_payload)
-            all_ccf_rows.append(stacked_order)
+        # Preview slots: one CCF curve per mask-KPF chunk (dropdown in stellar RV preview).
+        # When several chunks share an echelle order (line-window Voronoi bins), each chunk
+        # gets its own slot + ``rvccf_chunk_id`` aligned with ``RVCCF`` ``CHUNK_ID``.
+        if want_preview_effective and ccf_2d is not None and n_chunks_order > 0:
+            c2 = np.asarray(ccf_2d, dtype=np.float64)
+            if c2.ndim == 2 and c2.shape[0] == n_chunks_order:
+                v_prev = np.asarray(v_grid_o, dtype=np.float64)
+                std2 = (
+                    np.asarray(_ccf_std_2d, dtype=np.float64)
+                    if _ccf_std_2d is not None
+                    and np.asarray(_ccf_std_2d).shape == c2.shape
+                    else None
+                )
+                wlo_a = (
+                    np.asarray(_wl_lo_o, dtype=np.float64)
+                    if _wl_lo_o is not None
+                    else None
+                )
+                whi_a = (
+                    np.asarray(_wl_hi_o, dtype=np.float64)
+                    if _wl_hi_o is not None
+                    else None
+                )
+                ng_arr = np.asarray(ng_o, dtype=np.int64)
+                n_rvccf_added = int(len(rvccf_rows_accum) - rvccf_order_start)
+                have_rvccf_ids = n_rvccf_added == int(n_chunks_order) and int(n_chunks_order) > 0
+                for ii in range(n_chunks_order):
+                    row = np.asarray(c2[ii], dtype=np.float64)
+                    slot_payload: dict = {
+                        "kind": "order",
+                        "order": int(order),
+                        "chunk_index": int(ii),
+                        "chunk_n": int(n_chunks_order),
+                        "v": v_prev,
+                        "ccf": row,
+                        "wl_lo": float(wlo_a[ii])
+                        if wlo_a is not None and ii < int(wlo_a.size)
+                        else float(w_min),
+                        "wl_hi": float(whi_a[ii])
+                        if whi_a is not None and ii < int(whi_a.size)
+                        else float(w_max),
+                        "n_good": max(1, int(ng_arr[ii])) if ii < int(ng_arr.size) else 1,
+                    }
+                    if have_rvccf_ids:
+                        slot_payload["rvccf_chunk_id"] = int(rvccf_order_start + ii)
+                    ce_row: np.ndarray | None = None
+                    if std2 is not None and np.any(np.isfinite(std2[ii])):
+                        ce_row = np.asarray(std2[ii], dtype=np.float64)
+                    elif (
+                        n_chunks_order == 1
+                        and ccf_err_mean_order is not None
+                        and np.any(np.isfinite(ccf_err_mean_order))
+                    ):
+                        ce_row = np.asarray(ccf_err_mean_order, dtype=np.float64)
+                    if ce_row is not None:
+                        slot_payload["ccf_err"] = ce_row
+
+                    order_slots.append(slot_payload)
+                    all_ccf_rows.append(np.ascontiguousarray(c2[ii : ii + 1], dtype=np.float64))
+                    if std2 is not None:
+                        all_ccf_err_rows.append(
+                            np.ascontiguousarray(std2[ii : ii + 1], dtype=np.float64)
+                        )
+                    elif (
+                        n_chunks_order == 1
+                        and ccf_err_mean_order is not None
+                        and np.any(np.isfinite(ccf_err_mean_order))
+                    ):
+                        all_ccf_err_rows.append(
+                            np.asarray(ccf_err_mean_order, dtype=np.float64, ndmin=2)
+                        )
+                    else:
+                        all_ccf_err_rows.append(
+                            np.full((1, int(c2.shape[1])), np.nan, dtype=np.float64)
+                        )
 
         if debug_ccf and n_chunks_order > 0:
+            if kw_rv_line_chunking:
+                n_geom_dbg = mask_kpf_n_chunks_for_order_num_lines(
+                    w,
+                    mask_lines,
+                    window_size_num_lines=float(kw_rv_line_chunking["window_size_num_lines"]),
+                    v_center_m_s=float(kw_rv_line_chunking["mask_kpf_line_chunk_v_center_m_s"]),
+                    zb=float(zb),
+                    min_good_pixels=int(min_good_pixels),
+                )
+            else:
+                n_geom_dbg = ccf_order_n_chunks_for_span(span_um, float(window_size_um))
             logger.info(
                 "CCF-mask_kpf fiber=%s order=%s: n_chunks_geom=%d n_chunks_out=%d rv_mean~%.1f m/s",
                 fiber,
                 order,
-                ccf_order_n_chunks_for_span(span_um, float(window_size_um)),
+                int(n_geom_dbg),
                 n_chunks_order,
                 float(np.nanmedian(order_chunk_rvs)),
             )
@@ -7146,8 +8242,8 @@ def run_ccf_mask_kpf_for_fiber(
         pv_step = float(effective_ccf_v_step_for_fit(fiber_merged_v_grid))
         preview_v_grid = fiber_merged_v_grid
     else:
-        pv_min = float(v_min_m_s)
-        pv_max = float(v_max_m_s)
+        pv_min = float(v_min_use)
+        pv_max = float(v_max_use)
         pv_step = float(v_step_m_s)
         preview_v_grid = v_grid
 
@@ -7158,6 +8254,13 @@ def run_ccf_mask_kpf_for_fiber(
             fiber,
             len(order_slots),
         )
+        _preview_gauss_seed = (
+            float(ccf_hybrid_center_m_s)
+            if hybrid
+            and ccf_hybrid_center_m_s is not None
+            and math.isfinite(float(ccf_hybrid_center_m_s))
+            else None
+        )
         preview_detail = finalize_ccf_preview_dict(
             order_slots,
             all_ccf_rows,
@@ -7167,7 +8270,11 @@ def run_ccf_mask_kpf_for_fiber(
             pv_step,
             all_ccf_err_rows if len(all_ccf_err_rows) == len(order_slots) else None,
             ccf_mask_kpf_stored_negated=MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
-            mask_kpf_parabolic_vertex_n_samples=int(mask_kpf_parabolic_vertex_n_samples),
+            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
+            mask_kpf_window_size_num_lines=float(window_size_num_lines)
+            if window_size_num_lines is not None
+            else None,
+            mask_kpf_gaussian_seed_mean_m_s=_preview_gauss_seed,
         )
 
     logger.info(

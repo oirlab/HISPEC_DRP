@@ -38,7 +38,7 @@
 </head>
 <body>
   <div class="row">
-    <label>Order
+    <label>Spectrum chunk
       <select id="orderSelect"></select>
     </label>
     <label>Velocity shift (m/s)
@@ -86,14 +86,36 @@ __SPECTRUM_HELP__
     let ccfPlotReady = false;
     let sliderPlotRaf = null;
 
+    /** Line-window mask overlay: padded ``window_size_um`` band (µm); else null. */
+    function spectrumBandUmFromPayload(o) {
+      const slo = Number(o.spectrum_band_lo_um);
+      const shi = Number(o.spectrum_band_hi_um);
+      if (Number.isFinite(slo) && Number.isFinite(shi) && shi > slo) {
+        return { lo: slo, hi: shi };
+      }
+      return null;
+    }
+
     DATA.orders.forEach((o, i) => {
       const opt = document.createElement("option");
       opt.value = String(i);
-      const lo = Number(o.wl_lo_um);
-      const hi = Number(o.wl_hi_um);
-      let lab = `Order ${o.order}`;
-      if (Number.isFinite(lo) && Number.isFinite(hi)) {
-        lab += ` · λ ${lo.toFixed(4)}–${hi.toFixed(4)} µm`;
+      const loPix = Number(o.wl_lo_um);
+      const hiPix = Number(o.wl_hi_um);
+      const band = spectrumBandUmFromPayload(o);
+      const vlo = band ? band.lo : Number(o.voronoi_lo_um);
+      const vhi = band ? band.hi : Number(o.voronoi_hi_um);
+      const lc = Number(o.chunk_center_um);
+      let lab = `Echelle ${o.order}`;
+      if (Number.isFinite(o.chunk_n) && o.chunk_n > 1 && Number.isFinite(o.chunk_index)) {
+        lab += ` · segment ${Number(o.chunk_index) + 1}/${Number(o.chunk_n)}`;
+      }
+      if (Number.isFinite(vlo) && Number.isFinite(vhi)) {
+        lab += ` · λ ${vlo.toFixed(4)}–${vhi.toFixed(4)} µm`;
+      } else if (Number.isFinite(loPix) && Number.isFinite(hiPix)) {
+        lab += ` · λ ${loPix.toFixed(4)}–${hiPix.toFixed(4)} µm`;
+      }
+      if (Number.isFinite(lc)) {
+        lab += ` · λ_c=${lc.toFixed(6)} µm`;
       }
       opt.textContent = lab;
       orderSelect.appendChild(opt);
@@ -214,6 +236,16 @@ __SPECTRUM_HELP__
     }
 
     function ccfAtVelocityMask(order, vMs) {
+      const pv0 = order.ccf_v_m_s;
+      const pc0 = order.ccf;
+      if (
+        Array.isArray(pv0) &&
+        Array.isArray(pc0) &&
+        pv0.length === pc0.length &&
+        pv0.length >= 2
+      ) {
+        return interpLinear(pv0, pc0, vMs);
+      }
       let cache = orderCache.get(currentOrderIdx);
       if (!cache) {
         cache = buildOrderCache(order);
@@ -302,6 +334,26 @@ __SPECTRUM_HELP__
       if (ccfCurveCache.has(currentOrderIdx)) {
         return ccfCurveCache.get(currentOrderIdx);
       }
+      const pvEmb = order.ccf_v_m_s;
+      const pcEmb = order.ccf;
+      const peEmb = order.ccf_err;
+      if (
+        Array.isArray(pvEmb) &&
+        Array.isArray(pcEmb) &&
+        pvEmb.length === pcEmb.length &&
+        pvEmb.length >= 2
+      ) {
+        const bundle = {
+          v: pvEmb.slice(),
+          ccf: pcEmb.slice(),
+          ccfErr:
+            Array.isArray(peEmb) && peEmb.length === pvEmb.length
+              ? peEmb.slice()
+              : null,
+        };
+        ccfCurveCache.set(currentOrderIdx, bundle);
+        return bundle;
+      }
       const vMin = parseFloat(vSlider.min);
       const vMax = parseFloat(vSlider.max);
       const coarseStep = 50.0;
@@ -387,13 +439,26 @@ __SPECTRUM_HELP__
     }
 
     function spectrumTitleText(order, vMs) {
-      const lo = Number(order.wl_lo_um);
-      const hi = Number(order.wl_hi_um);
+      const loPix = Number(order.wl_lo_um);
+      const hiPix = Number(order.wl_hi_um);
+      const band = spectrumBandUmFromPayload(order);
+      const vlo = band ? band.lo : Number(order.voronoi_lo_um);
+      const vhi = band ? band.hi : Number(order.voronoi_hi_um);
+      const lc = Number(order.chunk_center_um);
       let wl = "";
-      if (Number.isFinite(lo) && Number.isFinite(hi)) {
-        wl = ` | λ ${lo.toFixed(4)}–${hi.toFixed(4)} µm`;
+      if (Number.isFinite(vlo) && Number.isFinite(vhi)) {
+        wl = ` | λ ${vlo.toFixed(4)}–${vhi.toFixed(4)} µm`;
+      } else if (Number.isFinite(loPix) && Number.isFinite(hiPix)) {
+        wl = ` | plot λ ${loPix.toFixed(4)}–${hiPix.toFixed(4)} µm`;
       }
-      return `Fiber ${DATA.fiber} | Order ${order.order}${wl} | v = ${vMs.toFixed(1)} m/s`;
+      if (Number.isFinite(lc)) {
+        wl += ` | λ_c=${lc.toFixed(6)} µm (mask line @ v_init)`;
+      }
+      let seg = "";
+      if (Number.isFinite(order.chunk_n) && order.chunk_n > 1 && Number.isFinite(order.chunk_index)) {
+        seg = ` | segment ${Number(order.chunk_index) + 1}/${Number(order.chunk_n)}`;
+      }
+      return `Fiber ${DATA.fiber} | echelle ${order.order}${seg}${wl} | v = ${vMs.toFixed(1)} m/s`;
     }
 
 
@@ -514,6 +579,37 @@ __SPECTRUM_HELP__
           xMax = Math.max(xMax, xv);
         }
       }
+      const band = spectrumBandUmFromPayload(order);
+      if (band) {
+        xMin = band.lo;
+        xMax = band.hi;
+      } else {
+        const vlo = Number(order.voronoi_lo_um);
+        const vhi = Number(order.voronoi_hi_um);
+        if (Number.isFinite(vlo) && Number.isFinite(vhi) && vhi > vlo) {
+          xMin = Math.min(xMin, vlo);
+          xMax = Math.max(xMax, vhi);
+        }
+      }
+      const lc0 = Number(order.chunk_center_um);
+      if (Number.isFinite(lc0)) {
+        xMin = Math.min(xMin, lc0);
+        xMax = Math.max(xMax, lc0);
+      }
+      const edgeLo = Number(order.window_edge_lo_um);
+      const edgeHi = Number(order.window_edge_hi_um);
+      let edgeLoOut = null;
+      let edgeHiOut = null;
+      if (Number.isFinite(edgeLo)) {
+        xMin = Math.min(xMin, edgeLo);
+        xMax = Math.max(xMax, edgeLo);
+        edgeLoOut = edgeLo;
+      }
+      if (Number.isFinite(edgeHi)) {
+        xMin = Math.min(xMin, edgeHi);
+        xMax = Math.max(xMax, edgeHi);
+        edgeHiOut = edgeHi;
+      }
       const xSpan = xMax - xMin;
       const minDx = Math.max(1e-12, xSpan * 3e-5);
       // Rectangle height uses raw catalog weights; CCF slider uses deweighted mask_weight.
@@ -536,13 +632,37 @@ __SPECTRUM_HELP__
           line: { width: 1.2 },
           yaxis: "y1",
         },
-        {
-          x: [null], y: [null], mode: "markers", name: "Mask lines (shifted)",
-          marker: { size: 10, color: "rgba(255, 140, 0, 0.7)", symbol: "square" },
-          yaxis: "y2",
-          showlegend: true,
-        },
       ];
+      const pioRoot = Number(DATA.mask_ccf_pixel_interp_order);
+      if (
+        Array.isArray(order.interp_wave_um) &&
+        Array.isArray(order.interp_spec) &&
+        order.interp_wave_um.length === order.interp_spec.length &&
+        order.interp_wave_um.length >= 2
+      ) {
+        const yI01 = [];
+        for (let i = 0; i < order.interp_spec.length; i++) {
+          const v = order.interp_spec[i];
+          yI01.push(
+            Number.isFinite(v) && spanF > 0 && Number.isFinite(spanF) ? (v - loF) / spanF : NaN,
+          );
+        }
+        const pioLab = Number.isFinite(pioRoot) && pioRoot > 0 ? String(Math.round(pioRoot)) : "?";
+        traces.push({
+          x: order.interp_wave_um,
+          y: yI01,
+          mode: "lines",
+          name: `Spectrum (Lagrange interp, order=${pioLab})`,
+          line: { width: 1.75, color: "rgba(192, 57, 43, 0.95)" },
+          yaxis: "y1",
+        });
+      }
+      traces.push({
+        x: [null], y: [null], mode: "markers", name: "Mask lines (shifted)",
+        marker: { size: 10, color: "rgba(255, 140, 0, 0.7)", symbol: "square" },
+        yaxis: "y2",
+        showlegend: true,
+      });
 
       const st = {
         traces,
@@ -551,6 +671,8 @@ __SPECTRUM_HELP__
         minDx,
         wMax,
         wMask,
+        edgeLo: edgeLoOut,
+        edgeHi: edgeHiOut,
       };
       spectrumStaticByOrderIdx.set(idx, st);
       return st;
@@ -609,6 +731,25 @@ __SPECTRUM_HELP__
       return shapes;
     }
 
+    /** ``window_size_um`` ±½ edges (µm) for line-window mask overlay — light grey guides. */
+    function appendWindowSizeUmGuideLines(shapes, st) {
+      const gl = {
+        type: "line",
+        xref: "x",
+        yref: "paper",
+        y0: 0,
+        y1: 1,
+        line: { color: "rgba(170, 170, 170, 0.9)", width: 1.35 },
+        layer: "above",
+      };
+      if (st.edgeLo != null && Number.isFinite(st.edgeLo)) {
+        shapes.push({ ...gl, x0: st.edgeLo, x1: st.edgeLo });
+      }
+      if (st.edgeHi != null && Number.isFinite(st.edgeHi)) {
+        shapes.push({ ...gl, x0: st.edgeHi, x1: st.edgeHi });
+      }
+    }
+
     function updatePlot() {
       const order = DATA.orders[currentOrderIdx];
       if (!order) return;
@@ -618,8 +759,25 @@ __SPECTRUM_HELP__
       if (OVERLAY_KIND === "mask") {
         const st = getSpectrumStatic(order, currentOrderIdx);
         const shapes = buildMaskShapes(order, currentV, st);
+        const lcLine = Number(order.chunk_center_um);
+        if (Number.isFinite(lcLine)) {
+          shapes.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: lcLine,
+            x1: lcLine,
+            y0: 0,
+            y1: 1,
+            line: { color: "rgba(39, 174, 96, 0.85)", width: 2, dash: "dash" },
+            layer: "above",
+          });
+        }
+        appendWindowSizeUmGuideLines(shapes, st);
+        const xSpanM = st.xMax - st.xMin;
+        const xPadM = xSpanM > 0 && Number.isFinite(xSpanM) ? xSpanM * 0.02 : 1e-6;
         layoutSpectrum = {
-        uirevision: `fib-${DATA.fiber}-ord-${order.order}`,
+        uirevision: `fib-${DATA.fiber}-ord-${order.order}-slot-${currentOrderIdx}`,
         title: {
           text: titleText,
           y: 1.03,
@@ -628,7 +786,10 @@ __SPECTRUM_HELP__
           font: { size: 11 },
           pad: { b: 2, t: 0 },
         },
-        xaxis: { title: "Wavelength (um)" },
+        xaxis: {
+          title: "Wavelength (um)",
+          range: [st.xMin - xPadM, st.xMax + xPadM],
+        },
         yaxis: {
           title: "Normalized flux",
           range: [0, 1],
@@ -662,7 +823,7 @@ __SPECTRUM_HELP__
       } else {
         const tracesSpec = buildSpectrumTraces(order, currentV);
         layoutSpectrum = {
-          uirevision: `fib-${DATA.fiber}-tpl-${order.order}`,
+          uirevision: `fib-${DATA.fiber}-tpl-${order.order}-slot-${currentOrderIdx}`,
           title: { text: titleText, y: 1.03, yref: "paper", yanchor: "top", font: { size: 11 } },
           xaxis: { title: "Wavelength (µm)" },
           yaxis: { title: "Normalized flux", range: [0, 1], zeroline: true },
@@ -689,11 +850,29 @@ __SPECTRUM_HELP__
       const sameSpectrumOrder = spectrumDrawnOrderIdx === currentOrderIdx;
       if (OVERLAY_KIND === "mask") {
         const st = getSpectrumStatic(order, currentOrderIdx);
-        const shapes = buildMaskShapes(order, currentV, st);
+        const shapesR = buildMaskShapes(order, currentV, st);
+        const lcR = Number(order.chunk_center_um);
+        if (Number.isFinite(lcR)) {
+          shapesR.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: lcR,
+            x1: lcR,
+            y0: 0,
+            y1: 1,
+            line: { color: "rgba(39, 174, 96, 0.85)", width: 2, dash: "dash" },
+            layer: "above",
+          });
+        }
+        appendWindowSizeUmGuideLines(shapesR, st);
+        const xSpanR = st.xMax - st.xMin;
+        const xPadR = xSpanR > 0 && Number.isFinite(xSpanR) ? xSpanR * 0.02 : 1e-6;
         if (sameSpectrumOrder && spectrumPlotReady) {
           Plotly.relayout(plotSpectrumDiv, {
             "title.text": titleText,
-            shapes: shapes,
+            shapes: shapesR,
+            "xaxis.range": [st.xMin - xPadR, st.xMax + xPadR],
           });
         } else {
           Plotly.react(plotSpectrumDiv, st.traces, layoutSpectrum, { responsive: true });
@@ -744,7 +923,7 @@ __SPECTRUM_HELP__
           },
         ];
         const layoutCcf = {
-          uirevision: OVERLAY_KIND === "mask" ? `ccf-${DATA.fiber}-ord-${order.order}` : `ccf-tpl-${DATA.fiber}-${order.order}`,
+          uirevision: OVERLAY_KIND === "mask" ? `ccf-${DATA.fiber}-ord-${order.order}-slot-${currentOrderIdx}` : `ccf-tpl-${DATA.fiber}-${order.order}-slot-${currentOrderIdx}`,
           title: {
             text: OVERLAY_KIND === "mask" ? "RV versus mask CCF" : "RV versus template CCF (pipeline)",
             y: 1.02,

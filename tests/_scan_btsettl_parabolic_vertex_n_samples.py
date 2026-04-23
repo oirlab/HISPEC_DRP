@@ -1,5 +1,5 @@
 """
-One-off / dev helper: sweep ``mask_kpf_parabolic_vertex_n_samples`` on the lte049 BSPEC
+One-off / dev helper: sweep ``ccf_parabolic_vertex_n_samples`` on the lte049 BSPEC
 synthetic setup and report |bias| vs injected RV.
 
 Run from repo root::
@@ -96,15 +96,15 @@ def bias_m_s(n_samples: int, rvccf_l2, orders, mas_lte049, window_um: float, tmp
         do_fibers=["1"],
         do_orders=orders,
         window_size_um=window_um,
-        v_step=_TEST_TEMPLATE_CCF_V_STEP_M_S,
-        ccf_mask_kpf_auto_hybrid_scout=False,
+        v_step_coarse=_TEST_TEMPLATE_CCF_V_STEP_M_S,
+        mask_auto_hybrid_scout=False,
         outlier_sigma=4.0,
         max_cores=6,
         save_preview=False,
         show_preview=False,
         output_dir=tmp,
         suffix=f"scan_n{n_samples}",
-        mask_kpf_parabolic_vertex_n_samples=int(n_samples),
+        ccf_parabolic_vertex_n_samples=int(n_samples),
     )
     out = prim.apply(rvccf_l2, do_orders=orders)
     avg = getattr(out, "rvccfavg_fib1", None)
