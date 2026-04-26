@@ -17,7 +17,7 @@ There are **three** preview surfaces:
    ``ccf_spectrum_overlay_unified.html.in``) with an ``overlay_kind`` switch. **Mask** mode
    (``ccf_mask_kpf``): per-**chunk** spectrum (equal-µm bins from ``window_size_um`` /
    :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or for
-   ``window_size_num_lines`` the symmetric ``window_size_um`` band about each predicted observed
+   ``window_line_by_line`` the symmetric ``window_size_um`` band about each predicted observed
    mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf_utils.mask_kpf_line_window_spectrum_band_um`)
    with shifted mask
    segments and the **pipeline** mask CCF per chunk (same Numba grid as RVCCF; the overlay restores
@@ -30,17 +30,16 @@ There are **three** preview surfaces:
    10⁻⁷**; they are embedded with **significant-figure** rounding so fixed-decimal JSON does not
    zero the curve (the main Plotly preview passes float64 arrays and is unaffected).
    When the pipeline built ``_ccf_preview_by_fiber``, mask mode can include ``ccf_v_m_s`` and
-   ``ccf_err`` (weighted SD of per-line ``F*SN`` about the order-mean mask CCF), interpolated onto
+   ``ccf_err`` (quadrature of flux-error–propagated uncertainty on the mask-weighted mean and
+   weighted line-to-line dispersion of ``F*SN``; see ``_calc_mask_ccf_chunks_numba``), interpolated onto
    the interactive CCF curve.
    Payload arrays are **downsampled** before embedding; limits come from env
    ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS`` / ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS``
    (template crop length: ``HISPEC_DRP_TEMPLATE_OVERLAY_MAX_TEMPLATE_POINTS``).
-   Optional **Lagrange pixel-interpolation** curve on the spectrum panel (same stencil as
-   ``rv_per_chunks_mask_kpf`` / ``mask_ccf_pixel_interp_order``): enable with truthy
-   ``HISPEC_DRP_MASK_OVERLAY_SHOW_SPEC_PIXEL_INTERP``, **or** by setting
-   ``HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS`` to a non-empty value (explicit grid size implies
-   the trace should be embedded). Point count along λ defaults to ``320`` when unset; values are
-   clamped to ``[24, 8192]`` before spectrum downsampling.
+   **Lagrange pixel-interpolation** curve on the mask spectrum panel (same stencil as
+   ``rv_per_chunks_mask_kpf`` / ``mask_ccf_pixel_interp_order``) is **always** embedded in mask
+   overlay debug HTML. Optional ``HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS`` sets the dense λ
+   grid size before downsampling (default ``320`` when unset); values are clamped to ``[24, 8192]``.
 
 Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
 mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
@@ -90,7 +89,7 @@ from ...utils.ccf_utils import (
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
     _gaussian_ccf_model,
     build_hybrid_merged_velocity_grid,
-    build_mask_kpf_chunk_wavelength_intervals_num_lines,
+    build_mask_kpf_chunk_wavelength_intervals_line_by_line,
     ccf_order_n_chunks_for_span,
     clip_gaussian_plot_velocity_range_m_s,
     combine_rv_estimates_median_mad_weighted,
@@ -117,6 +116,7 @@ _MASK_OVERLAY_SPECTRUM_HELP_HTML = (
     "Green band/tick: order RV ±1σ.<br>"
     "Dashed green: chunk-center λ.<br>"
     "Orange: mask weights.<br>"
+    "Red: Lagrange-interpolated spectrum (same order as ``mask_ccf_pixel_interp_order``).<br>"
 )
 _TEMPLATE_OVERLAY_SPECTRUM_HELP_HTML = (
     "    Orange curve: rest-frame stellar template (median-normalized per order in the payload), "
@@ -238,23 +238,6 @@ def _env_positive_int(name: str, default: int, *, floor: int = 32) -> int:
 def _truthy_env(name: str) -> bool:
     raw = os.environ.get(name, "").strip().lower()
     return raw in ("1", "true", "yes", "y", "on")
-
-
-def _mask_overlay_spec_interp_points_env_set() -> bool:
-    """True when ``HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS`` is explicitly present (any token)."""
-    return bool(os.environ.get("HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS", "").strip())
-
-
-def _mask_overlay_show_spec_pixel_interp_from_env() -> bool:
-    """
-    Embed dense Lagrange-interpolated spectrum curve for mask-overlay HTML (matches Numba CCF).
-
-    Enabled when the show flag is truthy **or** when ``SPEC_INTERP_POINTS`` is set: users who only
-    pass the latter expect the interpolation trace (grid size is then taken from that env var).
-    """
-    if _truthy_env("HISPEC_DRP_MASK_OVERLAY_SHOW_SPEC_PIXEL_INTERP"):
-        return True
-    return _mask_overlay_spec_interp_points_env_set()
 
 
 def _mask_overlay_spec_interp_n_dense_from_env() -> int:
@@ -1134,6 +1117,47 @@ def _collapse_mask_kpf_rv_scatter_rows(
     )
 
 
+def _rvcc_hover_order_segment_line(
+    order_col: np.ndarray,
+    wl_um: np.ndarray,
+    *,
+    collapsed: bool,
+) -> np.ndarray:
+    """
+    One hover line per RVCCF scatter point: ``Order m, Segment k/n``.
+
+    For non-collapsed mask-KPF rows, segment index follows the same **descending chunk-center
+    λ** ordering as the pipeline / mask-overlay HTML (red → blue within each echelle order).
+    When :func:`_collapse_mask_kpf_rv_scatter_rows` merged duplicate order-mean RVs, there is
+    no single segment — label with an order-mean note instead.
+    """
+    oa = np.asarray(order_col, dtype=np.int64).ravel()
+    wa = np.asarray(wl_um, dtype=np.float64).ravel()
+    n = int(oa.size)
+    out = np.empty(n, dtype=object)
+    if n == 0:
+        return out
+    if collapsed:
+        for i in range(n):
+            oo = int(oa[i])
+            out[i] = "—" if oo < 0 else f"Order {oo} (order-mean RV)"
+        return out
+    for oo in np.unique(oa):
+        if oo < 0:
+            for i in np.flatnonzero(oa == oo):
+                out[i] = "—"
+            continue
+        idx = np.flatnonzero(oa == int(oo))
+        if idx.size == 0:
+            continue
+        sub_w = wa[idx]
+        idx_sorted = idx[np.argsort(-sub_w)]
+        nk = int(idx_sorted.size)
+        for rank, ii in enumerate(idx_sorted):
+            out[int(ii)] = f"Order {int(oo)}, Segment {rank + 1}/{nk}"
+    return out
+
+
 def _preview_abbrev_ccf_uncertainty(diag: dict) -> str:
     """Short legend text for how RV uncertainty was estimated (fit_ok only)."""
     wtd = bool(diag.get("used_ccf_pointwise_error"))
@@ -1292,7 +1316,7 @@ def collect_mask_overlay_payload_for_primitive(
     ``spectrum_band_lo_um`` / ``spectrum_band_hi_um`` (symmetric ``window_size_um`` band used for
     pixels, slightly padded), ``window_edge_lo_um`` / ``window_edge_hi_um`` (±½``window_size_um`` at
     ``ccf_input_velocity`` for guide lines), and ``chunk_center_um`` (mean predicted observed mask-line
-    λ in the chunk; for ``window_size_num_lines=1``, the single line’s λ). Mask lines and weights match
+    λ in the chunk). Mask lines and weights match
     :func:`~hispecdrp.primitives.utils.ccf_utils.restrict_mask_to_chunk` for each chunk span.
 
     When per-chunk pipeline RV arrays are supplied, ``fit_rv_m_s`` / ``fit_rv_err_m_s`` match the
@@ -1326,15 +1350,10 @@ def collect_mask_overlay_payload_for_primitive(
     window_um = float(getattr(primitive, "window_size_um", 0.3))
     min_good = max(1, int(getattr(primitive, "ccf_min_good_pixels", 9)))
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
-    wnl = getattr(primitive, "window_size_num_lines", None)
+    wbl = bool(getattr(primitive, "window_line_by_line", False))
     v_in = getattr(primitive, "ccf_input_velocity", None)
     zb_prim = float(getattr(primitive, "ccf_zb", 0.0))
-    use_line_window = (
-        wnl is not None
-        and v_in is not None
-        and math.isfinite(float(v_in))
-        and float(wnl) > 0.0
-    )
+    use_line_window = wbl and v_in is not None and math.isfinite(float(v_in))
 
     entries: list[dict] = []
     for oi, order in enumerate(order_vec):
@@ -1363,10 +1382,9 @@ def collect_mask_overlay_payload_for_primitive(
         span_um = float(w_max - w_min)
         _w_edge_eps = max(1e-15, abs(float(w_max)) * 1e-12)
         if use_line_window:
-            wl_lo_a, wl_hi_a, wl_ctr_a = build_mask_kpf_chunk_wavelength_intervals_num_lines(
+            wl_lo_a, wl_hi_a, wl_ctr_a = build_mask_kpf_chunk_wavelength_intervals_line_by_line(
                 w_row,
                 mask_lines,
-                window_size_num_lines=float(wnl),
                 v_center_m_s=float(v_in),
                 zb=zb_prim,
                 min_good_pixels=min_good,
@@ -1510,19 +1528,18 @@ def collect_mask_overlay_payload_for_primitive(
             if w_edge_lo is not None and w_edge_hi is not None:
                 row_payload["window_edge_lo_um"] = float(w_edge_lo)
                 row_payload["window_edge_hi_um"] = float(w_edge_hi)
-            if _mask_overlay_show_spec_pixel_interp_from_env():
-                pio_slot = int(getattr(primitive, "mask_ccf_pixel_interp_order", 1) or 1)
-                icurve = _mask_overlay_spec_interp_curve(
-                    w_c,
-                    s_norm,
-                    pixel_interp_order=pio_slot,
-                    n_dense=_mask_overlay_spec_interp_n_dense_from_env(),
-                    spec_downsample_lim=spec_lim,
-                )
-                if icurve is not None:
-                    wi, si = icurve
-                    row_payload["interp_wave_um"] = np.asarray(wi, dtype=np.float64)
-                    row_payload["interp_spec"] = np.asarray(si, dtype=np.float64)
+            pio_slot = int(getattr(primitive, "mask_ccf_pixel_interp_order", 1) or 1)
+            icurve = _mask_overlay_spec_interp_curve(
+                w_c,
+                s_norm,
+                pixel_interp_order=pio_slot,
+                n_dense=_mask_overlay_spec_interp_n_dense_from_env(),
+                spec_downsample_lim=spec_lim,
+            )
+            if icurve is not None:
+                wi, si = icurve
+                row_payload["interp_wave_um"] = np.asarray(wi, dtype=np.float64)
+                row_payload["interp_spec"] = np.asarray(si, dtype=np.float64)
             entries.append(row_payload)
 
     if not entries:
@@ -1575,11 +1592,13 @@ def collect_mask_overlay_payload_for_primitive(
         fiber,
         len(entries),
     )
-    out_payload: dict = {"fiber": str(fiber), "orders": entries}
-    if _mask_overlay_show_spec_pixel_interp_from_env():
-        out_payload["mask_ccf_pixel_interp_order"] = int(
+    out_payload: dict = {
+        "fiber": str(fiber),
+        "orders": entries,
+        "mask_ccf_pixel_interp_order": int(
             getattr(primitive, "mask_ccf_pixel_interp_order", 1) or 1
-        )
+        ),
+    }
     return out_payload
 
 
@@ -2104,12 +2123,10 @@ def _preview_gaussian_cache_and_slot_legends(
                         np.asarray(_ce, dtype=np.float64) if _ce is not None else None
                     )
                     _ccf_arr = np.asarray(sl["ccf"], dtype=np.float64)
-                    _mask_wnl = getattr(primitive, "window_size_num_lines", None)
-                    _mask_wnl_f = (
-                        float(_mask_wnl)
-                        if _mask_wnl is not None
-                        and getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
-                        else None
+                    _mask_wbl = (
+                        bool(getattr(primitive, "window_line_by_line", False))
+                        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+                        else False
                     )
                     _gseed = getattr(primitive, "ccf_input_velocity", None)
                     _gs = (
@@ -2128,7 +2145,7 @@ def _preview_gaussian_cache_and_slot_legends(
                             if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
                             else None
                         ),
-                        mask_kpf_window_size_num_lines=_mask_wnl_f,
+                        mask_kpf_line_window_by_line=_mask_wbl,
                         gaussian_seed_mean_m_s=_gs
                         if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
                         else None,
@@ -2643,7 +2660,18 @@ def create_stellar_rv_preview(primitive) -> None:
                     y_title = f"RV (cm/s) − {rv_mean_cm_r:.4e}"
                 rv_panel_y_title[fiber] = y_title
                 ord_lbl = np.where(order_col >= 0, order_col.astype(str), "—")
-                cd_rv = np.column_stack([ord_lbl.astype(object), rv_pt_kms, rv_err_pt_kms])
+                seg_line = _rvcc_hover_order_segment_line(
+                    order_col, wl, collapsed=collapsed_plot
+                )
+                cd_rv = np.stack(
+                    [
+                        ord_lbl.astype(object),
+                        np.asarray(rv_pt_kms, dtype=np.float64),
+                        np.asarray(rv_err_pt_kms, dtype=np.float64),
+                        np.asarray(seg_line, dtype=object),
+                    ],
+                    axis=1,
+                )
                 in_ok = inlier & np.isfinite(rv_err) & (rv_err > 0)
                 out_ok = ~inlier & np.isfinite(rv_err) & (rv_err > 0)
                 if np.any(in_ok):
@@ -2664,8 +2692,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             marker=dict(size=6, color="royalblue"),
                             customdata=cd_rv[in_ok],
                             hovertemplate=(
+                                "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "Order %{customdata[0]}<br>"
                                 "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
                                 "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
                             ),
@@ -2685,8 +2713,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             marker=dict(size=5, color="grey", symbol="circle-open"),
                             customdata=cd_rv[out_ok],
                             hovertemplate=(
+                                "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "Order %{customdata[0]}<br>"
                                 "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
                                 "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
                             ),
@@ -2706,8 +2734,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             marker=dict(size=6, color="royalblue"),
                             customdata=cd_rv,
                             hovertemplate=(
+                                "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "Order %{customdata[0]}<br>"
                                 "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
                                 "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
                             ),

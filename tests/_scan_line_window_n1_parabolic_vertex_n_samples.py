@@ -99,7 +99,7 @@ def _metrics_for_n(
         do_fibers=["1"],
         do_orders=orders,
         window_size_um=window_um,
-        window_size_num_lines=1.0,
+        window_line_by_line=True,
         ccf_input_velocity=float(input_rv_m_s),
         v_min_coarse=v_min,
         v_max_coarse=v_max,
