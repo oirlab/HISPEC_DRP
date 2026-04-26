@@ -25,8 +25,8 @@ function states otherwise.
 ``run_ccf_mask_kpf_for_fiber``, ``build_ccf_preview_dict``
     Mask-line pipeline driver for one fiber and Plotly preview payload builder.
 
-``mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s``
-    Residual-based σ on the LSTSQ parabolic vertex (homoscedastic LS + delta method).
+``mask_kpf_parabolic_vertex_rv_err_levmar_m_s``, ``mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s``
+    Parabolic-vertex σ: LevMar ``Polynomial1D`` (+ optional ``ccf_err`` weights) and homoscedastic LSTSQ fallback.
 
 See :mod:`hispecdrp.primitives.utils.ccf_utils` for full docstrings and references.
 """
@@ -42,6 +42,8 @@ from .ccf_utils import (
     flat_chunk_echelle_orders,
     load_mask,
     masked_ccf_rv,
+    mask_kpf_parabolic_vertex_rv_err_levmar_m_s,
+    mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s,
     process_one_order_rvs,
     process_orders_rvs_numba_parallel,
     resolve_mask_path,
@@ -62,6 +64,7 @@ __all__ = [
     "build_ccf_preview_dict",
     "load_mask",
     "masked_ccf_rv",
+    "mask_kpf_parabolic_vertex_rv_err_levmar_m_s",
     "mask_kpf_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s",
     "process_one_order_rvs",
     "process_orders_rvs_numba_parallel",

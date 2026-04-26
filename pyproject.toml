@@ -68,6 +68,7 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov", "requests"]
 docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
+examples = ["emcee"]
 
 [project.urls]
 "Documentation" = "https://oirlab.github.io/HISPEC_DRP/"
