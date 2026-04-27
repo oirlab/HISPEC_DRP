@@ -2,6 +2,7 @@ from pathlib import Path
 import yaml
 import copy
 import numpy as np
+import json
 import jsonschema
 import jsonref
 from typing import MutableMapping, Self
@@ -203,6 +204,12 @@ class MetaModel(MutableMapping):
                 # Info and value
                 keyword = sub_schema['fits_keyword']
                 comment = make_comment(sub_schema)
+
+                # FITS headers are scalar cards; encode arrays as JSON strings. Had to deal with PARVI TIMEI00 metadata which is an array of read timestamps in MJD, which is critical to have in the header for timing corrections, but doesn't fit into a single FITS card as an array.
+                if sub_schema.get('type') == 'array':
+                    if isinstance(value, np.ndarray):
+                        value = value.tolist()
+                    value = json.dumps(value)
 
                 # Add to header
                 header.append((keyword, value, comment), end=True)

@@ -6,6 +6,9 @@ from ... import datamodels
 from ...calibrations import GainSelector,ReadNoiseSelector
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import os
 from typing import Sequence
 from ...utils.math import get_err_from_posterior
 import logging
@@ -244,6 +247,234 @@ class MakeGainPrimitive(BasePrimitive):
         output_gain.dq = np.zeros(bestfit_gain.shape, dtype=np.uint32)
 
         return dict(output=output_gain)
+
+    def _create_preview(self):
+        """Create preview visualization of gain calibration results."""
+        try:
+            gain_model = self._output['output']
+            gain_data = gain_model.gain
+            rn_data = gain_model.rn
+        except Exception as e:
+            logger.warning(f"Could not load gain model for preview: {e}")
+            return
+        
+        ny, nx = gain_data.shape
+        
+        # Create figure with 2x2 subplots for gain
+        fig_gain = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                "Fitted Gain (Full Frame)",
+                "Center 50x50 Pixels (Zoomed)",
+                "Histogram of Gain Values",
+                "Gain Statistics"
+            ),
+            specs=[
+                [{}, {}],
+                [{"type": "histogram"}, {"type": "histogram"}]
+            ]
+        )
+        
+        # Plot 1: Full gain map
+        fig_gain.add_trace(
+            go.Heatmap(
+                z=gain_data,
+                colorscale='Viridis',
+                showscale=True,
+                name='Gain',
+                colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Zoomed center (50x50 pixels)
+        center_y, center_x = ny // 2, nx // 2
+        half_size = min(25, min(center_y, center_x, ny - center_y, nx - center_x))
+        gain_zoom = gain_data[center_y-half_size:center_y+half_size, center_x-half_size:center_x+half_size]
+        
+        fig_gain.add_trace(
+            go.Heatmap(
+                z=gain_zoom,
+                colorscale='Viridis',
+                showscale=True,
+                name='Gain (Zoomed)',
+                colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Histogram of gain values
+        valid_gain = gain_data[np.isfinite(gain_data)].flatten()
+        fig_gain.add_trace(
+            go.Histogram(
+                x=valid_gain,
+                nbinsx=100,
+                name='Gain',
+                marker=dict(color='#1f77b4'),
+                showlegend=False
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: Gain statistics (DQ flags or residuals)
+        valid_dq = gain_model.dq[np.isfinite(gain_model.dq)].flatten()
+        fig_gain.add_trace(
+            go.Histogram(
+                x=valid_dq,
+                nbinsx=50,
+                name='DQ Flags',
+                marker=dict(color='#d62728'),
+                showlegend=False
+            ),
+            row=2, col=2
+        )
+        
+        fig_gain.update_xaxes(title_text="Gain (e-/ADU)", row=2, col=1, showgrid=False)
+        fig_gain.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
+        fig_gain.update_xaxes(title_text="DQ Flags", row=2, col=2, showgrid=False)
+        fig_gain.update_yaxes(title_text="Frequency", row=2, col=2, showgrid=False)
+        fig_gain.update_xaxes(showgrid=False, row=1, col=1)
+        fig_gain.update_yaxes(showgrid=False, row=1, col=1)
+        fig_gain.update_xaxes(showgrid=False, row=1, col=2)
+        fig_gain.update_yaxes(showgrid=False, row=1, col=2)
+        
+        median_gain = np.nanmedian(gain_data)
+        fig_gain.update_layout(
+            height=900,
+            width=1200,
+            title_text=f"Fitted Gain (Median: {median_gain:.3f} e-/ADU)",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Create figure with 2x2 subplots for read noise
+        fig_rn = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                "Fitted Read Noise (Full Frame)",
+                "Center 50x50 Pixels (Zoomed)",
+                "Histogram of Read Noise",
+                "Gain vs Read Noise"
+            ),
+            specs=[
+                [{}, {}],
+                [{"type": "histogram"}, {}]
+            ]
+        )
+        
+        # Plot 1: Full read noise map
+        fig_rn.add_trace(
+            go.Heatmap(
+                z=rn_data,
+                colorscale='Magma',
+                showscale=True,
+                name='RN',
+                colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Zoomed center (50x50 pixels)
+        rn_zoom = rn_data[center_y-half_size:center_y+half_size, center_x-half_size:center_x+half_size]
+        
+        fig_rn.add_trace(
+            go.Heatmap(
+                z=rn_zoom,
+                colorscale='Magma',
+                showscale=True,
+                name='RN (Zoomed)',
+                colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Histogram of read noise
+        valid_rn = rn_data[np.isfinite(rn_data)].flatten()
+        fig_rn.add_trace(
+            go.Histogram(
+                x=valid_rn,
+                nbinsx=100,
+                name='RN',
+                marker=dict(color='#ff7f0e'),
+                showlegend=False
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: 2D scatter plot of gain vs read noise
+        valid_mask = np.isfinite(gain_data) & np.isfinite(rn_data)
+        fig_rn.add_trace(
+            go.Scatter(
+                x=gain_data[valid_mask].flatten(),
+                y=rn_data[valid_mask].flatten(),
+                mode='markers',
+                marker=dict(
+                    size=3,
+                    color=rn_data[valid_mask].flatten(),
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(x=1.02, y=0.25, len=0.15, orientation='h', xanchor='center', yanchor='top')
+                ),
+                name='Gain vs RN',
+                showlegend=False
+            ),
+            row=2, col=2
+        )
+        
+        fig_rn.update_xaxes(title_text="Read Noise (DN)", row=2, col=1, showgrid=False)
+        fig_rn.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
+        fig_rn.update_xaxes(title_text="Gain (e-/ADU)", row=2, col=2, showgrid=False)
+        fig_rn.update_yaxes(title_text="Read Noise (DN)", row=2, col=2, showgrid=False)
+        fig_rn.update_xaxes(showgrid=False, row=1, col=1)
+        fig_rn.update_yaxes(showgrid=False, row=1, col=1)
+        fig_rn.update_xaxes(showgrid=False, row=1, col=2)
+        fig_rn.update_yaxes(showgrid=False, row=1, col=2)
+        
+        median_rn = np.nanmedian(rn_data)
+        fig_rn.update_layout(
+            height=900,
+            width=1200,
+            title_text=f"Fitted Read Noise (Median: {median_rn:.2f} DN)",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Save if configured
+        if self.save_preview:
+            if not self.output_dir:
+                self.output_dir = '.'
+            
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            gain_html = os.path.join(self.output_dir, f'gain_preview_{self.suffix}.html')
+            rn_html = os.path.join(self.output_dir, f'readnoise_preview_{self.suffix}.html')
+            
+            fig_gain.write_html(gain_html, include_plotlyjs='cdn')
+            fig_rn.write_html(rn_html, include_plotlyjs='cdn')
+            
+            logger.info(f"Gain preview saved to {gain_html}")
+            logger.info(f"Read Noise preview saved to {rn_html}")
+            
+            # Try to save PNG versions
+            try:
+                gain_png = gain_html.replace('.html', '.png')
+                rn_png = rn_html.replace('.html', '.png')
+                fig_gain.write_image(gain_png, scale=2)
+                fig_rn.write_image(rn_png, scale=2)
+                logger.info(f"PNG versions saved")
+            except Exception as e:
+                logger.debug(f"Could not save PNG preview: {e}")
+        
+        if self.show_preview:
+            logger.info("Showing gain calibration preview...")
+            fig_gain.show()
+            fig_rn.show()
+        
+        # Store in output
+        self._output['preview'] = {
+            'gain_fig': fig_gain,
+            'rn_fig': fig_rn,
+        }
 
 def fit_gain_and_readnoise(
     readtimes : np.ndarray, ramps : np.ndarray, dq_raw : np.ndarray,
@@ -905,11 +1136,14 @@ def _fit_single_gain_readnoise(
 
         gain_post = np.sum(np.exp(likelihoods - np.amax(likelihoods)), axis=0)
         gain_post /= np.sum(gain_post)
-        gains_init_diffs = np.diff(_gains_init, prepend=_gains_init[0] - (_gains_init[1] - _gains_init[0]))
-        gain_post /= gains_init_diffs
-
-        bestfit_gain, gain_left_error, gain_right_error = get_err_from_posterior(_gains_init, gain_post)
-        bestfit_gain_err = np.max([gain_left_error, gain_right_error])
+        if np.size(_gains_init) > 1:
+            gains_init_diffs = np.diff(_gains_init, prepend=_gains_init[0] - (_gains_init[1] - _gains_init[0]))
+            gain_post /= gains_init_diffs
+            bestfit_gain, gain_left_error, gain_right_error = get_err_from_posterior(_gains_init, gain_post)
+            bestfit_gain_err = np.max([gain_left_error, gain_right_error])
+        else:
+            bestfit_gain = _gains_init[0]
+            bestfit_gain_err = np.nan
 
         if np.size(_rns_init) > 3:
             rn_post = np.sum(np.exp(likelihoods - np.amax(likelihoods)), axis=1)

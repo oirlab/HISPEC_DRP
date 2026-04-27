@@ -5,6 +5,9 @@ from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
 import logging
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+import os 
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,154 @@ class BiasSubtractionPrimitive(BasePrimitive):
         # Output
         return dict(output=result, bias=bias)
 
+    def _create_preview(self):
+        """Create preview visualization of bias calibration applied."""
+    
+        try:
+            # Try to get the bias calibration model
+            bias_filepath = self._output.get('bias')
+            if not bias_filepath:
+                logger.warning("No bias calibration file available for preview.")
+                return
+            
+            bias_model = datamodels.open(bias_filepath)
+            
+        except Exception as e:
+            logger.warning(f"Could not load bias model for preview: {e}")
+            return
+        
+        # Extract bias and kTC data
+        bias_data = bias_model.bias
+        ktc_data = bias_model.ktc if hasattr(bias_model, 'ktc') and bias_model.ktc is not None else np.zeros_like(bias_data)
+        
+        ny, nx = bias_data.shape
+        
+        # Create subplots for bias
+        fig_bias = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Bias Calibration Map (DN)", "Bias Histogram"),
+            specs=[[{}, {"type": "histogram"}]]
+        )
+        
+        # Bias heatmap
+        fig_bias.add_trace(
+            go.Heatmap(
+                z=bias_data,
+                colorscale='Inferno',
+                showscale=True,
+                name='Bias',
+                colorbar=dict(x=0.46, y=0.5, len=0.4, orientation='h', xanchor='center', yanchor='middle')
+            ),
+            row=1, col=1
+        )
+        
+        # Bias histogram
+        valid_bias = bias_data[np.isfinite(bias_data)].flatten()
+        fig_bias.add_trace(
+            go.Histogram(
+                x=valid_bias,
+                nbinsx=50,
+                name='Bias',
+                marker=dict(color='#1f77b4'),
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+        
+        fig_bias.update_xaxes(title_text="Bias (DN)", row=1, col=2, showgrid=False)
+        fig_bias.update_yaxes(title_text="Frequency", row=1, col=2, showgrid=False)
+        fig_bias.update_xaxes(showgrid=False, row=1, col=1)
+        fig_bias.update_yaxes(showgrid=False, row=1, col=1)
+        
+        fig_bias.update_layout(
+            height=500,
+            width=1000,
+            title_text=f"Bias Calibration: {os.path.basename(bias_filepath)}",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Create subplots for kTC
+        fig_ktc = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("kTC Noise Map (DN)", "kTC Histogram"),
+            specs=[[{}, {"type": "histogram"}]]
+        )
+        
+        # kTC heatmap
+        fig_ktc.add_trace(
+            go.Heatmap(
+                z=ktc_data,
+                colorscale='Plasma',
+                showscale=True,
+                name='kTC',
+                colorbar=dict(x=0.46, y=0.5, len=0.4, orientation='h', xanchor='center', yanchor='middle')
+            ),
+            row=1, col=1
+        )
+        
+        # kTC histogram
+        valid_ktc = ktc_data[np.isfinite(ktc_data)].flatten()
+        fig_ktc.add_trace(
+            go.Histogram(
+                x=valid_ktc,
+                nbinsx=50,
+                name='kTC',
+                marker=dict(color='#ff7f0e'),
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+        
+        fig_ktc.update_xaxes(title_text="kTC (DN)", row=1, col=2, showgrid=False)
+        fig_ktc.update_yaxes(title_text="Frequency", row=1, col=2, showgrid=False)
+        fig_ktc.update_xaxes(showgrid=False, row=1, col=1)
+        fig_ktc.update_yaxes(showgrid=False, row=1, col=1)
+        
+        fig_ktc.update_layout(
+            height=500,
+            width=1000,
+            title_text=f"kTC Calibration: {os.path.basename(bias_filepath)}",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Save if configured
+        if self.save_preview:
+            if not self.output_dir:
+                self.output_dir = os.path.dirname(self.input) if isinstance(self.input, str) else '.'
+            
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            bias_html = os.path.join(self.output_dir, f'bias_preview_{self.suffix}.html')
+            ktc_html = os.path.join(self.output_dir, f'ktc_preview_{self.suffix}.html')
+            
+            fig_bias.write_html(bias_html, include_plotlyjs='cdn')
+            fig_ktc.write_html(ktc_html, include_plotlyjs='cdn')
+            
+            logger.info(f"Bias preview saved to {bias_html}")
+            logger.info(f"kTC preview saved to {ktc_html}")
+            
+            # Try to save PNG versions
+            try:
+                bias_png = bias_html.replace('.html', '.png')
+                ktc_png = ktc_html.replace('.html', '.png')
+                fig_bias.write_image(bias_png, scale=2)
+                fig_ktc.write_image(ktc_png, scale=2)
+                logger.info(f"PNG versions saved")
+            except Exception as e:
+                logger.debug(f"Could not save PNG preview: {e}")
+        
+        if self.show_preview:
+            logger.info("Showing bias calibration preview...")
+            fig_bias.show()
+            fig_ktc.show()
+        
+        # Store in output
+        self._output['preview'] = {
+            'bias_fig': fig_bias,
+            'ktc_fig': fig_ktc,
+        }
 
 def _bias_subtraction(
     input_data : np.ndarray,

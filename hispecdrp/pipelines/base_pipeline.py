@@ -64,10 +64,18 @@ class BasePipeline(ProcessingComponent):
                     else:
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {valids_args}")
             
-        # Propagate output directory to primitives
+        # Propagate output directory and preview settings to primitives
         primary_input_dir = self.get_primary_input_dir()
         for prim_alias in self.PRIMITIVES:
             prim_instance = getattr(self, prim_alias)
+            
+            # Propagate preview flags
+            if self.save_preview:
+                prim_instance.save_preview = True
+            if self.show_preview:
+                prim_instance.show_preview = True
+            
+            # Propagate output directory
             if (prim_instance.save_result or prim_instance.save_preview) and prim_instance.output_dir is None:
                 if self.output_dir is not None:
                     prim_instance.output_dir = self.output_dir

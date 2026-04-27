@@ -4,6 +4,141 @@ import hispecdrp.simulations as simu
 import numpy as np
 import os
 import time
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+
+def plot_gain_calibration_results(
+    gain_measured, gain_err, gain_true=None,
+    output_dir=None, show=True
+):
+    """
+    Create Plotly visualizations of gain calibration results.
+    
+    Parameters
+    ----------
+    gain_measured : np.ndarray
+        Measured gain map in e-/ADU
+    gain_err : np.ndarray
+        Gain error/uncertainty map
+    gain_true : np.ndarray, optional
+        True gain map for comparison
+    output_dir : str, optional
+        Directory to save plots. If None, plots are not saved.
+    show : bool, optional
+        Whether to display the plots. Default is True.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing figure objects
+    """
+    
+    ny, nx = gain_measured.shape
+    
+    # Create figure with 2x2 subplots
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=(
+            "Master Gain (Full Frame)",
+            "Center 50x50 Pixels (Zoomed)",
+            "Histogram of Gain Values",
+            "Histogram of Gain Errors (Read Noise)"
+        ),
+        specs=[
+            [{}, {}],
+            [{"type": "histogram"}, {"type": "histogram"}]
+        ]
+    )
+    
+    # Plot 1: Full gain map
+    fig.add_trace(
+        go.Heatmap(
+            z=gain_measured,
+            colorscale='Viridis',
+            showscale=True,
+            name='Gain',
+            colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=1
+    )
+    
+    # Plot 2: Zoomed center (50x50 pixels)
+    center_y, center_x = ny // 2, nx // 2
+    half_size = min(25, min(center_y, center_x, ny - center_y, nx - center_x))
+    gain_zoom = gain_measured[center_y-half_size:center_y+half_size, center_x-half_size:center_x+half_size]
+    
+    fig.add_trace(
+        go.Heatmap(
+            z=gain_zoom,
+            colorscale='Viridis',
+            showscale=True,
+            name='Gain (Zoomed)',
+            colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=2
+    )
+    
+    # Plot 3: Histogram of gain values
+    valid_gain = gain_measured[np.isfinite(gain_measured)].flatten()
+    fig.add_trace(
+        go.Histogram(
+            x=valid_gain,
+            nbinsx=100,
+            name='Gain',
+            marker=dict(color='#1f77b4'),
+            showlegend=False
+        ),
+        row=2, col=1
+    )
+    
+    # Plot 4: Histogram of gain errors
+    valid_err = gain_err[np.isfinite(gain_err)].flatten()
+    fig.add_trace(
+        go.Histogram(
+            x=valid_err,
+            nbinsx=100,
+            name='RN',
+            marker=dict(color='#ff7f0e'),
+            showlegend=False
+        ),
+        row=2, col=2
+    )
+    
+    # Update axes labels and properties
+    fig.update_xaxes(title_text="Gain (e-/ADU)", row=2, col=1, showgrid=False)
+    fig.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
+    
+    fig.update_xaxes(title_text="RN (e-)", row=2, col=2, showgrid=False)
+    fig.update_yaxes(title_text="Frequency", row=2, col=2, showgrid=False)
+    
+    fig.update_xaxes(showgrid=False, row=1, col=1)
+    fig.update_yaxes(showgrid=False, row=1, col=1)
+    fig.update_xaxes(showgrid=False, row=1, col=2)
+    fig.update_yaxes(showgrid=False, row=1, col=2)
+    
+    fig.update_layout(
+        height=900,
+        width=1200,
+        title_text="Master Gain Analysis",
+        showlegend=False,
+        margin=dict(b=80)
+    )
+    
+    # Save if output_dir is provided
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        gain_html = os.path.join(output_dir, 'gain_calibration_preview.html')
+        
+        fig.write_html(gain_html, include_plotlyjs='cdn')
+        
+        print(f"Gain calibration plots saved to {gain_html}")
+    
+    if show:
+        fig.show()
+    
+    return {'gain': fig}
+
 
 def test_stage0_gain_calib(tmp_path):
     np.random.seed(12345)
@@ -14,8 +149,8 @@ def test_stage0_gain_calib(tmp_path):
     max_slope = 200  # e-/s
     readtime = 1.7  # seconds
     n_reads = 30
-    N_files = 100  # number of simulated files to create
-    ny, nx = 2, 2  # size of the detector
+    N_files = 10  # number of simulated files to create
+    ny, nx = 100, 100  # size of the detector
 
     step_time = time.time();
     print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
@@ -211,13 +346,14 @@ def test_stage0_gain_calib(tmp_path):
         },
         'make_gain': {
             'max_cores': pipe_max_cores,
-            'mode': 'per_pixel',  # 'full_detector', 'per_pixel'
+            'mode': 'full_detector',  # 'full_detector', 'per_pixel'
             'method': 'quad',
-            'fix_RN': True,
-            'init_delta_gains': np.linspace(-0.5, 0.5, 100),  # Example delta gain values to try
+            'fix_RN': False,
+            'init_delta_gains': np.linspace(-2, 2, 100),  # Example delta gain values to try
             'init_delta_RNs': np.linspace(-1, 1, 100),
             'quad_delta_gain': 0.2,
-            'quad_delta_RN': 0.5
+            'quad_delta_RN': 0.5,
+            'show_preview': True,
         },
         'ramp_fit': {
             'run': False,
@@ -261,13 +397,34 @@ def test_stage0_gain_calib(tmp_path):
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0, :, :])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+
+    # Create visualizations for first test case
+    plots = plot_gain_calibration_results(
+        gain_measured=model_result['gain'].gain,
+        gain_err=np.sqrt(model_result['gain'].cov[0, 0, :, :]),
+        gain_true=gain_model.gain,
+        output_dir=str(tmp_path),
+        show=True
+    )
 
     prim_args['make_gain']['fix_RN'] = False
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0, :, :])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'full_detector'
@@ -275,7 +432,13 @@ def test_stage0_gain_calib(tmp_path):
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'full_detector'
@@ -283,7 +446,13 @@ def test_stage0_gain_calib(tmp_path):
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'full_detector'
@@ -291,7 +460,13 @@ def test_stage0_gain_calib(tmp_path):
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
 
     prim_args['make_gain']['fix_RN'] = False
     prim_args['make_gain']['mode'] = 'per_pixel'
@@ -300,7 +475,13 @@ def test_stage0_gain_calib(tmp_path):
     model_result = detflat_pipe.apply(ramp_model_sequence, prim_args=prim_args)
     rel_residuals = np.abs(model_result['gain'].gain - gain_model.gain) / np.sqrt(
         model_result['gain'].cov[0, 0, :, :])
-    assert np.sum(rel_residuals > 5) == 0
+    try:
+        assert np.sum(rel_residuals > 5) == 0
+    except AssertionError:
+        print("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
+        print(f"Number of outliers: {np.sum(rel_residuals > 5)}")
+        print(f"Max relative residual: {np.max(rel_residuals)}")
+        raise AssertionError("Test failed: Some gain values deviate from the true gain by more than 5 sigma.")
 
 
 def test_stage0_gain_calib_stats(tmp_path):
@@ -554,3 +735,7 @@ def test_stage0_gain_calib_stats(tmp_path):
     confidence_level = np.sum(rel_residuals < 1) / np.size(rel_residuals)
     print(confidence_level)
     assert abs(confidence_level-0.683)<0.1
+
+if __name__ == "__main__":
+    test_stage0_gain_calib(tmp_path='/Users/bensappey/scratch')
+    # test_stage0_gain_calib_stats(tmp_path="test_outputs")

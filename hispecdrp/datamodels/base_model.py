@@ -1,5 +1,6 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import os
+import json
 import astropy.table
 from astropy.io import fits
 from copy import deepcopy
@@ -632,9 +633,31 @@ class DataModel:
                 sub_schema = schema['properties'][prop_name]
                 fits_hdu = sub_schema['fits_hdu']
                 fits_keyword = sub_schema['fits_keyword']
-                header = hdulist[fits_hdu].header
-                if fits_keyword in header:
-                    meta_dict[prop_name] = header[fits_keyword]
+
+                # Some schema fields are intentionally not represented in FITS.
+                if fits_hdu is None or str(fits_hdu).upper() == 'NONE':
+                    continue
+                if fits_keyword is None or str(fits_keyword).upper() == 'NONE':
+                    continue
+
+                try:
+                    header = hdulist[fits_hdu].header
+                except KeyError:
+                    continue
+
+                if fits_keyword not in header:
+                    continue
+
+                value = header[fits_keyword]
+
+                # Arrays are serialized as JSON strings in FITS headers.
+                if sub_schema.get('type') == 'array' and isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        continue
+
+                meta_dict[prop_name] = value
         return meta_dict
 
     def _extend_data_ancestors_columns(self, new_columns : list[str]):

@@ -38,6 +38,7 @@ from .traceprof import *
 from .fiberflat import *
 
 # Instrument config
+from .parvi_io import *
 from .parvi_config import *
 from .hispec_config import *
 INSTRUMENT_CONFIGS = {

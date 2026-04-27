@@ -6,6 +6,9 @@ from ...utils.parallelization_utils import numba_thread_scope
 import numpy as np
 from numba import njit, prange
 import logging
+import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,147 @@ class GainCorrectionPrimitive(BasePrimitive):
 
         # Output
         return dict(output=result, gain=gain)
+
+    def _create_preview(self):
+        """Create preview visualization of gain calibration applied."""
+        
+        try:
+            # Try to get the gain calibration model
+            gain_filepath = self._output.get('gain')
+            if not gain_filepath:
+                logger.warning("No gain calibration file available for preview.")
+                return
+            
+            gain_model = datamodels.open(gain_filepath)
+            
+        except Exception as e:
+            logger.warning(f"Could not load gain model for preview: {e}")
+            return
+        
+        # Extract gain data and error
+        gain_data = gain_model.gain
+        gain_err = np.sqrt(gain_model.cov[0, 0]) if hasattr(gain_model, 'cov') and gain_model.cov is not None else None
+        
+        ny, nx = gain_data.shape
+        
+        # Create figure with 2x2 subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                "Master Gain (Full Frame)",
+                "Center 50x50 Pixels (Zoomed)",
+                "Histogram of Gain Values",
+                "Histogram of Gain Errors"
+            ),
+            specs=[
+                [{}, {}],
+                [{"type": "histogram"}, {"type": "histogram"}]
+            ]
+        )
+        
+        # Plot 1: Full gain map
+        fig.add_trace(
+            go.Heatmap(
+                z=gain_data,
+                colorscale='Viridis',
+                showscale=True,
+                name='Gain',
+                colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Zoomed center (50x50 pixels)
+        center_y, center_x = ny // 2, nx // 2
+        half_size = min(25, min(center_y, center_x, ny - center_y, nx - center_x))
+        gain_zoom = gain_data[center_y-half_size:center_y+half_size, center_x-half_size:center_x+half_size]
+        
+        fig.add_trace(
+            go.Heatmap(
+                z=gain_zoom,
+                colorscale='Viridis',
+                showscale=True,
+                name='Gain (Zoomed)',
+                colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Histogram of gain values
+        valid_gain = gain_data[np.isfinite(gain_data)].flatten()
+        fig.add_trace(
+            go.Histogram(
+                x=valid_gain,
+                nbinsx=100,
+                name='Gain',
+                marker=dict(color='#1f77b4'),
+                showlegend=False
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: Histogram of gain errors
+        if gain_err is not None:
+            valid_err = gain_err[np.isfinite(gain_err)].flatten()
+            fig.add_trace(
+                go.Histogram(
+                    x=valid_err,
+                    nbinsx=100,
+                    name='Error',
+                    marker=dict(color='#ff7f0e'),
+                    showlegend=False
+                ),
+                row=2, col=2
+            )
+            fig.update_xaxes(title_text="Gain Error (e-/ADU)", row=2, col=2, showgrid=False)
+        else:
+            logger.warning("No gain error data available for preview histogram")
+        
+        # Update axes labels and properties
+        fig.update_xaxes(title_text="Gain (e-/ADU)", row=2, col=1, showgrid=False)
+        fig.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
+        fig.update_yaxes(title_text="Frequency", row=2, col=2, showgrid=False)
+        
+        fig.update_xaxes(showgrid=False, row=1, col=1)
+        fig.update_yaxes(showgrid=False, row=1, col=1)
+        fig.update_xaxes(showgrid=False, row=1, col=2)
+        fig.update_yaxes(showgrid=False, row=1, col=2)
+        
+        fig.update_layout(
+            height=900,
+            width=1200,
+            title_text=f"Gain Calibration: {os.path.basename(gain_filepath)}",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Save if configured
+        if self.save_preview:
+            if not self.output_dir:
+                self.output_dir = os.path.dirname(self.input) if isinstance(self.input, str) else '.'
+            
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            gain_html = os.path.join(self.output_dir, f'gain_preview_{self.suffix}.html')
+            
+            fig.write_html(gain_html, include_plotlyjs='cdn')
+            
+            logger.info(f"Gain preview saved to {gain_html}")
+            
+            # Try to save PNG version
+            try:
+                gain_png = gain_html.replace('.html', '.png')
+                fig.write_image(gain_png, scale=2)
+                logger.info(f"PNG preview saved")
+            except Exception as e:
+                logger.debug(f"Could not save PNG preview: {e}")
+        
+        if self.show_preview:
+            logger.info("Showing gain calibration preview...")
+            fig.show()
+        
+        # Store in output
+        self._output['preview'] = {'gain_fig': fig}
 
 
 def gain_correction(

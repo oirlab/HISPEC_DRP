@@ -73,6 +73,72 @@ class PARVIConfig:
         props['n_channels']['default'] = 32
 
         props['ref_channel_position']['default'] = 'NONE'
+
+        # Optional PARVI timing metadata used to correct dropped-read timing.
+        props['parvi_timei00_mjd'] = {
+            'title': 'PARVI TIMEI00-derived read timestamps (MJD)',
+            'fits_section': 'EXPOSURE',
+            'fits_hdu': 'PRIMARY',
+            'fits_keyword': 'PTI00MJD',
+            'type': 'array',
+            'items': {'type': 'number'},
+            'unit': 'day',
+            'cal_db': None,
+            'merge_rule': 'drop',
+            'include_ancestors': False,
+            'default': None,
+        }
+        props['parvi_timef_mjd'] = {
+            'title': 'PARVI TIMEF-derived read end timestamps (MJD)',
+            'fits_section': 'EXPOSURE',
+            'fits_hdu': 'PRIMARY',
+            'fits_keyword': 'PTF00MJD',
+            'type': 'array',
+            'items': {'type': 'number'},
+            'unit': 'day',
+            'cal_db': None,
+            'merge_rule': 'drop',
+            'include_ancestors': False,
+            'default': None,
+        }
+        props['parvi_timei00_unix_ns'] = {
+            'title': 'PARVI TIMEI00 raw timestamps in Unix nanoseconds',
+            'fits_section': 'EXPOSURE',
+            'fits_hdu': 'PRIMARY',
+            'fits_keyword': 'PTI00NS',
+            'type': 'array',
+            'items': {'type': 'number'},
+            'unit': 'ns',
+            'cal_db': None,
+            'merge_rule': 'drop',
+            'include_ancestors': False,
+            'default': None,
+        }
+        props['parvi_timef_unix_ns'] = {
+            'title': 'PARVI TIMEF raw read-end timestamps in Unix nanoseconds',
+            'fits_section': 'EXPOSURE',
+            'fits_hdu': 'PRIMARY',
+            'fits_keyword': 'PTF00NS',
+            'type': 'array',
+            'items': {'type': 'number'},
+            'unit': 'ns',
+            'cal_db': None,
+            'merge_rule': 'drop',
+            'include_ancestors': False,
+            'default': None,
+        }
+        props['parvi_readtime_sec'] = {
+            'title': 'Nominal PARVI read time for dropped-read inference',
+            'fits_section': 'EXPOSURE',
+            'fits_hdu': 'PRIMARY',
+            'fits_keyword': 'PREADSEC',
+            'type': 'number',
+            'unit': 'sec',
+            'cal_db': None,
+            'merge_rule': 'first',
+            'include_ancestors': False,
+            'default': 1.467,
+        }
         
         return meta_schema
 
@@ -96,7 +162,7 @@ class PARVIConfig:
         if model.meta.order_end is None:
             model.meta.order_end = 85
         if model.meta.clock_rate is None:
-            model.meta.clock_rate = 150_000
+            model.meta.clock_rate = 88802  # pixels per second, based on 32 channels and 275 reads/s per channel
         if model.meta.lfc_nu0 is None:
             model.meta.lfc_nu0 = scipy.constants.c / (1559.91370 * 1E-9) # Hz
         if model.meta.lfc_delta_nu is None:

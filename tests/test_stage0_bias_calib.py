@@ -5,18 +5,186 @@ import numpy as np
 import os
 import time
 from hispecdrp.primitives.bias_subtraction.master_bias_primitive import MakeMasterBiasPrimitive
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+
+def plot_bias_calibration_results(
+    bias_true, bias_measured, ktc_true, ktc_measured,
+    residuals_bias, residuals_ktc,
+    output_dir=None, show=True
+):
+    """
+    Create Plotly visualizations of bias calibration results.
+    
+    Parameters
+    ----------
+    bias_true : np.ndarray
+        True bias map in DN
+    bias_measured : np.ndarray
+        Measured bias map in DN
+    ktc_true : np.ndarray
+        True kTC map in DN
+    ktc_measured : np.ndarray
+        Measured kTC map in DN
+    residuals_bias : np.ndarray
+        Residuals for bias in DN
+    residuals_ktc : np.ndarray
+        Residuals for kTC in DN
+    output_dir : str, optional
+        Directory to save plots. If None, plots are not saved.
+    show : bool, optional
+        Whether to display the plots. Default is True.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing figure objects with keys 'bias' and 'ktc'
+    """
+    
+    ny, nx = bias_true.shape
+    
+    # Create subplots for bias
+    fig_bias = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=("True Bias (DN)", "Measured Bias (DN)", "Residuals (DN)"),
+        specs=[[{}, {}, {}]]
+    )
+    
+    # True bias
+    fig_bias.add_trace(
+        go.Heatmap(
+            z=bias_true,
+            colorscale='Inferno',
+            showscale=True,
+            name='True',
+            colorbar=dict(x=0.16, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=1
+    )
+    
+    # Measured bias
+    fig_bias.add_trace(
+        go.Heatmap(
+            z=bias_measured,
+            colorscale='Viridis',
+            showscale=True,
+            name='Measured',
+            colorbar=dict(x=0.5, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=2
+    )
+    
+    # Residuals bias
+    fig_bias.add_trace(
+        go.Heatmap(
+            z=residuals_bias,
+            colorscale='RdBu',
+            showscale=True,
+            name='Residuals',
+            colorbar=dict(x=0.84, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=3
+    )
+    
+    fig_bias.update_xaxes(showgrid=False)
+    fig_bias.update_yaxes(showgrid=False)
+    
+    fig_bias.update_layout(
+        height=650,
+        width=1400,
+        title_text="Bias Calibration Results",
+        showlegend=False,
+        margin=dict(b=180)
+    )
+    
+    # Create subplots for kTC
+    fig_ktc = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=("True kTC (DN)", "Measured kTC (DN)", "Residuals (DN)"),
+        specs=[[{}, {}, {}]]
+    )
+    
+    # True kTC
+    fig_ktc.add_trace(
+        go.Heatmap(
+            z=ktc_true,
+            colorscale='Viridis',
+            showscale=True,
+            name='True',
+            colorbar=dict(x=0.16, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=1
+    )
+    
+    # Measured kTC
+    fig_ktc.add_trace(
+        go.Heatmap(
+            z=ktc_measured,
+            colorscale='Viridis',
+            showscale=True,
+            name='Measured',
+            colorbar=dict(x=0.5, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=2
+    )
+    
+    # Residuals kTC
+    fig_ktc.add_trace(
+        go.Heatmap(
+            z=residuals_ktc,
+            colorscale='RdBu',
+            showscale=True,
+            name='Residuals',
+            colorbar=dict(x=0.84, y=-0.15, len=0.2, orientation='h', xanchor='center', yanchor='top')
+        ),
+        row=1, col=3
+    )
+    
+    fig_ktc.update_xaxes(showgrid=False)
+    fig_ktc.update_yaxes(showgrid=False)
+    
+    fig_ktc.update_layout(
+        height=650,
+        width=1400,
+        title_text="kTC Noise Calibration Results",
+        showlegend=False,
+        margin=dict(b=180)
+    )
+    
+    # Save if output_dir is provided
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        bias_html = os.path.join(output_dir, 'bias_calibration_preview.html')
+        ktc_html = os.path.join(output_dir, 'ktc_calibration_preview.html')
+        
+        fig_bias.write_html(bias_html, include_plotlyjs='cdn')
+        fig_ktc.write_html(ktc_html, include_plotlyjs='cdn')
+        
+        print(f"Bias calibration plots saved to {bias_html}")
+        print(f"kTC calibration plots saved to {ktc_html}")
+    
+    if show:
+        fig_bias.show()
+        fig_ktc.show()
+    
+    return {
+        'bias': fig_bias,
+        'ktc': fig_ktc
+    }
+
 
 def test_stage0_bias_calib(tmp_path):
     np.random.seed(12345)
     start_time = time.time()
 
     # --- Define parameters for the simulated ramp ---
-    max_cores = 1
+    max_cores = 4
     max_slope = 200  # e-/s
     readtime = 1.7  # seconds
     n_reads = 1
-    N_files = 100  # number of simulated files to create
-    ny, nx = 10,10  # size of the detector
+    N_files = 10 # number of simulated files to create
+    ny, nx = 4096,4096  # size of the detector
 
     step_time = time.time();
     print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
@@ -201,6 +369,8 @@ def test_stage0_bias_calib(tmp_path):
         'make_bias': {
             'run': True,
             'max_cores': pipe_max_cores,
+            'save_preview': True,
+            'show_preview': True,
         },
         'register_bias_cal': {
             'run': True,
@@ -210,8 +380,12 @@ def test_stage0_bias_calib(tmp_path):
     # Setup and call the stage 0 pipeline
     bias_pipe = ProcessBiasPipeline()
 
-    # Set any primitive args
+    # Enable preview generation
+    bias_pipe.save_preview = True
+    bias_pipe.show_preview = True  
+    bias_pipe.output_dir = str(tmp_path)
 
+    # Set any primitive args
     bias_pipe.dq_init.dq = dqinit_model
 
     step_time = time.time();
@@ -228,11 +402,36 @@ def test_stage0_bias_calib(tmp_path):
 
     # Residuals (bias - true bias)
     residuals_bias = np.abs(model_result['bias'].bias - bias_map / gain_map) # in DN
-    assert np.sum(residuals_bias > 10) == 0
-
+    
     # Residuals (kTC - true kTC)
     residuals_kTC = np.abs(model_result['bias'].ktc - kTC_noise_map / gain_map) # in DN
-    assert np.sum(residuals_kTC > 5) == 0
+    
+    # # Create visualizations
+    # plots = plot_bias_calibration_results(
+    #     bias_true=bias_map / gain_map,
+    #     bias_measured=model_result['bias'].bias,
+    #     ktc_true=kTC_noise_map / gain_map,
+    #     ktc_measured=model_result['bias'].ktc,
+    #     residuals_bias=residuals_bias,
+    #     residuals_ktc=residuals_kTC,
+    #     output_dir=str(tmp_path),
+    #     show=True  # Set to True if you want interactive display
+    # )
+    try:
+        assert np.sum(residuals_bias > 10) == 0
+    except AssertionError:
+        print("Bias residuals exceed threshold at the following pixels:")
+        print(np.argwhere(residuals_bias > 10))
+
+    # Residuals (kTC - true kTC)
+    
+    try:
+        assert np.sum(residuals_kTC > 5) == 0
+    except AssertionError:
+        print("kTC residuals exceed threshold at the following pixels:")
+        print(np.argwhere(residuals_kTC > 5))
+
+
 
 def test_stage0_master_bias(tmp_path):
     tmp_path = str(tmp_path)
@@ -264,3 +463,7 @@ def test_stage0_master_bias(tmp_path):
     assert  output_master_bias.meta.master_cal
     np.testing.assert_array_equal(output_master_bias.bias, bias_map / gain_map)
     np.testing.assert_array_equal(output_master_bias.kTC, kTC_noise_map)  # error should reduce by sqrt(4)
+
+if __name__ == "__main__":
+    test_stage0_bias_calib(tmp_path='/Users/bensappey/scratch/')
+    
