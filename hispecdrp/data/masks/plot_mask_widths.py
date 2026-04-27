@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Regenerate ``mask_width_vs_wavelength.png``: SPIROU ``.mas`` segment width vs wavelength.
+Regenerate ``mask_width_vs_wavelength.png``: ``.mas`` segment width vs mean wavelength.
 
-Each row is (λ_start, λ_end, weight) in vacuum nm (see ``load_mask_spirou_mas``).
-Run from repo root: ``python hispecdrp/data/masks/plot_mask_widths.py``
+Uses only ``*.kpf.mas`` files (three columns: λ_start, λ_end, weight in vacuum nm). Two-column
+**delta** masks are skipped. Run from repo root: ``python hispecdrp/data/masks/plot_mask_widths.py``
 """
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ def load_mas(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    files = sorted(here.glob("*.mas"))
+    files = sorted(here.glob("*.kpf.mas"))
     if not files:
-        raise SystemExit("No .mas files next to this script.")
+        raise SystemExit("No *.kpf.mas files next to this script (need three-column segment masks).")
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 9))
     ax_scatter, ax_frac, ax_hist, ax_log = axes.ravel()

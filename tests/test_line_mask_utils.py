@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from hispecdrp.primitives.utils.ccf_utils import load_mask_spirou_mas
+from astropy import units as u
+
 from hispecdrp.utils.line_mask_utils import (
     DEFAULT_WIDTH_CALIBRATION_K2_ALL,
     LINE_MASK_META_PREFIX,
+    MASK_STYLE_DELTA,
+    MaskLines,
     _cluster_max_depth,
     _continuum_normalized_d2_flux_dlam2_at_um,
-    _segment_mean_continuum_normalized_depth_um,
     _local_min_continuum_normalized_flux_um,
+    _segment_mean_continuum_normalized_depth_um,
     build_line_mask_from_template,
     compare_line_center_lists_um,
     detect_template_line_centers_gradient_um,
@@ -22,14 +27,31 @@ from hispecdrp.utils.line_mask_utils import (
     fit_half_width_linear_from_mas,
     load_atmospheric_transmission_um,
     mean_transmission_over_velocity_interval_um,
+    package_data_masks_dir,
     parse_mask_generation_meta_line,
+    read_mask_generation_meta,
+    restrict_mask_to_chunk,
 )
 
 
+def _lte049_kpf_mas_for_width_calibration() -> str | None:
+    """lte049 segment mask used to match :data:`DEFAULT_WIDTH_CALIBRATION_K2_ALL`; optional."""
+    p = package_data_masks_dir() / "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.kpf.mas"
+    return str(p) if p.is_file() else None
+
+
+def _first_bundled_kpf_mas() -> str | None:
+    """Any ``*.kpf.mas`` under ``package_data_masks_dir()`` (geometry tests)."""
+    found = sorted(package_data_masks_dir().glob("*.kpf.mas"))
+    return str(found[0]) if found else None
+
+
 def test_fit_half_width_k2_all_matches_default_constant():
-    here = os.path.dirname(__file__)
-    mas = os.path.join(here, "..", "hispecdrp", "data", "masks", "K2_all.mas")
-    mas = os.path.normpath(mas)
+    mas = _lte049_kpf_mas_for_width_calibration()
+    if mas is None:
+        pytest.skip(
+            "lte049 kpf mask not in data/masks (optional; generate with regenerate_template_masks.py)"
+        )
     slope, icept = fit_half_width_linear_from_mas(mas)
     assert np.isclose(slope, DEFAULT_WIDTH_CALIBRATION_K2_ALL[0], rtol=1e-6)
     assert abs(icept) < 1e-9
@@ -120,7 +142,22 @@ def test_continuum_normalized_d2_matches_parabolic_curvature():
     assert np.isclose(got[0], 2.0 * k, rtol=0.02)
 
 
-def test_load_mask_spirou_mas_two_column(tmp_path):
+def test_masklines_kpf_geometry_from_bundled_template_kpf():
+    mas = _first_bundled_kpf_mas()
+    if mas is None:
+        pytest.skip("no *.kpf.mas in data/masks (optional; generate with regenerate_template_masks.py)")
+    m = MaskLines.load(mas)
+    assert m.mask_style == "kpf"
+    assert m.line_center.unit.is_equivalent(u.um)
+    assert np.all(m.line_width.value > 0)
+    assert np.allclose(
+        m.line_center.value, 0.5 * (m.line_left_edge + m.line_right_edge).value
+    )
+    assert "source_file" in m.metadata
+    assert "hispecdrp_wavelength_columns" in m.metadata
+
+
+def test_masklines_delta_zero_width_and_restrict(tmp_path):
     p = tmp_path / "delta.mas"
     p.write_text(
         "# test\n"
@@ -128,10 +165,73 @@ def test_load_mask_spirou_mas_two_column(tmp_path):
         "  1500.1  3.0\n",
         encoding="utf-8",
     )
-    m = load_mask_spirou_mas(str(p))
+    m = MaskLines.load(str(p))
+    assert m.mask_style == "delta"
+    assert np.all(m.line_width.to_value(u.um) == 0.0)
+    sub = restrict_mask_to_chunk(
+        m,
+        w_min_um=1.499,
+        w_max_um=1.501,
+        v_min_m_s=-200_000.0,
+        v_max_m_s=200_000.0,
+    )
+    assert sub.line_center.size >= 1
+
+
+def test_masklines_load_two_column_mas(tmp_path):
+    p = tmp_path / "delta.mas"
+    p.write_text(
+        "# test\n"
+        "  1500.0  2.5\n"
+        "  1500.1  3.0\n",
+        encoding="utf-8",
+    )
+    m = MaskLines.load(str(p))
     assert m.line_lambda_um.size == 2
     assert np.allclose(m.line_lambda_um * 1e3, [1500.0, 1500.1])
     assert np.allclose(m.weight, [2.5, 3.0])
+
+
+def test_masklines_load_mask_style_kpf_requires_three_columns(tmp_path):
+    meta_line = LINE_MASK_META_PREFIX + json.dumps(
+        {"schema_version": 1, "mask_style": "kpf"}, separators=(",", ":")
+    )
+    p = tmp_path / "bad_kpf.mas"
+    p.write_text(
+        f"{meta_line}\n"
+        "  1500.0  0.25\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="mask_style='kpf'"):
+        MaskLines.load(str(p))
+
+
+def test_masklines_load_mask_style_delta_requires_two_columns(tmp_path):
+    meta_line = LINE_MASK_META_PREFIX + json.dumps(
+        {"schema_version": 1, "mask_style": "delta"}, separators=(",", ":")
+    )
+    p = tmp_path / "bad_delta.mas"
+    p.write_text(
+        f"{meta_line}\n"
+        "  967.31  967.32  0.2\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="mask_style='delta'"):
+        MaskLines.load(str(p))
+
+
+def test_masklines_load_unknown_mask_style_raises(tmp_path):
+    meta_line = LINE_MASK_META_PREFIX + json.dumps(
+        {"schema_version": 1, "mask_style": "spirou"}, separators=(",", ":")
+    )
+    p = tmp_path / "bad_style.mas"
+    p.write_text(
+        f"{meta_line}\n"
+        "  967.31  967.32  0.2\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Unknown mask_style"):
+        MaskLines.load(str(p))
 
 
 @pytest.mark.parametrize("template_basename", ["lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"])
@@ -144,12 +244,62 @@ def test_build_line_mask_from_template_two_columns(tmp_path, template_basename):
     build_line_mask_from_template(tpl, output_path=str(out))
     text = out.read_text(encoding="utf-8")
     assert "wavelength_vac_nm" in text
+    meta = read_mask_generation_meta(str(out))
+    assert meta is not None
+    assert meta.get("mask_style") == MASK_STYLE_DELTA
+    assert "hispecdrp_wavelength_columns" in meta
+    assert "disk_wavelength_columns" in meta
     data = np.loadtxt(str(out), comments="#")
     assert data.ndim == 2 and data.shape[1] == 2
     assert np.isclose(np.sum(data[:, 1]), 1.0, rtol=0.0, atol=1e-12)
-    m = load_mask_spirou_mas(str(out))
+    m = MaskLines.load(str(out))
     assert m.line_lambda_um.size == data.shape[0]
     assert np.allclose(m.line_lambda_um * 1e3, data[:, 0])
+
+
+@pytest.mark.parametrize("template_basename", ["lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"])
+def test_build_line_mask_from_template_default_output_includes_mask_style(
+    tmp_path, template_basename
+):
+    here = os.path.dirname(__file__)
+    tpl = os.path.normpath(
+        os.path.join(here, "..", "hispecdrp", "data", "templates", template_basename)
+    )
+    if not os.path.isfile(tpl):
+        pytest.skip(f"missing template: {tpl}")
+    path_written, _entries = build_line_mask_from_template(
+        tpl, masks_directory=str(tmp_path), output_path=None
+    )
+    expect = tmp_path / f"{Path(tpl).stem}.{MASK_STYLE_DELTA}.mas"
+    assert Path(path_written) == expect.resolve()
+    assert expect.is_file()
+
+
+def test_masklines_save_default_name_includes_mask_style(tmp_path):
+    m = MaskLines.from_delta_centers_um(
+        np.array([1.0, 1.1]),
+        np.array([0.4, 0.6]),
+        metadata={"template_path": "/x/foo.h5"},
+    )
+    p = m.save(masks_directory=str(tmp_path))
+    assert Path(p).name == "foo.delta.mas"
+    m2 = MaskLines.load(p)
+    assert m2.mask_style == "delta"
+    assert m2.line_lambda_um.size == 2
+
+
+def test_masklines_save_kpf_default_name_includes_mask_style(tmp_path):
+    m = MaskLines.from_kpf_segment_edges_um(
+        np.array([1.0, 1.2]),
+        np.array([1.01, 1.21]),
+        np.array([1.0, 2.0]),
+        metadata={"template_path": "/data/bar.h5"},
+    )
+    p = m.save(masks_directory=str(tmp_path))
+    assert Path(p).name == "bar.kpf.mas"
+    m2 = MaskLines.load(p)
+    assert m2.mask_style == "kpf"
+    assert m2.line_lambda_um.size == 2
 
 
 def test_compare_line_center_lists_um_counts():

@@ -1,6 +1,6 @@
 """
 Sweep ``ccf_parabolic_vertex_n_samples`` for the **line-window n_lines=1** lte049 BSPEC
-setup (same geometry as ``test_fit_ccf_kpf_style_btsettl_bspec_mask_kpf_line_window_n1_parallel``).
+setup (same geometry as ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel``).
 
 Reports per-chunk bias for ORDER=139 CHUNK_ID=0 (segment 1/24), RMS |bias| over all chunks,
 and RVCCFAVG bias vs injected RV.
@@ -22,7 +22,7 @@ if _ROOT not in sys.path:
 
 from hispecdrp import datamodels  # noqa: E402
 from hispecdrp.primitives import StellarRVPrimitive  # noqa: E402
-from hispecdrp.primitives.utils.ccf_utils import load_mask  # noqa: E402
+from hispecdrp.utils.line_mask_utils import MaskLines  # noqa: E402
 
 import tests.test_stellar_rv as ts  # noqa: E402
 
@@ -36,7 +36,7 @@ def _build_line_window_l2_orders_mask():
         raise FileNotFoundError(path)
     wl_min, wl_max = ts._BTSETTL_WL_RANGE_UM
     w_rest, flux_rest = ts._load_btsettl_sorted_micron(path, wl_min, wl_max)
-    orders = ts._bspec_btsettl_ccf_mask_kpf_order_ids()
+    orders = ts._bspec_btsettl_ccf_line_mask_order_ids()
     input_rv_m_s = ts.INPUT_RV_KM_S * 1000.0
     n_orders = len(orders)
     n_pix = ts._TEST_ECHELLE_N_PIX
@@ -76,7 +76,7 @@ def _build_line_window_l2_orders_mask():
     rvccf_l2.spec_err_fib1 = spec_err_2d.astype(np.float32)
     rvccf_l2.wave_fib1 = wave_2d
     rvccf_l2.spec_dq_fib1 = dq_2d
-    load_mask(mas_lte049, mask_width_um=None)  # fail fast if mask missing
+    MaskLines.load(mas_lte049)  # fail fast if mask missing
     return rvccf_l2, orders, mas_lte049, float(input_rv_m_s)
 
 
@@ -94,7 +94,7 @@ def _metrics_for_n(
     v_max = float(input_rv_m_s + v_coarse_half_m_s)
     window_um = float(ts._BTSETTL_LINE_WINDOW_N1_WINDOW_UM)
     prim = StellarRVPrimitive(
-        algorithm="ccf_mask_kpf",
+        algorithm="ccf_line_mask",
         mask_path=mas_lte049,
         do_fibers=["1"],
         do_orders=orders,
@@ -135,7 +135,7 @@ def main() -> None:
     import tempfile
     import time
 
-    # Align with ``test_fit_ccf_kpf_style_btsettl_bspec_mask_kpf_line_window_n1_parallel`` when
+    # Align with ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel`` when
     # the shell leaves HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER unset (otherwise match env).
     os.environ.setdefault("HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER", "3")
 

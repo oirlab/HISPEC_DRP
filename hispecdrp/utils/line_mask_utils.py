@@ -1,35 +1,7 @@
-"""
-Build SPIROU-style ``.mas`` line masks from stellar template spectra.
+"""Line-mask utilities (mask I/O, MaskLines container, template-built masks).
 
-Loads a template (BT-Settl HDF5 via :mod:`hispecdrp.utils.spectral_templates_utils`),
-detects absorption centers with :func:`detect_template_line_centers_gradient_um`
-(``numpy.gradient``: ``dF/dλ = 0``, ``d²F/dλ² > 0`` at interpolated roots), applies
-depth / deblending / telluric filters, and writes a **two-column** mask (vacuum nm:
-wavelength, weight). Lines have **infinitely narrow** extent on disk (no left/right
-edges). Weights are proportional to **continuum-normalized absorption strength**
-:math:`1 - F/F_c` at each line center (``F`` and ``F_c`` interpolated on the template
-grid), then **renormalized so the weight column sums to 1**. Candidate lines whose
-local minimum :math:`F/F_c` near the centroid falls below a small floor (default
-:math:`10^{-4}`) are dropped as unreliable saturated cores.
-Generation options are
-serialized as JSON on a ``# HISPEC_DRP_MASK_META`` line for parsing
-(:func:`read_mask_generation_meta`).
-
-See ``hispecdrp/data/masks/README.md`` for mask format notes and
-``hispecdrp/data/atmosphere/README.md`` for the transmission table used in telluric
-filtering.
-
-**Centroid vs** :mod:`hispecdrp.primitives.utils.ccf_utils`
------------------------------------------------------------
-:func:`~hispecdrp.primitives.utils.ccf_utils.load_mask` supplies each line as a rest
-wavelength ``line_lambda_um`` (vacuum µm); the CCF never re-estimates line centers from
-data. **Two-column** template masks store that wavelength directly; legacy three-column
-SPIROU files list ``start_nm``, ``end_nm`` and loaders use ``(start+end)/2``.
-:func:`fit_half_width_linear_from_mas` applies only to masks with measurable segment
-width (delta rows are skipped).
-
-:func:`detect_template_line_centers_parabolic_um` remains available to compare against
-:func:`detect_template_line_centers_gradient_um` via :func:`compare_line_center_lists_um`.
+The canonical overview of mask formats and generation lives in the documentation:
+``docs/source/algorithms/line_mask.rst``.
 """
 from __future__ import annotations
 
@@ -37,14 +9,17 @@ import json
 import logging
 import os
 import re
-from typing import Any
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
+from astropy import units as u
 from scipy.ndimage import maximum_filter1d
 from scipy.signal import argrelextrema
 
+from hispecdrp.utils.physical_constants import C_M_S
 from hispecdrp.utils.spectral_templates_utils import load_template_from_path
 
 logger = logging.getLogger(__name__)
@@ -52,7 +27,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_WIDTH_CALIBRATION_K2_ALL",
     "MASK_LINE_HALF_WIDTH_SLOPE_NM_PER_NM",
+    "MASK_STYLE_DELTA",
+    "MASK_STYLE_KPF",
     "LINE_MASK_META_PREFIX",
+    "MaskLineStyle",
+    "MaskLines",
+    "masklines_wavelength_unit_meta",
+    "package_data_masks_dir",
     "OPTIMAL_TEMPLATE_MASK_BUILD_KW",
     "LineMaskEntry",
     "build_line_mask_from_template",
@@ -60,6 +41,12 @@ __all__ = [
     "detect_template_line_centers_gradient_um",
     "detect_template_line_centers_parabolic_um",
     "fit_half_width_linear_from_mas",
+    "DEFAULT_PACKAGED_LINE_MASK_BASENAME",
+    "packaged_default_line_mask_path",
+    "pixel_edges_from_wavelength",
+    "resolve_mask_path",
+    "restrict_mask_to_chunk",
+    "stellar_rv_ccf_mask_lines",
     "load_atmospheric_transmission_um",
     "mean_transmission_over_velocity_interval_um",
     "parse_mask_generation_meta_line",
@@ -68,6 +55,10 @@ __all__ = [
 
 # Prefix for a single-line JSON blob of generation parameters (after ``# ``).
 LINE_MASK_META_PREFIX = "# HISPEC_DRP_MASK_META "
+
+# Values for ``mask_style`` in :func:`read_mask_generation_meta` / written ``.mas`` JSON.
+MASK_STYLE_DELTA: str = "delta"
+MASK_STYLE_KPF: str = "kpf"
 
 # Half-width (nm) vs line-center vacuum wavelength (nm): half_width ≈ slope * λ_nm + intercept.
 # Coefficients from a least-squares fit to bundled ``K2_all.mas`` (2797 segments); intercept
@@ -124,6 +115,567 @@ def read_mask_generation_meta(path: str) -> dict | None:
             if meta is not None:
                 return meta
     return None
+
+
+def package_data_masks_dir() -> Path:
+    """Absolute path to ``hispecdrp/data/masks``."""
+    return Path(__file__).resolve().parents[1] / "data" / "masks"
+
+
+#: Packaged default **delta** line mask basename under :func:`package_data_masks_dir`.
+DEFAULT_PACKAGED_LINE_MASK_BASENAME: str = (
+    "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"
+)
+
+
+def packaged_default_line_mask_path() -> str:
+    """Absolute path to the packaged default **delta** mask (same as ``resolve_mask_path(None)``)."""
+    return str((package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME).resolve())
+
+
+def resolve_mask_path(mask_path: str | None) -> str:
+    """
+    Resolve ``mask_path`` to an absolute filesystem path, or the packaged default when ``None``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``mask_path`` is ``None`` and the default mask file is missing.
+    """
+    if mask_path:
+        p = Path(mask_path).expanduser()
+        return str(p if p.is_absolute() else (Path.cwd() / p).resolve())
+    default_file = package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME
+    if not default_file.exists():
+        raise FileNotFoundError(
+            f"Default mask not found: {default_file}. "
+            "Pass StellarRVPrimitive(mask_path=...) to use a custom mask."
+        )
+    return str(default_file)
+
+
+def masklines_wavelength_unit_meta(unit: u.UnitBase) -> dict[str, str]:
+    """Serializable Astropy/FITS unit strings for :attr:`MaskLines.metadata` wavelength keys."""
+    return {
+        "astropy_unit_string": unit.to_string(),
+        "fits_unit_string": unit.to_string("fits"),
+    }
+
+
+MaskLineStyle = Literal["delta", "kpf"]
+
+
+def _assert_mas_mask_style_matches_columns(
+    mask_file: str, ncols: int, meta: dict | None
+) -> None:
+    """
+    If ``.mas`` header JSON (``# HISPEC_DRP_MASK_META``) includes ``mask_style``, require
+    that it matches the numeric layout: ``delta`` → 2 columns (vacuum nm, weight);
+    ``kpf`` → ≥3 columns (start_nm, end_nm, weight, …).
+    """
+    if not meta:
+        return
+    raw = meta.get("mask_style")
+    if raw is None:
+        return
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"mask_style in mask metadata ({mask_file!r}) must be a string, "
+            f"got {type(raw).__name__!r}"
+        )
+    style = raw.strip().lower()
+    if style in ("", "none", "null"):
+        return
+    if style == "delta":
+        if ncols != 2:
+            raise ValueError(
+                f"Mask metadata declares mask_style='delta' (wavelength_nm, weight) but "
+                f"{mask_file!r} has {ncols} numeric column(s); expected 2."
+            )
+        return
+    if style == "kpf":
+        if ncols < 3:
+            raise ValueError(
+                f"Mask metadata declares mask_style='kpf' (start_nm, end_nm, weight) but "
+                f"{mask_file!r} has {ncols} numeric column(s); expected ≥3."
+            )
+        return
+    raise ValueError(
+        f"Unknown mask_style {raw!r} in mask metadata for {mask_file!r} "
+        "(expected 'delta' or 'kpf')"
+    )
+
+
+def _infer_wavelength_disk_to_um(values: np.ndarray) -> np.ndarray:
+    """
+    Infer wavelength column scale for KPF-style two-column text: median of positive finite
+    values → Å (>1e3) /1e4, nm (>10) /1e3, else assume µm. Not used for ``.mas`` (vacuum nm).
+    """
+    v = np.asarray(values, dtype=np.float64)
+    finite = np.isfinite(v) & (v > 0)
+    if not np.any(finite):
+        return v
+    med = float(np.nanmedian(v[finite]))
+    if med > 1e3:
+        return v / 1e4
+    if med > 10:
+        return v / 1e3
+    return v
+
+
+@dataclass(eq=False)
+class MaskLines:
+    """
+    Tabulated CCF line mask (**delta** zero-width lines or **kpf** finite segments).
+
+    **delta** — two on-disk columns (vacuum line-center nm, weight): ``line_left_edge``,
+    ``line_right_edge``, and ``line_center`` coincide; ``line_width`` is 0.
+    **kpf** — ≥3 columns (vacuum segment start nm, end nm, weight): ``line_center`` is the
+    segment midpoint; ``line_width = line_right_edge - line_left_edge``.
+
+    Wavelengths are **vacuum**; internal arrays use **microns** (nm÷1000 on read/write
+    for ``.mas``). Use :meth:`load` and :meth:`save` for disk I/O with
+    ``# HISPEC_DRP_MASK_META`` JSON (:func:`read_mask_generation_meta`).
+
+    CCF hot paths use :attr:`line_lambda_um` (centers, µm) and :attr:`weight`.
+    """
+
+    mask_style: MaskLineStyle
+    line_center: u.Quantity
+    line_left_edge: u.Quantity
+    line_right_edge: u.Quantity
+    line_width: u.Quantity
+    weight: np.ndarray
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.line_center, u.Quantity):
+            self.line_center = u.Quantity(
+                np.asarray(self.line_center, dtype=np.float64).ravel(), u.um
+            )
+        if not isinstance(self.line_left_edge, u.Quantity):
+            self.line_left_edge = u.Quantity(
+                np.asarray(self.line_left_edge, dtype=np.float64).ravel(), u.um
+            )
+        if not isinstance(self.line_right_edge, u.Quantity):
+            self.line_right_edge = u.Quantity(
+                np.asarray(self.line_right_edge, dtype=np.float64).ravel(), u.um
+            )
+        if not isinstance(self.line_width, u.Quantity):
+            self.line_width = u.Quantity(
+                np.asarray(self.line_width, dtype=np.float64).ravel(), u.um
+            )
+
+        lc = self.line_center.to(u.um)
+        ll = self.line_left_edge.to(u.um)
+        lr = self.line_right_edge.to(u.um)
+        lw = self.line_width.to(u.um)
+        self.line_center = lc
+        self.line_left_edge = ll
+        self.line_right_edge = lr
+        self.line_width = lw
+
+        w = np.asarray(self.weight, dtype=np.float64).ravel()
+        n = int(lc.size)
+        if ll.size != n or lr.size != n or lw.size != n:
+            raise ValueError(
+                "MaskLines wavelength quantities must all have the same shape as line_center."
+            )
+        if w.size != n:
+            raise ValueError("MaskLines.weight must match line_center length.")
+        if w.ndim != 1:
+            raise ValueError("MaskLines.weight must be 1D.")
+        self.weight = w
+
+        diff = (lr - ll).value
+        if not np.allclose(diff, lw.value, rtol=0.0, atol=1.0e-12):
+            raise ValueError(
+                "MaskLines.line_width must equal line_right_edge - line_left_edge (µm)."
+            )
+
+        if self.mask_style not in ("delta", "kpf"):
+            raise ValueError(f"Unknown mask_style {self.mask_style!r} (expected 'delta' or 'kpf').")
+
+        self.metadata = dict(self.metadata or {})
+
+    @property
+    def line_lambda_um(self) -> np.ndarray:
+        """Rest line centers in µm (``line_center`` in µm)."""
+        return np.asarray(self.line_center.to_value(u.um), dtype=np.float64)
+
+    @classmethod
+    def _from_mas_path(cls, mask_file: str) -> MaskLines:
+        meta = read_mask_generation_meta(mask_file)
+        try:
+            data = np.loadtxt(mask_file, comments="#")
+        except OSError as e:
+            raise ValueError(f"Cannot read mask file: {mask_file}") from e
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        ncols = int(data.shape[1])
+        _assert_mas_mask_style_matches_columns(mask_file, ncols, meta)
+        md: dict[str, Any] = dict(meta or {})
+        md["source_file"] = str(Path(mask_file).resolve())
+        md["disk_wavelength_unit"] = "vacuum_nanometer"
+        md["stored_wavelength_unit"] = masklines_wavelength_unit_meta(u.um)
+        if ncols == 2:
+            w_um = data[:, 0].astype(np.float64) / 1e3
+            weight = data[:, 1].astype(np.float64)
+            if "mask_style" not in md:
+                md["mask_style"] = "delta"
+                md["mask_style_inferred_from_columns"] = True
+            return cls.from_delta_centers_um(w_um, weight, metadata=md)
+        if ncols < 3:
+            raise ValueError(
+                f"Need 2 columns (wavelength_nm, weight) or ≥3 (start_nm, end_nm, weight): {mask_file}"
+            )
+        start = data[:, 0].astype(np.float64) / 1e3
+        end = data[:, 1].astype(np.float64) / 1e3
+        weight = data[:, 2].astype(np.float64)
+        lo = np.minimum(start, end)
+        hi = np.maximum(start, end)
+        if "mask_style" not in md:
+            md["mask_style"] = "kpf"
+            md["mask_style_inferred_from_columns"] = True
+        return cls.from_kpf_segment_edges_um(lo, hi, weight, metadata=md)
+
+    @classmethod
+    def _from_two_column_path(cls, mask_file: str) -> MaskLines:
+        try:
+            data = np.loadtxt(mask_file, comments="#")
+        except OSError as e:
+            raise ValueError(f"Cannot read mask file: {mask_file}") from e
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        if data.shape[1] < 2:
+            raise ValueError(f"Need ≥2 columns (wavelength, weight): {mask_file}")
+        w = _infer_wavelength_disk_to_um(data[:, 0].astype(np.float64))
+        weight = data[:, 1].astype(np.float64)
+        md: dict[str, Any] = {
+            "source_file": str(Path(mask_file).resolve()),
+            "mask_style": "delta",
+            "disk_wavelength_column0": "inferred_angstrom_or_nm_or_micron_via_median_heuristic",
+            "stored_wavelength_unit": masklines_wavelength_unit_meta(u.um),
+        }
+        return cls.from_delta_centers_um(w, weight, metadata=md)
+
+    @classmethod
+    def load(cls, path: str) -> MaskLines:
+        """
+        Load a mask from disk: ``.mas`` (vacuum nm on disk → µm) or two-column text
+        (``.txt`` / ``.dat`` / ``.csv``; wavelength column Å/nm/µm via median heuristic).
+        Other extensions try ``.mas`` parsing first, then two-column.
+        """
+        p = Path(path)
+        suf = p.suffix.lower()
+        if suf == ".mas":
+            return cls._from_mas_path(path)
+        if suf in (".txt", ".dat", ".csv"):
+            return cls._from_two_column_path(path)
+        try:
+            return cls._from_mas_path(path)
+        except Exception:
+            return cls._from_two_column_path(path)
+
+    @classmethod
+    def from_delta_centers_um(
+        cls,
+        line_lambda_um: np.ndarray,
+        weight: np.ndarray,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> MaskLines:
+        """Build a **delta** mask: zero width at each center (µm)."""
+        x = np.asarray(line_lambda_um, dtype=np.float64).ravel()
+        wt = np.asarray(weight, dtype=np.float64).ravel()
+        center = x * u.um
+        z = np.zeros_like(x, dtype=np.float64) * u.um
+        md: dict[str, Any] = dict(metadata or {})
+        md.setdefault(
+            "hispecdrp_wavelength_columns",
+            {
+                "line_center": masklines_wavelength_unit_meta(u.um),
+                "line_left_edge": masklines_wavelength_unit_meta(u.um),
+                "line_right_edge": masklines_wavelength_unit_meta(u.um),
+                "line_width": masklines_wavelength_unit_meta(u.um),
+            },
+        )
+        md.setdefault("mask_style", "delta")
+        return cls(
+            mask_style="delta",
+            line_center=center,
+            line_left_edge=center,
+            line_right_edge=center,
+            line_width=z,
+            weight=wt,
+            metadata=md,
+        )
+
+    @classmethod
+    def from_kpf_segment_edges_um(
+        cls,
+        lo_um: np.ndarray,
+        hi_um: np.ndarray,
+        weight: np.ndarray,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> MaskLines:
+        """Build a **kpf** (finite-width) mask from rest segment bounds in µm."""
+        lo = np.asarray(lo_um, dtype=np.float64).ravel()
+        hi = np.asarray(hi_um, dtype=np.float64).ravel()
+        wt = np.asarray(weight, dtype=np.float64).ravel()
+        lo_q = lo * u.um
+        hi_q = hi * u.um
+        center = 0.5 * (lo_q + hi_q)
+        width = hi_q - lo_q
+        md: dict[str, Any] = dict(metadata or {})
+        md.setdefault(
+            "hispecdrp_wavelength_columns",
+            {
+                "line_center": masklines_wavelength_unit_meta(u.um),
+                "line_left_edge": masklines_wavelength_unit_meta(u.um),
+                "line_right_edge": masklines_wavelength_unit_meta(u.um),
+                "line_width": masklines_wavelength_unit_meta(u.um),
+            },
+        )
+        md.setdefault("mask_style", "kpf")
+        return cls(
+            mask_style="kpf",
+            line_center=center,
+            line_left_edge=lo_q,
+            line_right_edge=hi_q,
+            line_width=width,
+            weight=wt,
+            metadata=md,
+        )
+
+    @classmethod
+    def empty_like_style(
+        cls, mask_style: MaskLineStyle, *, metadata: dict[str, Any] | None = None
+    ) -> MaskLines:
+        """Zero-line mask preserving ``mask_style`` (e.g. after wavelength restriction)."""
+        z = np.array([], dtype=np.float64) * u.um
+        md = dict(metadata or {})
+        md["n_lines"] = 0
+        md.setdefault(
+            "hispecdrp_wavelength_columns",
+            {
+                "line_center": masklines_wavelength_unit_meta(u.um),
+                "line_left_edge": masklines_wavelength_unit_meta(u.um),
+                "line_right_edge": masklines_wavelength_unit_meta(u.um),
+                "line_width": masklines_wavelength_unit_meta(u.um),
+            },
+        )
+        return cls(
+            mask_style=mask_style,
+            line_center=z,
+            line_left_edge=z,
+            line_right_edge=z,
+            line_width=z,
+            weight=np.array([], dtype=np.float64),
+            metadata=md,
+        )
+
+    def metadata_dict(self) -> dict[str, Any]:
+        """Shallow copy of :attr:`metadata` for inspection or JSON serialization."""
+        return dict(self.metadata)
+
+    def save(
+        self,
+        output_path: str | None = None,
+        *,
+        masks_directory: str | None = None,
+        basename: str | None = None,
+    ) -> str:
+        """
+        Write this mask to a ``.mas`` file.
+
+        **On-disk layout:** ``delta`` → vacuum line-center (nm), weight; ``kpf`` →
+        vacuum segment start (nm), end (nm), weight. One ``# HISPEC_DRP_MASK_META`` JSON
+        line (:func:`read_mask_generation_meta`).
+
+        When ``output_path`` is ``None``, writes
+        ``{masks_directory}/{basename}.{mask_style}.mas`` with ``basename`` from
+        ``metadata["template_path"]`` when set, else ``\"mask\"``. ``masks_directory``
+        defaults to :func:`package_data_masks_dir`.
+        """
+        style = str(self.mask_style)
+        if basename is not None:
+            stem = Path(basename).stem
+        else:
+            tp = self.metadata.get("template_path")
+            if isinstance(tp, str) and tp.strip():
+                stem = Path(tp.strip()).stem
+            else:
+                stem = "mask"
+
+        if masks_directory is None:
+            masks_directory = str(package_data_masks_dir())
+
+        if output_path is None:
+            out_path = Path(masks_directory).expanduser()
+            out_path.mkdir(parents=True, exist_ok=True)
+            out_path = out_path / f"{stem}.{style}.mas"
+        else:
+            out_path = Path(output_path).expanduser()
+            if out_path.parent != Path("."):
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        meta: dict[str, Any] = dict(self.metadata)
+        meta["mask_style"] = style
+        meta.setdefault("schema_version", 2)
+        meta["n_lines"] = int(self.line_center.size)
+        if style == "delta":
+            meta.setdefault(
+                "disk_wavelength_columns",
+                {
+                    "column0_line_center": "vacuum_nanometer",
+                    "column1_weight": "dimensionless",
+                },
+            )
+        else:
+            meta.setdefault(
+                "disk_wavelength_columns",
+                {
+                    "column0_segment_start": "vacuum_nanometer",
+                    "column1_segment_end": "vacuum_nanometer",
+                    "column2_weight": "dimensionless",
+                },
+            )
+
+        meta_json = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+        if style == "delta":
+            col_desc = "wavelength_vac_nm, weight"
+        else:
+            col_desc = "start_nm, end_nm, weight"
+        header = (
+            f"# HISPEC DRP CCF line mask (columns: {col_desc}).\n"
+            f"# mask_style: {style}\n"
+            "# Metadata JSON on the next line (parse with read_mask_generation_meta).\n"
+            f"{LINE_MASK_META_PREFIX}{meta_json}\n"
+        )
+
+        wts = np.asarray(self.weight, dtype=np.float64)
+        parts: list[str] = [header]
+        if style == "delta":
+            lc_nm = self.line_center.to_value(u.nm)
+            for i in range(int(lc_nm.size)):
+                parts.append(
+                    f"  {float(lc_nm[i]): .16e}       {float(wts[i]): .16e}\n"
+                )
+        else:
+            lo_nm = self.line_left_edge.to_value(u.nm)
+            hi_nm = self.line_right_edge.to_value(u.nm)
+            for i in range(int(lo_nm.size)):
+                parts.append(
+                    f"  {float(lo_nm[i]): .16e}       {float(hi_nm[i]): .16e}       {float(wts[i]): .16e}\n"
+                )
+
+        out_path.write_text("".join(parts), encoding="utf-8")
+        return str(out_path.resolve())
+
+
+def pixel_edges_from_wavelength(wave_um: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Pixel bin left/right edges (µm) from a sorted wavelength array (midpoints + end padding).
+    """
+    w = np.asarray(wave_um, dtype=np.float64).ravel()
+    if w.size < 2:
+        raise ValueError("Need at least 2 wavelength points to build pixel edges.")
+    x_start = (w + np.roll(w, 1)) / 2.0
+    x_end = np.roll(x_start, -1)
+    x_start[0] = w[0] - (w[1] - w[0]) / 2.0
+    x_end[-1] = w[-1] + (w[-1] - w[-2]) / 2.0
+    return x_start, x_end
+
+
+def restrict_mask_to_chunk(
+    mask_lines: MaskLines,
+    w_min_um: float,
+    w_max_um: float,
+    *,
+    v_min_m_s: float,
+    v_max_m_s: float,
+    zb: float = 0.0,
+) -> MaskLines:
+    """
+    Keep lines whose rest **centers** can Doppler-shift into ``[w_min_um, w_max_um]`` for
+    some velocity in ``[v_min_m_s, v_max_m_s]`` (m/s) with denominator ``(1+zb)``.
+    """
+    zb1 = 1.0 + zb
+    sh_a = (1.0 + v_min_m_s / C_M_S) / zb1
+    sh_b = (1.0 + v_max_m_s / C_M_S) / zb1
+    sh_lo = min(sh_a, sh_b)
+    sh_hi = max(sh_a, sh_b)
+    lam = mask_lines.line_lambda_um
+    keep = (lam * sh_hi >= w_min_um) & (lam * sh_lo <= w_max_um)
+    if not np.any(keep):
+        return MaskLines.empty_like_style(
+            mask_lines.mask_style,
+            metadata={
+                **mask_lines.metadata,
+                "restrict_mask_to_chunk": "empty",
+                "w_min_um": float(w_min_um),
+                "w_max_um": float(w_max_um),
+            },
+        )
+    k = np.asarray(keep, dtype=bool)
+    md = {
+        **mask_lines.metadata,
+        "restrict_mask_to_chunk": True,
+        "n_lines_before": int(mask_lines.line_center.size),
+        "n_lines_after": int(np.count_nonzero(k)),
+        "w_min_um": float(w_min_um),
+        "w_max_um": float(w_max_um),
+    }
+    return MaskLines(
+        mask_style=mask_lines.mask_style,
+        line_center=mask_lines.line_center[k],
+        line_left_edge=mask_lines.line_left_edge[k],
+        line_right_edge=mask_lines.line_right_edge[k],
+        line_width=mask_lines.line_width[k],
+        weight=mask_lines.weight[k],
+        metadata=md,
+    )
+
+
+def stellar_rv_ccf_mask_lines(
+    *,
+    mask_path: str | None,
+    mask_wavelength=None,
+    mask_weight=None,
+) -> tuple[MaskLines, str]:
+    """Resolve mask lines for line-mask CCF (path, default package mask, or in-memory arrays)."""
+    has_wl = mask_wavelength is not None
+    has_wt = mask_weight is not None
+    if has_wl or has_wt:
+        if not (has_wl and has_wt):
+            raise ValueError(
+                "mask_wavelength and mask_weight must both be provided when supplying an in-memory mask"
+            )
+        wl = np.asarray(mask_wavelength, dtype=np.float64).ravel()
+        wt = np.asarray(mask_weight, dtype=np.float64).ravel()
+        if wl.size != wt.size:
+            raise ValueError(
+                "mask_wavelength and mask_weight must have the same length "
+                f"(got {wl.size} vs {wt.size})"
+            )
+        if wl.size == 0:
+            raise ValueError("in-memory mask has zero lines")
+        return (
+            MaskLines.from_delta_centers_um(
+                wl,
+                wt,
+                metadata={
+                    "source": "in_memory_mask",
+                    "mask_style": "delta",
+                    "stored_wavelength_unit": masklines_wavelength_unit_meta(u.um),
+                },
+            ),
+            "in_memory_mask",
+        )
+    resolved = resolve_mask_path(mask_path)
+    return MaskLines.load(resolved), resolved
 
 
 @dataclass(frozen=True)
@@ -225,7 +777,7 @@ def mean_transmission_over_velocity_interval_um(
     lam = float(line_wavelength_um)
     if not np.isfinite(lam) or lam <= 0:
         return float("nan")
-    c_m_s = 299792458.0
+    c_m_s = C_M_S
     v_m_s = abs(float(half_width_km_s)) * 1000.0
     beta = min(v_m_s / c_m_s, 0.2)
     lo = lam * (1.0 - beta)
@@ -271,7 +823,7 @@ def _parabolic_minimum_wavelength_um(
     ``wave_um[idx]``.
 
     This aligns the stored segment midpoint ``(start_nm + end_nm)/2`` with the same
-    convention :func:`~hispecdrp.primitives.utils.ccf_utils.load_mask_spirou_mas` uses for
+    convention :meth:`MaskLines.load` uses for
     three-column SPIROU masks (``line_lambda_um``), while improving precision over using
     the grid sample at ``idx`` alone.
     """
@@ -745,7 +1297,9 @@ def build_line_mask_from_template(
         :math:`\\min(F/F_c)` test. If ``None``, uses ``5 ×`` the template median step (nm).
     output_path
         Full path for the output ``.mas``. If ``None``, writes under
-        ``masks_directory`` as ``<template_basename>.mas``.
+        ``masks_directory`` as ``<template_basename>.delta.mas`` (``delta`` is the
+        on-disk :data:`MASK_STYLE_DELTA` layout; distinct stems per style match
+        :meth:`MaskLines.save`).
     masks_directory
         Default output directory (package ``data/masks`` if ``None``).
 
@@ -862,17 +1416,16 @@ def build_line_mask_from_template(
         entries.append(LineMaskEntry(wavelength_nm=lam_nm, weight=wt))
 
     if masks_directory is None:
-        masks_directory = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "data", "masks")
-        )
+        masks_directory = str(package_data_masks_dir())
     os.makedirs(masks_directory, exist_ok=True)
 
     base = os.path.splitext(os.path.basename(template_path))[0]
-    auto_name = f"{base}.mas"
+    auto_name = f"{base}.{MASK_STYLE_DELTA}.mas"
     out = output_path if output_path is not None else os.path.join(masks_directory, auto_name)
 
-    meta: dict = {
+    meta: dict[str, Any] = {
         "schema_version": 2,
+        "mask_style": MASK_STYLE_DELTA,
         "generator": "hispecdrp.utils.line_mask_utils.build_line_mask_from_template",
         "template_path": os.path.abspath(template_path),
         "wl_min_um": float(wl_min_um),
@@ -897,22 +1450,28 @@ def build_line_mask_from_template(
         ),
         "n_lines": int(len(entries)),
     }
-    meta_json = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+    from astropy import units as _u
 
-    header = (
-        "# HISPEC DRP template-derived CCF line mask (columns: wavelength_vac_nm, weight).\n"
-        f"# Template basename: {os.path.basename(template_path)}\n"
-        "# Wavelength: vacuum nanometers; lines are infinitely narrow (no segment edges).\n"
-        "# Weights: continuum-normalized depth at line center (see mask JSON); "
-        "**normalized so the column sums to 1**.\n"
-        "# Generation parameters: single-line JSON on the next line "
-        "(parse with read_mask_generation_meta).\n"
-        f"{LINE_MASK_META_PREFIX}{meta_json}\n"
-    )
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(header)
-        for e in entries:
-            f.write(f"  {e.wavelength_nm: .16e}       {e.weight: .16e}\n")
+    def _disk_u(unit: _u.UnitBase) -> dict[str, str]:
+        return {
+            "astropy_unit_string": unit.to_string(),
+            "fits_unit_string": unit.to_string("fits"),
+        }
 
-    logger.info("Wrote %d mask lines to %s", len(entries), out)
-    return out, entries
+    meta["disk_wavelength_columns"] = {
+        "column0_line_center": "vacuum_nanometer",
+        "column1_weight": "dimensionless",
+    }
+    meta["hispecdrp_wavelength_columns"] = {
+        "line_center": masklines_wavelength_unit_meta(u.nm),
+        "line_left_edge": masklines_wavelength_unit_meta(u.nm),
+        "line_right_edge": masklines_wavelength_unit_meta(u.nm),
+        "line_width": masklines_wavelength_unit_meta(u.nm),
+    }
+
+    centers_um_arr = (centers_nm * 1.0e-3).astype(np.float64)
+    ml = MaskLines.from_delta_centers_um(centers_um_arr, weights, metadata=meta)
+    path_written = ml.save(output_path=out)
+
+    logger.info("Wrote %d mask lines to %s", len(entries), path_written)
+    return path_written, entries

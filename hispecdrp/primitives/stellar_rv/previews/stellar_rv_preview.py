@@ -5,7 +5,7 @@ There are **three** preview surfaces:
 
 1. **Default preview** (``create_stellar_rv_preview``): **two** Plotly HTML embeds per save — (a) RV vs
    λ per fiber with its own mode bar; (b) CCF + residual per fiber (linked velocity axes within each
-   fiber), second mode bar, slot dropdown. For ``ccf_mask_kpf`` with
+   fiber), second mode bar, slot dropdown. For ``ccf_line_mask`` with
    mask-overlay payload, the top row is the same spectrum/mask content as the standalone
    ``*_mask_overlay_debug_fib*.html`` (initial overlay velocity: finite ``ccf_input_velocity`` if
    set, else ``0`` m/s; chunk dropdown uses ``restyle``). CCF slot dropdown aligns with the CCF
@@ -15,13 +15,13 @@ There are **three** preview surfaces:
    ``write_template_overlay_debug_pages``): one shared page implementation
    (:mod:`~hispecdrp.primitives.stellar_rv.previews.ccf_spectrum_overlay_debug_html` + embedded
    ``ccf_spectrum_overlay_unified.html.in``) with an ``overlay_kind`` switch. **Mask** mode
-   (``ccf_mask_kpf``): per-**chunk** spectrum (equal-µm bins from ``window_size_um`` /
+   (``ccf_line_mask``): per-**chunk** spectrum (equal-µm bins from ``window_size_um`` /
    :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or for
    ``window_line_by_line`` the symmetric ``window_size_um`` band about each predicted observed
-   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf_utils.mask_kpf_line_window_spectrum_band_um`)
+   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_window_spectrum_band_um`)
    with shifted mask
    segments and the **pipeline** mask CCF per chunk (same Numba grid as RVCCF; the overlay restores
-   the **raw** weighted mask statistic when ``MASK_KPF_STORED_CCF_NEGATED_FROM_RAW`` is true in
+   the **raw** weighted mask statistic when ``LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`` is true in
    ``ccf_utils``, matching the absorption-shaped CCF from the data). **Template** mode (``ccf_stellar_template``):
    same chrome, but the spectrum panel overplots the median-normalized rest-frame template
    Doppler-shifted onto each chunk’s wavelength samples; the CCF panel still uses the **pipeline**
@@ -36,10 +36,11 @@ There are **three** preview surfaces:
    Payload arrays are **downsampled** before embedding; limits come from env
    ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS`` / ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS``
    (template crop length: ``HISPEC_DRP_TEMPLATE_OVERLAY_MAX_TEMPLATE_POINTS``).
-   **Lagrange pixel-interpolation** curve on the mask spectrum panel (same stencil as
-   ``rv_per_chunks_mask_kpf`` / ``mask_ccf_pixel_interp_order``) is **always** embedded in mask
-   overlay debug HTML. Optional ``HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS`` sets the dense λ
-   grid size before downsampling (default ``320`` when unset); values are clamped to ``[24, 8192]``.
+  **Lagrange pixel-interpolation** curve on the mask spectrum panel (same stencil as
+  ``rv_per_chunks_line_mask`` / ``mask_ccf_pixel_interp_order``) is **always** embedded in mask
+  overlay debug HTML. The dense λ grid size is derived from the displayed spectrum point count:
+  ``n_dense = 2 * mask_ccf_pixel_interp_order * N_specpoints`` (clamped to ``[24, 8192]``),
+  where ``N_specpoints`` is the number of points in the plotted blue spectrum trace.
 
 Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
 mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
@@ -51,7 +52,7 @@ flags into the writers below; :func:`write_mask_overlay_debug_pages` /
 (mask vs. template overlay);
 :func:`collect_mask_overlay_payload_for_primitive` and related helpers assemble mask/spectrum
 payloads from ``ccf_utils`` and the L2 model. Environment variables
-``HISPEC_DRP_MASK_OVERLAY_*`` and ``HISPEC_DRP_SHOW_CCF_PREVIEW`` adjust downsampling and
+``HISPEC_DRP_MASK_OVERLAY_*`` and ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS`` adjust downsampling and
 browser behavior (see in-file constants and call sites).
 
 Notes
@@ -81,35 +82,36 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
+from astropy import units as u
 
 from ....datamodels.dqflags import DQ_FLAGS
+from ....utils.line_mask_utils import restrict_mask_to_chunk, stellar_rv_ccf_mask_lines
+from ....utils.physical_constants import C_M_S
+from ..stellar_rv_primitive import (
+    combine_rv_estimates_median_mad_weighted,
+    combine_rvs_median_mad,
+)
 from ...utils.ccf_utils import (
     CCFFitKpfConfig,
-    MASK_KPF_STORED_CCF_NEGATED_FROM_RAW,
+    LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
     _gaussian_ccf_model,
     build_hybrid_merged_velocity_grid,
-    build_mask_kpf_chunk_wavelength_intervals_line_by_line,
+    build_line_mask_chunk_wavelength_intervals_line_by_line,
     ccf_order_n_chunks_for_span,
     clip_gaussian_plot_velocity_range_m_s,
-    combine_rv_estimates_median_mad_weighted,
-    combine_rvs_median_mad,
     effective_ccf_v_step_for_fit,
-    ensure_mask_kpf_lstsq_preview_plot_metadata,
+    ensure_line_mask_lstsq_preview_plot_metadata,
     fit_ccf_rv,
-    load_mask_lines_for_ccf_mask_kpf,
-    mask_kpf_line_window_spectrum_band_um,
+    mask_line_window_spectrum_band_um,
     refine_ccf_rv_coarse_grid_parabolic,
     resolve_ccf_broad_grid_m_s,
-    restrict_mask_to_chunk,
+    STELLAR_RV_LINE_MASK_ALGORITHMS,
 )
 
 from .ccf_spectrum_overlay_debug_html import build_ccf_spectrum_overlay_debug_html
 
 logger = logging.getLogger(__name__)
-
-# Speed of light (m/s); mask wavelength shift matches overlay HTML / ``collect_mask_overlay_payload``.
-C_M_S = 299792458.0
 
 # Inner HTML for ``ccf_spectrum_overlay_unified.html.in`` help paragraph (trusted markup only).
 _MASK_OVERLAY_SPECTRUM_HELP_HTML = (
@@ -238,17 +240,6 @@ def _env_positive_int(name: str, default: int, *, floor: int = 32) -> int:
 def _truthy_env(name: str) -> bool:
     raw = os.environ.get(name, "").strip().lower()
     return raw in ("1", "true", "yes", "y", "on")
-
-
-def _mask_overlay_spec_interp_n_dense_from_env() -> int:
-    """Dense λ samples before downsampling to ``MASK_OVERLAY_SPECTRUM_MAX_POINTS``."""
-    raw = os.environ.get("HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS", "").strip()
-    if not raw:
-        return 320
-    try:
-        return max(24, min(int(raw), 8192))
-    except ValueError:
-        return 320
 
 
 def _mask_unique_sorted_xy(w: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -533,7 +524,7 @@ def _preview_gaussian_curve_v_range_m_s(
     return lo, hi
 
 
-def _mask_kpf_preview_gaussian_overlay_params(
+def _line_mask_preview_gaussian_overlay_params(
     sl: dict,
     params: dict,
     diag: dict,
@@ -541,10 +532,10 @@ def _mask_kpf_preview_gaussian_overlay_params(
     ccf: np.ndarray,
 ) -> tuple[float, float, float, float] | None:
     """
-    Display-only Gaussian (amplitude, v0, sigma, baseline) for mask-KPF CCF previews.
+    Display-only Gaussian (amplitude, v0, sigma, baseline) for line-mask CCF previews.
 
     LevMar ``params`` can carry a near-zero ``amplitude`` while the reported RV uses
-    ``mask_kpf_refine_rmeta`` (LSTSQ parabolic vertex). The overlay uses ``rv_refined_m_s``
+    ``line_mask_refine_rmeta`` (LSTSQ parabolic vertex). The overlay uses ``rv_refined_m_s``
     as ``v0`` when present, applies the same ``sigma`` sanity caps as before, then solves for
     **(amplitude, baseline)** by linear least squares on the slot CCF:
 
@@ -560,7 +551,7 @@ def _mask_kpf_preview_gaussian_overlay_params(
     amp_lm = float(params["amplitude"])
     sig = float(params["sigma"])
     base_lm = float(params["baseline"])
-    rmeta = sl.get("mask_kpf_refine_rmeta") if isinstance(sl, dict) else None
+    rmeta = sl.get("line_mask_refine_rmeta") if isinstance(sl, dict) else None
     if isinstance(rmeta, dict) and rmeta.get("ok"):
         rv_r = rmeta.get("rv_refined_m_s")
         if rv_r is not None and math.isfinite(float(rv_r)):
@@ -599,7 +590,7 @@ def _mask_kpf_preview_gaussian_overlay_params(
     return amp, v0, sig, base
 
 
-def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
+def _line_mask_refine_plotly_traces_from_cached_rmeta(
     fig: go.Figure,
     row: int,
     *,
@@ -611,10 +602,10 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
     ylim_hi: float,
 ) -> list[int]:
     """
-    Build the five mask-KPF refine overlay traces from ``rmeta`` (no second parabolic solve).
+    Build the five line-mask refine overlay traces from ``rmeta`` (no second parabolic solve).
 
     Used when :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict` already
-    ran refinement and stored ``mask_kpf_refine_rmeta`` on the slot.
+    ran refinement and stored ``line_mask_refine_rmeta`` on the slot.
     """
     trace_indices: list[int] = []
 
@@ -644,7 +635,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
                 mode="lines",
                 name=v_label,
                 line=dict(width=1.5, color="black", dash="dash"),
-                legendgroup="mask_kpf_refine",
+                legendgroup="line_mask_refine",
                 showlegend=False,
                 visible=visible,
             ),
@@ -659,10 +650,10 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
         return trace_indices
 
     # Without coarse-grid Gaussian-smooth refine metadata: LSTSQ path may still carry
-    # ``refine_parabola_*`` / ``lstsq_parabola_*`` from :func:`refine_ccf_rv_mask_kpf_lstsq_from_stored`.
+    # ``refine_parabola_*`` / ``lstsq_parabola_*`` from :func:`refine_ccf_rv_line_mask_lstsq_from_stored`.
     if "refine_curve_v_m_s" not in rmeta:
         if (
-            rmeta.get("refine_method") == "mask_kpf_lstsq_parabolic_vertex"
+            rmeta.get("refine_method") == "line_mask_lstsq_parabolic_vertex"
             and rmeta.get("refine_parabola_v_dense_m_s") is not None
             and rmeta.get("lstsq_parabola_v_samples_m_s") is not None
         ):
@@ -678,7 +669,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
                         mode="lines",
                         name="Parabolic fit (LSTSQ on CCF)",
                         line=dict(width=2.5, color="rgb(204, 51, 102)", dash="dash"),
-                        legendgroup="mask_kpf_refine",
+                        legendgroup="line_mask_refine",
                         showlegend=show_legend,
                         visible=visible,
                     ),
@@ -703,7 +694,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
                             symbol="diamond",
                             line=dict(width=1.5, color="white"),
                         ),
-                        legendgroup="mask_kpf_refine",
+                        legendgroup="line_mask_refine",
                         showlegend=show_legend,
                         visible=visible,
                     ),
@@ -736,7 +727,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
             line=dict(width=0),
             mode="lines",
             name="Refine ±1σ (smoothed)",
-            legendgroup="mask_kpf_refine",
+            legendgroup="line_mask_refine",
             showlegend=show_legend,
             visible=visible,
             hoverinfo="skip",
@@ -753,7 +744,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
             mode="lines",
             name="Smoothed CCF (refine basis)",
             line=dict(width=2.0, color="rgb(0,114,178)"),
-            legendgroup="mask_kpf_refine",
+            legendgroup="line_mask_refine",
             showlegend=show_legend,
             visible=visible,
         ),
@@ -772,7 +763,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
                 mode="lines",
                 name="Parabolic fit (Gaussian-smoothed CCF)",
                 line=dict(width=2.5, color="rgb(204, 51, 102)", dash="dash"),
-                legendgroup="mask_kpf_refine",
+                legendgroup="line_mask_refine",
                 showlegend=show_legend,
                 visible=visible,
             ),
@@ -797,7 +788,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
                 mode="markers",
                 name="Parabolic samples (3-point, smoothed CCF)",
                 marker=dict(size=13, color="rgb(204, 51, 102)", symbol="diamond"),
-                legendgroup="mask_kpf_refine",
+                legendgroup="line_mask_refine",
                 showlegend=show_legend,
                 visible=visible,
             ),
@@ -812,7 +803,7 @@ def _mask_kpf_refine_plotly_traces_from_cached_rmeta(
     return trace_indices
 
 
-def _mask_kpf_refine_ccf_add_plotly_traces(
+def _line_mask_refine_ccf_add_plotly_traces(
     fig: go.Figure,
     row: int,
     *,
@@ -827,12 +818,12 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
     ylim_hi: float,
 ) -> list[int]:
     """
-    For ``ccf_mask_kpf``, overlay :func:`~hispecdrp.primitives.utils.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
+    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
     curves on the CCF panel (smoothed CCF ±1σ, local parabola, refined RV line). Refinement uses
     the default pipeline behaviour: scan ``smooth_sigma_scale`` to minimize
     ``|RV_refined − v_0|`` versus the Gaussian fit center (unless disabled in that function).
 
-    When the slot carries ``mask_kpf_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict`,
+    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict`,
     that result is reused so Plotly does not repeat the parabolic refinement.
 
     Always appends **five** traces (real overlays or empty placeholders) so dropdown indices stay aligned.
@@ -847,7 +838,7 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
         )
         trace_indices.append(len(fig.data) - 1)
 
-    cached = sl.get("mask_kpf_refine_rmeta")
+    cached = sl.get("line_mask_refine_rmeta")
     kpf = sl.get("kpf_fit")
     rv_slot = kpf.get("rv") if isinstance(kpf, dict) else None
     if (
@@ -856,10 +847,10 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
         and rv_slot is not None
         and np.isfinite(float(rv_slot))
     ):
-        rmeta_use = ensure_mask_kpf_lstsq_preview_plot_metadata(cached, vg, ccf)
+        rmeta_use = ensure_line_mask_lstsq_preview_plot_metadata(cached, vg, ccf)
         if rmeta_use is None:
             rmeta_use = cached
-        return _mask_kpf_refine_plotly_traces_from_cached_rmeta(
+        return _line_mask_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
             rv_r_m_s=float(rv_slot),
@@ -901,7 +892,7 @@ def _mask_kpf_refine_ccf_add_plotly_traces(
                 _placeholder()
             return trace_indices
 
-        return _mask_kpf_refine_plotly_traces_from_cached_rmeta(
+        return _line_mask_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
             rv_r_m_s=float(rv_r),
@@ -1010,7 +1001,7 @@ def _per_order_pipeline_rv_iv_mean_m_s(tbl) -> dict[int, tuple[float, float]]:
     return out
 
 
-def _pipeline_rv_for_mask_kpf_preview_slot(tbl, sl: dict) -> tuple[float, float] | None:
+def _pipeline_rv_for_line_mask_preview_slot(tbl, sl: dict) -> tuple[float, float] | None:
     """Single-chunk RV / RV_ERR from ``RVCCF`` (m/s) when ``rvccf_chunk_id`` is set on the slot."""
     rid = sl.get("rvccf_chunk_id")
     if tbl is None or rid is None or "CHUNK_ID" not in tbl.colnames:
@@ -1028,7 +1019,7 @@ def _pipeline_rv_for_mask_kpf_preview_slot(tbl, sl: dict) -> tuple[float, float]
     return rv, rv_e
 
 
-def _slot_by_order_chunk_from_mask_kpf_preview(prev: dict | None) -> dict[tuple[int, int], dict]:
+def _slot_by_order_chunk_from_line_mask_preview(prev: dict | None) -> dict[tuple[int, int], dict]:
     """Map (echelle ``ORDER``, chunk index along that order) → CCF preview slot dict."""
     out: dict[tuple[int, int], dict] = {}
     if not prev:
@@ -1046,7 +1037,7 @@ def _slot_by_order_chunk_from_mask_kpf_preview(prev: dict | None) -> dict[tuple[
     return out
 
 
-def _collapse_mask_kpf_rv_scatter_rows(
+def _collapse_line_mask_rv_scatter_rows(
     wl_um: np.ndarray,
     rv_m_s: np.ndarray,
     rv_err_m_s: np.ndarray,
@@ -1056,10 +1047,10 @@ def _collapse_mask_kpf_rv_scatter_rows(
     rv_dup_atol_m_s: float = 1e-3,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
     """
-    Collapse RV vs wavelength preview points when ``ccf_mask_kpf`` duplicated the **same**
+    Collapse RV vs wavelength preview points when ``ccf_line_mask`` duplicated the **same**
     order-level RV/ERR at every wavelength chunk center.
 
-    Mask-KPF **evaluates** the mask statistic on overlapping wavelength segments of width
+    Line-mask mode **evaluates** the mask statistic on overlapping wavelength segments of width
     ``window_size_um`` along each order (multiple chunks per order). When the order-mean
     Gaussian + refine path succeeds, the pipeline **stores one RV per echelle order** on
     every chunk row of ``RVCCF``. The RV panel should show **one marker per order** (λ =
@@ -1126,9 +1117,9 @@ def _rvcc_hover_order_segment_line(
     """
     One hover line per RVCCF scatter point: ``Order m, Segment k/n``.
 
-    For non-collapsed mask-KPF rows, segment index follows the same **descending chunk-center
+    For non-collapsed line-mask rows, segment index follows the same **descending chunk-center
     λ** ordering as the pipeline / mask-overlay HTML (red → blue within each echelle order).
-    When :func:`_collapse_mask_kpf_rv_scatter_rows` merged duplicate order-mean RVs, there is
+    When :func:`_collapse_line_mask_rv_scatter_rows` merged duplicate order-mean RVs, there is
     no single segment — label with an order-mean note instead.
     """
     oa = np.asarray(order_col, dtype=np.int64).ravel()
@@ -1185,16 +1176,16 @@ def _preview_should_write_png(primitive) -> bool:
     PNG via Kaleido is often several seconds for large multi-panel figures; HTML
     is usually much faster.
 
-    When env ``HISPEC_DRP_SHOW_CCF_PREVIEW`` is set (typical interactive preview
-    runs), PNG export is disabled and only HTML is written when ``save_preview``
-    is True.
+    When env ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS`` is set (typical interactive /
+    test preview runs), PNG export is disabled and only HTML is written when
+    ``save_preview`` is True.
 
     Otherwise, when ``save_preview`` is True, PNGs are written alongside HTML unless
     the environment disables them as above.
     """
     if not getattr(primitive, "save_preview", False):
         return False
-    if _env_flag("HISPEC_DRP_SHOW_CCF_PREVIEW"):
+    if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
         return False
     return True
 
@@ -1302,29 +1293,29 @@ def collect_mask_overlay_payload_for_primitive(
     chunk_wavelength_um: np.ndarray | None = None,
 ) -> dict | None:
     """
-    Build per-**chunk** spectrum + mask payload for mask-overlay debug HTML (``ccf_mask_kpf``).
+    Build per-**chunk** spectrum + mask payload for mask-overlay debug HTML (``ccf_line_mask``).
 
     Chunk wavelength bins match :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`
-    and ``window_size_um`` on the primitive. Pixel gates follow ``rv_per_chunks_mask_kpf`` (finite
+    and ``window_size_um`` on the primitive. Pixel gates follow ``rv_per_chunks_line_mask`` (finite
     flux/error, not ``DO_NOT_USE``); chunks with fewer than ``ccf_min_good_pixels`` included pixels
     are omitted.
 
     Each row still uses key ``order`` for the echelle order number plus ``chunk_index`` /
     ``chunk_n`` for the segment on that order. Segments on an echelle row are ordered **descending**
-    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`.
+    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`.
     Payload rows include ``voronoi_lo_um`` / ``voronoi_hi_um`` (line-window Voronoi chunk bounds),
     ``spectrum_band_lo_um`` / ``spectrum_band_hi_um`` (symmetric ``window_size_um`` band used for
     pixels, slightly padded), ``window_edge_lo_um`` / ``window_edge_hi_um`` (±½``window_size_um`` at
     ``ccf_input_velocity`` for guide lines), and ``chunk_center_um`` (mean predicted observed mask-line
     λ in the chunk). Mask lines and weights match
-    :func:`~hispecdrp.primitives.utils.ccf_utils.restrict_mask_to_chunk` for each chunk span.
+    :func:`~hispecdrp.utils.line_mask_utils.restrict_mask_to_chunk` for each chunk span.
 
     When per-chunk pipeline RV arrays are supplied, ``fit_rv_m_s`` / ``fit_rv_err_m_s`` match the
     chunk center wavelength when ``chunk_wavelength_um`` aligns with the run.
     """
     vm, vx, _vs = _preview_ccf_velocity_range_m_s(primitive)
     try:
-        mask_lines, _src = load_mask_lines_for_ccf_mask_kpf(
+        mask_lines, _src = stellar_rv_ccf_mask_lines(
             mask_path=getattr(primitive, "mask_path", None),
             mask_wavelength=getattr(primitive, "mask_wavelength", None),
             mask_weight=getattr(primitive, "mask_weight", None),
@@ -1382,7 +1373,7 @@ def collect_mask_overlay_payload_for_primitive(
         span_um = float(w_max - w_min)
         _w_edge_eps = max(1e-15, abs(float(w_max)) * 1e-12)
         if use_line_window:
-            wl_lo_a, wl_hi_a, wl_ctr_a = build_mask_kpf_chunk_wavelength_intervals_line_by_line(
+            wl_lo_a, wl_hi_a, wl_ctr_a = build_line_mask_chunk_wavelength_intervals_line_by_line(
                 w_row,
                 mask_lines,
                 v_center_m_s=float(v_in),
@@ -1435,7 +1426,7 @@ def collect_mask_overlay_payload_for_primitive(
             w_edge_lo: float | None = None
             w_edge_hi: float | None = None
             if use_line_window:
-                band_lo, band_hi = mask_kpf_line_window_spectrum_band_um(
+                band_lo, band_hi = mask_line_window_spectrum_band_um(
                     float(wl_center),
                     float(window_um),
                     w_min,
@@ -1493,9 +1484,10 @@ def collect_mask_overlay_payload_for_primitive(
                 zb=float(getattr(primitive, "ccf_zb", 0.0)),
             )
             if mask_o.line_lambda_um.size > 0:
-                ml = np.asarray(mask_o.line_lambda_um, dtype=np.float64)
-                mstart = ml
-                mend = ml
+                # Use full segment widths when present (KPF-style finite edges). For delta masks,
+                # left/right edges coincide with the center and the overlay expands them only by minDx.
+                mstart = np.asarray(mask_o.line_left_edge.to_value(u.um), dtype=np.float64)
+                mend = np.asarray(mask_o.line_right_edge.to_value(u.um), dtype=np.float64)
                 mw_raw = np.asarray(mask_o.weight, dtype=np.float64)
                 mw = mw_raw.copy()
             else:
@@ -1528,12 +1520,13 @@ def collect_mask_overlay_payload_for_primitive(
             if w_edge_lo is not None and w_edge_hi is not None:
                 row_payload["window_edge_lo_um"] = float(w_edge_lo)
                 row_payload["window_edge_hi_um"] = float(w_edge_hi)
-            pio_slot = int(getattr(primitive, "mask_ccf_pixel_interp_order", 1) or 1)
+            pio_slot = int(getattr(primitive, "mask_ccf_pixel_interp_order", 3) or 3)
+            n_dense = 10 * int(pio_slot) * int(len(w_plot))
             icurve = _mask_overlay_spec_interp_curve(
                 w_c,
                 s_norm,
                 pixel_interp_order=pio_slot,
-                n_dense=_mask_overlay_spec_interp_n_dense_from_env(),
+                n_dense=n_dense,
                 spec_downsample_lim=spec_lim,
             )
             if icurve is not None:
@@ -1549,9 +1542,10 @@ def collect_mask_overlay_payload_for_primitive(
         )
         return None
 
-    slot_by_oc = _slot_by_order_chunk_from_mask_kpf_preview(
+    slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
         getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
-        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+        if (getattr(primitive, "algorithm", None) or "").strip().lower()
+        in STELLAR_RV_LINE_MASK_ALGORITHMS
         else None
     )
     for entry in entries:
@@ -1566,8 +1560,8 @@ def collect_mask_overlay_payload_for_primitive(
             continue
         # Slots / RVCCF use the stored convention (often negated so parabolic/Gaussian fits target a
         # maximum). The mask-overlay CCF panel should match the raw weighted mask statistic from
-        # :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf` (absorption-like).
-        if bool(MASK_KPF_STORED_CCF_NEGATED_FROM_RAW):
+        # :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` (absorption-like).
+        if bool(LINE_MASK_CCF_STORED_NEGATED_FROM_RAW):
             ccf_row = -ccf_row
         ce = sl.get("ccf_err")
         cea = (
@@ -1595,8 +1589,9 @@ def collect_mask_overlay_payload_for_primitive(
     out_payload: dict = {
         "fiber": str(fiber),
         "orders": entries,
+        "window_line_by_line": bool(getattr(primitive, "window_line_by_line", False)),
         "mask_ccf_pixel_interp_order": int(
-            getattr(primitive, "mask_ccf_pixel_interp_order", 1) or 1
+            getattr(primitive, "mask_ccf_pixel_interp_order", 3) or 3
         ),
     }
     return out_payload
@@ -1786,7 +1781,7 @@ def collect_template_overlay_payload_for_primitive(
     min_good = max(1, int(getattr(primitive, "ccf_min_good_pixels", 9)))
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
 
-    slot_by_oc = _slot_by_order_chunk_from_mask_kpf_preview(
+    slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
         getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
     )
 
@@ -2045,7 +2040,7 @@ def maybe_write_ccf_overlay_debug_html(
     Called from :meth:`StellarRVPrimitive._perform` after per-fiber processing so
     ``primitive._mask_overlay_by_fiber`` / ``primitive._template_overlay_by_fiber`` are populated.
     """
-    if algo_key == "ccf_mask_kpf" and bool(
+    if (algo_key or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS and bool(
         getattr(primitive, "show_overlay_debug", False)
         or getattr(primitive, "save_overlay_debug", False)
     ):
@@ -2098,6 +2093,7 @@ def _preview_gaussian_cache_and_slot_legends(
         if not detail:
             slot_metadata[fiber] = []
             continue
+        _prim_algo_lm = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
         rv_agg_tbl, rv_agg_err_tbl, per_order_rv = pipeline_rv_by_fiber[fiber]
         v_step = float(detail["v_step"])
         slots = detail["slots"]
@@ -2125,7 +2121,7 @@ def _preview_gaussian_cache_and_slot_legends(
                     _ccf_arr = np.asarray(sl["ccf"], dtype=np.float64)
                     _mask_wbl = (
                         bool(getattr(primitive, "window_line_by_line", False))
-                        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+                        if _prim_algo_lm
                         else False
                     )
                     _gseed = getattr(primitive, "ccf_input_velocity", None)
@@ -2140,14 +2136,14 @@ def _preview_gaussian_cache_and_slot_legends(
                         v_step,
                         return_params=True,
                         ccf_err=_ce_arr,
-                        ccf_mask_kpf_stored_negated=(
-                            MASK_KPF_STORED_CCF_NEGATED_FROM_RAW
-                            if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+                        ccf_line_mask_stored_negated=(
+                            LINE_MASK_CCF_STORED_NEGATED_FROM_RAW
+                            if _prim_algo_lm
                             else None
                         ),
-                        mask_kpf_line_window_by_line=_mask_wbl,
+                        line_mask_line_window_by_line=_mask_wbl,
                         gaussian_seed_mean_m_s=_gs
-                        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+                        if _prim_algo_lm
                         else None,
                     )
                     rv_err = float(_re) if _re is not None and np.isfinite(_re) else np.nan
@@ -2155,7 +2151,7 @@ def _preview_gaussian_cache_and_slot_legends(
                     fit_slot_cache[sid] = (params, diag, rv_err, rv_final)
             params, diag, rv_err, rv_final = fit_slot_cache[sid]
             v_report = rv_final if np.isfinite(rv_final) else float(params.get("v0", np.nan))
-            is_mask_kpf = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+            is_line_mask = _prim_algo_lm
             if sl.get("kind") == "mean":
                 meta = "Mean · all ord"
                 if np.isfinite(rv_agg_tbl):
@@ -2187,8 +2183,8 @@ def _preview_gaussian_cache_and_slot_legends(
                 except (TypeError, ValueError):
                     oo = None
                 chunk_tbl = (
-                    _pipeline_rv_for_mask_kpf_preview_slot(tbl_rv, sl)
-                    if is_mask_kpf
+                    _pipeline_rv_for_line_mask_preview_slot(tbl_rv, sl)
+                    if is_line_mask
                     else None
                 )
                 if chunk_tbl is not None:
@@ -2199,7 +2195,7 @@ def _preview_gaussian_cache_and_slot_legends(
                     )
                 elif oo is not None and oo in per_order_rv:
                     rp, rpe = per_order_rv[oo]
-                    if is_mask_kpf:
+                    if is_line_mask:
                         meta += (
                             f"<br>RV (Gauss=table): {rp / 1000.0:.4f} km/s · "
                             f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
@@ -2210,15 +2206,15 @@ def _preview_gaussian_cache_and_slot_legends(
                             f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
                         )
                 elif oo is not None:
-                    lbl = "RV" if is_mask_kpf else "Pipe"
+                    lbl = "RV" if is_line_mask else "Pipe"
                     meta += f"<br>{lbl}: —"
             if params and diag.get("fit_ok"):
                 v0_lm = float(params["v0"])
                 sig_lm = float(params["sigma"])
                 amp_lm = float(params["amplitude"])
                 v0, sig, amp = v0_lm, sig_lm, amp_lm
-                if is_mask_kpf:
-                    _ov_leg = _mask_kpf_preview_gaussian_overlay_params(
+                if is_line_mask:
+                    _ov_leg = _line_mask_preview_gaussian_overlay_params(
                         sl,
                         params,
                         diag,
@@ -2227,7 +2223,7 @@ def _preview_gaussian_cache_and_slot_legends(
                     )
                     if _ov_leg is not None:
                         amp, v0, sig, _base_leg = _ov_leg
-                if is_mask_kpf and sl.get("kind") != "mean":
+                if is_line_mask and sl.get("kind") != "mean":
                     meta += (
                         f"<br>Gaussian overlay (LSTSQ-centered): "
                         f"center={v0 / 1000.0:.4f} km/s · σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
@@ -2241,7 +2237,7 @@ def _preview_gaussian_cache_and_slot_legends(
                         f"<br>RV (fit+refine, table): {v_report / 1000.0:.4f} km/s"
                     )
                     tbl_rp: float | None = None
-                    ct = _pipeline_rv_for_mask_kpf_preview_slot(tbl_rv, sl)
+                    ct = _pipeline_rv_for_line_mask_preview_slot(tbl_rv, sl)
                     if ct is not None:
                         tbl_rp = float(ct[0])
                     if tbl_rp is None:
@@ -2255,7 +2251,7 @@ def _preview_gaussian_cache_and_slot_legends(
                         meta += f"<br><i>ΔRV vs table {v_report - tbl_rp:+.2f} m/s</i>"
                     meta += f"<br>σ_RV: {_preview_abbrev_ccf_uncertainty(diag)}"
                 else:
-                    if is_mask_kpf:
+                    if is_line_mask:
                         meta += (
                             f"<br>RV (fit+refine)={v_report / 1000.0:.4f} km/s · "
                             f"overlay σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
@@ -2269,7 +2265,7 @@ def _preview_gaussian_cache_and_slot_legends(
                         dvp = v_report - rv_agg_tbl
                         if np.isfinite(dvp) and abs(dvp) > 250.0:
                             meta += f"<br><i>RV−⟨RV⟩tbl {dvp:+.0f} m/s</i>"
-                    elif sl.get("kind") != "mean" and not is_mask_kpf:
+                    elif sl.get("kind") != "mean" and not is_line_mask:
                         try:
                             oi = int(sl.get("order"))
                         except (TypeError, ValueError):
@@ -2392,8 +2388,8 @@ def _preview_export_combined_html(
                     "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
                 )
         else:
-            if _env_flag("HISPEC_DRP_SHOW_CCF_PREVIEW"):
-                skip_reason = "HISPEC_DRP_SHOW_CCF_PREVIEW (HTML-only preview)"
+            if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
+                skip_reason = "HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS (HTML-only preview)"
             else:
                 skip_reason = "disabled"
             logger.info(
@@ -2433,14 +2429,14 @@ def create_stellar_rv_preview(primitive) -> None:
     """
     Writes ``*_preview.html`` with **two** Plotly embeds:
 
-    1. **RV figure** — Pipeline RV vs wavelength (Δ vs ⟨RV⟩). For ``ccf_mask_kpf`` with the
+    1. **RV figure** — Pipeline RV vs wavelength (Δ vs ⟨RV⟩). For ``ccf_line_mask`` with the
        order-mean+refine path, **one marker per echelle order** (λ = mean of mask chunk centers)
        when RVCCF repeats the same RV on every chunk row; otherwise one marker per chunk. Own
        mode bar.
     2. **CCF figure** — Per fiber, CCF vs velocity (y-axis ``CCF``) then **Residual CCF**
        (raw CCF minus the Gaussian model on the full grid, same units). The Gaussian trace is
        drawn over a **narrow symmetric** span around ``v₀`` (not the full LevMar window). For
-       ``ccf_mask_kpf``, the black **dashed** vertical line is the final refined RV; for template
+       ``ccf_line_mask``, the black **dashed** vertical line is the final refined RV; for template
        CCF, a dashed line marks Gaussian ``v₀``. **Dropdown** switches slot on both rows;
        velocity zoom/pan is **linked** (``matches``). Own mode bar.
 
@@ -2479,7 +2475,7 @@ def create_stellar_rv_preview(primitive) -> None:
         getattr(primitive, "show_preview", False),
     )
 
-    # Per fiber: RV vs λ scatter (optionally one point per echelle order for mask-KPF
+    # Per fiber: RV vs λ scatter (optionally one point per echelle order for line-mask
     # order-mean duplicate rows) + metadata for subplot titles.
     rv_plot_by_fiber: dict[str, dict] = {}
     for fiber in fibers_with_ccf:
@@ -2511,8 +2507,8 @@ def create_stellar_rv_preview(primitive) -> None:
             else np.full(len(wl), -1, dtype=np.int64)
         )
         collapsed = False
-        if getattr(primitive, "algorithm", None) == "ccf_mask_kpf" and "ORDER" in tbl.colnames:
-            wl, rv, rv_err, inlier, order_col, collapsed = _collapse_mask_kpf_rv_scatter_rows(
+        if (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS and "ORDER" in tbl.colnames:
+            wl, rv, rv_err, inlier, order_col, collapsed = _collapse_line_mask_rv_scatter_rows(
                 wl, rv, rv_err, inlier, order_col
             )
         if (not collapsed) and wl.size > 1 and "ORDER" in tbl.colnames:
@@ -2571,7 +2567,7 @@ def create_stellar_rv_preview(primitive) -> None:
         else:
             subplot_titles_rv.append(f"Fiber {fiber} — per chunk RV")
         subplot_titles_ccf.append(
-            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; mask-KPF parabolic refine; slot ↓)"
+            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; line-mask parabolic refine; slot ↓)"
         )
         subplot_titles_ccf.append(f"Fiber {fiber} — Residual CCF")
 
@@ -2882,7 +2878,7 @@ def create_stellar_rv_preview(primitive) -> None:
                 continue
             v_step = float(detail["v_step"])
             slots = detail["slots"]
-            is_mask_kpf = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+            is_line_mask = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
             ccf_trace_indices[fiber] = []
             # Shared y-axis for the whole CCF row: use all preview slots (mean + per-order
             # chunks). Limits from slot 0 alone clip mask-line chunk CCFs and LSTSQ overlays
@@ -2926,8 +2922,8 @@ def create_stellar_rv_preview(primitive) -> None:
                 _amp_p = _v0_p = _sig_p = _base_p = float("nan")
                 if params and diag.get("fit_ok"):
                     _ov = (
-                        _mask_kpf_preview_gaussian_overlay_params(sl, params, diag, vg, ccf)
-                        if is_mask_kpf
+                        _line_mask_preview_gaussian_overlay_params(sl, params, diag, vg, ccf)
+                        if is_line_mask
                         else None
                     )
                     if _ov is not None:
@@ -3026,7 +3022,7 @@ def create_stellar_rv_preview(primitive) -> None:
                         col=1,
                     )
                 ccf_band_trace_idx.append(idx_fit)
-                if (not is_mask_kpf) and params and diag.get("fit_ok"):
+                if (not is_line_mask) and params and diag.get("fit_ok"):
                     v0_km = float(params["v0"]) / 1000.0
                     idx_v0 = len(fig_ccf.data)
                     fig_ccf.add_trace(
@@ -3043,8 +3039,8 @@ def create_stellar_rv_preview(primitive) -> None:
                         col=1,
                     )
                     ccf_band_trace_idx.append(idx_v0)
-                if is_mask_kpf:
-                    for ti in _mask_kpf_refine_ccf_add_plotly_traces(
+                if is_line_mask:
+                    for ti in _line_mask_refine_ccf_add_plotly_traces(
                         fig_ccf,
                         row,
                         sl=sl,
@@ -3068,7 +3064,7 @@ def create_stellar_rv_preview(primitive) -> None:
             continue
         slots = detail["slots"]
         resid_trace_indices[fiber] = []
-        is_mask_kpf_r = getattr(primitive, "algorithm", None) == "ccf_mask_kpf"
+        is_line_mask_r = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
         # Match CCF row: default y-range from the first slot, same padding rule as
         # :func:`_preview_ccf_y_limits` (~10% wider than robust data span).
         if slots:
@@ -3078,10 +3074,10 @@ def create_stellar_rv_preview(primitive) -> None:
             ccf0 = np.asarray(sl0["ccf"], dtype=np.float64)
             if params0 and diag0.get("fit_ok"):
                 _ov0 = (
-                    _mask_kpf_preview_gaussian_overlay_params(
+                    _line_mask_preview_gaussian_overlay_params(
                         sl0, params0, diag0, vg0, ccf0
                     )
-                    if is_mask_kpf_r
+                    if is_line_mask_r
                     else None
                 )
                 if _ov0 is not None:
@@ -3105,8 +3101,8 @@ def create_stellar_rv_preview(primitive) -> None:
             visible = si == 0
             if params and diag.get("fit_ok"):
                 _ovr = (
-                    _mask_kpf_preview_gaussian_overlay_params(sl, params, diag, vg, ccf)
-                    if is_mask_kpf_r
+                    _line_mask_preview_gaussian_overlay_params(sl, params, diag, vg, ccf)
+                    if is_line_mask_r
                     else None
                 )
                 if _ovr is not None:

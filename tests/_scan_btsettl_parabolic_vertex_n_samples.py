@@ -45,7 +45,7 @@ def _build_l2_and_orders():
     wl_min, wl_max = ts._BTSETTL_WL_RANGE_UM
     w_rest, flux_rest = ts._load_btsettl_sorted_micron(path, wl_min, wl_max)
     template_ln = np.log(w_rest)
-    orders = ts._bspec_btsettl_ccf_mask_kpf_order_ids()
+    orders = ts._bspec_btsettl_ccf_line_mask_order_ids()
     n_orders = len(orders)
     n_pix = _TEST_ECHELLE_N_PIX
     wave_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
@@ -91,7 +91,7 @@ def _build_l2_and_orders():
 def bias_m_s(n_samples: int, rvccf_l2, orders, mas_lte049, window_um: float, tmp: str) -> float:
     inj = INPUT_RV_KM_S * 1000.0
     prim = StellarRVPrimitive(
-        algorithm="ccf_mask_kpf",
+        algorithm="ccf_line_mask",
         mask_path=mas_lte049,
         do_fibers=["1"],
         do_orders=orders,

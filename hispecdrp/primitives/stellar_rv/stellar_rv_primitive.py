@@ -1,43 +1,6 @@
-"""
-Stellar radial-velocity primitive (template and mask-line CCF).
+"""Stellar radial-velocity primitive (template and mask-line CCF).
 
-Computes radial velocities (RVs) by cross-correlating each fiber’s L2 spectrum with
-either a **stellar template** (``algorithm="ccf_stellar_template"``) or a **line mask**
-(``algorithm="ccf_mask_kpf"``). Both paths produce **per-wavelength-chunk** RVs and
-uncertainties; chunk estimates are combined with **median/MAD** outlier rejection and
-an **inverse-variance weighted mean** (and related aggregate uncertainty) for the
-fiber-level summary written to RVCCF tables.
-
-**Units.** All RVs and CCF velocity axes are **m s\\ :sup:`−1`** unless noted otherwise
-in downstream tables or previews (e.g. km/s in Plotly).
-
-**Data flow.** The primitive reads ``SPEC_FIB*``, ``SPEC_ERR_FIB*``, ``SPEC_DQ_FIB*``,
-and ``WAVE_FIB*`` from the input L2 model, runs the selected algorithm per fiber and
-echelle order subset, and writes ``RVCCF_FIB*`` / ``RVCCFAVG_FIB*`` (and optional CCF
-columns) on the output L2 clone. Optional Plotly HTML previews are produced when
-``save_preview`` / ``show_preview`` (or ``save_overlay_debug`` / ``show_overlay_debug``) are enabled — see
-:mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`.
-
-Notes
------
-- **Template algorithm** — Uses :mod:`hispecdrp.primitives.utils.ccf_utils` (log-λ
-  weighted-covariance CCF, Numba multi-order driver when not in ``debug_ccf``) and
-  :mod:`hispecdrp.utils.spectral_templates_utils` for template resolution.
-- **Mask algorithm** — Uses mask-line CCF in :mod:`hispecdrp.primitives.utils.ccf_utils`
-  with SPIROU ``.mas`` or KPF-style two-column masks (default path:
-  ``hispecdrp/data/masks/README.md``). Design is **inspired by** public KPF / spirou-ccf
-  ideas; this package does not ship KPF pipeline source.
-
-References
-----------
-.. [1] KPF ``alg_rv_mask_line.py`` (mask-line reference):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
-.. [2] KPF radial_velocity ``src``:
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
-.. [3] spirou-ccf ``spiroulib.py``:
-       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
-.. [4] spirou-ccf ``ccf_masks``:
-       https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+Algorithm overview and references live in ``docs/source/algorithms/stellar_rv.rst``.
 """
 from __future__ import annotations
 
@@ -52,32 +15,42 @@ from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
 from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
 
+from .rv_combine_utils import (
+    combine_rv_estimates_median_mad_weighted,
+    combine_rvs_median_mad,
+    weighted_mean_rv,
+)
+
 from ...utils.parallelization_utils import resolve_numba_threads
 from ..utils.ccf_utils import (
     assemble_rvccf_fib_table,
     build_hybrid_merged_velocity_grid,
     ccf_order_n_chunks_for_span,
-    validate_mask_kpf_line_window_chunking_config,
+    validate_line_mask_line_window_chunking_config,
     build_rvccf_chunk_supplement,
     effective_ccf_v_step_for_fit,
     resolve_ccf_broad_grid_m_s,
-    run_ccf_mask_kpf_for_fiber,
+    run_ccf_line_mask_for_fiber,
+    STELLAR_RV_LINE_MASK_ALGORITHMS,
     _V_MAX,
     _V_MIN,
     _V_STEP,
     build_ccf_preview_dict,
-    combine_rvs_median_mad,
     flat_chunk_echelle_orders,
     masked_ccf_rv,
     process_orders_rvs_numba_parallel,
-    weighted_mean_rv,
 )
 from ...utils.spectral_templates_utils import resolve_stellar_template_to_log_micron
 
-__all__ = ["StellarRVPrimitive", "STELLAR_RV_ALGORITHMS"]
+__all__ = [
+    "StellarRVPrimitive",
+    "STELLAR_RV_ALGORITHMS",
+    "combine_rvs_median_mad",
+    "weighted_mean_rv",
+    "combine_rv_estimates_median_mad_weighted",
+]
 
 logger = logging.getLogger(__name__)
-
 
 def _fiber_l2_bundle(input_model, fiber: str):
     """
@@ -107,14 +80,9 @@ def _fiber_l2_bundle(input_model, fiber: str):
     return spec, err, dq, getattr(input_model, wa)
 
 
-# Registry of stellar RV algorithm names -> method name on StellarRVPrimitive.
-# Each algorithm method has signature (input_model, output_model, fiber, spectrograph,
-# do_orders, order_vec, template_ln, template_flux) and returns
-# (all_wavelengths, all_rvs, all_rv_errs, inlier, rv_mean, rv_std, all_orders, rvccf_chunk_supplement)
-# for _write_rv_tables.
 STELLAR_RV_ALGORITHMS = {
     "ccf_stellar_template": "_run_algorithm_ccf_stellar_template",
-    "ccf_mask_kpf": "_run_algorithm_ccf_mask_kpf",
+    "ccf_line_mask": "_run_algorithm_ccf_line_mask",
 }
 
 
@@ -124,29 +92,13 @@ class StellarRVPrimitive(BasePrimitive):
 
     **Algorithms**
 
-    * ``ccf_mask_kpf`` (default) — mask-shifted CCF using SPIROU ``.mas`` or KPF-style
-      two-column masks (:mod:`~hispecdrp.primitives.utils.ccf_utils`). Packaged defaults
-      and citations: ``hispecdrp/data/masks/README.md``.
+    * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
+      two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
+      :mod:`~hispecdrp.primitives.utils.ccf_utils`).
+      Packaged defaults and citations: ``hispecdrp/data/masks/README.md``.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
-
-    **Units.** Radial velocities and CCF velocity axes in this primitive are **m s\\ :sup:`−1`**.
-    Chunk centers and ``window_size_um`` use **micron**. Results are written to RVCCF /
-    RVCCFAVG on the output L2 clone.
-
-    **Argument groups.** In :attr:`ARGUMENTS`, related keys are clustered: *dispatch*
-    (``suffix``, ``algorithm``, ``do_fibers``, ``do_orders``); *template*
-    (``template_*`` for ``ccf_stellar_template``); *mask line list and mask-only analysis*
-    (``mask_*`` including ``mask_auto_hybrid_scout`` for ``ccf_mask_kpf``); *shared chunking*
-    (``window_size_um``, ``outlier_sigma``, ``window_line_by_line``); *CCF velocity grid and shared CCF analysis*
-    (``v_*_coarse``, ``ccf_input_velocity`` / ``v_window_fine`` / ``v_step_fine``, plus
-    ``ccf_parabolic_vertex_n_samples``, ``ccf_zb``, ``ccf_min_good_pixels`` — used by both
-    ``ccf_mask_kpf`` and ``ccf_stellar_template``);
-    *output and compute* (``output_model``, ``max_cores``, ``debug_ccf``); *previews and overlay
-    HTML*. Framework ``save_preview`` / ``show_preview`` come from :class:`~hispecdrp.processing_component.ProcessingComponent`.
-
-    Pipeline YAML keys and constructor keywords match :attr:`ARGUMENTS` (same names as below).
 
     Parameters
     ----------
@@ -157,8 +109,8 @@ class StellarRVPrimitive(BasePrimitive):
         **Default:** ``"stellar_rv"``. Short label used by the framework for this primitive’s
         derived products, logging, and file naming together with ``output_dir``.
     algorithm : str
-        **Default:** ``"ccf_mask_kpf"``. Must be a key of :data:`STELLAR_RV_ALGORITHMS`.
-        Chooses ``_run_algorithm_ccf_mask_kpf`` (mask-line CCF, no PHOENIX template) or
+        **Default:** ``"ccf_line_mask"``. Must be a key of :data:`STELLAR_RV_ALGORITHMS`.
+        Chooses ``_run_algorithm_ccf_line_mask`` (line-mask CCF, no PHOENIX template) or
         ``_run_algorithm_ccf_stellar_template`` (log-λ template CCF).
     do_fibers : sequence of str or None
         **Default:** ``None``. Which fiber indices to process (e.g. ``["1","2"]``). ``None``
@@ -180,16 +132,19 @@ class StellarRVPrimitive(BasePrimitive):
         **Default:** ``None``. Template flux samples matching ``template_wavelength`` (same length).
     mask_path : str or None
         **Default:** ``None``. Path to a SPIROU ``.mas`` or KPF-style two-column mask file for
-        ``ccf_mask_kpf`` (delta-line model). ``None`` resolves to the packaged default via
-        :func:`~hispecdrp.primitives.utils.ccf_utils.resolve_mask_path` when you are **not**
+        ``ccf_line_mask`` (delta-line model). ``None`` resolves to the
+        packaged lte049 template-derived **delta** mask (see
+        :func:`~hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path` /
+        :data:`~hispecdrp.utils.line_mask_utils.DEFAULT_PACKAGED_LINE_MASK_BASENAME`) via
+        :func:`~hispecdrp.utils.line_mask_utils.resolve_mask_path` when you are **not**
         passing ``mask_wavelength`` / ``mask_weight``.
     mask_wavelength : array-like or None
-        **Default:** ``None``. In-memory mask rest wavelengths (µm) for ``ccf_mask_kpf``. Must be
+        **Default:** ``None``. In-memory mask rest wavelengths (µm) for ``ccf_line_mask``. Must be
         paired with ``mask_weight``; when both are set, ``mask_path`` is not required for loading.
     mask_weight : array-like or None
         **Default:** ``None``. Weights matching ``mask_wavelength`` (same length).
     mask_ccf_pixel_interp_order : int
-        **Default:** ``1``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
+        **Default:** ``3``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
         for sampling flux and the per-pixel gate onto Doppler-shifted mask-line wavelengths in
         :func:`~hispecdrp.primitives.utils.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
         to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Orders **greater than 1** are not
@@ -198,7 +153,7 @@ class StellarRVPrimitive(BasePrimitive):
         you revalidate tolerances on your science cases.
     mask_auto_hybrid_scout : bool
         **Default:** ``True``. **Mask algorithm only.** Passed to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_mask_kpf_for_fiber`. When ``True``,
+        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber`. When ``True``,
         **only** if ``ccf_input_velocity`` is unset **and** a single echelle order is processed,
         a scout full-order CCF finds a coarse peak and builds a hybrid velocity grid. Multi-order
         runs skip scouting so every order shares one ``v`` axis. ``False`` uses the broad grid from
@@ -210,14 +165,14 @@ class StellarRVPrimitive(BasePrimitive):
     outlier_sigma : float
         **Default:** ``4.0``. Multiplier on the robust scatter (MAD) for rejecting outlier **chunk**
         RVs before the inverse-variance weighted mean (see
-        :func:`~hispecdrp.primitives.utils.ccf_utils.combine_rvs_median_mad`).
+        :func:`~hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_rvs_median_mad`).
     window_line_by_line : bool
-        **Default:** ``False``. **Mask algorithm only** (``ccf_mask_kpf``). When ``False``, chunk
+        **Default:** ``False``. **Line-mask algorithm only** (``ccf_line_mask``). When ``False``, chunk
         boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`.
         When ``True``, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
         at ``ccf_input_velocity``, which must be finite — hybrid fine-leg center). Spectral pixels
         per chunk use the intersection of that Voronoi interval with a symmetric ``window_size_um``
-        band; see :func:`~hispecdrp.primitives.utils.ccf_utils.build_mask_kpf_chunk_wavelength_intervals_line_by_line`.
+        band; see :func:`~hispecdrp.primitives.utils.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
     v_min_coarse : float or None
         **Default:** ``None``. **Coarse** CCF search lower bound (m/s): the uniform broad leg before
         any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf_utils._V_MIN` via
@@ -242,18 +197,18 @@ class StellarRVPrimitive(BasePrimitive):
         **10 cm s\\ :sup:`−1`** per step.
     ccf_parabolic_vertex_n_samples : int
         **Default:** ``31``. **Both algorithms:** **odd** integer :math:`\\ge 3` (even values raise
-        :class:`ValueError` in mask utilities). For ``ccf_mask_kpf``, window placement follows
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf` / the order-mean refine
+        :class:`ValueError` in mask utilities). For ``ccf_line_mask``, window placement follows
+        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` / the order-mean refine
         path. For ``ccf_stellar_template`` (parallel Numba driver and ``debug_ccf`` ``masked_ccf_rv``),
         each chunk’s Gaussian :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv` result can be
         refined with the same LSTSQ parabolic vertex machinery as mask-line CCF (see
         :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_rv_from_ccf`). Set ``None`` only inside
         low-level helpers to skip parabolic refinement (Gaussian-only per chunk).
     ccf_zb : float
-        **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_mask_kpf``
+        **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_mask_kpf_for_fiber` /
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`). For ``ccf_stellar_template``
+        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` /
+        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
         it applies the same multiplicative shift in :math:`\\ln\\lambda` template evaluation as in
         :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_chunk_ccf_numba`. Use ``0.0`` when L2
         wavelengths and the template/mask rest frame already match.
@@ -262,8 +217,8 @@ class StellarRVPrimitive(BasePrimitive):
         **wavelength chunk** (chunking from ``window_size_um`` via
         :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or from
         ``window_line_by_line`` Voronoi bins) required to form
-        a CCF and fit an RV. For ``ccf_mask_kpf`` this is ``min_good_pixels`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_mask_kpf`; for ``ccf_stellar_template``
+        a CCF and fit an RV. For ``ccf_line_mask`` this is ``min_good_pixels`` in
+        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`; for ``ccf_stellar_template``
         it gates the Numba per-chunk CCF and the Python per-chunk fit. Overlay debug HTML uses the
         same threshold for chunk inclusion.
     output_model : str
@@ -273,7 +228,7 @@ class StellarRVPrimitive(BasePrimitive):
     max_cores : int or None
         **Default:** ``None``. Upper bound on parallel **Numba** threads: template path uses it for
         echelle-order parallelism; mask path passes it to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_mask_kpf_for_fiber` / chunk loops.
+        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` / chunk loops.
         ``None`` lets :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads` pick a
         host-appropriate count; ``1`` forces single-threaded, reproducible runs.
     debug_ccf : bool
@@ -283,134 +238,11 @@ class StellarRVPrimitive(BasePrimitive):
         **Default:** ``2.0``. Pixel scale multiplier for Kaleido PNG exports when ``save_preview`` is
         True (see :mod:`~hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`).
     show_overlay_debug : bool
-        **Default:** ``False``. For ``ccf_mask_kpf``, open mask-overlay debug HTML in a browser; for
+        **Default:** ``False``. For ``ccf_line_mask``, open mask-overlay debug HTML in a browser; for
         ``ccf_stellar_template``, open template-overlay debug HTML. Meaning follows ``algorithm``.
     save_overlay_debug : bool
-        **Default:** ``False``. For ``ccf_mask_kpf``, write mask-overlay HTML (``_output["mask_overlay_debug"]``);
+        **Default:** ``False``. For ``ccf_line_mask``, write mask-overlay HTML (``_output["mask_overlay_debug"]``);
         for ``ccf_stellar_template``, write template-overlay HTML (``_output["template_overlay_debug"]``).
-
-    **Inherited** (from :class:`~hispecdrp.processing_component.ProcessingComponent`, not repeated in
-    :attr:`ARGUMENTS` here but merged at class init): ``input``, ``output_dir``, ``save_preview``,
-    ``show_preview``, and related framework fields. ``save_preview`` / ``show_preview`` gate whether
-    the standard Plotly RV/CCF preview is written and/or opened; they also control whether CCF arrays
-    are collected for that figure. When ``save_preview`` is True, companion PNG export follows the
-    Kaleido path unless ``HISPEC_DRP_SHOW_CCF_PREVIEW`` requests HTML-only (see preview module).
-
-    **Implementation notes**
-
-    Default coarse CCF step when ``v_step_coarse`` is unset is **50 m s\\ :sup:`−1`**
-    (``ccf_utils._V_STEP``).
-    Very long grids are subsampled inside :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`.
-    Preview HTML may downsample traces for smaller files.
-
-    Mask/template **overlay debug** HTML (not the main Plotly preview) lists **wavelength chunks**
-    (same binning as ``window_size_um`` / :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`,
-    or line-by-line Voronoi bins (``window_line_by_line``) with spectral pixels in a symmetric
-    ``window_size_um`` band about each predicted observed mask line; see
-    :func:`~hispecdrp.primitives.utils.ccf_utils.mask_kpf_line_window_spectrum_band_um`), gating each chunk with ``ccf_min_good_pixels``
-    and ``DO_NOT_USE`` like ``rv_per_chunks_mask_kpf``. Chunks are ordered **descending** in
-    chunk-center λ within each echelle order (matching ``rv_per_chunks_mask_kpf`` / ``RVCCF``).
-    Embedded arrays downsample using only ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS``,
-    ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS``, and ``HISPEC_DRP_TEMPLATE_OVERLAY_MAX_TEMPLATE_POINTS``
-    (see :mod:`~hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`).
-    Mask overlay debug HTML **always** includes a dense Lagrange-interpolated spectrum trace (same
-    stencil as ``mask_ccf_pixel_interp_order`` in ``ccf_utils``). Optional
-    ``HISPEC_DRP_MASK_OVERLAY_SPEC_INTERP_POINTS`` sets the pre-downsample λ grid size (default
-    ``320`` when unset). The overlay page’s initial velocity matches finite ``ccf_input_velocity``
-    when set, otherwise ``0`` m/s.
-
-    Workflow (``ccf_mask_kpf``)
-    ---------------------------
-
-    End-to-end flow for **one fiber** (primitive dispatches here; template path is separate):
-
-    # 1 — Entry on the fiber
-    StellarRVPrimitive._run_algorithm_ccf_mask_kpf
-        ->
-        # Resolves coarse ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` (m/s), optional
-        # hybrid merge (fine ``v_window_fine`` / ``v_step_fine``) around
-        # ``ccf_input_velocity``, loads SPIROU/KPF-style mask lines once, then runs the fiber driver.
-        ccf_utils.run_ccf_mask_kpf_for_fiber(..., max_cores=..., want_preview=..., ...)
-            ->
-            # Velocity axis: uniform **coarse** grid, *or* merged coarse + **fine** window when hybrid is on;
-            # optional **auto-hybrid scout** (single echelle order, ``mask_auto_hybrid_scout``,
-            # no user center): one full-order ``rv_per_chunks_mask_kpf`` pass, mean-CCF peak center,
-            # then a shared merged grid for the rest of the fiber.
-            ccf_utils.build_hybrid_merged_velocity_grid(...)  [hybrid / scout paths only]
-            ->
-            # 2 — Per echelle order in ``do_orders``: wavelength chunks (~``window_size_um`` wide,
-            # or ``window_line_by_line`` + ``ccf_input_velocity`` line-by-line Voronoi bins with
-            # pixels in ``mask_kpf_line_window_spectrum_band_um``)
-            for each order:
-                ccf_utils.rv_per_chunks_mask_kpf(..., max_cores=..., return_ccf=True, ...)
-                    ->
-                    # Numba thread scope (``max_cores`` clamped for CI / host)
-                    with parallelization_utils.numba_thread_scope(max_cores)
-                        ->
-                        # Weight-normalized mask-line CCF(v): all chunk rows in one batched kernel
-                        # (``prange`` over chunk index when parallel).
-                        ccf_utils._calc_mask_ccf_chunks_numba(...)
-                        ->
-                        # Per-chunk RV + heuristic σ from LSTSQ / parabolic vertex on ``-CCF``
-                        # (absorption convention); per-chunk ``RV_ERR`` may be replaced by
-                        # ``mask_kpf_parabolic_vertex_rv_err_levmar_m_s`` (else homoscedastic LSTSQ)
-                        # using ``ccf_std_rows`` when present.
-                        ccf_utils._rv_from_ccf_mask_kpf_rows_numba(...)
-                    ->
-                    # Stored / RVCCF CCF rows follow the negated convention so the line appears as a peak
-                    # near the true RV (see ``MASK_KPF_STORED_CCF_NEGATED_FROM_RAW``).
-                    ->
-                # 3 — Optional **order-mean Gaussian** override (hybrid or post-scout merged grid):
-                # column-mean CCF across chunks for that order → ``fit_ccf_rv`` → mask parabolic refine;
-                # on success, **all chunks for that order** receive the same RV/σ (one fiber-aggregate slot).
-                ccf_utils.fit_ccf_rv(...) + ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_mask_kpf(...)
-                    [skipped when Gaussian fit is not accepted — per-chunk Numba RVs kept]
-            ->
-            # 4 — Fiber-level summary: map each chunk to its fiber-aggregate estimate, then
-            # ``combine_rv_estimates_median_mad_weighted`` on those aggregates (MAD + IV weights);
-            # fallback to per-chunk ``combine_rvs_median_mad`` + ``weighted_mean_rv`` if mapping fails.
-            ccf_utils.combine_rv_estimates_median_mad_weighted(...)
-                or  ccf_utils.combine_rvs_median_mad(...) + ccf_utils.weighted_mean_rv(...)
-            ->
-            # 5 — Plotly preview (when ``want_preview``): mean CCF slot per order + stacked chunk rows,
-            # Gaussian + mask refine in ``finalize_ccf_preview_dict`` (same stored CCF convention).
-            ccf_utils.finalize_ccf_preview_dict(..., ccf_mask_kpf_stored_negated=...)
-            ->
-            # Optional RVCCF HDU supplement (chunk CCF + ``v`` metadata) for tables.
-            ccf_utils.build_rvccf_chunk_supplement(...)
-
-    # After ``run_ccf_mask_kpf_for_fiber`` returns, the primitive stores ``preview_detail`` on
-    # ``_ccf_preview_by_fiber`` and, when mask-overlay flags are set, may write HTML via
-    # :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`.
-
-    Notes
-    -----
-    Environment variable ``HISPEC_DRP_SHOW_CCF_PREVIEW`` can force HTML-only behavior for
-    the main CCF preview (see preview module).
-
-    **BT-Settl BSPEC slow tests** (``tests/test_stellar_rv.py``) use pytest-only environment
-    switches; the pipeline equivalent is always explicit primitive kwargs / YAML:
-
-    * ``HISPEC_DRP_BSPEC_BTSETTL_ALL_ORDERS=1`` — in tests, ``do_orders=None`` so every configured
-      BSPEC echelle order is used. Otherwise tests pass a single order (or
-      ``HISPEC_DRP_BSPEC_BTSETTL_SINGLE_ORDER``). Set ``do_orders`` on the primitive the same way.
-    * ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1`` — enables the optional mask-KPF preview leg:
-      ``save_preview=True``, ``save_overlay_debug=True``, ``show_overlay_debug=True``
-      (and the test forces ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` while ``apply`` runs). Use those
-      fields instead of the env var in real recipes.
-    * ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_TEMPLATE_PREVIEWS=1`` — enables the optional template leg:
-      ``save_preview=True``, ``save_overlay_debug=True``, ``show_overlay_debug=True``
-      (again with ``HISPEC_DRP_SHOW_CCF_PREVIEW=1`` during
-      ``apply`` in the test helper). Chunk inclusion in overlay payloads follows ``ccf_min_good_pixels``
-      (same gate as mask CCF chunks); embedding sizes use env
-      ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS``, ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS``, and
-      ``HISPEC_DRP_TEMPLATE_OVERLAY_MAX_TEMPLATE_POINTS`` (see preview module).
-
-    See Also
-    --------
-    :mod:`hispecdrp.primitives.utils.ccf_utils` — template CCF + mask-line CCF
-    :mod:`hispecdrp.utils.spectral_templates_utils`
-    :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview` — preview generation
     """
 
     # Default primitive arguments (merged with ProcessingComponent at class init).
@@ -418,23 +250,23 @@ class StellarRVPrimitive(BasePrimitive):
     ARGUMENTS = {
         # --- Dispatch ---
         "suffix": "stellar_rv",
-        "algorithm": "ccf_mask_kpf",
+        "algorithm": "ccf_line_mask",
         "do_fibers": None,
         "do_orders": None,
         # --- Stellar template (ccf_stellar_template): template_* ---
         "template_path": None,
         "template_wavelength": None,
         "template_flux": None,
-        # --- Mask line list & mask-only analysis (ccf_mask_kpf): mask_* ---
+        # --- Mask line list & mask-only analysis (ccf_line_mask): mask_* ---
         "mask_path": None,
         "mask_wavelength": None,
         "mask_weight": None,
-        "mask_ccf_pixel_interp_order": 1,
+        "mask_ccf_pixel_interp_order": 3,
         "mask_auto_hybrid_scout": True,
         # --- Shared chunking & chunk RV aggregation (both algorithms) ---
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
-        "window_line_by_line": False,  # mask-KPF only; False -> wavelength window_size_um chunks
+        "window_line_by_line": False,  # ccf_line_mask only; False -> wavelength window_size_um chunks
         # --- CCF velocity grid & shared CCF analysis (both algorithms) ---
         "v_min_coarse": None,  # m/s; None -> ccf_utils._V_MIN
         "v_max_coarse": None,  # m/s; None -> _V_MAX
@@ -454,16 +286,6 @@ class StellarRVPrimitive(BasePrimitive):
         "show_overlay_debug": False,
         "save_overlay_debug": False,
     }
-
-    CALIBRATIONS = {}
-
-    def _ccf_broad_grid_m_s(self) -> tuple[float, float, float]:
-        """Coarse CCF velocity grid (m/s) from ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse``."""
-        return resolve_ccf_broad_grid_m_s(
-            getattr(self, "v_min_coarse", None),
-            getattr(self, "v_max_coarse", None),
-            getattr(self, "v_step_coarse", None),
-        )
 
     def _perform(self):
         """
@@ -487,20 +309,20 @@ class StellarRVPrimitive(BasePrimitive):
         else:
             raise TypeError("Input must be a DataModel, path, or sequence of these.")
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_mask_kpf").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_line_mask").lower().strip()
         logger.info(
             "Stellar RV: starting _perform algorithm=%s n_inputs=%d suffix=%s",
             algo_key,
             len(inp_list),
             getattr(self, "suffix", ""),
         )
-        validate_mask_kpf_line_window_chunking_config(
+        validate_line_mask_line_window_chunking_config(
             algorithm=algo_key,
             window_line_by_line=bool(getattr(self, "window_line_by_line", False)),
             ccf_input_velocity_m_s=getattr(self, "ccf_input_velocity", None),
         )
         template_ln, template_flux = None, None
-        if algo_key != "ccf_mask_kpf":
+        if (algo_key or "").strip().lower() not in STELLAR_RV_LINE_MASK_ALGORITHMS:
             logger.info("Stellar RV: resolving stellar template (path or inline arrays)")
             template_ln, template_flux = resolve_stellar_template_to_log_micron(
                 getattr(self, "template_path", None),
@@ -528,7 +350,7 @@ class StellarRVPrimitive(BasePrimitive):
             template_flux = np.array([], dtype=np.float64)
             self._stellar_template_wave_um = None
             self._stellar_template_flux = None
-            logger.info("Stellar RV: ccf_mask_kpf mode — empty template arrays (mask CCF only)")
+            logger.info("Stellar RV: ccf_line_mask mode — empty template arrays (line-mask CCF only)")
             _mw = getattr(self, "mask_wavelength", None)
             _mwt = getattr(self, "mask_weight", None)
             if (_mw is None) ^ (_mwt is None):
@@ -538,7 +360,7 @@ class StellarRVPrimitive(BasePrimitive):
 
         # Per-fiber CCF preview slots (mean + per-order); filled when save/show preview.
         self._ccf_preview_by_fiber: dict = {}
-        # Per-fiber payload for mask overlay debug HTML (ccf_mask_kpf only).
+        # Per-fiber payload for mask overlay debug HTML (ccf_line_mask only).
         self._mask_overlay_by_fiber: dict = {}
         # Per-fiber payload for template overlay debug HTML (ccf_stellar_template only).
         self._template_overlay_by_fiber: dict = {}
@@ -685,7 +507,11 @@ class StellarRVPrimitive(BasePrimitive):
         else:
             mode = "parallel"
 
-        vm, vx, vs = self._ccf_broad_grid_m_s()
+        vm, vx, vs = resolve_ccf_broad_grid_m_s(
+            getattr(self, "v_min_coarse", None),
+            getattr(self, "v_max_coarse", None),
+            getattr(self, "v_step_coarse", None),
+        )
         logger.info(
             "Stellar RV: ccf_stellar_template fiber=%s spectrograph=%s mode=%s "
             "n_order_tasks=%d want_preview=%s max_cores=%s window_um=%.4f "
@@ -823,7 +649,7 @@ class StellarRVPrimitive(BasePrimitive):
             rvccf_chunk_supplement,
         )
 
-    def _run_algorithm_ccf_mask_kpf(
+    def _run_algorithm_ccf_line_mask(
         self,
         input_model,
         output_model,
@@ -835,9 +661,9 @@ class StellarRVPrimitive(BasePrimitive):
         template_flux: np.ndarray,
     ):
         """
-        Mask-shifted KPF-style CCF + Gaussian RV fit.
+        Line-mask CCF (SPIROU/KPF-inspired) + Gaussian RV fit.
 
-        Minimal delegation to :func:`run_ccf_mask_kpf_for_fiber`.
+        Minimal delegation to :func:`run_ccf_line_mask_for_fiber`.
         """
         want_preview = bool(
             getattr(self, "save_preview", False)
@@ -845,9 +671,13 @@ class StellarRVPrimitive(BasePrimitive):
             or getattr(self, "show_overlay_debug", False)
             or getattr(self, "save_overlay_debug", False)
         )
-        vm, vx, vs = self._ccf_broad_grid_m_s()
+        vm, vx, vs = resolve_ccf_broad_grid_m_s(
+            getattr(self, "v_min_coarse", None),
+            getattr(self, "v_max_coarse", None),
+            getattr(self, "v_step_coarse", None),
+        )
         logger.info(
-            "Stellar RV: dispatching ccf_mask_kpf fiber=%s spectrograph=%s "
+            "Stellar RV: dispatching ccf_line_mask fiber=%s spectrograph=%s "
             "n_do_orders=%d want_preview=%s ccf_v_m_s=[%.2f, %.2f] step=%.4f refined=%s",
             fiber,
             spectrograph,
@@ -864,19 +694,15 @@ class StellarRVPrimitive(BasePrimitive):
             all_wavelengths,
             all_rvs,
             all_rv_errs,
-            inlier,
-            rv_mean,
-            rv_std,
             all_orders,
             preview_detail,
             rvccf_chunk_supplement,
-        ) = run_ccf_mask_kpf_for_fiber(
+        ) = run_ccf_line_mask_for_fiber(
             input_model=input_model,
             fiber=fiber,
             do_orders=do_orders,
             order_vec=order_vec,
             window_size_um=float(getattr(self, "window_size_um", 0.3)),
-            outlier_sigma=float(getattr(self, "outlier_sigma", 4.0)),
             mask_path=getattr(self, "mask_path", None),
             mask_wavelength=getattr(self, "mask_wavelength", None),
             mask_weight=getattr(self, "mask_weight", None),
@@ -898,10 +724,28 @@ class StellarRVPrimitive(BasePrimitive):
             ),
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             mask_ccf_pixel_interp_order=int(
-                getattr(self, "mask_ccf_pixel_interp_order", 1)
+                getattr(self, "mask_ccf_pixel_interp_order", 3)
             ),
             window_line_by_line=bool(getattr(self, "window_line_by_line", False)),
         )
+
+        # Fiber-level aggregation belongs to stellar_rv (not ccf_utils) so that stellar_rv depends
+        # on ccf_utils, but ccf_utils does not depend on stellar_rv.
+        valid = np.isfinite(all_rvs) & np.isfinite(all_rv_errs) & (np.asarray(all_rv_errs) > 0)
+        if not np.any(valid):
+            inlier = np.zeros(len(all_rvs), dtype=bool)
+            rv_mean, rv_std = np.nan, np.nan
+        else:
+            inlier, _, _ = combine_rvs_median_mad(
+                np.asarray(all_rvs, dtype=np.float64),
+                np.asarray(all_rv_errs, dtype=np.float64),
+                float(getattr(self, "outlier_sigma", 4.0)),
+            )
+            rv_mean, rv_std = weighted_mean_rv(
+                np.asarray(all_rvs, dtype=np.float64),
+                np.asarray(all_rv_errs, dtype=np.float64),
+                inlier,
+            )
         if preview_detail is not None:
             self._ccf_preview_by_fiber[fiber] = preview_detail
         if bool(
@@ -975,14 +819,14 @@ class StellarRVPrimitive(BasePrimitive):
             Map from echelle row index to physical order number (one entry per spectral row).
         template_ln : np.ndarray
             Natural log of template wavelength in **microns**; used by template algorithm.
-            For ``ccf_mask_kpf`` this is an empty placeholder array.
+            For ``ccf_line_mask`` this is an empty placeholder array.
         template_flux : np.ndarray
             Template flux aligned with ``template_ln``; empty for mask-only algorithm.
         """
         if _fiber_l2_bundle(input_model, fiber) is None:
             return
 
-        algo_key = (getattr(self, "algorithm", None) or "ccf_mask_kpf").lower().strip()
+        algo_key = (getattr(self, "algorithm", None) or "ccf_line_mask").lower().strip()
         method_name = STELLAR_RV_ALGORITHMS.get(algo_key)
         if method_name is None:
             raise ValueError(

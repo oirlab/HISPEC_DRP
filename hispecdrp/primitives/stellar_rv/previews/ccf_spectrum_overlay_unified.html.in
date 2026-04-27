@@ -760,7 +760,7 @@ __SPECTRUM_HELP__
         const st = getSpectrumStatic(order, currentOrderIdx);
         const shapes = buildMaskShapes(order, currentV, st);
         const lcLine = Number(order.chunk_center_um);
-        if (Number.isFinite(lcLine)) {
+        if (DATA.window_line_by_line && Number.isFinite(lcLine)) {
           shapes.push({
             type: "line",
             xref: "x",
@@ -852,7 +852,7 @@ __SPECTRUM_HELP__
         const st = getSpectrumStatic(order, currentOrderIdx);
         const shapesR = buildMaskShapes(order, currentV, st);
         const lcR = Number(order.chunk_center_um);
-        if (Number.isFinite(lcR)) {
+        if (DATA.window_line_by_line && Number.isFinite(lcR)) {
           shapesR.push({
             type: "line",
             xref: "x",

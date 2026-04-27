@@ -1,45 +1,51 @@
-# Packaged CCF line masks (SPIROU `.mas` format)
+# CCF line masks (SPIROU-style `.mas` format)
 
-## Origin and attribution
+## Contents of this directory
 
-The **`.mas`** files in this directory use the **SPIROU / OPERA-style** three-column
-format (wavelength start, wavelength end, weight in **air nanometers** for the wavelength
-columns—see `load_mask_spirou_mas` in `hispecdrp.primitives.utils.ccf_utils`).
+Line masks here are **generated from packaged BT-Settl templates** under
+`hispecdrp/data/templates/*.h5`. Regenerate all of them with:
 
-They are **redistributed for convenience** with HISPEC DRP so that
-`algorithm="ccf_mask_kpf"` works out of the box. The **scientific content** of the line
-masks comes from the SPIROU/CCF mask ecosystem, not from HISPEC.
+```bash
+python hispecdrp/data/masks/regenerate_template_masks.py
+```
 
-### Upstream mask repository
+(from the repository root, with the package on `PYTHONPATH` or installed editable).
 
-- **spirou-ccf** (Eder Martioli): collection of CCF masks and related tooling.  
-  **Directory:** <https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks>  
-  **Library (context for SPIRou data handling):**  
-  <https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py>
+For each template stem, that script writes:
 
-When publishing results, cite the **SPIROU/APERO** pipeline and/or the **spirou-ccf**
-repository as appropriate for the mask you use, in addition to HISPEC DRP if you use
-this package.
+| File pattern | Role |
+|--------------|------|
+| `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight (see :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`). |
+| `<template_stem>.kpf.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
 
-### Files shipped here (examples)
+Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
+:func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
 
-| File | Role |
-|------|------|
-| `M2_filt_allRV.mas` | Default mask when `mask_path` is unset (`ccf_mask_kpf`). |
-| `K2_filt_allRV.mas`, `K2_all.mas` | Alternate SPIROU-style masks for tests or custom runs. |
-| `<template_stem>.mas` (generated) | Template-derived masks from :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`: filename matches the BT-Settl (or other) template basename with ``.mas`` replacing ``.h5``. A ``# HISPEC_DRP_MASK_META`` JSON line in the header stores all generation parameters; load it with :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`. |
+**Default mask** when `StellarRVPrimitive(mask_path=None)` (via
+:func:`hispecdrp.utils.line_mask_utils.resolve_mask_path`) is the lte049
+template-derived delta mask — basename
+:data:`hispecdrp.utils.line_mask_utils.DEFAULT_PACKAGED_LINE_MASK_BASENAME`, absolute path
+:func:`hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`.
 
-### Segment widths (empirical)
+## On-disk layout and loaders
+
+Numeric layouts follow SPIROU / OPERA conventions as implemented in
+:meth:`hispecdrp.utils.line_mask_utils.MaskLines.load` (``.mas`` files): **two** columns
+(center λ, weight) for delta-style masks; **three** columns (start λ, end λ, weight)
+for kpf-style segment masks. Wavelengths in these generated files are **vacuum**
+nanometers (see mask JSON and module docstrings).
+
+The **mask-shifted CCF** algorithm is discussed relative to SPIROU / KPF-style workflows
+in :mod:`hispecdrp.primitives.utils.ccf_utils` and the references there.
+
+### Segment widths (kpf / empirical SPIROU masks)
 
 For each line, ``width_nm = λ_end − λ_start`` and ``mean_nm = (λ_start + λ_end)/2``.
-Across the bundled ``*.mas`` files, **width in nm increases roughly linearly with
-mean wavelength**, and **width / mean λ is nearly constant** (relative spread
-≪ 1%): segments behave like a **fixed fractional width in wavelength**, i.e. close
-to **constant Δln λ** per mask line. Regenerate the diagnostic figure with
-``python hispecdrp/data/masks/plot_mask_widths.py`` (writes ``mask_width_vs_wavelength.png``).
-
-Names and content are chosen to align with common **K2 / M2** mask naming in the
-spirou-ccf `ccf_masks` tree; verify against upstream if you need exact equivalence.
+On typical SPIROU segment lists, **width in nm increases roughly linearly with mean
+wavelength** (approximately constant Δln λ). The template-derived **kpf** files here
+use the packaged linear calibration explicitly. Regenerate the diagnostic scatter figure
+with ``python hispecdrp/data/masks/plot_mask_widths.py`` (writes
+``mask_width_vs_wavelength.png`` from ``*.kpf.mas`` only).
 
 ---
 
@@ -57,13 +63,13 @@ the structure of mask line tables and barycentric/velocity bookkeeping discussed
   <https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src>
 
 HISPEC DRP’s Python/Numba code is an **independent implementation** for HISPEC L2 data;
-it is **not** a copy of KPF proprietary source. KPF-style **two-column** text masks
-(center wavelength + weight) are also supported via `load_mask_kpf_two_column` with an
-explicit `mask_width_um`.
+it is **not** a copy of KPF proprietary source. KPF-style **two-column** text masks (center wavelength + weight) are also supported via
+:meth:`hispecdrp.utils.line_mask_utils.MaskLines.load` (``.txt`` / ``.dat`` / ``.csv``; wavelength
+unit inferred from the column median).
 
 ---
 
 ## Comment lines in `.mas` files
 
-Loader functions skip lines starting with `#`, `;`, or `//`. Each bundled `.mas` file
-may begin with comment lines documenting this README’s pointers.
+Loader functions skip lines starting with `#`, `;`, or `//`. Each `.mas` file may
+begin with comment lines documenting provenance and JSON metadata.

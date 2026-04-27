@@ -25,7 +25,7 @@ def build_ccf_spectrum_overlay_debug_html(
     spectrum_help_html: str,
 ) -> str:
     """
-    Single interactive page for ``ccf_mask_kpf`` (mask rectangles) and ``ccf_stellar_template``
+    Single interactive page for ``ccf_line_mask`` (mask rectangles) and ``ccf_stellar_template``
     (Doppler-shifted template trace). ``spectrum_help_html`` is inserted inside the help
     paragraph (trusted HTML fragment from this package only).
     """
