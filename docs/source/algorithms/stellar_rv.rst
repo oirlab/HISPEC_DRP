@@ -257,6 +257,12 @@ Useful command-line / environment overrides used by these tests include:
    Override the mask CCF interpolation order used by the tests (and reflected in the overlay
    debug spectrum interpolation trace label).
 
+``HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES``
+   Test-only hook (implemented in ``tests/test_stellar_rv.py``) to override the primitive parameter
+   ``ccf_parabolic_vertex_n_samples``. Set to an **odd** integer :math:`\ge 3` to enable post-Gaussian
+   parabolic-vertex refinement. Set to ``none`` (or ``null``) to disable refinement and keep
+   **Gaussian-only** per-chunk RV/RV_ERR for the template-CCF workflow.
+
 ``HISPEC_DRP_BSPEC_BTSETTL_ORDER``
    Which BSPEC echelle orders the BT-Settl BSPEC tests use. **Default** when unset is ``139``
    (single order). Set to ``all`` to use every BSPEC order from ``HISPECConfig`` (same as the former

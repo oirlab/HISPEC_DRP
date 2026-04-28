@@ -327,6 +327,37 @@ def _mask_ccf_pixel_interp_order_from_env() -> int:
     return max(1, min(v, MAX_MASK_CCF_PIXEL_INTERP_ORDER))
 
 
+def _ccf_parabolic_vertex_n_samples_from_env() -> int | None:
+    """
+    Override ``StellarRVPrimitive.ccf_parabolic_vertex_n_samples`` from the environment.
+
+    Reads ``HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES``.
+
+    - unset/empty -> returns default ``31``
+    - ``none``/``null`` (case-insensitive) -> returns ``None`` (Gaussian-only; disables refinement)
+    - otherwise -> odd integer >= 3
+    """
+    raw = os.environ.get("HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES", "").strip()
+    if not raw:
+        return 31
+    s = raw.strip().lower()
+    if s in ("none", "null"):
+        return None
+    try:
+        n = int(s)
+    except ValueError:
+        raise ValueError(
+            "HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES must be an odd integer >= 3, or 'none'; "
+            f"got {raw!r}"
+        )
+    if n < 3 or (n % 2) == 0:
+        raise ValueError(
+            "HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES must be an odd integer >= 3, or 'none'; "
+            f"got {raw!r}"
+        )
+    return n
+
+
 def _want_bspec_btsettl_previews() -> bool:
     """BT-Settl BSPEC optional previews (mask line + template legs) and HTML-only Plotly in preview module."""
     if SHOW_BSPEC_BTSETTL_PREVIEWS is not None:
@@ -1621,6 +1652,7 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
         window_size_um=WINDOW_UM,
         debug_ccf=False,
         algorithm=algorithm,
+        ccf_parabolic_vertex_n_samples=_ccf_parabolic_vertex_n_samples_from_env(),
         show_preview=show,
         save_preview=save_plots or show,
         output_dir=plot_out_dir,

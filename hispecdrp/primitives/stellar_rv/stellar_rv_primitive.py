@@ -195,15 +195,15 @@ class StellarRVPrimitive(BasePrimitive):
     v_step_fine : float
         **Default:** ``0.1``. **Fine** leg: spacing (m/s) on the dense hybrid samples —
         **10 cm s\\ :sup:`−1`** per step.
-    ccf_parabolic_vertex_n_samples : int
+    ccf_parabolic_vertex_n_samples : int or None
         **Default:** ``31``. **Both algorithms:** **odd** integer :math:`\\ge 3` (even values raise
         :class:`ValueError` in mask utilities). For ``ccf_line_mask``, window placement follows
         :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` / the order-mean refine
         path. For ``ccf_stellar_template`` (parallel Numba driver and ``debug_ccf`` ``masked_ccf_rv``),
         each chunk’s Gaussian :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv` result can be
         refined with the same LSTSQ parabolic vertex machinery as mask-line CCF (see
-        :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_rv_from_ccf`). Set ``None`` only inside
-        low-level helpers to skip parabolic refinement (Gaussian-only per chunk).
+        :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_rv_from_ccf`). Setting this to ``None``
+        disables the parabolic refinement step (Gaussian-only per chunk) for the template-CCF path.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
@@ -1022,8 +1022,8 @@ class StellarRVPrimitive(BasePrimitive):
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
-                            ccf_parabolic_vertex_n_samples=int(
-                                getattr(self, "ccf_parabolic_vertex_n_samples", 31)
+                            ccf_parabolic_vertex_n_samples=getattr(
+                                self, "ccf_parabolic_vertex_n_samples", 31
                             ),
                             return_ccf=True,
                         )
@@ -1042,8 +1042,8 @@ class StellarRVPrimitive(BasePrimitive):
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
-                            ccf_parabolic_vertex_n_samples=int(
-                                getattr(self, "ccf_parabolic_vertex_n_samples", 31)
+                            ccf_parabolic_vertex_n_samples=getattr(
+                                self, "ccf_parabolic_vertex_n_samples", 31
                             ),
                             return_ccf=True,
                         )
@@ -1183,8 +1183,8 @@ class StellarRVPrimitive(BasePrimitive):
             return_ccf=True,
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             zb=float(getattr(self, "ccf_zb", 0.0)),
-            ccf_parabolic_vertex_n_samples=int(
-                getattr(self, "ccf_parabolic_vertex_n_samples", 31)
+            ccf_parabolic_vertex_n_samples=getattr(
+                self, "ccf_parabolic_vertex_n_samples", 31
             ),
             **(
                 dict(
