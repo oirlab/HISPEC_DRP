@@ -6,6 +6,9 @@ from typing import Sequence
 from ...datamodels.dqflags import DQ_FLAGS
 from ..gain.make_gain_primitive import fit_gain_and_readnoise
 import logging
+import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__name__)
 
@@ -193,3 +196,141 @@ class MakeReadnoisePrimitive(BasePrimitive):
         output_detrn.dq = np.zeros(bestfit_rn.shape, dtype=np.uint32)
 
         return dict(output=output_detrn)
+
+    def _create_preview(self):
+        """Create preview visualization of read noise calibration results."""
+        try:
+            rn_model = self._output.get('output')
+            if not rn_model:
+                logger.warning("No read noise model available for preview.")
+                return
+            
+            rn_data = rn_model.rn
+            rn_err = rn_model.rn_err if hasattr(rn_model, 'rn_err') and rn_model.rn_err is not None else None
+            
+        except Exception as e:
+            logger.warning(f"Could not load read noise model for preview: {e}")
+            return
+        
+        ny, nx = rn_data.shape
+        
+        # Create figure with 2x2 subplots for read noise
+        fig_rn = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                "Fitted Read Noise (Full Frame)",
+                "Center 50x50 Pixels (Zoomed)",
+                "Histogram of Read Noise Values",
+                "Bad Pixel Map"
+            ),
+            specs=[
+                [{}, {}],
+                [{"type": "histogram"}, {}]
+            ]
+        )
+        
+        # Plot 1: Full read noise map
+        fig_rn.add_trace(
+            go.Heatmap(
+                z=rn_data,
+                colorscale='Magma',
+                showscale=True,
+                name='RN',
+                colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Zoomed center (50x50 pixels)
+        center_y, center_x = ny // 2, nx // 2
+        half_size = min(25, min(center_y, center_x, ny - center_y, nx - center_x))
+        rn_zoom = rn_data[center_y-half_size:center_y+half_size, center_x-half_size:center_x+half_size]
+        
+        fig_rn.add_trace(
+            go.Heatmap(
+                z=rn_zoom,
+                colorscale='Magma',
+                showscale=True,
+                name='RN (Zoomed)',
+                colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Histogram of read noise values
+        valid_rn = rn_data[np.isfinite(rn_data)].flatten()
+        fig_rn.add_trace(
+            go.Histogram(
+                x=valid_rn,
+                nbinsx=100,
+                name='RN',
+                marker=dict(color='#1f77b4'),
+                showlegend=False
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: Bad pixel map (DQ flags)
+        # Create a map where bad pixels are marked and good pixels are blank
+        bad_pixel_map = np.full_like(rn_model.dq, np.nan, dtype=np.float32)
+        bad_pixel_map[rn_model.dq != 0] = 1  # Mark bad pixels
+        
+        fig_rn.add_trace(
+            go.Heatmap(
+                z=bad_pixel_map,
+                colorscale=[[0, 'white'], [1, 'red']],
+                showscale=True,
+                name='Bad Pixels',
+                colorbar=dict(x=1.02, y=0.25, len=0.15, orientation='h', xanchor='center', yanchor='top', tickvals=[1], ticktext=['Bad']),
+                hovertemplate='Bad Pixel<extra></extra>'
+            ),
+            row=2, col=2
+        )
+        
+        fig_rn.update_xaxes(title_text="Read Noise (DN)", row=2, col=1, showgrid=False)
+        fig_rn.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
+        fig_rn.update_xaxes(title_text="X Pixel", row=2, col=2, showgrid=False)
+        fig_rn.update_yaxes(title_text="Y Pixel", row=2, col=2, showgrid=False)
+        fig_rn.update_xaxes(showgrid=False, row=1, col=1)
+        fig_rn.update_yaxes(showgrid=False, row=1, col=1)
+        fig_rn.update_xaxes(showgrid=False, row=1, col=2)
+        fig_rn.update_yaxes(showgrid=False, row=1, col=2)
+        
+        median_rn = np.nanmedian(rn_data)
+        fig_rn.update_layout(
+            height=900,
+            width=1200,
+            title_text=f"Fitted Read Noise (Median: {median_rn:.2f} DN)",
+            showlegend=False,
+            margin=dict(b=80)
+        )
+        
+        # Save if configured
+        if self.save_preview:
+            if not self.output_dir:
+                self.output_dir = '.'
+            
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            rn_html = os.path.join(self.output_dir, f'readnoise_preview_{self.suffix}.html')
+            
+            fig_rn.write_html(rn_html, include_plotlyjs='cdn')
+            
+            logger.info(f"Read Noise preview saved to {rn_html}")
+            
+            # Try to save PNG version
+            try:
+                rn_png = rn_html.replace('.html', '.png')
+                fig_rn.write_image(rn_png, scale=2)
+                logger.info(f"PNG preview saved")
+            except Exception as e:
+                logger.debug(f"Could not save PNG preview: {e}")
+        
+        if self.show_preview:
+            logger.info("Showing read noise calibration preview...")
+            fig_rn.show()
+        
+        # Store in output
+        self._output['preview'] = {
+            'rn_fig': fig_rn,
+        }

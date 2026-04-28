@@ -279,7 +279,7 @@ class MakeGainPrimitive(BasePrimitive):
         fig_gain.add_trace(
             go.Heatmap(
                 z=gain_data,
-                colorscale='Viridis',
+                colorscale='Inferno',
                 showscale=True,
                 name='Gain',
                 colorbar=dict(x=0.46, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
@@ -295,7 +295,7 @@ class MakeGainPrimitive(BasePrimitive):
         fig_gain.add_trace(
             go.Heatmap(
                 z=gain_zoom,
-                colorscale='Viridis',
+                colorscale='Inferno',
                 showscale=True,
                 name='Gain (Zoomed)',
                 colorbar=dict(x=1.02, y=0.75, len=0.15, orientation='h', xanchor='center', yanchor='top')
@@ -316,23 +316,27 @@ class MakeGainPrimitive(BasePrimitive):
             row=2, col=1
         )
         
-        # Plot 4: Gain statistics (DQ flags or residuals)
-        valid_dq = gain_model.dq[np.isfinite(gain_model.dq)].flatten()
+        # Plot 4: Bad pixel map (DQ flags)
+        # Create a map where bad pixels are marked and good pixels are blank
+        bad_pixel_map = np.full_like(gain_model.dq, np.nan, dtype=np.float32)
+        bad_pixel_map[gain_model.dq != 0] = 1  # Mark bad pixels
+        
         fig_gain.add_trace(
-            go.Histogram(
-                x=valid_dq,
-                nbinsx=50,
-                name='DQ Flags',
-                marker=dict(color='#d62728'),
-                showlegend=False
+            go.Heatmap(
+                z=bad_pixel_map,
+                colorscale=[[0, 'white'], [1, 'red']],
+                showscale=True,
+                name='Bad Pixels',
+                colorbar=dict(x=1.02, y=0.25, len=0.15, orientation='h', xanchor='center', yanchor='top', tickvals=[1], ticktext=['Bad']),
+                hovertemplate='Bad Pixel<extra></extra>'
             ),
             row=2, col=2
         )
         
         fig_gain.update_xaxes(title_text="Gain (e-/ADU)", row=2, col=1, showgrid=False)
         fig_gain.update_yaxes(title_text="Frequency", row=2, col=1, showgrid=False)
-        fig_gain.update_xaxes(title_text="DQ Flags", row=2, col=2, showgrid=False)
-        fig_gain.update_yaxes(title_text="Frequency", row=2, col=2, showgrid=False)
+        fig_gain.update_xaxes(title_text="X Pixel", row=2, col=2, showgrid=False)
+        fig_gain.update_yaxes(title_text="Y Pixel", row=2, col=2, showgrid=False)
         fig_gain.update_xaxes(showgrid=False, row=1, col=1)
         fig_gain.update_yaxes(showgrid=False, row=1, col=1)
         fig_gain.update_xaxes(showgrid=False, row=1, col=2)
@@ -395,7 +399,7 @@ class MakeGainPrimitive(BasePrimitive):
                 x=valid_rn,
                 nbinsx=100,
                 name='RN',
-                marker=dict(color='#ff7f0e'),
+                marker=dict(color="#083ad3"),
                 showlegend=False
             ),
             row=2, col=1
@@ -411,7 +415,7 @@ class MakeGainPrimitive(BasePrimitive):
                 marker=dict(
                     size=3,
                     color=rn_data[valid_mask].flatten(),
-                    colorscale='Viridis',
+                    colorscale='Inferno',
                     showscale=True,
                     colorbar=dict(x=1.02, y=0.25, len=0.15, orientation='h', xanchor='center', yanchor='top')
                 ),
