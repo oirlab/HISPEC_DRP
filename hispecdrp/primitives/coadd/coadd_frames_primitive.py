@@ -252,7 +252,7 @@ def coadd_frames(
     err_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     var_poisson_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     var_rnoise_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
-    dq_out = np.full((ny, nx), np.nan, dtype=dq_cube.dtype)
+    dq_out = np.zeros((ny, nx), dtype=dq_cube.dtype)
     if mid_time_cube is not None:
         mid_times_out = np.full((ny, nx), np.nan, dtype=mid_time_cube.dtype)
     else:

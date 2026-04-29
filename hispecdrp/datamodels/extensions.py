@@ -246,49 +246,13 @@ RVCCFAVG_HDU = {
     }
 }
 
-RVFWM_HDU = {
-    'hdu_type' : fits.BinTableHDU,
-    'columns' : {
-        'MBJDW' : np.float64,
-        'BERVW' : np.float64,
-        'RV' : np.float64,
-        'RV_ERR' : np.float64,
-        'WAVELENGTH' : np.float64,
-        'RESOLUTION' : np.float64,
-        'TELL_ABS' : np.float64,
-        'RV_ABS' : np.float64,
-        'RV_ABS_ERR' : np.float64,
-        'AIRMASS_FIT' : np.float64,
-        'AIRMASS_ERR_FIT' : np.float64,
-        'PWV_FIT' : np.float64,
-        'PWV_ERR_FIT' : np.float64,
-        'TELLURIC_VEL_FIT' : np.float64,
-        'TELLURIC_VEL_ERR_FIT' : np.float64,
-    }
-}
-
-RVFWMAVG_HDU = {
-    'hdu_type' : fits.BinTableHDU,
-    'columns' : {
-        'MBJDW' : np.float64,
-        'BERVW' : np.float64,
-        'RV' : np.float64,
-        'RV_ERR' : np.float64,
-        'WAVELENGTH' : np.float64,
-        'RESOLUTION' : np.float64,
-        'TELL_ABS' : np.float64,
-        'BIS' : np.float64,
-        'RV_ABS' : np.float64,
-        'RV_ABS_ERR' : np.float64,
-    }
-}
-
-def create_rv_extensions(fiber : str) -> dict[str, dict]:
+def create_rv_ccf_spectrograph_extensions(fiber: str, spectrograph: str) -> dict[str, dict]:
+    """RV extensions per spectrograph (BSPEC/RSPEC) and fiber.
+    Populated by CrossCorrelationPrimitive: per-chunk RVs and aggregated RV.
+    """
     return {
-        f'RVCCF_FIB{fiber}': RVCCF_HDU,
-        f'RVCCFAVG_FIB{fiber}': RVCCFAVG_HDU,
-        f'RVFWM_FIB{fiber}': RVFWM_HDU,
-        f'RVFWMAVG_FIB{fiber}': RVFWMAVG_HDU
+        f'RVCCF_{spectrograph}_FIB{fiber}': RVCCF_HDU,
+        f'RVCCFAVG_{spectrograph}_FIB{fiber}': RVCCFAVG_HDU,
     }
 
 

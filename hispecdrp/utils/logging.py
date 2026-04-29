@@ -273,6 +273,12 @@ def _configure_process(queue: mp.queues.Queue, level) -> None:
 def logging_context(config_dict: dict, queue: mp.queues.Queue | None = None):
     global _QUEUE, _CONFIGURED
 
+    # Save root logger state so we can restore it when exiting (so script/caller
+    # loggers continue to work after the pipeline runs).
+    root = logging.getLogger()
+    _saved_root_handlers = list(root.handlers)
+    _saved_root_level = root.level
+
     if not _CONFIGURED:
         if queue is None:
             _QUEUE = mp.Queue(-1)
@@ -304,6 +310,7 @@ def logging_context(config_dict: dict, queue: mp.queues.Queue | None = None):
         _restore_package_handlers(_SUPPRESSED_PKG_HANDLERS)
         _stop_listener()
         _CONFIGURED = False
+        _restore_root_logger(_saved_root_handlers, _saved_root_level)
 
 
 def get_queue() -> mp.queues.Queue | None:
