@@ -50,6 +50,15 @@ wheels/
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Local / optional example scripts (not tracked)
+examples/
+
+# Local simulation I/O (ramp, rate map, Stage 0 products from simulate_up_the_ramp, etc.)
+test_data/
+
+# Unit test outputs (e.g. saved Plotly previews from stellar RV tests)
+tests/output/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -120,6 +129,7 @@ ENV/
 
 # IDE related settings
 .vscode
+.cursor/
 
 .pytest_cache
 

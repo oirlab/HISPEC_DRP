@@ -1,42 +1,136 @@
 """
-Simulate up-the-ramp (UTR) readouts and run Stage 0 (and optionally Stage 1) pipeline.
+Simulate up-the-ramp (UTR) readouts and run Stage 0, Stage 1, and Stage 2 pipelines.
 
 This module provides functions to build simulated calibration models, generate
-ramp data from a rate map, and run the Stage 0 pipeline to produce rate/slope
-products. Calibrations can be (1) dummy/simulated via
+ramp data from a rate map, run :mod:`~hispecdrp.pipelines.stage0.stage0_pipeline`
+to produce rate/slope products, then (by default) dummy fiberflat rates and
+:mod:`~hispecdrp.pipelines.stage1.stage1_pipeline` for extracted spectra, then
+:mod:`~hispecdrp.pipelines.stage2.stage2_pipeline` (blaze correction using the
+fiberflat product). Calibrations can be (1) dummy/simulated via
 :func:`create_simulated_calibration_models`, or (2) master calibrations
 downloaded from the calibration store via :func:`run_caldb.get_master_calibrations`
 when ``use_master_calibrations=True`` in :func:`simulate_up_the_ramp`. Optional
 helpers for the fiberflat and Stage 1 pipelines are included for full workflows.
+
+Command line
+------------
+From the repository root (with ``hispec`` env active). By default all products go
+to ``test_data/`` at the repo root (see :data:`DEFAULT_SIMULATION_OUTPUT_DIR`)::
+
+    python -m benchmarks.simulate_up_the_ramp
+
+You can also run the file directly; the first import pass re-imports this module
+so package imports resolve::
+
+    python benchmarks/simulate_up_the_ramp.py
+
+Use ``-o`` / ``--output-dir`` only to override the output directory.
+
+Use ``-j N`` or ``--max-cores N`` (integer ≥ 1) to set the same parallelism
+budget for :func:`~benchmarks.create_ramp.create_ramp` and for
+``max_cores`` on every Stage 0 primitive that accepts it (via pipeline
+``prim_args``). Default is 1.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# ``python path/to/simulate_up_the_ramp.py`` leaves ``__package__`` unset. Multiprocessing
+# ``spawn`` (default on macOS) re-imports this file in workers as ``__name__ == "__mp_main__"``,
+# not ``__main__``, so a ``__main__``-only bootstrap would still break imports there.
+_repo_root = Path(__file__).resolve().parents[1]
+if not __package__:
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+    __package__ = "benchmarks"
+
+# CLI: re-import as a proper submodule so a single clean module object runs ``main()``.
+if __name__ == "__main__":
+    import importlib
+
+    _mod = importlib.import_module("benchmarks.simulate_up_the_ramp")
+    raise SystemExit(_mod.main())
+
+import copy
 import logging
 import os
 import re
 
 import numpy as np
 
+import hispecdrp
+
 logger = logging.getLogger(__name__)
 
-from .. import datamodels
-from ..utils.spectral_templates_utils import (
+from hispecdrp import datamodels
+from hispecdrp.datamodels.hispec_config import HISPECConfig
+from hispecdrp.utils.line_mask_utils import packaged_default_line_mask_path
+from hispecdrp.utils.spectral_templates_utils import (
     fetch_svo_2mass_filter,
     get_spectrum_path,
     load_btsettl_spectrum,
 )
-from ..datamodels.dqflags import DQ_FLAGS
-from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline, Stage1Pipeline
+from hispecdrp.datamodels.dqflags import DQ_FLAGS
+from hispecdrp.pipelines import ProcessFiberflatsPipeline
+from hispecdrp.pipelines.stage0 import stage0_pipeline as _stage0_pipeline
+from hispecdrp.pipelines.stage1 import stage1_pipeline as _stage1_pipeline
+from hispecdrp.pipelines.stage2 import stage2_pipeline as _stage2_pipeline
 from .create_ramp import create_ramp
 from .run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 
-# Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
-SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Legacy alias: bundled spectrum templates live under ``hispecdrp/data/templates/``.
+SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
 
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
+
+
+def _repository_root() -> Path:
+    """Path to the HISPEC_DRP repository root (parent of the ``hispecdrp`` package)."""
+    return Path(__file__).resolve().parents[1]
+
+
+def default_simulation_output_dir() -> str:
+    """Absolute path to ``test_data/`` at the repository root (gitignored)."""
+    return str(_repository_root() / "test_data")
+
+
+DEFAULT_SIMULATION_OUTPUT_DIR = default_simulation_output_dir()
+
+
+def _ensure_output_directory(output_dir: str) -> str:
+    """Create ``output_dir`` if needed and return its absolute path."""
+    out = os.path.abspath(output_dir)
+    os.makedirs(out, exist_ok=True)
+    return out
+
+
+def _calibration_dir(output_dir: str) -> str:
+    """Absolute path to the per-run calibration directory under ``output_dir``."""
+    return _ensure_output_directory(os.path.join(os.path.abspath(output_dir), "cals"))
+
+
+def _ensure_koa_calibration_cache_env(output_dir: str) -> str:
+    """
+    If ``KOA_CALIBRATION_CACHE`` is unset or empty, set it to
+    ``<output_dir>/cals/KOA_CALIBRATION_CACHE`` and create that directory.
+    """
+    existing = (os.environ.get("KOA_CALIBRATION_CACHE") or "").strip()
+    if existing:
+        return existing
+    cal_root = _calibration_dir(output_dir)
+    koa_path = os.path.join(cal_root, "KOA_CALIBRATION_CACHE")
+    os.makedirs(koa_path, exist_ok=True)
+    os.environ["KOA_CALIBRATION_CACHE"] = koa_path
+    logger.info(
+        "KOA_CALIBRATION_CACHE was unset; using default under output directory: %s",
+        koa_path,
+    )
+    return koa_path
+
 
 def _fiberflat_rate_filename(spectrograph: str, fiber: int) -> str:
     """Default filename for a single-fiber fiberflat rate FITS (matches KOA-style naming)."""
@@ -95,6 +189,8 @@ def fiberflat_rate_files_exist(
 
 
 __all__ = [
+    "DEFAULT_SIMULATION_OUTPUT_DIR",
+    "default_simulation_output_dir",
     "create_simulated_calibration_models",
     "simulate_ramp_from_rate_map",
     "fetch_svo_2mass_filter",
@@ -109,10 +205,13 @@ __all__ = [
     "rate_map_file_exists",
     "fiberflat_rate_files_exist",
     "get_default_stage0_prim_args",
+    "get_default_stage1_prim_args",
+    "get_default_stage2_prim_args",
     "run_stage0_simulation",
     "simulate_up_the_ramp",
     "run_fiberflat_pipeline",
     "run_stage1_simulation",
+    "run_stage2_simulation",
     "create_wavelength_solution_model_from_sim",
     "prepare_fiberflat_models",
     "get_fiberflat_prim_args",
@@ -135,8 +234,8 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     LFCWavesolModel
         Model with wave_fib# and spec_dq_fib# set from the HDF trace solution (micron; DQ zeros).
     """
-    from ..datamodels import hispec_config
-    from ..datamodels.lfcwavesol import LFCWavesolModel
+    from hispecdrp.datamodels import hispec_config
+    from hispecdrp.datamodels.lfcwavesol import LFCWavesolModel
 
     srm = SimulateRateMap()
     ws_dict = srm.get_wavelength_solution(spectrograph=spectrograph)
@@ -165,6 +264,26 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
                 np.zeros(wave_arr.shape, dtype=np.uint32),
             )
     return wavesol_model
+
+
+def _identity_nonlin_calibration_model(ny: int, nx: int) -> datamodels.NonlinearCorrectionModel:
+    """
+    Per-pixel linearity map that leaves DN ramps unchanged (see ``nonlincorr_numba.correct_nonlinearity``).
+
+    Used when no master nonlinearity file is available so :class:`~hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline`
+    can run ``nonlin_corr`` without altering simulated data.
+    """
+    coeffs = np.zeros((2, ny, nx), dtype=np.float32)
+    coeffs[1, :, :] = 1.0
+    nonlin_thresh = np.zeros((ny, nx), dtype=np.uint16)
+    nonlin_max = np.full((ny, nx), np.iinfo(np.uint16).max, dtype=np.uint16)
+    nonlin_dq = np.zeros((ny, nx), dtype=np.uint32)
+    return datamodels.NonlinearCorrectionModel(
+        coeffs=coeffs,
+        nonlin_thresh=nonlin_thresh,
+        nonlin_max=nonlin_max,
+        dq=nonlin_dq,
+    )
 
 
 def create_simulated_calibration_models(
@@ -215,7 +334,7 @@ def create_simulated_calibration_models(
     -------
     dict
         Dictionary with keys: ``dq``, ``saturation``, ``gain``, ``detflat``,
-        ``bias``, ``dark``, ``rn``. Each value is the corresponding
+        ``bias``, ``dark``, ``rn``, ``nonlin``. Each value is the corresponding
         calibration data model instance.
     """
     ny, nx = shape
@@ -287,6 +406,8 @@ def create_simulated_calibration_models(
         DQ=np.zeros((ny, nx), dtype=np.uint32),
     )
 
+    nonlin_model = _identity_nonlin_calibration_model(ny, nx)
+
     return {
         "dq": dq_model,
         "saturation": saturation_model,
@@ -295,6 +416,7 @@ def create_simulated_calibration_models(
         "bias": bias_model,
         "dark": dark_model,
         "rn": rn_model,
+        "nonlin": nonlin_model,
     }
 
 
@@ -306,7 +428,7 @@ def simulate_ramp_from_rate_map(
     n_reads: int = 10,
     nonlin_coeffs: np.ndarray | None = None,
     max_cores: int = 1,
-    spectrograph: str = "RSPEC",
+    spectrograph: str = "BSPEC",
     convert_to_uint16: bool = True,
     clip_ramps: bool = True,
     poisson_noise: bool = True,
@@ -321,7 +443,8 @@ def simulate_ramp_from_rate_map(
         2D rate map in e-/s/pixel (e.g. from SimulateRateMap).
     calibration_models : dict
         Output of :func:`create_simulated_calibration_models`. Must contain
-        ``gain``, ``detflat``, ``bias``, ``dark``, ``rn``.
+        ``gain``, ``detflat``, ``bias``, ``dark``, ``rn`` (and ``nonlin`` when
+        present, as returned by that helper).
     readtime : float, optional
         Time between reads in seconds. Default is 1.7.
     n_reads : int, optional
@@ -332,7 +455,7 @@ def simulate_ramp_from_rate_map(
     max_cores : int, optional
         Number of cores for create_ramp. Default is 1.
     spectrograph : str, optional
-        Spectrograph name for ramp meta. Default is "RSPEC".
+        Spectrograph name for ramp meta. Default is "BSPEC".
     convert_to_uint16 : bool, optional
         Whether to convert ramp data to uint16. Default is True.
     clip_ramps : bool, optional
@@ -393,61 +516,103 @@ def simulate_ramp_from_rate_map(
         meta=ramp_dict["meta"],
     )
     ramp_model.meta.filename = DEFAULT_SIMULATED_RAMP_FILENAME
+    HISPECConfig.sync_echelle_orders_for_spectrograph(ramp_model, spectrograph)
     return ramp_model
 
 
-def get_default_stage0_prim_args(
-    *,
-    max_cores: int = 1,
-    ramp_fit_method: str = "jwst_likely",
-    run_bias_sub: bool = False,
-    run_nonlin_corr: bool = False,
-    run_jump_detec: bool = False,
-) -> dict:
+def _apply_max_cores_to_stage0_prim_args(prim_args: dict, max_cores: int) -> dict:
     """
-    Return default primitive arguments for the Stage 0 pipeline.
-
-    Parameters
-    ----------
-    max_cores : int, optional
-        Number of cores for parallel primitives. Default is 1.
-    ramp_fit_method : str, optional
-        Ramp fit method: 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'.
-        Default is 'jwst_likely'.
-    run_bias_sub : bool, optional
-        Whether to run bias subtraction. Default is False.
-    run_nonlin_corr : bool, optional
-        Whether to run nonlinearity correction. Default is False.
-    run_jump_detec : bool, optional
-        Whether to run jump detection. Default is False.
-
-    Returns
-    -------
-    dict
-        Nested dict of primitive names to keyword arguments for
-        Stage0Pipeline.apply(..., prim_args=...).
+    Return a deep copy of ``prim_args`` with ``max_cores`` set for each Stage 0
+    primitive whose merged ``ARGUMENTS`` includes that key.
     """
-    return {
-        "dq_init": {"max_cores": max_cores},
-        "saturation_check": {"max_cores": max_cores},
-        "bias_sub": {"run": run_bias_sub, "max_cores": max_cores},
-        "nonlin_corr": {"run": run_nonlin_corr, "max_cores": max_cores},
-        "jump_detec": {
-            "run": run_jump_detec,
-            "method": "tpd",
-            "max_cores": max_cores,
-            "rejection_threshold": 4.0,
-        },
-        "ramp_fit": {
-            "method": ramp_fit_method,
-            "max_cores": max_cores,
-            "jwst_jump_detection": True,
-            "jwst_jump_rejection_threshold": 4.0,
-        },
-        "dark_sub": {"max_cores": max_cores},
-        "gain_corr": {"max_cores": max_cores},
-        "detflat_corr": {"max_cores": max_cores},
-    }
+    out = copy.deepcopy(prim_args)
+    for name, cls in _stage0_pipeline.Stage0Pipeline.PRIMITIVES.items():
+        if "max_cores" not in cls.ARGUMENTS:
+            continue
+        if name not in out:
+            out[name] = {}
+        out[name]["max_cores"] = max_cores
+    return out
+
+
+def get_default_stage0_prim_args(*, max_cores: int | None = None) -> dict:
+    """
+    Return default primitive arguments for :class:`~hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline`.
+
+    Values are taken from each primitive class's merged ``ARGUMENTS`` (same defaults
+    as constructing ``Stage0Pipeline()`` with no ``prim_args``), optionally
+    overriding ``max_cores`` for every primitive that defines it. Pipeline routing
+    matches ``hispecdrp.pipelines.stage0.stage0_pipeline.Stage0Pipeline._perform``.
+    """
+    _skip = frozenset({"input", "output_path", "output_dir"})
+    out: dict[str, dict] = {}
+    for name, cls in _stage0_pipeline.Stage0Pipeline.PRIMITIVES.items():
+        args = {k: v for k, v in cls.ARGUMENTS.items() if k not in _skip}
+        if max_cores is not None and "max_cores" in args:
+            args["max_cores"] = max_cores
+        out[name] = args
+    return out
+
+
+def _apply_max_cores_to_stage1_prim_args(prim_args: dict, max_cores: int) -> dict:
+    """Deep-copy ``prim_args`` and set ``max_cores`` for each Stage 1 primitive that defines it."""
+    out = copy.deepcopy(prim_args)
+    for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
+        if "max_cores" not in cls.ARGUMENTS:
+            continue
+        if name not in out:
+            out[name] = {}
+        out[name]["max_cores"] = max_cores
+    return out
+
+
+def get_default_stage1_prim_args(*, max_cores: int | None = None) -> dict:
+    """
+    Return default primitive arguments for :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`.
+
+    Values follow each primitive class's merged ``ARGUMENTS``, matching
+    ``Stage1Pipeline._perform`` (``spec_extract`` then ``set_wavesol``).
+    """
+    _skip = frozenset({"input", "output_path", "output_dir"})
+    out: dict[str, dict] = {}
+    for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
+        args = {k: v for k, v in cls.ARGUMENTS.items() if k not in _skip}
+        if max_cores is not None and "max_cores" in args:
+            args["max_cores"] = max_cores
+        out[name] = args
+    return out
+
+
+def _apply_max_cores_to_stage2_prim_args(prim_args: dict, max_cores: int) -> dict:
+    """Deep-copy ``prim_args`` and set ``max_cores`` for each Stage 2 primitive that defines it."""
+    out = copy.deepcopy(prim_args)
+    for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
+        if "max_cores" not in cls.ARGUMENTS:
+            continue
+        if name not in out:
+            out[name] = {}
+        out[name]["max_cores"] = max_cores
+    return out
+
+
+def get_default_stage2_prim_args(*, max_cores: int | None = None) -> dict:
+    """
+    Return default primitive arguments for :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
+
+    Values follow each primitive class's merged ``ARGUMENTS``, matching
+    ``Stage2Pipeline._perform``. Stellar RV defaults include an explicit
+    ``mask_path`` to the packaged lte049 BT-Settl **delta** mask.
+    """
+    _skip = frozenset({"input", "output_path", "output_dir"})
+    out: dict[str, dict] = {}
+    for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
+        args = {k: v for k, v in cls.ARGUMENTS.items() if k not in _skip}
+        if max_cores is not None and "max_cores" in args:
+            args["max_cores"] = max_cores
+        out[name] = args
+    if "stellar_rv" in out:
+        out["stellar_rv"]["mask_path"] = packaged_default_line_mask_path()
+    return out
 
 
 def create_dummy_fiberflat_rate_files(
@@ -479,10 +644,12 @@ def create_dummy_fiberflat_rate_files(
     spectrograph : str
         Spectrograph name (e.g. "BSPEC", "RSPEC").
     output_dir : str
-        Directory to save each rate FITS file.
+        Directory to save each rate FITS file. Pass :data:`DEFAULT_SIMULATION_OUTPUT_DIR`
+        to use ``test_data/`` at the repository root.
     calibration_models : dict
         Calibration models (same as used for the science ramp). Must contain
-        dq, saturation, bias, gain, rn, dark, detflat.
+        ``dq``, ``saturation``, ``bias``, ``gain``, ``rn``, ``dark``, ``detflat``,
+        and ``nonlin`` if present (see :func:`create_simulated_calibration_models`).
     flat_scale : float, optional
         Scale factor for the fiber flat spectrum flux. Default is 1e-14.
     flat_temperature_k : float, optional
@@ -492,9 +659,11 @@ def create_dummy_fiberflat_rate_files(
     n_reads : int, optional
         Number of reads in each ramp. Default is 10.
     max_cores : int, optional
-        Cores for create_ramp and Stage 0. Default is 1.
+        Parallelism for :func:`simulate_ramp_from_rate_map` and ``max_cores`` on
+        each Stage 0 primitive (via :func:`run_stage0_simulation`). Default is 1.
     stage0_prim_args : dict or None, optional
-        Primitive arguments for Stage 0. If None, use :func:`get_default_stage0_prim_args`(max_cores).
+        Primitive arguments for Stage 0. If None, use :func:`get_default_stage0_prim_args`.
+        ``max_cores`` is still applied for every primitive that supports it.
     fiberflat_filename : callable or None, optional
         (spectrograph, fiber) -> filename. If None, use default KOA-style naming.
 
@@ -507,10 +676,11 @@ def create_dummy_fiberflat_rate_files(
     from astropy.modeling.models import BlackBody
 
     if stage0_prim_args is None:
-        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
+        stage0_prim_args = get_default_stage0_prim_args()
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
 
+    output_dir = _ensure_output_directory(output_dir)
     # Blackbody spectrum 0.8–3.0 µm at high resolution to avoid interpolation errors in the simulation
     n_wl_flat = 100_000
     wl_flat = np.linspace(0.8, 3.0, n_wl_flat) * u.micron
@@ -522,8 +692,7 @@ def create_dummy_fiberflat_rate_files(
     # Convert per-Angstrom to per-micron: 1 micron = 1e4 AA => same flux density => multiply by 1e4
     flux_flat = (flat_scale * np.asarray(bb_lam_aa.value) * 1e4) * (u.erg / u.s / u.cm**2 / u.micron)
 
-    out_dir_abs = os.path.abspath(output_dir)
-    os.makedirs(out_dir_abs, exist_ok=True)
+    out_dir_abs = output_dir
     paths: list[str] = []
 
     for f in sorted(fibers):
@@ -554,6 +723,7 @@ def create_dummy_fiberflat_rate_files(
             calibration_models,
             output_dir=out_dir_abs,
             prim_args=stage0_prim_args,
+            max_cores=max_cores,
         )
         # Set object_fiber meta so group_by_illuminated_fiber (fiber flat pipeline) finds this fiber
         obj_flat = "FIBERFLAT-B" if spectrograph.upper() == "BSPEC" else "FIBERFLAT-R"
@@ -571,8 +741,10 @@ def create_dummy_fiberflat_rate_files(
 def run_stage0_simulation(
     ramp_model: datamodels.RampModel,
     calibration_models: dict[str, datamodels.CalibrationModel],
-    output_dir: str = ".",
+    output_dir: str = DEFAULT_SIMULATION_OUTPUT_DIR,
     prim_args: dict | None = None,
+    *,
+    max_cores: int | None = None,
 ) -> datamodels.DataModel:
     """
     Run the Stage 0 pipeline on a simulated ramp with the given calibrations.
@@ -584,25 +756,44 @@ def run_stage0_simulation(
     calibration_models : dict
         Output of :func:`create_simulated_calibration_models`. Must contain
         ``dq``, ``saturation``, ``bias``, ``gain``, ``rn``, ``dark``, ``detflat``.
+        If ``nonlin`` is missing (e.g. master calibrations from the store), an
+        identity :class:`~hispecdrp.datamodels.nonlin.NonlinearCorrectionModel` is
+        built for the ramp spatial shape so ``nonlin_corr`` matches the default pipeline.
     output_dir : str, optional
-        Directory for pipeline outputs. Default is ".".
+        Directory for pipeline outputs. Default is :data:`DEFAULT_SIMULATION_OUTPUT_DIR`
+        (``test_data/`` at the repository root).
     prim_args : dict or None, optional
         Primitive arguments for the pipeline. If None, use
         :func:`get_default_stage0_prim_args`(). Default is None.
+    max_cores : int or None, optional
+        If not ``None``, set ``max_cores`` to this value for every Stage 0
+        primitive that defines ``max_cores`` in its arguments (overwriting any
+        value already present under each primitive key in ``prim_args``).
+        Use ``None`` to leave ``prim_args`` unchanged. Default is None.
 
     Returns
     -------
     DataModel
-        Result of Stage0Pipeline.apply (e.g. rate or slope model).
+        Result of ``Stage0Pipeline.apply`` from
+        :mod:`hispecdrp.pipelines.stage0.stage0_pipeline` (e.g. rate or slope model).
     """
     if prim_args is None:
         prim_args = get_default_stage0_prim_args()
+    if max_cores is not None:
+        prim_args = _apply_max_cores_to_stage0_prim_args(prim_args, max_cores)
 
+    output_dir = _ensure_output_directory(output_dir)
     logger.info("Running Stage 0 pipeline (output_dir=%s).", output_dir)
-    pipe = Stage0Pipeline()
+    ny, nx = int(ramp_model.data.shape[1]), int(ramp_model.data.shape[2])
+    nonlin_model = calibration_models.get("nonlin") or _identity_nonlin_calibration_model(ny, nx)
+
+    pipe = _stage0_pipeline.Stage0Pipeline()
     pipe.dq_init.dq = calibration_models["dq"]
     pipe.saturation_check.saturation = calibration_models["saturation"]
     pipe.bias_sub.bias = calibration_models["bias"]
+    pipe.nonlin_corr.nonlin = nonlin_model
+    pipe.jump_detec.gain = calibration_models["gain"]
+    pipe.jump_detec.rn = calibration_models["rn"]
     pipe.ramp_fit.gain = calibration_models["gain"]
     pipe.ramp_fit.rn = calibration_models["rn"]
     pipe.dark_sub.dark = calibration_models["dark"]
@@ -620,12 +811,12 @@ def create_ramp_and_calibrations(
     spectrum_wavelengths=None,
     spectrum_flux=None,
     radial_velocity_km_s: float = 0.0,
-    output_dir: str = ".",
+    output_dir: str = DEFAULT_SIMULATION_OUTPUT_DIR,
     calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
     use_master_calibrations: bool = False,
     readtime: float = 1.7,
     n_reads: int = 10,
-    spectrograph: str = "RSPEC",
+    spectrograph: str = "BSPEC",
     max_cores: int = 1,
     poisson_noise: bool = True,
     convert_to_uint16: bool = True,
@@ -651,8 +842,10 @@ def create_ramp_and_calibrations(
     rate_map : np.ndarray or None, optional
         2D rate map in e-/s/pixel. If None, a default is created via SimulateRateMap.
     shape : tuple of int, optional
-        (ny, nx) for dummy calibrations when ``calibration_models`` is None and
-        ``use_master_calibrations`` is False. Default is (4096, 4096).
+        Ignored when a 2D ``rate_map`` is supplied or built first: dummy calibrations
+        are sized to ``rate_map.shape``. When ``rate_map`` is not ``None`` and
+        ``calibration_models`` is provided, this argument is unused. Default is
+        ``(4096, 4096)`` for backward compatibility only.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) to place spectra on when building the
         default rate map. Only 1, 2, 3 are supported by SimulateRateMap; others
@@ -670,7 +863,7 @@ def create_ramp_and_calibrations(
         Default is 0.0.
     output_dir : str, optional
         Directory for saving the rate map when building the default rate map
-        (when ``rate_map`` is None). Default is ".".
+        (when ``rate_map`` is None). Default is :data:`DEFAULT_SIMULATION_OUTPUT_DIR`.
     calibration_models : dict or None, optional
         Calibration models to use. If None, master or dummy models are used.
     use_master_calibrations : bool, optional
@@ -680,7 +873,7 @@ def create_ramp_and_calibrations(
     n_reads : int, optional
         Number of reads. Default is 10.
     spectrograph : str, optional
-        Spectrograph name. Default is "RSPEC".
+        Spectrograph name. Default is "BSPEC".
     max_cores : int, optional
         Cores for ramp creation. Default is 1.
     poisson_noise : bool, optional
@@ -702,23 +895,43 @@ def create_ramp_and_calibrations(
         (ramp_model, calibration_models). Pass these to :func:`run_stage0_simulation`
         to run the Stage 0 pipeline.
     """
-    if calibration_models is None:
-        if use_master_calibrations:
-            logger.info("Fetching master calibrations from calibration store (spectrograph=%s).", spectrograph)
-            calibration_models = get_master_calibrations(
-                meta=None,
-                instrument_name=instrument_name,
-                instrument_era=instrument_era,
-                spectrograph=spectrograph,
-                mjd_start=mjd_start,
-                datetime_obs=datetime_obs,
-                connect_remote=connect_remote,
-                sync_first=sync_caldb_first,
-            )
-        else:
-            logger.debug("Creating simulated calibration models (shape=%s).", shape)
-            calibration_models = create_simulated_calibration_models(shape, **cal_kw)
+    output_dir = _ensure_output_directory(output_dir)
+    _ensure_koa_calibration_cache_env(output_dir)
+    ramp_path = get_expected_ramp_path(output_dir)
 
+    # Re-use an existing ramp data product if present.
+    # This is important for multiprocessing "spawn" use and for quick iteration:
+    # only regenerate the ramp when the file is removed.
+    if rate_map is None and os.path.isfile(ramp_path):
+        logger.info("Re-using existing simulated ramp: %s", ramp_path)
+        ramp_model = datamodels.open(ramp_path)
+        HISPECConfig.sync_echelle_orders_for_spectrograph(ramp_model, spectrograph)
+        if calibration_models is None:
+            if use_master_calibrations:
+                logger.info(
+                    "Fetching master calibrations from calibration store (spectrograph=%s).",
+                    spectrograph,
+                )
+                calibration_models = get_master_calibrations(
+                    meta=None,
+                    instrument_name=instrument_name,
+                    instrument_era=instrument_era,
+                    spectrograph=spectrograph,
+                    mjd_start=mjd_start,
+                    datetime_obs=datetime_obs,
+                    connect_remote=connect_remote,
+                    sync_first=sync_caldb_first,
+                )
+            else:
+                ny, nx = int(ramp_model.data.shape[1]), int(ramp_model.data.shape[2])
+                logger.debug(
+                    "Creating simulated calibration models (shape=%s from ramp).",
+                    (ny, nx),
+                )
+                calibration_models = create_simulated_calibration_models((ny, nx), **cal_kw)
+        return ramp_model, calibration_models
+    # Build the rate map before dummy calibrations so detector shape matches
+    # (e.g. native maps are wider than 4096 after reference-channel padding).
     if rate_map is None:
         if fibers is None:
             fibers = [1]
@@ -750,6 +963,30 @@ def create_ramp_and_calibrations(
         rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
         logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
 
+    if calibration_models is None:
+        if use_master_calibrations:
+            logger.info("Fetching master calibrations from calibration store (spectrograph=%s).", spectrograph)
+            calibration_models = get_master_calibrations(
+                meta=None,
+                instrument_name=instrument_name,
+                instrument_era=instrument_era,
+                spectrograph=spectrograph,
+                mjd_start=mjd_start,
+                datetime_obs=datetime_obs,
+                connect_remote=connect_remote,
+                sync_first=sync_caldb_first,
+            )
+        else:
+            rm = np.asarray(rate_map, dtype=np.float64)
+            if rm.ndim != 2:
+                raise ValueError(
+                    "rate_map must be 2D when creating dummy calibrations; "
+                    f"got shape {rm.shape}"
+                )
+            eff_shape = (int(rm.shape[0]), int(rm.shape[1]))
+            logger.debug("Creating simulated calibration models (shape=%s from rate_map).", eff_shape)
+            calibration_models = create_simulated_calibration_models(eff_shape, **cal_kw)
+
     logger.info("Simulating ramp (n_reads=%s, readtime=%s s).", n_reads, readtime)
     ramp_model = simulate_ramp_from_rate_map(
         rate_map,
@@ -761,6 +998,12 @@ def create_ramp_and_calibrations(
         poisson_noise=poisson_noise,
         convert_to_uint16=convert_to_uint16,
     )
+    # Save the ramp as a standard data product before any Stage 0 processing.
+    if not os.path.isfile(ramp_path):
+        logger.info("Saving simulated ramp to %s", ramp_path)
+        ramp_model.save(filepath=ramp_path)
+    else:
+        logger.info("Ramp file already exists; leaving it unchanged: %s", ramp_path)
     return ramp_model, calibration_models
 
 
@@ -772,16 +1015,21 @@ def simulate_up_the_ramp(
     spectrum_wavelengths=None,
     spectrum_flux=None,
     radial_velocity_km_s: float = 0.0,
-    output_dir: str = ".",
+    output_dir: str = DEFAULT_SIMULATION_OUTPUT_DIR,
     calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
     use_master_calibrations: bool = False,
     readtime: float = 1.7,
     n_reads: int = 10,
-    spectrograph: str = "RSPEC",
+    spectrograph: str = "BSPEC",
     max_cores: int = 1,
     poisson_noise: bool = True,
     convert_to_uint16: bool = True,
     stage0_prim_args: dict | None = None,
+    run_stage1: bool = True,
+    stage1_prim_args: dict | None = None,
+    fiberflat_fibers: list[int] | None = None,
+    run_stage2: bool = True,
+    stage2_prim_args: dict | None = None,
     instrument_name: str | None = None,
     instrument_era: str = "0.0.1",
     mjd_start: float | None = None,
@@ -789,9 +1037,17 @@ def simulate_up_the_ramp(
     connect_remote: bool = True,
     sync_caldb_first: bool = True,
     **cal_kw,
-) -> tuple[datamodels.RampModel, datamodels.DataModel, dict]:
+) -> tuple[
+    datamodels.RampModel,
+    datamodels.DataModel,
+    dict,
+    datamodels.DataModel | None,
+    datamodels.DataModel | None,
+]:
     """
-    High-level up-the-ramp simulation: create calibrations, ramp, and run Stage 0.
+    High-level up-the-ramp simulation: create calibrations, ramp, run Stage 0, and
+    optionally dummy fiberflat processing, :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`,
+    and :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
 
     If ``rate_map`` is None, a simple rate map is generated using
     :class:`SimulateRateMap` with a flat spectrum on fiber 1 (for testing).
@@ -808,9 +1064,9 @@ def simulate_up_the_ramp(
         2D rate map in e-/s/pixel. If None, a default rate map is created
         via SimulateRateMap. Default is None.
     shape : tuple of int, optional
-        (ny, nx) for creating dummy calibration models when
-        ``calibration_models`` is None and ``use_master_calibrations`` is False.
-        Default is (4096, 4096).
+        Legacy ``(ny, nx)`` for dummy calibrations; superseded when a 2D
+        ``rate_map`` is built or supplied (see :func:`create_ramp_and_calibrations`).
+        Default is ``(4096, 4096)``.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) for default rate map. Passed to
         :func:`create_ramp_and_calibrations`. If None, default is [1].
@@ -824,7 +1080,8 @@ def simulate_up_the_ramp(
         building the rate map. Passed to :func:`create_ramp_and_calibrations`.
         Default is 0.0.
     output_dir : str, optional
-        Output directory for Stage 0. Default is ".".
+        Output directory for Stages 0–2, fiberflat intermediates, and default rate map.
+        Default is :data:`DEFAULT_SIMULATION_OUTPUT_DIR` (``test_data/`` at the repository root).
     calibration_models : dict or None, optional
         Calibration models to use. If None, either master calibrations are
         fetched (when ``use_master_calibrations`` is True) or dummy models
@@ -839,15 +1096,38 @@ def simulate_up_the_ramp(
     n_reads : int, optional
         Number of reads. Default is 10.
     spectrograph : str, optional
-        Spectrograph name. Default is "RSPEC".
+        Spectrograph name. Default is "BSPEC".
     max_cores : int, optional
-        Cores for ramp creation and Stage 0. Default is 1.
+        Parallelism for :func:`create_ramp` (via :func:`simulate_ramp_from_rate_map`)
+        and ``max_cores`` on each Stage 0 / 1 / 2 primitive that defines it when those
+        stages run. Default is 1.
     poisson_noise : bool, optional
         Whether to add Poisson noise when creating the ramp. Default is True.
     convert_to_uint16 : bool, optional
         Whether to convert ramp data to uint16. Default is True.
     stage0_prim_args : dict or None, optional
-        Primitive args for Stage 0. If None, use default. Default is None.
+        Primitive args for Stage 0. If None, use :func:`get_default_stage0_prim_args`
+        (defaults from each primitive in ``stage0_pipeline.Stage0Pipeline``).
+        Whether None or user-supplied, ``max_cores`` above is applied to every
+        Stage 0 primitive that accepts ``max_cores`` (see :func:`run_stage0_simulation`).
+        Default is None.
+    run_stage1 : bool, optional
+        If True, build dummy per-fiber fiberflat rate FITS, run
+        :func:`run_fiberflat_pipeline`, then run :func:`run_stage1_simulation` using
+        :mod:`hispecdrp.pipelines.stage1.stage1_pipeline` (writes under ``output_dir``).
+        Default is True.
+    stage1_prim_args : dict or None, optional
+        Primitive arguments for Stage 1. If None, use :func:`get_default_stage1_prim_args`.
+        Default is None.
+    fiberflat_fibers : list of int or None, optional
+        Fiber indices (1–3) for dummy fiberflat rate generation when ``run_stage1``
+        is True. Default is ``[1, 2, 3]``.
+    run_stage2 : bool, optional
+        If True (and Stage 1 ran), run :func:`run_stage2_simulation` using the fiberflat
+        bundle from the same fiberflat pipeline run. Default is True.
+    stage2_prim_args : dict or None, optional
+        Primitive arguments for Stage 2. If None, use :func:`get_default_stage2_prim_args`.
+        Default is None.
     instrument_name : str or None, optional
         Instrument name for the calibration store. Used when
         ``use_master_calibrations`` is True. Default is None.
@@ -873,8 +1153,10 @@ def simulate_up_the_ramp(
 
     Returns
     -------
-    tuple of (RampModel, DataModel, dict)
-        (ramp_model, stage0_result_model, calibration_models).
+    tuple of (RampModel, DataModel, dict, DataModel or None, DataModel or None)
+        (ramp_model, stage0_result_model, calibration_models, stage1_result_model,
+        stage2_result_model). The fourth element is None when ``run_stage1`` is False.
+        The fifth is None when Stage 2 does not run (``run_stage2`` False, or Stage 1 skipped).
     """
     logger.info(
         "simulate_up_the_ramp: rate_map=%s, use_master_calibrations=%s, output_dir=%s.",
@@ -908,16 +1190,70 @@ def simulate_up_the_ramp(
     )
 
     if stage0_prim_args is None:
-        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
+        stage0_prim_args = get_default_stage0_prim_args()
 
+    out_dir_abs = _ensure_output_directory(output_dir)
     logger.info("Running Stage 0 simulation.")
     result = run_stage0_simulation(
         ramp_model,
         calibration_models,
-        output_dir=output_dir,
+        output_dir=out_dir_abs,
         prim_args=stage0_prim_args,
+        max_cores=max_cores,
     )
-    return ramp_model, result, calibration_models
+
+    stage1_model: datamodels.DataModel | None = None
+    ff_bundle: dict[str, datamodels.DataModel] | None = None
+    if run_stage1:
+        ff_list = fiberflat_fibers if fiberflat_fibers is not None else [1, 2, 3]
+        ff_list = [f for f in ff_list if f in (1, 2, 3)]
+        if not ff_list:
+            logger.warning("run_stage1 is True but fiberflat_fibers is empty; skipping Stage 1.")
+        else:
+            logger.info(
+                "Running fiberflat pipeline and Stage 1 (spectrograph=%s, fiberflat_fibers=%s).",
+                spectrograph,
+                ff_list,
+            )
+            ff_paths = create_dummy_fiberflat_rate_files(
+                ff_list,
+                spectrograph,
+                out_dir_abs,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                stage0_prim_args=stage0_prim_args,
+            )
+            ff_bundle = run_fiberflat_pipeline(ff_paths, output_dir=out_dir_abs)
+            wavesol_model = create_wavelength_solution_model_from_sim(spectrograph)
+            stage1_model = run_stage1_simulation(
+                result,
+                ff_bundle["trace_pos"],
+                ff_bundle["trace_prof"],
+                prim_args=stage1_prim_args,
+                wavesol_model=wavesol_model,
+                output_dir=out_dir_abs,
+                max_cores=max_cores,
+            )
+
+    stage2_model: datamodels.DataModel | None = None
+    if run_stage2:
+        if stage1_model is None or ff_bundle is None:
+            logger.warning(
+                "run_stage2 is True but Stage 1 or fiberflat outputs are missing; skipping Stage 2."
+            )
+        else:
+            logger.info("Running Stage 2 pipeline.")
+            stage2_model = run_stage2_simulation(
+                stage1_model,
+                fiberflat_model=ff_bundle["fiberflat"],
+                prim_args=stage2_prim_args,
+                output_dir=out_dir_abs,
+                max_cores=max_cores,
+            )
+
+    return ramp_model, result, calibration_models, stage1_model, stage2_model
 
 
 def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepath: str) -> None:
@@ -986,6 +1322,7 @@ def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
     prim_args: dict | None = None,
     *,
+    output_dir: str | None = None,
     yrange: tuple[int, int] = (500, 4000),
     xrange: tuple[int, int] = (100, 4050),
     deg_pos: int = 4,
@@ -1001,6 +1338,10 @@ def run_fiberflat_pipeline(
         Paths to fiberflat rate FITS files (one per fiber).
     prim_args : dict or None, optional
         Primitive arguments. If None, built from the other keyword arguments.
+        Default is None.
+    output_dir : str or None, optional
+        If set, passed to :meth:`~hispecdrp.pipelines.base_pipeline.BasePipeline.apply`
+        so pipeline and primitive products are written under this directory.
         Default is None.
     yrange : tuple of int, optional
         Fitting range in spectral direction (pixels). Default is (500, 4000).
@@ -1018,6 +1359,8 @@ def run_fiberflat_pipeline(
     dict
         Pipeline results with keys such as ``trace_pos``, ``trace_prof``.
     """
+    if output_dir is not None:
+        _ensure_koa_calibration_cache_env(output_dir)
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
     ff_models = prepare_fiberflat_models(fiberflat_filepaths)
     if prim_args is None:
@@ -1030,7 +1373,10 @@ def run_fiberflat_pipeline(
             extraction_aperture=extraction_aperture,
         )
     pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
-    return pipe.apply(ff_models)
+    apply_kw: dict = {}
+    if output_dir is not None:
+        apply_kw["output_dir"] = _ensure_output_directory(output_dir)
+    return pipe.apply(ff_models, **apply_kw)
 
 
 def run_stage1_simulation(
@@ -1039,12 +1385,16 @@ def run_stage1_simulation(
     trace_prof_model: datamodels.DataModel,
     prim_args: dict | None = None,
     *,
-    extraction_aperture: int = 10,
+    wavesol_model: datamodels.DataModel | None = None,
+    output_dir: str | None = None,
+    max_cores: int | None = None,
+    extraction_aperture: int | tuple[int, int] = 10,
     do_orders: list | None = None,
     do_fibers: list[str] | None = None,
 ) -> datamodels.DataModel:
     """
-    Run the Stage 1 pipeline on a rate (or slope) model with trace calibrations.
+    Run :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline` on a rate
+    (or slope) model with trace calibrations (same primitive order as that module).
 
     Parameters
     ----------
@@ -1055,10 +1405,19 @@ def run_stage1_simulation(
     trace_prof_model : DataModel
         Trace profile model from fiberflat pipeline.
     prim_args : dict or None, optional
-        Primitive arguments. If None, built from the other keyword arguments.
+        If None, use :func:`get_default_stage1_prim_args` and fill ``spec_extract``
+        with ``do_orders``, ``do_fibers``, ``method``, ``extraction_aperture``, and
+        trace models. Default is None.
+    wavesol_model : DataModel or None, optional
+        Wavelength solution for ``set_wavesol``. If ``None``, ``set_wavesol`` is
+        skipped (``run``: False). Default is None.
+    output_dir : str or None, optional
+        Directory for saved pipeline products. Default is None.
+    max_cores : int or None, optional
+        If not ``None``, applied to Stage 1 primitives that define ``max_cores``.
         Default is None.
-    extraction_aperture : int, optional
-        Extraction aperture in pixels. Default is 10.
+    extraction_aperture : int or tuple of int, optional
+        Passed to ``spec_extract`` when ``prim_args`` is None. Default is 10.
     do_orders : list or None, optional
         Orders to extract. If None, use order vector from rate model. Default is None.
     do_fibers : list of str or None, optional
@@ -1067,7 +1426,7 @@ def run_stage1_simulation(
     Returns
     -------
     DataModel
-        Stage 1 spectral extraction result.
+        Stage 1 pipeline output (e.g. L2Model after ``set_wavesol`` when wavesol is set).
     """
     if do_orders is None and hasattr(rate_model, "make_order_vec"):
         do_orders = rate_model.make_order_vec()
@@ -1075,25 +1434,196 @@ def run_stage1_simulation(
         do_orders = []
     if do_fibers is None:
         do_fibers = ["1", "2", "3"]
-    
+
     if prim_args is not None:
         method = prim_args.get("spec_extract", {}).get("method", "box")
     else:
         method = "box"
 
     logger.info("Running Stage 1 simulation (do_orders=%s, do_fibers=%s, method=%s).", do_orders, do_fibers, method)
-    if prim_args is None:
-        prim_args = {
-            "spec_extract": {
-                "method": method,
-                "extraction_aperture": extraction_aperture,
-                "do_orders": do_orders,
-                "do_fibers": do_fibers,
-                "tracepos": trace_pos_model,
-                "traceprof": trace_prof_model,
-            },
-            "set_wavesol": {"run": False},
-        }
 
-    pipe = Stage1Pipeline(prim_args=prim_args)
-    return pipe.apply(rate_model)
+    if prim_args is None:
+        prim_args = get_default_stage1_prim_args(max_cores=max_cores)
+        prim_args["spec_extract"]["method"] = method
+        prim_args["spec_extract"]["extraction_aperture"] = extraction_aperture
+        prim_args["spec_extract"]["do_orders"] = do_orders
+        prim_args["spec_extract"]["do_fibers"] = do_fibers
+    else:
+        prim_args = copy.deepcopy(prim_args)
+        if max_cores is not None:
+            prim_args = _apply_max_cores_to_stage1_prim_args(prim_args, max_cores)
+
+    prim_args.setdefault("spec_extract", {})
+    prim_args["spec_extract"]["tracepos"] = trace_pos_model
+    prim_args["spec_extract"]["traceprof"] = trace_prof_model
+
+    prim_args.setdefault("set_wavesol", {})
+    if wavesol_model is None:
+        prim_args["set_wavesol"]["run"] = False
+    else:
+        prim_args["set_wavesol"].pop("run", None)
+        prim_args["set_wavesol"]["wavesol"] = wavesol_model
+
+    pipe = _stage1_pipeline.Stage1Pipeline(prim_args=prim_args)
+
+    apply_kw: dict = {}
+    if output_dir is not None:
+        apply_kw["output_dir"] = _ensure_output_directory(output_dir)
+    return pipe.apply(rate_model, **apply_kw)
+
+
+def run_stage2_simulation(
+    stage1_output: datamodels.DataModel,
+    *,
+    fiberflat_model: datamodels.DataModel,
+    prim_args: dict | None = None,
+    output_dir: str | None = None,
+    max_cores: int | None = None,
+) -> datamodels.DataModel:
+    """
+    Run :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline` on the
+    Stage 1 product, using the registered fiberflat from :func:`run_fiberflat_pipeline`.
+
+    Parameters
+    ----------
+    stage1_output : DataModel
+        Output of :func:`run_stage1_simulation` (e.g. L2Model with spectra and ``traces``).
+    fiberflat_model : DataModel
+        Fiber flat calibration model (``fiberflat`` entry from the fiberflat pipeline bundle).
+    prim_args : dict or None, optional
+        If None, use :func:`get_default_stage2_prim_args`. Default is None.
+    output_dir : str or None, optional
+        Directory for saved pipeline products. Default is None.
+    max_cores : int or None, optional
+        If not ``None``, set ``max_cores`` on Stage 2 primitives that define it.
+        Default is None.
+
+    Returns
+    -------
+    DataModel
+        Stage 2 pipeline output (e.g. blaze-corrected L2 model).
+    """
+    if prim_args is None:
+        prim_args = get_default_stage2_prim_args(max_cores=max_cores)
+    else:
+        prim_args = copy.deepcopy(prim_args)
+        if max_cores is not None:
+            prim_args = _apply_max_cores_to_stage2_prim_args(prim_args, max_cores)
+
+    pipe = _stage2_pipeline.Stage2Pipeline(prim_args=prim_args)
+    pipe.blaze_corr.fiberflat = fiberflat_model
+
+    apply_kw: dict = {}
+    if output_dir is not None:
+        apply_kw["output_dir"] = _ensure_output_directory(output_dir)
+    return pipe.apply(stage1_output, **apply_kw)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry: simulate ramp + dummy calibrations + Stages 0–2 (default rate map)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Simulate a HISPEC up-the-ramp exposure from a default rate map, "
+            "dummy calibrations, Stage 0, fiberflat trace derivation, Stage 1, and Stage 2."
+        )
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=DEFAULT_SIMULATION_OUTPUT_DIR,
+        help=(
+            "Directory for Stages 0–2 and fiberflat outputs and default rate map FITS (default: "
+            f"{DEFAULT_SIMULATION_OUTPUT_DIR})."
+        ),
+    )
+    parser.add_argument(
+        "--spectrograph",
+        default="BSPEC",
+        choices=("RSPEC", "BSPEC"),
+        help="Spectrograph name for rate map and ramp meta (default: BSPEC).",
+    )
+    parser.add_argument(
+        "--fibers",
+        default="1",
+        help="Comma-separated fiber indices for default rate map (default: 1).",
+    )
+    parser.add_argument(
+        "--n-reads",
+        type=int,
+        default=10,
+        help=(
+            "Number of UTR reads (default: 10). Use at least a few reads for a "
+            "stable ramp fit (defaults follow ``FitRampPrimitive.ARGUMENTS``)."
+        ),
+    )
+    parser.add_argument(
+        "-j",
+        "--max-cores",
+        dest="max_cores",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Parallelism budget (integer >= 1): passed to ramp simulation "
+            "(create_ramp) and to max_cores for Stage 0/1/2 primitives that "
+            "define it when those stages run. Default: 1."
+        ),
+    )
+    parser.add_argument(
+        "--no-stage1",
+        action="store_true",
+        help="Skip dummy fiberflat generation, fiberflat pipeline, Stage 1, and Stage 2.",
+    )
+    parser.add_argument(
+        "--no-stage2",
+        action="store_true",
+        help="Skip Stage 2 (requires Stage 1 and fiberflat bundle).",
+    )
+    parser.add_argument(
+        "--use-master-calibrations",
+        action="store_true",
+        help="Fetch calibrations from the calibration store instead of dummy models.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable INFO logging on the root logger.",
+    )
+    args = parser.parse_args(argv)
+    if args.n_reads < 4:
+        parser.error("--n-reads must be >= 4 for a reliable default ramp fit.")
+    if args.max_cores < 1:
+        parser.error("-j/--max-cores must be >= 1.")
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+
+    fibers = [int(x.strip()) for x in args.fibers.split(",") if x.strip()]
+    out_dir = os.path.abspath(args.output_dir)
+    os.makedirs(out_dir, exist_ok=True)
+
+    ramp, rate, cals, l1, l2 = simulate_up_the_ramp(
+        output_dir=out_dir,
+        fibers=fibers,
+        spectrograph=args.spectrograph,
+        n_reads=args.n_reads,
+        max_cores=args.max_cores,
+        use_master_calibrations=args.use_master_calibrations,
+        run_stage1=not args.no_stage1,
+        run_stage2=(not args.no_stage1) and (not args.no_stage2),
+    )
+    ramp_path = get_expected_ramp_path(out_dir)
+    print("Ramp model:", type(ramp).__name__)
+    print("Stage 0 result:", type(rate).__name__)
+    print("Stage 1 result:", type(l1).__name__ if l1 is not None else None)
+    print("Stage 2 result:", type(l2).__name__ if l2 is not None else None)
+    print("Calibration keys:", sorted(cals.keys()))
+    print("Expected ramp path (if saved elsewhere, check pipeline logs):", ramp_path)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

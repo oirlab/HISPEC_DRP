@@ -1,4 +1,5 @@
 from ... import datamodels
+from ...datamodels.dqflags import DQ_FLAGS
 from ..base_primitive import BasePrimitive
 
 from ...calibrations import WavelengthSolutionSelector

@@ -11,7 +11,7 @@ except ImportError:
     import multiprocessing
     if multiprocessing.current_process().name == "MainProcess":
         warnings.warn(
-            "pyechelle package not found in imports in hispec.simulations.simulate_rate_map.py. "
+            "pyechelle package not found in imports in benchmarks.simulate_rate_map. "
             "This is not a problem unless you need it. pyechelle simulations will simply not run."
         )
 

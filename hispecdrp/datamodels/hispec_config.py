@@ -1,9 +1,12 @@
 import importlib.resources
+import logging
 from .base_model import DataModel
 from .meta_data import read_meta_schema
 
 import scipy.constants
 from typing import ClassVar
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['HISPECConfig']
 
@@ -42,14 +45,38 @@ class HISPECConfig:
     def get_order_list(cls, spectrograph: str) -> list[int]:
         """
         Return the list of echelle order numbers for a spectrograph (single source of truth).
-        Used by simulations and trace finding so order count and indices match model meta.
+        Used by benchmarks and trace finding so order count and indices match model meta.
         """
-        if spectrograph not in cls.echelle_orders:
+        sp = (spectrograph or "").strip().upper()
+        if sp not in cls.echelle_orders:
             return []
-        o = cls.echelle_orders[spectrograph]
+        o = cls.echelle_orders[sp]
         start, end = o['order_start'], o['order_end']
         step = 1 if end >= start else -1
         return list(range(start, end + step, step))
+
+    @classmethod
+    def sync_echelle_orders_for_spectrograph(cls, model: 'DataModel', spectrograph: str) -> None:
+        """
+        Set ``meta.spectrograph``, ``meta.order_start``, and ``meta.order_end`` from
+        :attr:`echelle_orders` for the given spectrograph.
+
+        Use this when constructing or reloading simulated data so echelle order labels
+        match :meth:`get_order_list` and primitives that rely on ``make_order_vec()``
+        (e.g. spectral extraction, stellar RV), including after FITS headers carried
+        stale ORDERST/ORDEREND from an older run.
+        """
+        sp = (spectrograph or "").strip().upper()
+        if sp not in cls.echelle_orders:
+            logger.warning(
+                "Unknown spectrograph %r; leaving echelle order metadata unchanged on model.",
+                spectrograph,
+            )
+            return
+        o = cls.echelle_orders[sp]
+        model.meta.spectrograph = sp
+        model.meta.order_start = o["order_start"]
+        model.meta.order_end = o["order_end"]
 
     metadata_schema_filename : ClassVar[str] = 'hispec_metadata_schema.yaml'
 

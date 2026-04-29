@@ -1,5 +1,5 @@
 """
-Unit tests for hispecdrp.simulations: rate map, ramp creation, calibration models,
+Unit tests for benchmarks: rate map, ramp creation, calibration models,
 stage 0/1 runners, and helpers.
 """
 import os
@@ -9,7 +9,7 @@ import numpy as np
 import astropy.units as u
 import pytest
 
-from hispecdrp import simulations
+import benchmarks as simulations
 from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
 
 
@@ -156,10 +156,10 @@ def test_create_simulated_calibration_models():
 
 
 def test_get_spectrum_path():
-    """get_spectrum_path resolves relative path under simulations data dir."""
+    """get_spectrum_path resolves relative path under hispecdrp templates dir."""
     rel = "lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5"
     out = get_spectrum_path(rel)
-    assert "simulations" in out
+    assert "templates" in out
     assert "data" in out
     assert out.endswith(rel)
     abs_path = "/absolute/path/to/file.h5"

@@ -20,23 +20,23 @@ authentication.
 
 from __future__ import annotations
 
-# Allow running as script: python hispecdrp/simulations/run_caldb.py (relative imports need package context)
+# Allow running as script: python benchmarks/run_caldb.py (relative imports need package context)
 if __name__ == "__main__" and __package__ is None:
     import sys
     import os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if _root not in sys.path:
         sys.path.insert(0, _root)
-    __package__ = "hispecdrp.simulations"
+    __package__ = "benchmarks"
 
 import argparse
 import logging
 import os
 import sys
 
-from .. import datamodels
-from ..utils.logging import LogConfig, ROOT_LOGGER
-from ..calibrations import (
+from hispecdrp import datamodels
+from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
+from hispecdrp.calibrations import (
     HISPECCalibrationStore,
     DQSelector,
     SaturationSelector,
@@ -244,7 +244,8 @@ def get_master_calibrations(
             try:
                 if connect_remote and store.remote_db is not None:
                     store.sync_records_from_remote(mode="id")
-                store.sync_local_db_from_local_files()
+                # Populate local DB from any files already in the cache.
+                store.sync_records_from_cached_files()
             except Exception as e:
                 logger.warning("Sync before get_master_calibrations failed: %s", e)
 
@@ -374,7 +375,7 @@ def run(
         # Add any files currently in the local cache that are not yet in the cal DB
         if not dry_run:
             try:
-                cals_added = store.sync_local_db_from_local_files()
+                cals_added = store.sync_records_from_cached_files()
                 if cals_added:
                     logger.info("Added %d file(s) from local cache to calibration DB.", len(cals_added))
             except Exception as e:
@@ -390,7 +391,7 @@ def main() -> None:
 
     Configures logging via :class:`hispecdrp.utils.logging.LogConfig`, then calls
     :func:`run` with the parsed options. See the script help (e.g.
-    ``python -m hispecdrp.simulations.run_caldb --help``) for available arguments.
+    ``python -m benchmarks.run_caldb --help``) for available arguments.
 
     Returns
     -------

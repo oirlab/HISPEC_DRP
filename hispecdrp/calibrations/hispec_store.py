@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pyexpat import model
+
 from koa_middleware import CalibrationStore
 import glob
 import os
@@ -32,6 +32,19 @@ class HISPECCalibrationStore(CalibrationStore):
             instrument_name=instrument_name,
             **kwargs
         )
+
+    def sync_records_from_remote(self, _cals=None, mode: str = "id") -> list[dict]:
+        """
+        Pull remote calibration metadata into the local SQLite DB.
+
+        ``koa_middleware.store.CalibrationStore.__init__`` calls this with no
+        arguments when ``sync_on_init`` is True. Some ``koa_middleware`` versions
+        declare a required first parameter ``cals`` on the base implementation
+        even though that body ignores it and refetches from the remote DB; calling
+        ``super()`` without that argument then raises ``TypeError``. The base
+        method only needs a dummy positional value.
+        """
+        return super().sync_records_from_remote((), mode)
 
     def sync_local_db_from_local_files(self, origin : str | None = None) -> list[dict]:
         """

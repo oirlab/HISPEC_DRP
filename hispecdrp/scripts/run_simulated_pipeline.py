@@ -736,7 +736,10 @@ def main():
         fiberflat_filepaths = simulations.get_expected_fiberflat_rate_paths(
             datadir, spectrograph, fiberflat_fibers
         )
-        logger.info("Using existing dummy fiber flat rate file(s) in %s", datadir)
+        logger.info(
+            "Using existing dummy fiber flat rate file(s) in %s",
+            os.path.join(os.path.abspath(datadir), "cals"),
+        )
     else:
         fiberflat_filepaths = simulations.create_dummy_fiberflat_rate_files(
             fiberflat_fibers,
@@ -751,7 +754,11 @@ def main():
             stage0_prim_args=stage0_prim_args,
         )
         if fiberflat_filepaths:
-            logger.info("Created %d dummy fiber flat rate file(s) in %s", len(fiberflat_filepaths), datadir)
+            logger.info(
+                "Created %d dummy fiber flat rate file(s) in %s",
+                len(fiberflat_filepaths),
+                os.path.join(os.path.abspath(datadir), "cals"),
+            )
 
     logger.info("Running Stage 0 pipeline...")
     start_time = time.time()

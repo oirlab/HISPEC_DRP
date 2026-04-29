@@ -34,12 +34,14 @@ CALIBRATIONS = {
     'CALIBRATIONS': {
         'hdu_type': fits.BinTableHDU,
         'columns': {
-            'FILENAME': str, # Base filename of the calibration
-            'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+            'CAL_ROLE': str, # Role of calibration
             'CAL_TYPE': str, # Type of calibration
+            'FILENAME': str, # Base filename of the calibration
+            'ID': str, # UUID
             'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
             'LAST_PROCESSED': str, # When calibration was last processed. This is NOT equal to the last_updated timestamp in the calibration DB.
-            'ID': str, # UUID
+            'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+            'CLASS' : str, # Primitive class that used the calibration.
             'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
         }
     }
@@ -201,19 +203,31 @@ def create_lfcfitparam_extensions(fiber : str) -> dict[str, dict]:
 
 #### RVs
 
+# Element dtype for each 1D CCF vector stored in the ``CCF`` column (the table column itself is ``object``).
+RVCCF_CCF_ELEM_DTYPE = np.float64
+
 RVCCF_HDU = {
     'hdu_type' : fits.BinTableHDU,
     'columns' : {
-        'MBJDW' : np.float64,
-        'BERVW' : np.float64,
-        'RV' : np.float64,
-        'RV_ERR' : np.float64,
-        'WAVELENGTH' : np.float64,
-        'RESOLUTION' : np.float64,
-        'TELL_ABS' : np.float64,
-        'BIS' : np.float64,
-        'RV_ABS' : np.float64,
-        'RV_ABS_ERR' : np.float64,
+        'MBJDW' : np.float64,  # flux-weighted modified BJD
+        'BERVW' : np.float64,  # flux-weighted barycentric correction (km/s)
+        'RV' : np.float64,  # chunk RV (m/s)
+        'RV_ERR' : np.float64,  # chunk RV uncertainty (m/s)
+        'ORDER' : np.int16,  # echelle order of the chunk
+        'WAVELENGTH' : np.float64,  # chunk center wavelength (µm)
+        'RESOLUTION' : np.float64,  # resolving power R = λ/Δλ
+        'TELL_ABS' : np.float64,  # telluric absorption metric
+        'BIS' : np.float64,  # line bisector span (m/s)
+        'RV_ABS' : np.float64,  # absolute-frame RV (m/s)
+        'RV_ABS_ERR' : np.float64,  # uncertainty on RV_ABS (m/s)
+        'INLIER' : np.uint8,  # 1 = used in aggregate, 0 = rejected by median/MAD outlier
+        'CHUNK_ID' : np.int32,  # serial chunk index in the exposure
+        'N_GOOD' : np.int32,  # good pixels in chunk (-1 if unknown)
+        'V_MIN' : np.float64,  # CCF velocity grid min (m/s)
+        'V_MAX' : np.float64,  # CCF velocity grid max (m/s)
+        'V_STEP' : np.float64,  # CCF velocity sampling step (m/s)
+        'N_VEL' : np.int32,  # length of CCF(v)
+        'CCF' : object,  # object column: each row is a 1D np.ndarray, dtype ``RVCCF_CCF_ELEM_DTYPE``; empty if absent
     }
 }
 
@@ -232,13 +246,49 @@ RVCCFAVG_HDU = {
     }
 }
 
-def create_rv_ccf_spectrograph_extensions(fiber: str, spectrograph: str) -> dict[str, dict]:
-    """RV extensions per spectrograph (BSPEC/RSPEC) and fiber.
-    Populated by CrossCorrelationPrimitive: per-chunk RVs and aggregated RV.
-    """
+RVFWM_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+        'AIRMASS_FIT' : np.float64,
+        'AIRMASS_ERR_FIT' : np.float64,
+        'PWV_FIT' : np.float64,
+        'PWV_ERR_FIT' : np.float64,
+        'TELLURIC_VEL_FIT' : np.float64,
+        'TELLURIC_VEL_ERR_FIT' : np.float64,
+    }
+}
+
+RVFWMAVG_HDU = {
+    'hdu_type' : fits.BinTableHDU,
+    'columns' : {
+        'MBJDW' : np.float64,
+        'BERVW' : np.float64,
+        'RV' : np.float64,
+        'RV_ERR' : np.float64,
+        'WAVELENGTH' : np.float64,
+        'RESOLUTION' : np.float64,
+        'TELL_ABS' : np.float64,
+        'BIS' : np.float64,
+        'RV_ABS' : np.float64,
+        'RV_ABS_ERR' : np.float64,
+    }
+}
+
+def create_rv_extensions(fiber : str) -> dict[str, dict]:
     return {
-        f'RVCCF_{spectrograph}_FIB{fiber}': RVCCF_HDU,
-        f'RVCCFAVG_{spectrograph}_FIB{fiber}': RVCCFAVG_HDU,
+        f'RVCCF_FIB{fiber}': RVCCF_HDU,
+        f'RVCCFAVG_FIB{fiber}': RVCCFAVG_HDU,
+        f'RVFWM_FIB{fiber}': RVFWM_HDU,
+        f'RVFWMAVG_FIB{fiber}': RVFWMAVG_HDU
     }
 
 

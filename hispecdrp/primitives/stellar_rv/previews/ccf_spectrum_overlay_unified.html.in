@@ -1,0 +1,1017 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>__TITLE__</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 10px 14px 14px; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+    .row-slider { margin-bottom: 2px; justify-content: flex-start; align-items: center; }
+    #vLabel {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      font-size: 12px;
+      line-height: 1.4;
+      margin: 0 0 10px 0;
+      padding: 0;
+      color: #222;
+    }
+    .row label { font-size: 13px; }
+    #plotSpectrum { width: 100%; height: 400px; margin-top: 0; }
+    #plotCcf { width: 100%; height: 260px; margin-top: 2px; }
+    input[type=number] { width: 140px; }
+    select { min-width: 280px; }
+    #vSliderWrap { position: relative; width: 840px; height: 28px; }
+    #rvFitTrack { position: absolute; left: 0; right: 0; top: 10px; height: 8px;
+      background: rgba(0,0,0,0.08); border-radius: 4px; pointer-events: none; }
+    #rvFitBand { display: none; position: absolute; top: 10px; height: 8px;
+      background: rgba(46, 204, 113, 0.55); border-radius: 4px; pointer-events: none; }
+    #rvFitTick { display: none; position: absolute; top: 5px; width: 0; height: 18px;
+      border-left: 3px solid #1e8449; transform: translateX(-1.5px); pointer-events: none; }
+    #vSlider { position: absolute; left: 0; width: 100%; top: 0; height: 28px; margin: 0;
+      z-index: 2; background: transparent; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <label>Spectrum chunk
+      <select id="orderSelect"></select>
+    </label>
+    <label>Velocity shift (m/s)
+      <input id="vInput" type="number" step="__V_STEP__" />
+    </label>
+  </div>
+  <p style="font-size:11px;color:#555;margin:0 0 0 0;max-width:840px;">
+__SPECTRUM_HELP__
+  </p>
+  <div class="row row-slider">
+    <div id="vSliderWrap">
+      <div id="rvFitTrack"></div>
+      <div id="rvFitBand"></div>
+      <div id="rvFitTick"></div>
+      <input id="vSlider" type="range" min="__V_MIN__" max="__V_MAX__" step="__V_STEP__" />
+    </div>
+  </div>
+  <div id="vLabel"></div>
+  <div id="plotSpectrum"></div>
+  <div id="plotCcf"></div>
+
+  <script>
+    const C_MS = __C_MS__;
+    const ZB = __ZB__;
+    const DATA = __PAYLOAD_JSON__;
+    const OVERLAY_KIND = __OVERLAY_KIND__;
+    const V_INIT_M_S = __V_INIT__;
+    let currentOrderIdx = 0;
+    let currentV = V_INIT_M_S;
+
+    const orderSelect = document.getElementById("orderSelect");
+    const vSlider = document.getElementById("vSlider");
+    const vInput = document.getElementById("vInput");
+    const vLabel = document.getElementById("vLabel");
+    const plotSpectrumDiv = document.getElementById("plotSpectrum");
+    const plotCcfDiv = document.getElementById("plotCcf");
+    const orderCache = new Map();
+    const ccfCurveCache = new Map();
+    /** Per-order spectrum traces + static mask metadata (avoid recomputing flux on every v tick). */
+    const spectrumStaticByOrderIdx = new Map();
+    let spectrumDrawnOrderIdx = -1;
+    let ccfDrawnOrderIdx = -1;
+    /** Plotly may not expose ``.data`` on the DOM node reliably; use flags after ``react``. */
+    let spectrumPlotReady = false;
+    let ccfPlotReady = false;
+    let sliderPlotRaf = null;
+
+    /** Line-window mask overlay: padded ``window_size_um`` band (µm); else null. */
+    function spectrumBandUmFromPayload(o) {
+      const slo = Number(o.spectrum_band_lo_um);
+      const shi = Number(o.spectrum_band_hi_um);
+      if (Number.isFinite(slo) && Number.isFinite(shi) && shi > slo) {
+        return { lo: slo, hi: shi };
+      }
+      return null;
+    }
+
+    DATA.orders.forEach((o, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      const loPix = Number(o.wl_lo_um);
+      const hiPix = Number(o.wl_hi_um);
+      const band = spectrumBandUmFromPayload(o);
+      const vlo = band ? band.lo : Number(o.voronoi_lo_um);
+      const vhi = band ? band.hi : Number(o.voronoi_hi_um);
+      const lc = Number(o.chunk_center_um);
+      let lab = `Echelle ${o.order}`;
+      if (Number.isFinite(o.chunk_n) && o.chunk_n > 1 && Number.isFinite(o.chunk_index)) {
+        lab += ` · segment ${Number(o.chunk_index) + 1}/${Number(o.chunk_n)}`;
+      }
+      if (Number.isFinite(vlo) && Number.isFinite(vhi)) {
+        lab += ` · λ ${vlo.toFixed(4)}–${vhi.toFixed(4)} µm`;
+      } else if (Number.isFinite(loPix) && Number.isFinite(hiPix)) {
+        lab += ` · λ ${loPix.toFixed(4)}–${hiPix.toFixed(4)} µm`;
+      }
+      if (Number.isFinite(lc)) {
+        lab += ` · λ_c=${lc.toFixed(6)} µm`;
+      }
+      opt.textContent = lab;
+      orderSelect.appendChild(opt);
+    });
+
+    function updateRvFitIndicator(order) {
+      const band = document.getElementById("rvFitBand");
+      const tick = document.getElementById("rvFitTick");
+      const vMin = parseFloat(vSlider.min);
+      const vMax = parseFloat(vSlider.max);
+      const span = vMax - vMin;
+      if (!band || !tick || !(span > 0)) return;
+      const rv = order.fit_rv_m_s;
+      const sig = order.fit_rv_err_m_s;
+      if (rv == null || !Number.isFinite(Number(rv))) {
+        band.style.display = "none";
+        tick.style.display = "none";
+        return;
+      }
+      const rvN = Number(rv);
+      const sigN = Number(sig);
+      band.style.display = "block";
+      tick.style.display = "block";
+      let lo = rvN;
+      let hi = rvN;
+      if (Number.isFinite(sigN) && sigN > 0) {
+        lo = rvN - sigN;
+        hi = rvN + sigN;
+      }
+      const pLo = 100 * (lo - vMin) / span;
+      const pHi = 100 * (hi - vMin) / span;
+      const leftPct = Math.max(0, Math.min(100, Math.min(pLo, pHi)));
+      const rightPct = Math.max(0, Math.min(100, Math.max(pLo, pHi)));
+      let widthPct = rightPct - leftPct;
+      if (widthPct < 0.4) widthPct = 0.4;
+      band.style.left = leftPct + "%";
+      band.style.width = widthPct + "%";
+      const cPct = Math.max(0, Math.min(100, 100 * (rvN - vMin) / span));
+      tick.style.left = cPct + "%";
+    }
+
+    function shiftWavelengths(arr, vMs) {
+      const factor = (1.0 + vMs / C_MS) / (1.0 + ZB);
+      return arr.map(c => c * factor);
+    }
+
+    function lowerBound(arr, x) {
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid] < x) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    }
+
+    function upperBound(arr, x) {
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid] <= x) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    }
+
+    function interpLinear(wx, sy, xq) {
+      const nn = wx.length;
+      if (nn < 2) return NaN;
+      if (xq <= wx[0]) return sy[0];
+      if (xq >= wx[nn - 1]) return sy[nn - 1];
+      let lo = 0;
+      let hi = nn - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (wx[mid] <= xq) lo = mid;
+        else hi = mid;
+      }
+      const i0 = lo;
+      const i1 = lo + 1;
+      const t = (xq - wx[i0]) / (wx[i1] - wx[i0]);
+      return (1.0 - t) * sy[i0] + t * sy[i1];
+    }
+
+    function buildOrderCache(order) {
+      const w = order.wave;
+      const s = order.spec;
+      const n = w.length;
+      if (n < 3) return null;
+      const left = new Array(n);
+      const right = new Array(n);
+      const width = new Array(n);
+      const sUse = new Array(n);
+      for (let i = 0; i < n; i++) {
+        let l;
+        let r;
+        if (i === 0) {
+          const d = w[1] - w[0];
+          l = w[0] - 0.5 * d;
+        } else {
+          l = 0.5 * (w[i - 1] + w[i]);
+        }
+        if (i === n - 1) {
+          const d = w[n - 1] - w[n - 2];
+          r = w[n - 1] + 0.5 * d;
+        } else {
+          r = 0.5 * (w[i] + w[i + 1]);
+        }
+        left[i] = l;
+        right[i] = r;
+        const pw = r - l;
+        width[i] = Number.isFinite(pw) && pw > 0 ? pw : NaN;
+        sUse[i] = Number.isFinite(s[i]) ? s[i] : 0.0;
+      }
+      return { left, right, width, sUse, n };
+    }
+
+    function ccfAtVelocityMask(order, vMs) {
+      const pv0 = order.ccf_v_m_s;
+      const pc0 = order.ccf;
+      if (
+        Array.isArray(pv0) &&
+        Array.isArray(pc0) &&
+        pv0.length === pc0.length &&
+        pv0.length >= 2
+      ) {
+        return interpLinear(pv0, pc0, vMs);
+      }
+      let cache = orderCache.get(currentOrderIdx);
+      if (!cache) {
+        cache = buildOrderCache(order);
+        if (!cache) return NaN;
+        orderCache.set(currentOrderIdx, cache);
+      }
+
+      const left = cache.left;
+      const right = cache.right;
+      const width = cache.width;
+      const sUse = cache.sUse;
+      const n = cache.n;
+      const maskSpectra = new Array(n).fill(0.0);
+      const shift = (1.0 + vMs / C_MS) / (1.0 + ZB);
+      const wCenters = order.wave;
+      let deltaAcc = 0.0;
+      let wSumDelta = 0.0;
+
+      for (let i = 0; i < order.mask_start_um.length; i++) {
+        const lnStart = order.mask_start_um[i];
+        const lnEnd = order.mask_end_um[i];
+        const lnWeight = order.mask_weight[i];
+        if (!Number.isFinite(lnStart) || !Number.isFinite(lnEnd) || !Number.isFinite(lnWeight)) continue;
+        let lineStart = lnStart * shift;
+        let lineEnd = lnEnd * shift;
+        if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd)) continue;
+        if (lineEnd <= lineStart) {
+          const lam0 = 0.5 * (lineStart + lineEnd);
+          if (lam0 < left[0] || lam0 > right[n - 1]) continue;
+          const fv = interpLinear(wCenters, sUse, lam0);
+          if (Number.isFinite(fv)) {
+            deltaAcc += lnWeight * fv;
+            wSumDelta += lnWeight;
+          }
+          continue;
+        }
+
+        const closest = lowerBound(right, lineStart);
+        const next = upperBound(left, lineEnd);
+        if (next <= 0 || closest >= n - 1) continue;
+        const lo = Math.max(0, closest);
+        const hi = Math.min(n, next);
+        if (hi <= lo) continue;
+
+        for (let p = lo; p < hi; p++) {
+          if (left[p] <= lineEnd && right[p] >= lineStart) {
+            const waveStart = Math.max(left[p], lineStart);
+            const waveEnd = Math.min(right[p], lineEnd);
+            const overlap = waveEnd - waveStart;
+            if (overlap > 0 && Number.isFinite(width[p]) && width[p] > 0) {
+              maskSpectra[p] += lnWeight * (overlap / width[p]);
+            }
+          }
+        }
+      }
+
+      let deltaPart = 0.0;
+      if (wSumDelta > 0.0) {
+        deltaPart = deltaAcc / wSumDelta;
+      }
+      let boxPart = 0.0;
+      for (let i = 0; i < n; i++) {
+        boxPart += sUse[i] * maskSpectra[i];
+      }
+      return deltaPart + boxPart;
+    }
+
+    function getCcfCurveTemplateEmbedded(order) {
+      if (ccfCurveCache.has(currentOrderIdx)) {
+        return ccfCurveCache.get(currentOrderIdx);
+      }
+      const pv = order.ccf_v_m_s;
+      const pc = order.ccf;
+      const pe = order.ccf_err;
+      if (!Array.isArray(pv) || !Array.isArray(pc) || pv.length !== pc.length || pv.length < 2) {
+        const empty = { v: [0, 1], ccf: [0, 0], ccfErr: null };
+        ccfCurveCache.set(currentOrderIdx, empty);
+        return empty;
+      }
+      const bundle = { v: pv.slice(), ccf: pc.slice(), ccfErr: Array.isArray(pe) && pe.length === pv.length ? pe.slice() : null };
+      ccfCurveCache.set(currentOrderIdx, bundle);
+      return bundle;
+    }
+
+    function getCcfCurveMaskKpf(order) {
+      if (ccfCurveCache.has(currentOrderIdx)) {
+        return ccfCurveCache.get(currentOrderIdx);
+      }
+      const pvEmb = order.ccf_v_m_s;
+      const pcEmb = order.ccf;
+      const peEmb = order.ccf_err;
+      if (
+        Array.isArray(pvEmb) &&
+        Array.isArray(pcEmb) &&
+        pvEmb.length === pcEmb.length &&
+        pvEmb.length >= 2
+      ) {
+        const bundle = {
+          v: pvEmb.slice(),
+          ccf: pcEmb.slice(),
+          ccfErr:
+            Array.isArray(peEmb) && peEmb.length === pvEmb.length
+              ? peEmb.slice()
+              : null,
+        };
+        ccfCurveCache.set(currentOrderIdx, bundle);
+        return bundle;
+      }
+      const vMin = parseFloat(vSlider.min);
+      const vMax = parseFloat(vSlider.max);
+      const coarseStep = 50.0;
+      const outerHalfWidth = 100000.0;
+      const innerHalfWidth = 10000.0;
+      const fineStep = 0.1;
+      const wingStep = 2.0;
+      const maxInnerPts = 200000;
+
+      let vc = V_INIT_M_S;
+      const frv = order.fit_rv_m_s;
+      if (frv != null && Number.isFinite(Number(frv))) {
+        vc = Number(frv);
+      }
+
+      const vBins = new Set();
+      const addV = (v) => {
+        if (!Number.isFinite(v)) return;
+        const c = Math.max(vMin, Math.min(vMax, v));
+        vBins.add(Math.round(c * 10) / 10);
+      };
+
+      const nCoarse = Math.max(1, Math.floor((vMax - vMin) / coarseStep) + 1);
+      for (let k = 0; k < nCoarse; k++) {
+        addV(vMin + k * coarseStep);
+      }
+      addV(vMax);
+
+      const v_lo = Math.max(vMin, vc - outerHalfWidth);
+      const v_hi = Math.min(vMax, vc + outerHalfWidth);
+      const ilo = Math.max(vMin, vc - innerHalfWidth);
+      const ihi = Math.min(vMax, vc + innerHalfWidth);
+
+      if (ihi > ilo) {
+        let nIn = Math.floor((ihi - ilo) / fineStep) + 1;
+        if (nIn < 2) nIn = 2;
+        if (nIn > maxInnerPts) nIn = maxInnerPts;
+        const actualInner = (ihi - ilo) / (nIn - 1);
+        for (let i = 0; i < nIn; i++) {
+          addV(ilo + i * actualInner);
+        }
+      }
+
+      if (v_lo < ilo) {
+        for (let w = v_lo; w < ilo - 1e-9; w += wingStep) {
+          addV(w);
+        }
+        addV(ilo);
+      }
+      if (ihi < v_hi) {
+        addV(ihi);
+        for (let w = ihi + wingStep; w < v_hi - 1e-9; w += wingStep) {
+          addV(w);
+        }
+        addV(v_hi);
+      }
+
+      const vArr = Array.from(vBins).sort((a, b) => a - b);
+      const ccfArr = new Array(vArr.length);
+      let ccfErrArr = null;
+      const pv = order.ccf_v_m_s;
+      const pe = order.ccf_err;
+      if (Array.isArray(pv) && Array.isArray(pe) && pv.length === pe.length && pv.length >= 2) {
+        ccfErrArr = new Array(vArr.length);
+      }
+      for (let i = 0; i < vArr.length; i++) {
+        ccfArr[i] = ccfAtVelocityMask(order, vArr[i]);
+        if (ccfErrArr) {
+          const ev = interpLinear(pv, pe, vArr[i]);
+          ccfErrArr[i] = Number.isFinite(ev) && ev > 0 ? ev : NaN;
+        }
+      }
+      const bundle = { v: vArr, ccf: ccfArr, ccfErr: ccfErrArr };
+      ccfCurveCache.set(currentOrderIdx, bundle);
+      return bundle;
+    }
+
+    function getCcfCurve(order) {
+      if (OVERLAY_KIND === "template") {
+        return getCcfCurveTemplateEmbedded(order);
+      }
+      return getCcfCurveMaskKpf(order);
+    }
+
+    function spectrumTitleText(order, vMs) {
+      const loPix = Number(order.wl_lo_um);
+      const hiPix = Number(order.wl_hi_um);
+      const band = spectrumBandUmFromPayload(order);
+      const vlo = band ? band.lo : Number(order.voronoi_lo_um);
+      const vhi = band ? band.hi : Number(order.voronoi_hi_um);
+      const lc = Number(order.chunk_center_um);
+      let wl = "";
+      if (Number.isFinite(vlo) && Number.isFinite(vhi)) {
+        wl = ` | λ ${vlo.toFixed(4)}–${vhi.toFixed(4)} µm`;
+      } else if (Number.isFinite(loPix) && Number.isFinite(hiPix)) {
+        wl = ` | plot λ ${loPix.toFixed(4)}–${hiPix.toFixed(4)} µm`;
+      }
+      if (Number.isFinite(lc)) {
+        wl += ` | λ_c=${lc.toFixed(6)} µm (mask line @ v_init)`;
+      }
+      let seg = "";
+      if (Number.isFinite(order.chunk_n) && order.chunk_n > 1 && Number.isFinite(order.chunk_index)) {
+        seg = ` | segment ${Number(order.chunk_index) + 1}/${Number(order.chunk_n)}`;
+      }
+      return `Fiber ${DATA.fiber} | echelle ${order.order}${seg}${wl} | v = ${vMs.toFixed(1)} m/s`;
+    }
+
+
+        function dopplerFactor(vMs) {
+          return (1.0 + vMs / C_MS) / (1.0 + ZB);
+        }
+
+        function templateNormOnObsGrid(order, vMs) {
+          const fac = dopplerFactor(vMs);
+          const xObs = order.wave;
+          const wx = order.tpl_wave_um;
+          const fy = order.tpl_flux;
+          const n = xObs.length;
+          const raw = new Array(n);
+          for (let i = 0; i < n; i++) {
+            const xo = xObs[i];
+            const xr = xo / fac;
+            raw[i] = interpLinear(wx, fy, xr);
+          }
+          let loF = Infinity;
+          let hiF = -Infinity;
+          for (let i = 0; i < n; i++) {
+            const v = raw[i];
+            if (Number.isFinite(v)) {
+              loF = Math.min(loF, v);
+              hiF = Math.max(hiF, v);
+            }
+          }
+          const spanF = hiF - loF;
+          const y01 = [];
+          if (spanF > 0 && Number.isFinite(spanF)) {
+            for (let i = 0; i < n; i++) {
+              const v = raw[i];
+              y01.push(Number.isFinite(v) ? (v - loF) / spanF : NaN);
+            }
+          } else {
+            for (let i = 0; i < n; i++) {
+              y01.push(0.5);
+            }
+          }
+          return y01;
+        }
+
+        function ccfAtVelocityPipeline(order, vMs) {
+          const pv = order.ccf_v_m_s;
+          const pc = order.ccf;
+          if (!Array.isArray(pv) || !Array.isArray(pc) || pv.length !== pc.length || pv.length < 2) {
+            return NaN;
+          }
+          return interpLinear(pv, pc, vMs);
+        }
+
+        function buildSpectrumTraces(order, vMs) {
+          const xSpec = order.wave;
+          const ySpec = order.spec;
+          let loF = Infinity;
+          let hiF = -Infinity;
+          for (let i = 0; i < ySpec.length; i++) {
+            const v = ySpec[i];
+            if (Number.isFinite(v)) {
+              loF = Math.min(loF, v);
+              hiF = Math.max(hiF, v);
+            }
+          }
+          const spanF = hiF - loF;
+          const ySpec01 = [];
+          if (spanF > 0 && Number.isFinite(spanF)) {
+            for (let i = 0; i < ySpec.length; i++) {
+              const v = ySpec[i];
+              ySpec01.push(Number.isFinite(v) ? (v - loF) / spanF : NaN);
+            }
+          } else {
+            for (let i = 0; i < ySpec.length; i++) {
+              ySpec01.push(Number.isFinite(ySpec[i]) ? 0.5 : NaN);
+            }
+          }
+          const yTpl = templateNormOnObsGrid(order, vMs);
+          return [
+            { x: xSpec, y: ySpec01, mode: "lines", name: "Spectrum", line: { width: 1.2, color: "#2c3e50" } },
+            { x: xSpec, y: yTpl, mode: "lines", name: "Template (shifted)", line: { width: 1.2, color: "rgba(230, 126, 34, 0.95)" } },
+          ];
+        }
+    function getSpectrumStatic(order, idx) {
+      if (spectrumStaticByOrderIdx.has(idx)) {
+        return spectrumStaticByOrderIdx.get(idx);
+      }
+      const xSpec = order.wave;
+      const ySpec = order.spec;
+      let loF = Infinity;
+      let hiF = -Infinity;
+      for (let i = 0; i < ySpec.length; i++) {
+        const v = ySpec[i];
+        if (Number.isFinite(v)) {
+          loF = Math.min(loF, v);
+          hiF = Math.max(hiF, v);
+        }
+      }
+      const spanF = hiF - loF;
+      const ySpec01 = [];
+      if (spanF > 0 && Number.isFinite(spanF)) {
+        for (let i = 0; i < ySpec.length; i++) {
+          const v = ySpec[i];
+          ySpec01.push(Number.isFinite(v) ? (v - loF) / spanF : NaN);
+        }
+      } else {
+        for (let i = 0; i < ySpec.length; i++) {
+          const v = ySpec[i];
+          ySpec01.push(Number.isFinite(v) ? 0.5 : NaN);
+        }
+      }
+
+      let xMin = Infinity;
+      let xMax = -Infinity;
+      for (let i = 0; i < xSpec.length; i++) {
+        const xv = xSpec[i];
+        if (Number.isFinite(xv)) {
+          xMin = Math.min(xMin, xv);
+          xMax = Math.max(xMax, xv);
+        }
+      }
+      const band = spectrumBandUmFromPayload(order);
+      if (band) {
+        xMin = band.lo;
+        xMax = band.hi;
+      } else {
+        const vlo = Number(order.voronoi_lo_um);
+        const vhi = Number(order.voronoi_hi_um);
+        if (Number.isFinite(vlo) && Number.isFinite(vhi) && vhi > vlo) {
+          xMin = Math.min(xMin, vlo);
+          xMax = Math.max(xMax, vhi);
+        }
+      }
+      const lc0 = Number(order.chunk_center_um);
+      if (Number.isFinite(lc0)) {
+        xMin = Math.min(xMin, lc0);
+        xMax = Math.max(xMax, lc0);
+      }
+      const edgeLo = Number(order.window_edge_lo_um);
+      const edgeHi = Number(order.window_edge_hi_um);
+      let edgeLoOut = null;
+      let edgeHiOut = null;
+      if (Number.isFinite(edgeLo)) {
+        xMin = Math.min(xMin, edgeLo);
+        xMax = Math.max(xMax, edgeLo);
+        edgeLoOut = edgeLo;
+      }
+      if (Number.isFinite(edgeHi)) {
+        xMin = Math.min(xMin, edgeHi);
+        xMax = Math.max(xMax, edgeHi);
+        edgeHiOut = edgeHi;
+      }
+      const xSpan = xMax - xMin;
+      const minDx = Math.max(1e-12, xSpan * 3e-5);
+      // Rectangle height uses raw catalog weights; CCF slider uses deweighted mask_weight.
+      let wMask = order.mask_weight;
+      if (
+        Array.isArray(order.mask_weight_raw) &&
+        order.mask_weight_raw.length === order.mask_start_um.length
+      ) {
+        wMask = order.mask_weight_raw;
+      }
+      let wMax = 0.0;
+      for (let j = 0; j < wMask.length; j++) {
+        const t = Number(wMask[j]);
+        if (Number.isFinite(t) && t > wMax) wMax = t;
+      }
+
+      const traces = [
+        {
+          x: xSpec, y: ySpec01, mode: "lines", name: "Spectrum",
+          line: { width: 1.2 },
+          yaxis: "y1",
+        },
+      ];
+      const pioRoot = Number(DATA.mask_ccf_pixel_interp_order);
+      if (
+        Array.isArray(order.interp_wave_um) &&
+        Array.isArray(order.interp_spec) &&
+        order.interp_wave_um.length === order.interp_spec.length &&
+        order.interp_wave_um.length >= 2
+      ) {
+        const yI01 = [];
+        for (let i = 0; i < order.interp_spec.length; i++) {
+          const v = order.interp_spec[i];
+          yI01.push(
+            Number.isFinite(v) && spanF > 0 && Number.isFinite(spanF) ? (v - loF) / spanF : NaN,
+          );
+        }
+        const pioLab = Number.isFinite(pioRoot) && pioRoot > 0 ? String(Math.round(pioRoot)) : "?";
+        traces.push({
+          x: order.interp_wave_um,
+          y: yI01,
+          mode: "lines",
+          name: `Spectrum (Lagrange interp, order=${pioLab})`,
+          line: { width: 1.75, color: "rgba(192, 57, 43, 0.95)" },
+          yaxis: "y1",
+        });
+      }
+      traces.push({
+        x: [null], y: [null], mode: "markers", name: "Mask lines (shifted)",
+        marker: { size: 10, color: "rgba(255, 140, 0, 0.7)", symbol: "square" },
+        yaxis: "y2",
+        showlegend: true,
+      });
+
+      const st = {
+        traces,
+        xMin,
+        xMax,
+        minDx,
+        wMax,
+        wMask,
+        edgeLo: edgeLoOut,
+        edgeHi: edgeHiOut,
+      };
+      spectrumStaticByOrderIdx.set(idx, st);
+      return st;
+    }
+
+    function buildMaskShapes(order, vMs, st) {
+      const xMin = st.xMin;
+      const xMax = st.xMax;
+      const minDx = st.minDx;
+      const wMax = st.wMax;
+      const wMask = st.wMask;
+      const xMaskStart = shiftWavelengths(order.mask_start_um, vMs);
+      const xMaskEnd = shiftWavelengths(order.mask_end_um, vMs);
+      const fiducialDepth = 0.5;
+      const minBandH = 0.02;
+      const shapes = [];
+      for (let i = 0; i < xMaskStart.length; i++) {
+        const x0 = xMaskStart[i];
+        const x1 = xMaskEnd[i];
+        if (!Number.isFinite(x0) || !Number.isFinite(x1)) continue;
+        let lo = Math.min(x0, x1);
+        let hi = Math.max(x0, x1);
+        if (hi < xMin || lo > xMax) continue;
+        if (hi <= lo) {
+          const xc = 0.5 * (lo + hi);
+          lo = xc - 0.5 * minDx;
+          hi = xc + 0.5 * minDx;
+        } else if (hi - lo < minDx) {
+          const xc = 0.5 * (lo + hi);
+          lo = xc - 0.5 * minDx;
+          hi = xc + 0.5 * minDx;
+        }
+        let w = Number(wMask[i]);
+        if (!Number.isFinite(w) || w < 0) w = 0;
+        const wRel = wMax > 0 ? w / wMax : 0;
+        const yTop = 1.0;
+        const bandH = Math.min(
+          fiducialDepth,
+          Math.max(fiducialDepth * wRel, minBandH)
+        );
+        const yBot = Math.max(0.0, yTop - bandH);
+        if (yBot >= yTop) continue;
+        shapes.push({
+          type: "rect",
+          xref: "x",
+          yref: "y2",
+          x0: lo,
+          x1: hi,
+          y0: yBot,
+          y1: yTop,
+          fillcolor: "rgba(255, 140, 0, 0.42)",
+          line: { color: "rgba(230, 115, 0, 0.95)", width: 1 },
+          layer: "below",
+        });
+      }
+      return shapes;
+    }
+
+    /** ``window_size_um`` ±½ edges (µm) for line-window mask overlay — light grey guides. */
+    function appendWindowSizeUmGuideLines(shapes, st) {
+      const gl = {
+        type: "line",
+        xref: "x",
+        yref: "paper",
+        y0: 0,
+        y1: 1,
+        line: { color: "rgba(170, 170, 170, 0.9)", width: 1.35 },
+        layer: "above",
+      };
+      if (st.edgeLo != null && Number.isFinite(st.edgeLo)) {
+        shapes.push({ ...gl, x0: st.edgeLo, x1: st.edgeLo });
+      }
+      if (st.edgeHi != null && Number.isFinite(st.edgeHi)) {
+        shapes.push({ ...gl, x0: st.edgeHi, x1: st.edgeHi });
+      }
+    }
+
+    function updatePlot() {
+      const order = DATA.orders[currentOrderIdx];
+      if (!order) return;
+
+      const titleText = spectrumTitleText(order, currentV);
+      let layoutSpectrum;
+      if (OVERLAY_KIND === "mask") {
+        const st = getSpectrumStatic(order, currentOrderIdx);
+        const shapes = buildMaskShapes(order, currentV, st);
+        const lcLine = Number(order.chunk_center_um);
+        if (DATA.window_line_by_line && Number.isFinite(lcLine)) {
+          shapes.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: lcLine,
+            x1: lcLine,
+            y0: 0,
+            y1: 1,
+            line: { color: "rgba(39, 174, 96, 0.85)", width: 2, dash: "dash" },
+            layer: "above",
+          });
+        }
+        appendWindowSizeUmGuideLines(shapes, st);
+        const xSpanM = st.xMax - st.xMin;
+        const xPadM = xSpanM > 0 && Number.isFinite(xSpanM) ? xSpanM * 0.02 : 1e-6;
+        layoutSpectrum = {
+        uirevision: `fib-${DATA.fiber}-ord-${order.order}-slot-${currentOrderIdx}`,
+        title: {
+          text: titleText,
+          y: 1.03,
+          yref: "paper",
+          yanchor: "top",
+          font: { size: 11 },
+          pad: { b: 2, t: 0 },
+        },
+        xaxis: {
+          title: "Wavelength (um)",
+          range: [st.xMin - xPadM, st.xMax + xPadM],
+        },
+        yaxis: {
+          title: "Normalized flux",
+          range: [0, 1],
+          zeroline: true,
+        },
+        yaxis2: {
+          title: "Mask weight",
+          overlaying: "y",
+          side: "right",
+          range: [0, 1],
+          scaleanchor: "y",
+          scaleratio: 1,
+          showgrid: false,
+        },
+        shapes: shapes,
+        legend: {
+          orientation: "h",
+          xref: "paper",
+          yref: "paper",
+          x: 0.5,
+          xanchor: "center",
+          y: 1.02,
+          yanchor: "bottom",
+          font: { size: 9 },
+          bgcolor: "rgba(255, 255, 255, 0.92)",
+          bordercolor: "rgba(0,0,0,0.15)",
+          borderwidth: 1,
+        },
+        margin: { l: 70, r: 70, t: 132, b: 48 },
+      };
+      } else {
+        const tracesSpec = buildSpectrumTraces(order, currentV);
+        layoutSpectrum = {
+          uirevision: `fib-${DATA.fiber}-tpl-${order.order}-slot-${currentOrderIdx}`,
+          title: { text: titleText, y: 1.03, yref: "paper", yanchor: "top", font: { size: 11 } },
+          xaxis: { title: "Wavelength (µm)" },
+          yaxis: { title: "Normalized flux", range: [0, 1], zeroline: true },
+          legend: {
+            orientation: "h", xref: "paper", yref: "paper", x: 0.5, xanchor: "center", y: 1.02, yanchor: "bottom",
+            font: { size: 9 }, bgcolor: "rgba(255, 255, 255, 0.92)", bordercolor: "rgba(0,0,0,0.15)", borderwidth: 1,
+          },
+          margin: { l: 70, r: 28, t: 100, b: 48 },
+        };
+      }
+
+      const ccfVal = OVERLAY_KIND === "mask"
+        ? ccfAtVelocityMask(order, currentV)
+        : ccfAtVelocityPipeline(order, currentV);
+      const ccfText = Number.isFinite(ccfVal) ? ccfVal.toExponential(3) : "nan";
+      let ccfSigText = "";
+      if (Array.isArray(order.ccf_v_m_s) && Array.isArray(order.ccf_err) && order.ccf_v_m_s.length === order.ccf_err.length) {
+        const se = interpLinear(order.ccf_v_m_s, order.ccf_err, currentV);
+        if (Number.isFinite(se) && se > 0) {
+          ccfSigText = ` ± ${se.toExponential(2)} (σ_CCF)`;
+        }
+      }
+
+      const sameSpectrumOrder = spectrumDrawnOrderIdx === currentOrderIdx;
+      if (OVERLAY_KIND === "mask") {
+        const st = getSpectrumStatic(order, currentOrderIdx);
+        const shapesR = buildMaskShapes(order, currentV, st);
+        const lcR = Number(order.chunk_center_um);
+        if (DATA.window_line_by_line && Number.isFinite(lcR)) {
+          shapesR.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: lcR,
+            x1: lcR,
+            y0: 0,
+            y1: 1,
+            line: { color: "rgba(39, 174, 96, 0.85)", width: 2, dash: "dash" },
+            layer: "above",
+          });
+        }
+        appendWindowSizeUmGuideLines(shapesR, st);
+        const xSpanR = st.xMax - st.xMin;
+        const xPadR = xSpanR > 0 && Number.isFinite(xSpanR) ? xSpanR * 0.02 : 1e-6;
+        if (sameSpectrumOrder && spectrumPlotReady) {
+          Plotly.relayout(plotSpectrumDiv, {
+            "title.text": titleText,
+            shapes: shapesR,
+            "xaxis.range": [st.xMin - xPadR, st.xMax + xPadR],
+          });
+        } else {
+          Plotly.react(plotSpectrumDiv, st.traces, layoutSpectrum, { responsive: true });
+          spectrumDrawnOrderIdx = currentOrderIdx;
+          spectrumPlotReady = true;
+        }
+      } else {
+        const tracesSpec = buildSpectrumTraces(order, currentV);
+        if (sameSpectrumOrder && spectrumPlotReady) {
+          Plotly.restyle(plotSpectrumDiv, {
+            y: [tracesSpec[0].y, tracesSpec[1].y],
+          }, [0, 1]);
+          Plotly.relayout(plotSpectrumDiv, { "title.text": titleText });
+        } else {
+          Plotly.react(plotSpectrumDiv, tracesSpec, layoutSpectrum, { responsive: true });
+          spectrumDrawnOrderIdx = currentOrderIdx;
+          spectrumPlotReady = true;
+        }
+      }
+
+      const ccfValMarker = Number.isFinite(ccfVal) ? ccfVal : null;
+      const sameCcfOrder = ccfDrawnOrderIdx === currentOrderIdx;
+      if (sameCcfOrder && ccfPlotReady) {
+        Plotly.restyle(plotCcfDiv, {
+          x: [[currentV]],
+          y: [[ccfValMarker]],
+        }, [1]);
+      } else {
+        const curve = getCcfCurve(order);
+        const tracesCcf = [
+          {
+            x: curve.v,
+            y: curve.ccf,
+            mode: "lines",
+            name: "CCF",
+            line: { color: "#2c3e50", width: 1.5 },
+          },
+          {
+            x: [currentV],
+            y: [ccfValMarker],
+            mode: "markers",
+            name: "Current v",
+            marker: {
+              size: 11,
+              color: "rgba(231, 76, 60, 0.95)",
+              line: { color: "rgba(192, 57, 43, 1)", width: 2 },
+            },
+          },
+        ];
+        const layoutCcf = {
+          uirevision: OVERLAY_KIND === "mask" ? `ccf-${DATA.fiber}-ord-${order.order}-slot-${currentOrderIdx}` : `ccf-tpl-${DATA.fiber}-${order.order}-slot-${currentOrderIdx}`,
+          title: {
+            text: OVERLAY_KIND === "mask" ? "RV versus mask CCF" : "RV versus template CCF (pipeline)",
+            y: 1.02,
+            yref: "paper",
+            yanchor: "top",
+            pad: { b: 0, t: 0 },
+            font: { size: 13 },
+          },
+          xaxis: { title: "Radial velocity (m/s)" },
+          yaxis: { title: OVERLAY_KIND === "mask" ? "CCF (Normalized)" : "CCF" },
+          margin: { l: 70, r: 28, t: 44, b: 42 },
+          showlegend: false,
+        };
+        Plotly.react(plotCcfDiv, tracesCcf, layoutCcf, { responsive: true });
+        ccfDrawnOrderIdx = currentOrderIdx;
+        ccfPlotReady = true;
+      }
+
+      let rvAggTxt = "";
+      if (order.fit_rv_m_s != null && Number.isFinite(Number(order.fit_rv_m_s))) {
+        const frv = Number(order.fit_rv_m_s);
+        const fe = order.fit_rv_err_m_s;
+        if (fe != null && Number.isFinite(Number(fe)) && Number(fe) > 0) {
+          rvAggTxt = ` | RV = ${frv.toFixed(1)} ± ${Number(fe).toFixed(1)} m/s`;
+        } else {
+          rvAggTxt = ` | RV = ${frv.toFixed(1)} m/s`;
+        }
+      }
+      vLabel.textContent = `v = ${currentV.toFixed(1)} m/s | CCF = ${ccfText}${ccfSigText}${rvAggTxt}`;
+      updateRvFitIndicator(order);
+    }
+
+    function cancelSliderPlotRaf() {
+      if (sliderPlotRaf !== null) {
+        cancelAnimationFrame(sliderPlotRaf);
+        sliderPlotRaf = null;
+      }
+    }
+
+    function schedulePlotFromSlider() {
+      if (sliderPlotRaf !== null) return;
+      sliderPlotRaf = requestAnimationFrame(() => {
+        sliderPlotRaf = null;
+        updatePlot();
+      });
+    }
+
+    function setVelocity(v, opts) {
+      const immediate = opts && opts.immediate;
+      currentV = Number(v);
+      if (!Number.isFinite(currentV)) currentV = 0.0;
+      vSlider.value = String(currentV);
+      vInput.value = String(currentV);
+      if (immediate) cancelSliderPlotRaf();
+      updatePlot();
+    }
+
+    orderSelect.addEventListener("change", (ev) => {
+      cancelSliderPlotRaf();
+      currentOrderIdx = Number(ev.target.value);
+      spectrumDrawnOrderIdx = -1;
+      ccfDrawnOrderIdx = -1;
+      spectrumPlotReady = false;
+      ccfPlotReady = false;
+      orderCache.clear();
+      spectrumStaticByOrderIdx.clear();
+      ccfCurveCache.clear();
+      updatePlot();
+    });
+    vSlider.addEventListener("input", (ev) => {
+      currentV = Number(ev.target.value);
+      if (!Number.isFinite(currentV)) currentV = 0.0;
+      vInput.value = String(currentV);
+      schedulePlotFromSlider();
+    });
+    vSlider.addEventListener("change", (ev) => {
+      cancelSliderPlotRaf();
+      setVelocity(ev.target.value, { immediate: true });
+    });
+    vInput.addEventListener("change", (ev) => setVelocity(ev.target.value, { immediate: true }));
+    vInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") setVelocity(ev.target.value, { immediate: true });
+    });
+
+    vSlider.value = String(currentV);
+    vInput.value = String(currentV);
+    orderSelect.value = "0";
+    updatePlot();
+  </script>
+</body>
+</html>

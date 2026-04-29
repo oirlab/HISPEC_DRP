@@ -1,5 +1,5 @@
 import numpy as np
-from .. import datamodels
+from hispecdrp import datamodels
 
 def add_refchan_ramp(
     model : datamodels.RampModel,
