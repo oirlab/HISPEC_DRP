@@ -1,7 +1,7 @@
 
 from .base_model import DataModel
 
-from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_rv_extensions, create_drift_extensions, create_etalonfitparam_extensions
+from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_drift_extensions, create_etalonfitparam_extensions
 
 __all__ = ['L2Model']
 
@@ -63,7 +63,7 @@ class L2Model(DataModel):
     DRIFT_ERR_PIX_FIB#              Image      Float64     Nord x 4096     e-/s             Drift error in pixels for each pixel.
     DRIFT_WAVE_FIB3#                Image      Float64     Nord x 4096     e-/s             Drift measured by etalon in microns for each pixel.
     DRIFT_ERR_WAVE_FIB#             Image      Float64     Nord x 4096     e-/s             Drift error in microns for each pixel.
-    RVCCF_FIB#                      Table      See below   See below       See below        RVs for each chunk.
+    RVCCF_FIB#                      Table      See below   See below       See below        Per-chunk RVs and raw CCF(v) (stellar RV).
     RVCCFAGG_FIB#                   Table      See below   See below       See below        RVs aggregated across chunks.
     """
 

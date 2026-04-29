@@ -50,6 +50,12 @@ wheels/
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Local / optional example scripts (not tracked)
+examples/
+
+# Unit test outputs (e.g. saved Plotly previews from stellar RV tests)
+tests/output/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

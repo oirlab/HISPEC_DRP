@@ -38,6 +38,19 @@ class HISPECConfig:
         }
     }
 
+    @classmethod
+    def get_order_list(cls, spectrograph: str) -> list[int]:
+        """
+        Return the list of echelle order numbers for a spectrograph (single source of truth).
+        Used by simulations and trace finding so order count and indices match model meta.
+        """
+        if spectrograph not in cls.echelle_orders:
+            return []
+        o = cls.echelle_orders[spectrograph]
+        start, end = o['order_start'], o['order_end']
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+
     metadata_schema_filename : ClassVar[str] = 'hispec_metadata_schema.yaml'
 
     @classmethod
@@ -76,9 +89,14 @@ class HISPECConfig:
             model.meta.instrument_mode = 'YJHK'
         if model.meta.spectrograph is None:
             model.meta.spectrograph = 'BSPEC'
+        # Only fill echelle order bounds when unset. Unconditional overwrite breaks
+        # models whose 2-D spectra cover a subset of orders: meta must stay aligned
+        # with ``wave_fib*`` axis 0 (e.g. L2Model.from_datamodels + StellarRVPrimitive).
         if model.meta.spectrograph in cls.echelle_orders:
-            model.meta.order_start = cls.echelle_orders[model.meta.spectrograph]['order_start']
-            model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
+            if model.meta.order_start is None:
+                model.meta.order_start = cls.echelle_orders[model.meta.spectrograph]['order_start']
+            if model.meta.order_end is None:
+                model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
         # TODO: Defaults need to know which LFC, ignore until we have a more robust way to determine this from the metadata

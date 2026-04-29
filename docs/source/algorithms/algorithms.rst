@@ -6,6 +6,9 @@ Descriptions, runtime performance, and statistical performance (accuracy/precisi
 .. toctree::
    :maxdepth: 2
 
+   stellar_rv
+   ccf
+   line_mask
    spectral_extraction
    ramp_fitting
    trace_fitting

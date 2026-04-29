@@ -8,6 +8,48 @@ def pytest_addoption(parser):
         default=None,
         help="Directory to store test data"
     )
+    parser.addoption(
+        "--bspec-all-orders",
+        action="store_true",
+        default=False,
+        help=(
+            "BSPEC BT-Settl line-mask tests: use every echelle order from HISPECConfig "
+            "(sets HISPEC_DRP_BSPEC_BTSETTL_ORDER=all). Same as exporting that env var."
+        ),
+    )
+    parser.addoption(
+        "--bspec-window-um",
+        action="store",
+        default=None,
+        metavar="UM",
+        help=(
+            "BSPEC BT-Settl test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel: set "
+            "window_size_um in micron (sets HISPEC_DRP_BSPEC_BTSETTL_WINDOW_UM). Default 0.3 "
+            "when unset."
+        ),
+    )
+    parser.addoption(
+        "--bspec-relax-parallel-asserts",
+        action="store_true",
+        default=False,
+        help=(
+            "BSPEC BT-Settl test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel: skip strict "
+            "template-CCF recovery, RVCCFAVG, and chunk-benchmark timing asserts "
+            "(sets HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS=1). Use with non-default "
+            "--bspec-window-um or when you need previews despite loose RV agreement."
+        ),
+    )
+
+
+def pytest_configure(config):
+    if config.getoption("--bspec-all-orders", default=False):
+        os.environ["HISPEC_DRP_BSPEC_BTSETTL_ORDER"] = "all"
+    w_um = config.getoption("--bspec-window-um", default=None)
+    if w_um is not None:
+        os.environ["HISPEC_DRP_BSPEC_BTSETTL_WINDOW_UM"] = str(w_um).strip()
+    if config.getoption("--bspec-relax-parallel-asserts", default=False):
+        os.environ["HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS"] = "1"
+
 
 @pytest.fixture(scope="session")
 def datadir(request):
