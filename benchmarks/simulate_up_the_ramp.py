@@ -100,6 +100,8 @@ def default_simulation_output_dir() -> str:
 
 DEFAULT_SIMULATION_OUTPUT_DIR = default_simulation_output_dir()
 
+DEFAULT_RATE_MAP_FIBERS: list[int] = [1, 2, 3]
+
 
 def _ensure_output_directory(output_dir: str) -> str:
     """Create ``output_dir`` if needed and return its absolute path."""
@@ -190,6 +192,7 @@ def fiberflat_rate_files_exist(
 
 __all__ = [
     "DEFAULT_SIMULATION_OUTPUT_DIR",
+    "DEFAULT_RATE_MAP_FIBERS",
     "default_simulation_output_dir",
     "create_simulated_calibration_models",
     "simulate_ramp_from_rate_map",
@@ -849,7 +852,7 @@ def create_ramp_and_calibrations(
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) to place spectra on when building the
         default rate map. Only 1, 2, 3 are supported by SimulateRateMap; others
-        are ignored for rate map creation. If None, default is [1].
+        are ignored for rate map creation. If None, default is :data:`DEFAULT_RATE_MAP_FIBERS` (fibers 1–3).
     spectrum_wavelengths : array-like with units or None, optional
         Wavelength array for the input spectrum when building the default rate
         map. If None (and spectrum_flux is None), a flat spectrum is used.
@@ -934,7 +937,7 @@ def create_ramp_and_calibrations(
     # (e.g. native maps are wider than 4096 after reference-channel padding).
     if rate_map is None:
         if fibers is None:
-            fibers = [1]
+            fibers = list(DEFAULT_RATE_MAP_FIBERS)
         logger.info("Building default rate map (fibers=%s, spectrograph=%s, output_dir=%s).", fibers, spectrograph, output_dir)
         srm = SimulateRateMap()
         srm.output_directory = os.path.abspath(output_dir)
@@ -1050,7 +1053,8 @@ def simulate_up_the_ramp(
     and :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
 
     If ``rate_map`` is None, a simple rate map is generated using
-    :class:`SimulateRateMap` with a flat spectrum on fiber 1 (for testing).
+    :class:`SimulateRateMap` with the default template (or user spectrum) on
+    fibers in :data:`DEFAULT_RATE_MAP_FIBERS` (default 1–3).
     Otherwise the provided rate map (e-/s/pixel) is used.
 
     Calibrations are either (1) taken from the calibration store (master
@@ -1069,7 +1073,8 @@ def simulate_up_the_ramp(
         Default is ``(4096, 4096)``.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) for default rate map. Passed to
-        :func:`create_ramp_and_calibrations`. If None, default is [1].
+        :func:`create_ramp_and_calibrations`. If None, default is
+        :data:`DEFAULT_RATE_MAP_FIBERS`.
     spectrum_wavelengths : array-like with units or None, optional
         Input spectrum wavelengths for default rate map. Passed to
         :func:`create_ramp_and_calibrations`.
@@ -1546,8 +1551,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--fibers",
-        default="1",
-        help="Comma-separated fiber indices for default rate map (default: 1).",
+        default="1,2,3",
+        help="Comma-separated fiber indices for default rate map (default: 1,2,3).",
     )
     parser.add_argument(
         "--n-reads",
