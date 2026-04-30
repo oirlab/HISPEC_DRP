@@ -17,7 +17,7 @@ class ProcessingComponent(_BasePrimitive):
     ARGUMENTS = {
         'input': None,
         'run' : True,
-        'save_result': False,
+        'save_result': None,
         'output_model': 'input',
         'output_path': None,
         'output_dir': None,
