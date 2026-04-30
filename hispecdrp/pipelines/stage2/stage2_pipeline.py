@@ -27,13 +27,6 @@ class Stage2Pipeline(BasePipeline):
 
     def _perform(self):
         model_to_process = datamodels.open(self.input)
-        # BasePipeline.apply may set output_dir, but sub-primitives default save_result=False;
-        # forward so blaze + stellar_rv products are written when the user passes output_dir.
-        if self.output_dir is not None:
-            for alias in self.PRIMITIVES:
-                prim = getattr(self, alias)
-                prim.output_dir = self.output_dir
-                prim.save_result = True
         result = self.blaze_corr.apply(model_to_process)
         result = self.stellar_rv.apply(result)
         return dict(output=result)
