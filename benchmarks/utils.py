@@ -1,5 +1,9 @@
 import numpy as np
+from contextlib import contextmanager
+import time
+from datetime import datetime
 from hispecdrp import datamodels
+
 
 def add_refchan_ramp(
     model : datamodels.RampModel,
@@ -26,3 +30,24 @@ def add_refchan_ramp(
     # DQ RAW ext
     if model.dq_raw is not None:
         model.dq_raw = np.pad(model.dq_raw, pad_width, mode="constant", constant_values=0)
+
+
+
+@contextmanager
+def benchmark_wrapper(**kwargs):
+    records = {**kwargs}
+    start = time.perf_counter()
+    try:
+        yield records
+    finally:
+        t = time.perf_counter() - start
+        print(f"{kwargs.get('msg', 'Runtime')}: {t:.4f} seconds")
+        records["t"] = t
+
+
+def _get_primitive_runtime(receipt, i):
+    prim_class = receipt[i]['CLASS']
+    dt1 = datetime.fromisoformat(receipt[i]['PROC_START_TIME'])
+    dt2 = datetime.fromisoformat(receipt[i]['PROC_END_TIME'])
+    runtime = (dt2 - dt1).total_seconds()
+    return prim_class, runtime
