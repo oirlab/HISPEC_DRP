@@ -6,7 +6,6 @@ from datetime import datetime
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.pipelines import Stage2Pipeline
-from hispecdrp.utils.line_mask_utils import packaged_default_line_mask_path
 from hispecdrp.utils.spectral_templates_utils import load_btsettl_spectrum, get_spectrum_path
 
 from .utils import _run_pipeline_perf
@@ -107,27 +106,28 @@ def _create_stage2_cals(
     return cals
 
 
-def _get_stage2_prim_args(cals : dict, max_cores : int, do_orders : list[int], do_fibers : list[str], quicklook : bool = False) -> dict:
+def _get_stage2_prim_args(cals : dict, max_cores : int, do_orders : list[int], do_fibers : list[str], quicklook : bool = False, save_rv_preview : bool = False) -> dict:
     prim_args = {prim: {} for prim in Stage2Pipeline.PRIMITIVES.keys()}
     prim_args['blaze_corr']['fiberflat'] = cals['fiberflat']
 
     for prim in prim_args:
         prim_args[prim]['max_cores'] = max_cores
-        
         prim_args[prim]['do_orders'] = do_orders
         prim_args[prim]['do_fibers'] = do_fibers
 
-    prim_args['stellar_rv']['save_preview'] = True
+    prim_args['stellar_rv']['save_preview'] = save_rv_preview
+    prim_args['stellar_rv']['mask_auto_hybrid_scout'] = False
+    prim_args['stellar_rv']['v_min_coarse'] = -20_000.0
+    prim_args['stellar_rv']['v_max_coarse'] = 20_000.0
+    prim_args['stellar_rv']['v_step_coarse'] = 50.0
 
     if quicklook:
-        # TBD...
         pass
 
     return prim_args
 
 
 def _make_stage2_config_file(
-    config_filepath : str,
     cals : dict,
     max_cores : int,
     do_orders : list[int],
@@ -135,13 +135,15 @@ def _make_stage2_config_file(
     output_dir : str | None = None,
     save_result : bool = True,
     quicklook : bool = False,
+    save_rv_preview : bool = False,
 ):
     prim_args = _get_stage2_prim_args(
         cals=cals,
         max_cores=max_cores,
         do_orders=do_orders,
         do_fibers=do_fibers,
-        quicklook=quicklook
+        quicklook=quicklook,
+        save_rv_preview=save_rv_preview,
     )
     config = {
         'class' : 'Stage2Pipeline',
@@ -159,8 +161,7 @@ def _make_stage2_config_file(
                 cal = config['primitives'][prim]['arguments'][arg]
                 config['primitives'][prim]['arguments'][arg] = cal._filepath
 
-    with open(config_filepath, 'w') as f:
-        yaml.dump(config, f)
+    return config
 
 
 def run_perf_stage2(
@@ -170,6 +171,7 @@ def run_perf_stage2(
     do_fibers : list[str] | None = None,
     save_result : bool = True,
     quicklook : bool = False,
+    save_rv_preview : bool = False,
 ):
     input_filepath = _create_stage2_input(output_dir=output_dir)
 
@@ -178,9 +180,7 @@ def run_perf_stage2(
         output_dir=output_dir,
     )
 
-    config_filepath = os.path.join(output_dir, "stage2_config.yaml")
-    _make_stage2_config_file(
-        config_filepath=config_filepath,
+    config = _make_stage2_config_file(
         cals=cals,
         max_cores=max_cores,
         do_fibers=do_fibers,
@@ -188,7 +188,12 @@ def run_perf_stage2(
         output_dir=output_dir,
         save_result=save_result,
         quicklook=quicklook,
+        save_rv_preview=save_rv_preview,
     )
+
+    config_filepath = os.path.join(output_dir, "stage2_config.yaml")
+    with open(config_filepath, 'w') as f:
+        yaml.dump(config, f)
 
     # NOTE: Delete for better RAM estimate
     # since filepaths are passed, not models.

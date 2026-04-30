@@ -10,7 +10,7 @@ if __name__ == "__main__":
     n_reads = 20 # 350
     max_cores = 4
     output_dir = os.path.abspath('test_data/')
-    quicklook = False
+    quicklook = True
     
     run_perf_stage0(
         output_dir=output_dir,

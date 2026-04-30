@@ -45,7 +45,6 @@ def _get_stage1_prim_args(cals : dict, max_cores : int, quicklook : bool = False
 
 
 def _make_stage1_config_file(
-    config_filepath : str,
     cals : dict,
     max_cores : int,
     output_dir : str | None = None,
@@ -69,8 +68,7 @@ def _make_stage1_config_file(
                 cal = config['primitives'][prim]['arguments'][arg]
                 config['primitives'][prim]['arguments'][arg] = cal._filepath
     
-    with open(config_filepath, 'w') as f:
-        yaml.dump(config, f)
+    return config
 
 def run_perf_stage1(
     output_dir : str,
@@ -85,15 +83,18 @@ def run_perf_stage1(
     # Download a fiberflat as a dummy input model
     input_filepath = download_gdrive_file('HISPEC/L0/HR.20231006.00000.00_rate-FIBERFLAT-FIB1.fits', output_dir=output_dir)
 
-    config_filepath = os.path.join(output_dir, "stage1_config.yaml")
-    _make_stage1_config_file(
-        config_filepath=config_filepath,
+    config = _make_stage1_config_file(
         cals=cals,
         max_cores=max_cores,
         output_dir=output_dir,
         save_result=save_result,
         quicklook=quicklook,
     )
+
+    config_filepath = os.path.join(output_dir, "stage1_config.yaml")
+    with open(config_filepath, 'w') as f:
+        yaml.dump(config, f)
+
     del cals
 
     results = _run_pipeline_perf(
