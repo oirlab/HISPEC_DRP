@@ -107,9 +107,8 @@ from hispecdrp.pipelines import ProcessFiberflatsPipeline
 from hispecdrp.pipelines.stage0 import stage0_pipeline as _stage0_pipeline
 from hispecdrp.pipelines.stage1 import stage1_pipeline as _stage1_pipeline
 from hispecdrp.pipelines.stage2 import stage2_pipeline as _stage2_pipeline
-from .create_ramp import create_ramp
+from hispecdrp.simulations import create_ramp, DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 from .run_caldb import get_master_calibrations
-from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 
 # Directory containing bundled spectrum templates (BT-Settl .h5 files)
 TEMPLATES_DATA_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")

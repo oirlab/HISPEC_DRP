@@ -37,22 +37,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# ``python path/to/simulate_up_the_ramp.py`` leaves ``__package__`` unset. Multiprocessing
-# ``spawn`` (default on macOS) re-imports this file in workers as ``__name__ == "__mp_main__"``,
-# not ``__main__``, so a ``__main__``-only bootstrap would still break imports there.
-_repo_root = Path(__file__).resolve().parents[1]
-if not __package__:
-    if str(_repo_root) not in sys.path:
-        sys.path.insert(0, str(_repo_root))
-    __package__ = "benchmarks"
-
-# CLI: re-import as a proper submodule so a single clean module object runs ``main()``.
-if __name__ == "__main__":
-    import importlib
-
-    _mod = importlib.import_module("benchmarks.simulate_up_the_ramp")
-    raise SystemExit(_mod.main())
-
 import copy
 import logging
 import os
@@ -77,9 +61,8 @@ from hispecdrp.pipelines import ProcessFiberflatsPipeline
 from hispecdrp.pipelines.stage0 import stage0_pipeline as _stage0_pipeline
 from hispecdrp.pipelines.stage1 import stage1_pipeline as _stage1_pipeline
 from hispecdrp.pipelines.stage2 import stage2_pipeline as _stage2_pipeline
-from .create_ramp import create_ramp
+from hispecdrp.simulations import create_ramp, DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 from .run_caldb import get_master_calibrations
-from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 
 # Legacy alias: bundled spectrum templates live under ``hispecdrp/data/templates/``.
 SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
