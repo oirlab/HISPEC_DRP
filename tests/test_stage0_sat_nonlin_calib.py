@@ -1,6 +1,6 @@
 from hispecdrp import ProcessSatFlatsPipeline
 from hispecdrp import datamodels
-import benchmarks as simu
+import hispecdrp.simulations as simu
 import numpy as np
 import time
 

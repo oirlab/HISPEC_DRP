@@ -1,7 +1,7 @@
 import os
 from hispecdrp import ProcessDarksPipeline
 from hispecdrp import datamodels
-import benchmarks as simu
+import hispecdrp.simulations as simu
 import numpy as np
 import time
 from hispecdrp.primitives.dark_subtraction.master_dark_primitive import MakeMasterDarkPrimitive

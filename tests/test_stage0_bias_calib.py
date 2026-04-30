@@ -1,6 +1,6 @@
 from hispecdrp import ProcessBiasPipeline
 from hispecdrp import datamodels
-import benchmarks as simu
+import hispecdrp.simulations as simu
 import numpy as np
 import os
 import time

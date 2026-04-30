@@ -3,7 +3,7 @@ import os
 import time
 
 from hispecdrp import datamodels
-import benchmarks as simu
+import hispecdrp.simulations as simu
 from hispecdrp.primitives.refpix.refpix_primitive import RefPixelCorrectionPrimitive
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
