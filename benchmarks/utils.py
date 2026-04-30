@@ -2,6 +2,7 @@ import numpy as np
 from contextlib import contextmanager
 import time
 from datetime import datetime
+from astropy.table import Table
 from hispecdrp import datamodels
 
 
@@ -51,3 +52,29 @@ def _get_primitive_runtime(receipt, i):
     dt2 = datetime.fromisoformat(receipt[i]['PROC_END_TIME'])
     runtime = (dt2 - dt1).total_seconds()
     return prim_class, runtime
+
+
+def _run_pipeline_perf(
+    pipeline_class : type,
+    ramp_model : datamodels.RampModel | str,
+    config_file : str,
+):
+    np.random.seed(12345)
+
+    stage0_pipe = pipeline_class(config=config_file)
+
+    with benchmark_wrapper() as t:
+        model_result = stage0_pipe.apply(ramp_model)
+
+    receipt = model_result.receipt
+    results = Table(names=("CLASS", "RUNTIME"), dtype=("U32", "f8"))
+
+    for i in range(len(receipt)):
+        prim_class, prim_runtime = _get_primitive_runtime(receipt, i)
+        prim_class = prim_class.split('.')[-1]
+        results.add_row((prim_class, prim_runtime))
+
+    # Total runtime
+    results.add_row((pipeline_class.__name__, t['t']))
+
+    return results
