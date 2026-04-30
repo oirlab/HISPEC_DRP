@@ -1,6 +1,6 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import os
-import astropy.table
+from astropy.table import Table, Column
 from astropy.io import fits
 from copy import deepcopy
 
@@ -212,7 +212,7 @@ class DataModel:
             extl = extname.lower()
             if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, astropy.table.Table({
+                    setattr(self, extl, Table({
                         name: np.array([], dtype=dtype)
                         for name, dtype in self.EXTENSIONS[extname]['columns'].items()
                     }))
@@ -222,7 +222,7 @@ class DataModel:
     def read_extension_data(
         self, hdu : _VALID_HDU,
         correct_dtype : bool = False
-    ) -> np.ndarray | astropy.table.Table:
+    ) -> np.ndarray | Table:
         """
         Read data from a specific HDU.
 
@@ -235,7 +235,7 @@ class DataModel:
 
         Returns
         -------
-        data : np.ndarray or astropy.table.Table
+        data : np.ndarray or Table
             If an ImageHDU, returns a numpy ndarray.
             If a BinTableHDU, returns an astropy Table.
         """
@@ -250,7 +250,7 @@ class DataModel:
                         data = data.astype(dtype, copy=False)
                 data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
-            data = astropy.table.Table(data)
+            data = Table(data)
         return data
 
     def save(
@@ -363,7 +363,8 @@ class DataModel:
                 include_missing_metadata=include_missing_metadata,
                 correct_dtypes=correct_dtypes
             )
-            hdulist.append(hdu)
+            if hdu is not None:
+                hdulist.append(hdu)
         
         return hdulist
     
@@ -451,9 +452,24 @@ class DataModel:
         # Nothing special for BIN tables
         elif hdu_class is fits.BinTableHDU:
             data = getattr(self, extl, None)
-            hdu = hdu_class(data=data, name=extname)
+            if data is None:
+                return None
+            elif len(data) == 0:
+                dtypes = {name: data[name].dtype for name in data.colnames}
+                if any(dtype == object for dtype in dtypes.values()):
+                    return None
+                else:
+                    return hdu_class(data=data, name=extname)
+            else:
+                return hdu_class(data=data, name=extname)
+            #if data is None:
+            #    hdu = hdu_class(data=data, name=extname)
+            #elif isinstance(data, Table):
+
 
         return hdu
+    
+
 
     def __repr__(self):
         if self.meta.filename is not None:
@@ -555,7 +571,7 @@ class DataModel:
             keyl = key.lower()
             val = kwargs[key]
             if keyu in self.EXTENSIONS:
-                if isinstance(val, astropy.table.Table):
+                if isinstance(val, Table):
                     setattr(self, keyl, val)
                 elif isinstance(val, np.ndarray):
                     if correct_dtypes:
@@ -564,16 +580,36 @@ class DataModel:
                         setattr(self, keyl, val)
             else:
                 raise ValueError(f"Unknown extension: {key.upper()}")
+            
+        def _init_empty_table(extdef : dict) -> Table:
+            cols = []
+            for name, spec in extdef["columns"].items():
+                if isinstance(spec, dict):
+                    dtype = spec.get("dtype")
+                    shape = spec.get("shape")
+                else:
+                    dtype = spec
+                    shape = None
+                if shape is not None:
+                    data = np.empty((0, *shape), dtype=dtype)
+                else:
+                    data = np.empty(0, dtype=dtype)
+                cols.append(Column(name=name, data=data))
+            return Table(cols)
 
         # Initialize remaining extensions
         for extname in self.EXTENSIONS:
             extl = extname.lower()
             if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, astropy.table.Table({
-                        name: np.array([], dtype=dtype)
-                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    }))
+                    # setattr(self, extl, Table({
+                    #     name: np.array([], dtype=dtype)
+                    #     for name, dtype in self.EXTENSIONS[extname]['columns'].items()
+                    # }))
+                    setattr(
+                        self, extl,
+                        _init_empty_table(self.EXTENSIONS[extname])
+                    )
                 else:
                     setattr(self, extl, None)
 
@@ -654,7 +690,7 @@ class DataModel:
             col = col.upper()
             if col not in self.data_ancestors.colnames:
                 # Add new column with object dtype to support None
-                self.data_ancestors.add_column(astropy.table.Column(
+                self.data_ancestors.add_column(Column(
                     name=col,
                     data=[None] * len(self.data_ancestors),
                     dtype=_json_schema_to_python_dtype(
