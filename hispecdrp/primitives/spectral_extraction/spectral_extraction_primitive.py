@@ -32,8 +32,8 @@ class SpectralExtractionPrimitive(BasePrimitive):
             - **box**: Sum all pixels within a fixed aperture around the trace position.
             - **optimal**: Fit a 1D profile to the data.
             - **cross_talk**: Simultaneously fit 1D profiles for all fibers to account for cross-talk between fibers. Only applicable when multiple fibers are present.
-    extraction_aperture : tuple[int, int]
-        Size of the extraction aperture in pixels. Tuple of (lower, upper) bounds relative to the trace position.
+    extraction_aperture : float
+        Size of the extraction aperture in pixels, centered on the trace position.
     do_fibers : list[int] or None
         List of fiber numbers to extract. If None, all fibers will be extracted.
     do_orders : list[int] or None
@@ -50,7 +50,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'specextract',
         'method' : 'box',
-        'extraction_aperture' : (-2, 2),
+        'extraction_aperture' : 3,
         'do_fibers' : None,
         'do_orders' : None,
         'pix_range' : None,
