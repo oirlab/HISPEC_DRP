@@ -122,3 +122,70 @@ properties:
       fits_keyword: OBJFIB3
       cal_db: true
       include_ancestors: true
+
+  # Target OB contents
+  # NOTE: Final home TBD
+  target_gaia_id:
+    title: "Gaia DR3 source ID for the target"
+    fits_keyword: GAIAID
+    type: string
+    merge_rule: first
+
+  target_gaia_px:
+    title: "Gaia DR3 parallax for the target"
+    fits_keyword: GAIAPX
+    type: number
+    unit: mas
+    merge_rule: first
+
+  target_gaia_ra:
+    title: "Gaia DR3 RA for the target"
+    fits_keyword: GAIARA
+    type: number
+    unit: degrees
+    merge_rule: first
+
+  target_gaia_dec:
+    title: "Gaia DR3 Dec for the target"
+    fits_keyword: GAIADEC
+    type: number
+    unit: degrees
+    merge_rule: first
+
+  target_gaia_teff:
+    title: "Gaia DR3 effective temperature for the target"
+    fits_keyword: GAIATEFF
+    type: number
+    unit: K
+    merge_rule: first
+
+  target_gaia_rv:
+    title: "Gaia DR3 radial velocity for the target"
+    fits_keyword: GAIARV
+    type: number
+    unit: km/s
+    merge_rule: first
+
+  target_2mass_id:
+    title: "2MASS ID for the target"
+    fits_keyword: TMASSID
+    type: string
+    merge_rule: first
+
+  target_2mass_mag_j:
+    title: "2MASS J-band magnitude for the target"
+    fits_keyword: TMAGJ
+    type: number
+    merge_rule: first
+
+  target_2mass_mag_h:
+    title: "2MASS H-band magnitude for the target"
+    fits_keyword: TMAGH
+    type: number
+    merge_rule: first
+
+  target_2mass_mag_ks:
+    title: "2MASS Ks-band magnitude for the target"
+    fits_keyword: TMAGKS
+    type: number
+    merge_rule: first
