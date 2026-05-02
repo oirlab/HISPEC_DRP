@@ -120,6 +120,10 @@ class SpectralExtractionPrimitive(BasePrimitive):
                         output_model, f'SPEC_DQ_FIB{fiber}',
                         np.zeros((n_orders, npix), dtype=input_model.dq.dtype)
                     )
+                    setattr(
+                        output_model, f'MID_TIME_FIB{fiber}',
+                        np.full((n_orders, npix), np.nan, dtype=input_model.mid_time.dtype)
+                    )
 
             # Dispatch to extraction method
             if self.method.lower() == 'box':
@@ -183,6 +187,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
             var_rnoise_out = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
             var_poisson_out = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
             dq_out = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+            mid_time_out = getattr(output_model, f'MID_TIME_FIB{fiber}')
 
             for j, order in enumerate(order_vec):
 
@@ -198,6 +203,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     input_dq=input_model.dq,
                     input_var_rnoise=input_model.rate_var_rnoise,
                     input_var_poisson=input_model.rate_var_poisson,
+                    input_mid_time=input_model.mid_time,
                     trace_positions=trace_positions[j, :],
                     extraction_aperture=self.extraction_aperture,
                     pix_range=self.pix_range,
@@ -209,7 +215,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 var_rnoise_out[j, :] = result['var_rnoise']
                 var_poisson_out[j, :] = result['var_poisson']
                 dq_out[j, :] = result['dq']
-                
+                mid_time_out[j, :] = result['mid_time']
                 # NOTE: Keep for debugging
                 # breakpoint()
                 # import matplotlib.pyplot as plt; plt.plot(spec_out[j, :]); plt.show()
@@ -238,6 +244,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
             var_rnoise_out = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
             var_poisson_out = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
             dq_out = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+            mid_time_out = getattr(output_model, f'MID_TIME_FIB{fiber}')
 
             for j, order in enumerate(order_vec):
 
@@ -258,6 +265,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     input_dq=input_model.dq,
                     input_var_rnoise=input_model.rate_var_rnoise,
                     input_var_poisson=input_model.rate_var_poisson,
+                    input_mid_time=input_model.mid_time,
                     trace_positions=trace_positions[j, :],
                     profile=fiberflat_profile,
                     extraction_aperture=self.extraction_aperture,
@@ -270,6 +278,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 var_rnoise_out[j, :] = result['var_rnoise']
                 var_poisson_out[j, :] = result['var_poisson']
                 dq_out[j, :] = result['dq']
+                mid_time_out[j, :] = result['mid_time']
 
                 # NOTE: Keep for debugging
                 # import matplotlib.pyplot as plt; plt.imshow(input_model.rate, vmin=0, vmax=np.nanquantile(input_model.rate, 0.995)); plt.plot(trace_positions,color='r'); plt.show()
@@ -313,6 +322,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 input_dq=input_model.dq,
                 input_var_rnoise=input_model.rate_var_rnoise,
                 input_var_poisson=input_model.rate_var_poisson,
+                input_mid_time=input_model.mid_time,
                 trace_positions=trace_positions,
                 profile=fiberflat_profiles,
                 extraction_aperture=self.extraction_aperture,
@@ -335,6 +345,9 @@ class SpectralExtractionPrimitive(BasePrimitive):
 
                 dq_output_fiber = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
                 dq_output_fiber[i, :] = result['dq'][j, :]
+
+                mid_time_output_fiber = getattr(output_model, f'MID_TIME_FIB{fiber}')
+                mid_time_output_fiber[i, :] = result['mid_time'][j, :]
 
             # NOTE: Keep for debugging
             # breakpoint()

@@ -12,6 +12,7 @@ def extract_spectra_cross_talk(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : list[np.ndarray],
     profile : list[np.ndarray],
     extraction_aperture : float,
@@ -21,6 +22,7 @@ def extract_spectra_cross_talk(
     var_rnoise_output : dict[str, np.ndarray] = None,
     var_poisson_output : dict[str, np.ndarray] = None,
     dq_output : dict[str, np.ndarray] = None,
+    mid_time_output : dict[str, np.ndarray] = None,
     orders_are_vertical : bool = True,
 ) -> dict:
     """
@@ -56,6 +58,8 @@ def extract_spectra_cross_talk(
         2D array to store extracted Poisson noise variance. Shape = (n_fibers, nx).
     dq_output : np.ndarray
         2D array to store extracted data quality flags. Shape = (n_fibers, nx).
+    mid_time_output : np.ndarray
+        2D array to store extracted mid times. Shape = (n_fibers, nx).
     orders_are_vertical : bool
         Whether the orders are oriented vertically.
 
@@ -90,6 +94,8 @@ def extract_spectra_cross_talk(
         var_poisson_output = np.full((n_fibers, npix), np.nan, dtype=input_var_poisson.dtype)
     if dq_output is None:
         dq_output = np.full((n_fibers, npix), 0, dtype=input_dq.dtype)
+    if mid_time_output is None:
+        mid_time_output = np.full((n_fibers, npix), np.nan, dtype=input_mid_time.dtype)
 
     # Call numba extraction routine
     _extract_cross_talk_numba(
@@ -107,6 +113,7 @@ def extract_spectra_cross_talk(
         var_rnoise_output=var_rnoise_output,
         var_poisson_output=var_poisson_output,
         dq_output=dq_output,
+        mid_time_output=mid_time_output,
         orders_are_vertical=orders_are_vertical,
     )
 
@@ -117,6 +124,7 @@ def extract_spectra_cross_talk(
         var_rnoise=var_rnoise_output,
         var_poisson=var_poisson_output,
         dq=dq_output,
+        mid_time=mid_time_output,
     )
 
 @njit(nogil=True, parallel=False, cache=True)
@@ -126,6 +134,7 @@ def _extract_cross_talk_numba(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     profile : np.ndarray,
     extraction_aperture : float,
@@ -135,6 +144,7 @@ def _extract_cross_talk_numba(
     var_rnoise_output : np.ndarray,
     var_poisson_output : np.ndarray,
     dq_output : np.ndarray,
+    mid_time_output : np.ndarray,
     orders_are_vertical : bool = True,
 ):
     n_fibers = trace_positions.shape[0]
@@ -203,6 +213,9 @@ def _extract_cross_talk_numba(
         var_rnoise_output[:, x] = var_rnoise_fibers
         var_poisson_output[:, x] = var_poisson_fibers
         dq_output[:, x] = 0
+
+        # TODO: Compute mid times for cross talk extraction.
+        # mid_time_output
 
         #if x == 1018:
         #    breakpoint()
