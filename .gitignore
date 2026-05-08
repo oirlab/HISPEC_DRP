@@ -134,3 +134,8 @@ hispecdrp/_version.py
 
 # Skip big fits files in demo directory
 tests/demo_frames/*.fits
+
+# Local simulation I/O (ramp, rate map, Stage 0 products from simulate_up_the_ramp, etc.)
+test_data/
+
+.cursor/
