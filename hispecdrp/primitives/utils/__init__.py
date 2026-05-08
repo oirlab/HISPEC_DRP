@@ -74,6 +74,8 @@ from .ccf_utils import (
 
 from ..stellar_rv.rv_combine_utils import combine_rvs_median_mad, weighted_mean_rv
 
+from .gaia_query import *
+
 __all__ = [
     "CCFFitKpfConfig",
     "DEFAULT_PACKAGED_LINE_MASK_BASENAME",
