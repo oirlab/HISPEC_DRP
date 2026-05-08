@@ -126,6 +126,7 @@ ENV/
 
 # IDE related settings
 .vscode
+.cursor/
 
 .pytest_cache
 

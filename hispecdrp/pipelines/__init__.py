@@ -1,6 +1,7 @@
 from .base_pipeline import BasePipeline
 from .stage0 import *
 from .stage1 import *
+from .stage2 import *
 from .calibration_pipeline_base import *
 from .calibration import *
 

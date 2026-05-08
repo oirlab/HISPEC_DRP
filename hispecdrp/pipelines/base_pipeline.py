@@ -110,7 +110,8 @@ class BasePipeline(ProcessingComponent):
 
                 primary_dir = self.get_primary_input_dir()
 
-                if self.save_result in (None, False) and self.output_dir is not None:
+                #if self.save_result in (None, False) and self.output_dir is not None:
+                if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
                     self.output_dir = primary_dir

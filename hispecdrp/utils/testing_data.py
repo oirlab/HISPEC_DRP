@@ -26,6 +26,8 @@ GDRIVE_FILES = {
     'Data/HISPEC_HK_20231006B-1_all_traces.hdf': '1Cb2V_4vpVbvnvPd5hd9g3QCLIAGtcNCT',
     'Data/HISPEC_yJ_20231006A-1_all_traces.hdf': '1ShJPuYqRV6j70EgtcX9kY1eGQw2l14Ho',
     'Data/psg_out_2020.08.02_l0_800nm_l1_2700nm_res_0.001nm_lon_204.53_lat_19.82_pres_0.5826_resampled.fits': '1qF9FV1UHbIzNNw3k3l3n5UtSRMKAB6kt',
+    'HISPEC/Cals/HR.20231006.00000.00.mastercal-tracepos.fits': '1cukFL0f-Zi6IXI27DkOV6ZBPCAWfHSKh',
+    'HISPEC/Cals/HR.20231006.00000.00.mastercal-traceprof.fits': '1cY3yvrei40tGX9k5yARFyqwHm0AO967v',
     'HISPEC/Cals/HB.20260212.00000.00.mastercal-bias.001.fits': '1VA-bPvls1YwPTT0k5ZZQ77CQd-F1wTva',
     'HISPEC/Cals/HB.20260212.00000.00.mastercal-dark.001.fits': '1am5aD-ZRFCcYJt3xKJY5e0T-F3snuv3D',
     'HISPEC/Cals/HB.20260212.00000.00.mastercal-detflat.001.fits': '1LHJLROXNxfG4CIXTG6GKp0fdm7hhPghf',

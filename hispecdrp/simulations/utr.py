@@ -74,6 +74,15 @@ def _create_ramp(
             draw_source = _poisson_like_draw(lam_source, source.shape)
             draw_dark = _poisson_like_draw(lam_dark, source.shape)
             _data[i, :, :] = _data[i-1, :, :] + (draw_source * flat + draw_dark) / gain
+            lam_source = np.asarray(_source[i - 1] * readtime, dtype=np.float64)
+            lam_source = np.nan_to_num(lam_source, nan=0.0, posinf=0.0, neginf=0.0)
+            lam_source = np.maximum(lam_source, 0.0)
+            lam_dark = np.asarray(dark * readtime, dtype=np.float64)
+            lam_dark = np.nan_to_num(lam_dark, nan=0.0, posinf=0.0, neginf=0.0)
+            lam_dark = np.maximum(lam_dark, 0.0)
+            draw_source = _poisson_like_draw(lam_source, source.shape)
+            draw_dark = _poisson_like_draw(lam_dark, source.shape)
+            _data[i, :, :] = _data[i-1, :, :] + (draw_source * flat + draw_dark) / gain
         else:
             _data[i, :, :] = _data[i-1, :, :] + (_source[i-1] * readtime *flat + dark * readtime) / gain
 
@@ -107,6 +116,7 @@ def _create_ramp(
         data[:] = np.round(_data).astype(np.uint16)
 
     return
+
 
 def _create_ramp_worker(args):
     """
@@ -428,6 +438,7 @@ def create_ramp(
 
     return _outputs
 
+
 def _tpool_init(data, data_shape,
                 dq_raw, dq_raw_shape,
                 source, source_shape,
@@ -479,6 +490,7 @@ def _tpool_init(data, data_shape,
     shared_kTC_noise = kTC_noise
     shared_kTC_noise_shape = kTC_noise_shape
 
+
 def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, clock_rate=1.0, std_1overf=1.0, seed=None):
     """
     Generate a 3D array of 1/f (pink) noise assuming same noise in each readout channel.
@@ -526,6 +538,7 @@ def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, clock_rate=
         return noise_1overf
     else:
         return noise_1overf.transpose(0, 2, 1)
+
 
 def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
     """
@@ -585,6 +598,7 @@ def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
         return noise, t
 
     return noise
+
 
 def generate_1overf_noise_integrated(
     n,
@@ -686,6 +700,7 @@ def generate_1overf_noise_integrated(
     noise_int = np.clip(noise_int,0,None)
     return noise_int
 
+
 def compute_psd(x, dt=1.0, detrend=False, onesided=True):
     """
     Compute the power spectral density (PSD) of a time series using an FFT
@@ -733,7 +748,6 @@ def compute_psd(x, dt=1.0, detrend=False, onesided=True):
         psd[1:] *= 2.0
 
     return freqs, psd
-
 
 
 def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detrend=False, onesided=True):
@@ -807,14 +821,13 @@ def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detre
     return freqs, np.asarray(psd_channels)
 
 
-
 def utr_variable_rate_cube(
-        source: np.ndarray,
-        flux_scaling: np.ndarray,
-        flux_scaling_times: np.ndarray,
-        n_reads: int,
-        readtime: float,
-        t0: float = 0.0,
+    source: np.ndarray,
+    flux_scaling: np.ndarray,
+    flux_scaling_times: np.ndarray,
+    n_reads: int,
+    readtime: float,
+    t0: float = 0.0,
 ):
     """
     Build a (n_reads-1, ny, nx) cube of per-read *average* electron rates
@@ -886,6 +899,7 @@ def utr_variable_rate_cube(
         t_hi = read_edges[i + 1]
 
         sel = (t_grid >= t_lo) & (t_grid <= t_hi)
+        interval_integrals[i] = np.trapezoid(
         interval_integrals[i] = np.trapezoid(
             scaling_grid[sel],
             t_grid[sel]

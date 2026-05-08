@@ -1,5 +1,5 @@
 from hispecdrp import datamodels
-from hispecdrp import simulations
+import benchmarks as simulations
 from hispecdrp import jump_detection_difference
 from hispecdrp import jump_detection_jwst
 import numpy as np

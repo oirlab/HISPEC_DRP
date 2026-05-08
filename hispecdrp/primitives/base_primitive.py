@@ -178,7 +178,13 @@ class BasePrimitive(ProcessingComponent):
                     if 'selector_kwargs' not in cal_config:
                         cal_config['selector_kwargs'] = {}
             
-            # Case 3: No selector class specified, but user may have kwargs
+            # Case 3: Filepath provided
+            elif isinstance(cal_config, str):
+                # Assume it's a filepath to a calibration model, but do not validate here
+                # User can provide filepath directly as argument value instead of using selector logic
+                continue
+
+            # Case 4: No selector class specified, but user may have kwargs
             # -> Use default selector and merge kwargs
             else:
                 cal_config['selector'] = self.CALIBRATIONS[cal]['selector']
@@ -222,9 +228,6 @@ class BasePrimitive(ProcessingComponent):
                 )
             setattr(self, k, v)
 
-        if self.output_dir is not None:
-            self.save_result = True
-
     def _pre_condition(self):
         """
         Checks if all preconditions are met in order to run this primitive.
@@ -263,13 +266,13 @@ class BasePrimitive(ProcessingComponent):
         with logging_context(log_cfg):
 
             # Start time of processing
-            self._datetime_start = datetime.datetime.now().isoformat(timespec='milliseconds')
+            self._datetime_start = datetime.datetime.now().isoformat(timespec='microseconds')
 
             try:
                 self.set_args(input=input, **kwargs)
 
                 primary_dir = self.get_primary_input_dir(self.input)
-                if self.save_result in (None, False) and self.output_dir is not None:
+                if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
                     self.output_dir = primary_dir
@@ -485,7 +488,7 @@ class BasePrimitive(ProcessingComponent):
         """
         assert self._output is not None and 'output' in self._output, 'No output to finalize.'
         output = self._output['output']
-        self._datetime_end = datetime.datetime.now().isoformat(timespec='milliseconds')
+        self._datetime_end = datetime.datetime.now().isoformat(timespec='microseconds')
         
         def _finalize(item):
             if isinstance(item, (str, DataModel)):

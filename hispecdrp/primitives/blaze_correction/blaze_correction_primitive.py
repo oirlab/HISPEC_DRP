@@ -272,9 +272,10 @@ def apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, order_v
             spec_blaze_cal_err_array[o] = spec_blaze_cal_err
 
     output_dq = output_model.traces[int(fiber)]['spec_dq']
-    # array edges cannot be smoothed properly with spline
-    output_dq[:int(pixels_per_spline_knot*10)] = 1 
-    output_dq[-int(pixels_per_spline_knot*10):] = 1 
+    # pixel edges along dispersion (per order) cannot be smoothed properly with spline
+    n_edge = int(pixels_per_spline_knot * 10)
+    output_dq[:, :n_edge] = 1
+    output_dq[:, -n_edge:] = 1 
 
     setattr(output_model, f'SPEC_FIB{fiber}', spec_blaze_cal_array)
     setattr(output_model, f'SPEC_ERR_FIB{fiber}', spec_blaze_cal_err_array)

@@ -1,8 +1,8 @@
 import numpy as np
-from .. import datamodels
+from hispecdrp.datamodels import RampModel
 
 def add_refchan_ramp(
-    model : datamodels.RampModel,
+    model : RampModel,
     channel_size : int = 64,
     value: float = 0,
 ):
@@ -11,7 +11,7 @@ def add_refchan_ramp(
     
     Parameters
     ----------
-    model : datamodels.RampModel
+    model : RampModel
         Input ramp data model.
     channel_size : int, optional
         Number of columns in each readout channel, by default 64.
