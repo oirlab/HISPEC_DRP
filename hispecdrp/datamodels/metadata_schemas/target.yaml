@@ -50,16 +50,16 @@ properties:
     unit: degrees
     merge_rule: mean
 
-  target_mu_ra:
+  target_rapm:
     title: "Target proper motion in RA"
-    fits_keyword: MURA
+    fits_keyword: RAPM
     type: number
     unit: degrees
     merge_rule: mean
 
-  target_mu_dec:
+  target_decpm:
     title: "Target proper motion in Dec"
-    fits_keyword: MUDEC
+    fits_keyword: DECPM
     type: number
     unit: degrees
     merge_rule: mean
@@ -125,6 +125,14 @@ properties:
 
   # Target OB contents
   # NOTE: Final home TBD
+  target_gaia_epoch:
+    title: "Epoch of Gaia coordinates for the target"
+    fits_keyword: GAIAEPCH
+    type: number
+    unit: year
+    default: 2016.5
+    merge_rule: first
+  
   target_gaia_id:
     title: "Gaia DR3 source ID for the target"
     fits_keyword: GAIAID
@@ -152,6 +160,20 @@ properties:
     unit: degrees
     merge_rule: first
 
+  target_gaia_decpm:
+    title: "Gaia DR3 proper motion in Dec for the target"
+    fits_keyword: GAIADCPM
+    type: number
+    unit: degrees
+    merge_rule: first
+
+  target_gaia_rapm:
+    title: "Gaia DR3 proper motion in RA for the target"
+    fits_keyword: GAIARAPM
+    type: number
+    unit: degrees
+    merge_rule: first
+
   target_gaia_teff:
     title: "Gaia DR3 effective temperature for the target"
     fits_keyword: GAIATEFF
@@ -159,7 +181,7 @@ properties:
     unit: K
     merge_rule: first
 
-  target_gaia_rv:
+  target_gaia_rvsys:
     title: "Gaia DR3 radial velocity for the target"
     fits_keyword: GAIARV
     type: number
