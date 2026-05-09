@@ -1,0 +1,31 @@
+# Default logging config installed at package import time (outside of any
+# primitive/pipeline run). Only stdout is used here; enable_file is ignored.
+#
+# Minimum log level: DEBUG | INFO | WARNING | ERROR | CRITICAL
+# Can be overridden by the HISPECDRP_LOG_LEVEL environment variable.
+level: INFO
+
+# Write log records to stdout.
+# Can be overridden by HISPECDRP_LOG_ENABLE_STDOUT (true/false).
+enable_stdout: true
+
+# Write log records to a file.
+# Can be overridden by HISPECDRP_LOG_ENABLE_FILE (true/false).
+enable_file: false
+
+# Directory where log files are written (only used when enable_file: true).
+# Defaults to ./logs/ relative to the current working directory when unset.
+# Can be overridden by HISPECDRP_LOG_DIR.
+log_dir: null
+
+# Prefix for the log filename: <prefix>_<run_id>_<pid>.txt
+filename_prefix: hispecdrp_log
+
+# Rotate log files when they reach max_bytes (only used when enable_file: true).
+rotate: false
+
+# Maximum log file size in bytes before rotation (only used when rotate: true).
+max_bytes: 50000000  # 50 MB
+
+# Number of rotated backup files to keep (only used when rotate: true).
+backup_count: 5
