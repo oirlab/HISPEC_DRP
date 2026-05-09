@@ -382,7 +382,7 @@ class DataModel:
         val = getattr(self, extl, None)
         if val is None:
             return True
-        if isinstance(val, astropy.table.Table) and len(val) == 0:
+        if isinstance(val, Table) and len(val) == 0:
             return True
         return False
 
