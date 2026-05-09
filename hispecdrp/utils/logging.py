@@ -122,9 +122,7 @@ class LogConfig:
         self.enable_file = enable_file
 
         if log_dir is None and self.enable_file:
-            log_dir = os.getenv("HISPECDRP_LOG_DIR")
-            if log_dir is None:
-                log_dir = os.path.join(os.path.expanduser("~"), "hispecdrp_logs") + os.sep
+            log_dir = os.getenv("HISPECDRP_LOG_DIR", os.path.join(os.getcwd(), "logs"))
 
         self.filename_prefix = filename_prefix
         self.log_dir = log_dir
@@ -290,22 +288,28 @@ def logging_context(config_dict: dict, queue: mp.queues.Queue | None = None):
     _saved_root_handlers = list(root.handlers)
     _saved_root_level = root.level
 
+    # Save and clear the hispecdrp logger's default handlers so they don't
+    # fire alongside the queue-based handlers during pipeline execution.
+    hispecdrp_logger = logging.getLogger(ROOT_LOGGER)
+    _saved_hispecdrp_handlers = list(hispecdrp_logger.handlers)
+    _saved_hispecdrp_level = hispecdrp_logger.level
+    hispecdrp_logger.handlers = []
+
     if not _CONFIGURED:
         if queue is None:
             _QUEUE = mp.Queue(-1)
         else:
             _QUEUE = queue
 
-        log_cfg = config_dict.get("logging", {})
         cfg = LogConfig(
-            level=log_cfg.get("level", "INFO"),
-            enable_stdout=log_cfg.get("enable_stdout"),
-            enable_file=log_cfg.get("enable_file"),
-            log_dir=log_cfg.get("log_dir"),
-            filename_prefix=log_cfg.get("filename_prefix", DEFAULT_FILENAME_PREFIX),
-            rotate=log_cfg.get("rotate", False),
-            max_bytes=log_cfg.get("max_bytes", 50_000_000),
-            backup_count=log_cfg.get("backup_count", 5),
+            level=config_dict.get("level", "INFO"),
+            enable_stdout=config_dict.get("enable_stdout"),
+            enable_file=config_dict.get("enable_file"),
+            log_dir=config_dict.get("log_dir"),
+            filename_prefix=config_dict.get("filename_prefix", DEFAULT_FILENAME_PREFIX),
+            rotate=config_dict.get("rotate", False),
+            max_bytes=config_dict.get("max_bytes", 50_000_000),
+            backup_count=config_dict.get("backup_count", 5),
         )
 
         _configure_process(_QUEUE, cfg.level)
@@ -322,6 +326,47 @@ def logging_context(config_dict: dict, queue: mp.queues.Queue | None = None):
         _stop_listener()
         _CONFIGURED = False
         _restore_root_logger(_saved_root_handlers, _saved_root_level)
+        hispecdrp_logger.handlers = _saved_hispecdrp_handlers
+        hispecdrp_logger.setLevel(_saved_hispecdrp_level)
+
+def setup_default_logging() -> None:
+    """
+    Install a default stdout handler on the ``hispecdrp`` logger and each
+    package in ``LOG_CAPTURE_PACKAGES`` so logs emitted outside of any
+    ``logging_context`` are visible.  Called once at package import time.
+    Skipped if the ``hispecdrp`` logger already has handlers (avoids
+    duplicates when called multiple times or when the user has pre-configured
+    logging before importing hispecdrp).
+    """
+    hispecdrp_logger = logging.getLogger(ROOT_LOGGER)
+    if hispecdrp_logger.handlers:
+        return
+
+    from .config import get_config_path, read_config_file
+    try:
+        cfg_dict = read_config_file(get_config_path("logging.yaml"))
+    except FileNotFoundError:
+        cfg_dict = {}
+
+    cfg = LogConfig(
+        level=cfg_dict.get("level", "INFO"),
+        enable_stdout=cfg_dict.get("enable_stdout", True),
+        enable_file=False,  # never write files as part of the import-time default
+    )
+    cfg._setup_handlers()
+
+    hispecdrp_logger.setLevel(cfg.level)
+    for h in cfg.handlers:
+        hispecdrp_logger.addHandler(h)
+
+    # Also attach to each captured package so their records are visible
+    # outside of logging_context (mirrors what logging_context does at runtime).
+    for pkg in LOG_CAPTURE_PACKAGES:
+        pkg_logger = logging.getLogger(pkg)
+        pkg_logger.setLevel(cfg.level)
+        for h in cfg.handlers:
+            if h not in pkg_logger.handlers:
+                pkg_logger.addHandler(h)
 
 def get_queue():
     return _QUEUE

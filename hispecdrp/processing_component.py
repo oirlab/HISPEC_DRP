@@ -4,6 +4,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 
 from .datamodels import DataModel
 from . import datamodels
+from .utils.config import get_config_path, read_config_file
 
 from typing import Sequence
 
@@ -26,16 +27,33 @@ class ProcessingComponent(_BasePrimitive):
         'show_preview' : False,
     }
 
-    LOGGING = {
-        'level' : 'INFO',                     # str or int
-        'enable_stdout' : None,               # enable StreamHandler
-        'enable_file' : None,                 # enable FileHandler
-        'log_dir' : None,                     # Path to log directory
-        'filename_prefix' : 'hispecdrp_log',  # prefix for log files
-        'rotate' : False,                     # enable rotating files (NOTE: TBD)
-        'max_bytes' : 50000000,               # rotation size (NOTE: TBD)
-        'backup_count' : 5                    # number of rotated files (NOTE: TBD)
-    }
+    def _init_log_config(self, log_config=None) -> None:
+        """
+        Resolve and store ``self.log_config`` by merging (lowest → highest priority):
+
+        1. Package defaults from ``hispecdrp/configs/logging.yaml``
+        2. ``logging`` key embedded in ``self.config`` (removed from ``self.config`` after reading)
+        3. ``log_config`` kwarg passed at construction time (dict or file path/name)
+        """
+
+        # 1. Package defaults
+        try:
+            defaults = read_config_file(get_config_path("logging_pipeline.yaml"))
+        except FileNotFoundError:
+            defaults = {}
+
+        # 2. Embedded logging block inside the run config (mutates self.config)
+        config_log = self.config.pop("logging", {}) or {}
+
+        # 3. Runtime kwarg
+        if isinstance(log_config, str):
+            kwarg_log = read_config_file(get_config_path(log_config))
+        elif isinstance(log_config, dict):
+            kwarg_log = log_config
+        else:
+            kwarg_log = {}
+
+        self.log_config = defaults | config_log | kwarg_log
 
     def apply(self, *args, **kwargs):
         """

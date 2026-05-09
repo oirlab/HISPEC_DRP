@@ -31,6 +31,7 @@ class BasePrimitive(ProcessingComponent):
     def __init__(
         self,
         config : dict | str | None = None,
+        log_config : dict | str | None = None,
         **kwargs
     ):
         """
@@ -38,12 +39,18 @@ class BasePrimitive(ProcessingComponent):
         ----------
         config : dict | str | None
             A configuration dictionary, or the path to to a configuration file.
+        log_config : dict | str | None
+            Logging configuration override. Can be a dict of logging keys, a path
+            to a logging YAML file, or None to use package defaults.
         **kwargs
             Any additional keyword arguments to set or override (including ``config``) for this primitive.
         """
 
         # Load the configuration file or Config object
         self.init_config(config)
+
+        # Resolve logging config (merges defaults -> config file -> kwarg)
+        self._init_log_config(log_config)
 
         # Set any kwargs passed to init
         self.init_args(**kwargs)
@@ -77,8 +84,6 @@ class BasePrimitive(ProcessingComponent):
             self.config = {
                 'class': class_name,
                 'arguments': self.ARGUMENTS.copy(),
-                #'calibrations': copy.deepcopy(self.CALIBRATIONS),
-                'logging': self.LOGGING.copy(),
             }
             return self.config
         
@@ -101,25 +106,8 @@ class BasePrimitive(ProcessingComponent):
             self.config['arguments'] = self.ARGUMENTS.copy()
         else:
             self.config['arguments'] = self.ARGUMENTS | self.config['arguments']
-
-        # Default logging
-        if 'logging' not in self.config:
-            self.config['logging'] = self.LOGGING.copy()
-        else:
-            self.config['logging'] = self.LOGGING | self.config['logging']
-
-        # Default calibrations
-        # if 'calibrations' not in self.config:
-        #     self.config['calibrations'] = copy.deepcopy(self.CALIBRATIONS)
-        # else:
         #
         self._init_calibrations()
-
-        # Logging config
-        if 'logging' not in self.config:
-            self.config['logging'] = self.LOGGING.copy()
-        else:
-            self.config['logging'] = self.LOGGING | self.config['logging']
 
         return self.config
     
@@ -261,9 +249,7 @@ class BasePrimitive(ProcessingComponent):
         self._status = None
         self._calibrations_used = {}
 
-        log_cfg = self.config['logging']
-
-        with logging_context(log_cfg):
+        with logging_context(self.log_config):
 
             # Start time of processing
             self._datetime_start = datetime.datetime.now().isoformat(timespec='microseconds')

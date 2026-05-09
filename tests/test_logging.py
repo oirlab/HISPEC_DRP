@@ -9,9 +9,33 @@ from hispecdrp.utils.logging import (
     RunIdFilter,
     PackageCaptureFilter,
     ROOT_LOGGER,
+    LOG_CAPTURE_PACKAGES,
     RUN_ID,
     _get_level,
+    logging_context,
+    setup_default_logging,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_loggers():
+    """
+    Snapshot and restore the hispecdrp and LOG_CAPTURE_PACKAGES loggers
+    around each test so setup_default_logging side-effects don't leak.
+    """
+    saved = {}
+    loggers_to_save = [ROOT_LOGGER] + list(LOG_CAPTURE_PACKAGES)
+    for name in loggers_to_save:
+        lg = logging.getLogger(name)
+        saved[name] = (list(lg.handlers), lg.level, lg.propagate)
+
+    yield
+
+    for name, (handlers, level, propagate) in saved.items():
+        lg = logging.getLogger(name)
+        lg.handlers = handlers
+        lg.setLevel(level)
+        lg.propagate = propagate
 
 
 @pytest.fixture
@@ -120,6 +144,11 @@ class TestFilters:
         # Accept hispecdrp
         record = logging.LogRecord(f"{ROOT_LOGGER}.test", logging.INFO, "", 0, "msg", (), None)
         assert filter_obj.filter(record) is True
+
+        # Accept LOG_CAPTURE_PACKAGES
+        for pkg in LOG_CAPTURE_PACKAGES:
+            record = logging.LogRecord(f"{pkg}.test", logging.INFO, "", 0, "msg", (), None)
+            assert filter_obj.filter(record) is True
         
         # Reject others
         record = logging.LogRecord("other.package", logging.INFO, "", 0, "msg", (), None)
@@ -209,3 +238,119 @@ class TestContextManager:
         
         assert len(logger.handlers) == initial_handlers
         assert "in context" in list(tmp_path.glob("*.txt"))[0].read_text()
+
+
+class TestLoggingContext:
+    """Test the logging_context context manager"""
+
+    def test_logging_context_stdout(self, capsys):
+        """logging_context routes hispecdrp records to stdout"""
+        cfg = {"level": "INFO", "enable_stdout": True, "enable_file": False}
+        log = logging.getLogger(f"{ROOT_LOGGER}.ctx_test")
+        with logging_context(cfg):
+            log.info("ctx stdout message")
+        assert "ctx stdout message" in capsys.readouterr().out
+
+    def test_logging_context_file(self, tmp_path):
+        """logging_context writes to a file when enable_file=True"""
+        cfg = {
+            "level": "INFO",
+            "enable_stdout": False,
+            "enable_file": True,
+            "log_dir": str(tmp_path),
+        }
+        log = logging.getLogger(f"{ROOT_LOGGER}.ctx_file_test")
+        with logging_context(cfg):
+            log.info("ctx file message")
+        log_files = list(tmp_path.glob("*.txt"))
+        assert len(log_files) == 1
+        assert "ctx file message" in log_files[0].read_text()
+
+    def test_logging_context_restores_hispecdrp_handlers(self, capsys):
+        """hispecdrp logger handlers are restored after logging_context exits"""
+        # Ensure a default handler is present before entering the context
+        root_log = logging.getLogger(ROOT_LOGGER)
+        root_log.handlers = []
+        setup_default_logging()
+        handlers_before = list(root_log.handlers)
+
+        cfg = {"level": "INFO", "enable_stdout": True, "enable_file": False}
+        with logging_context(cfg):
+            pass
+
+        assert root_log.handlers == handlers_before
+
+    def test_logging_context_captures_koa_middleware(self, tmp_path):
+        """logging_context captures koa_middleware records"""
+        cfg = {
+            "level": "INFO",
+            "enable_stdout": False,
+            "enable_file": True,
+            "log_dir": str(tmp_path),
+        }
+        koa_log = logging.getLogger("koa_middleware.ctx_test")
+        with logging_context(cfg):
+            koa_log.info("koa ctx message")
+        content = list(tmp_path.glob("*.txt"))[0].read_text()
+        assert "koa ctx message" in content
+
+    def test_logging_context_not_reentrant(self, capsys):
+        """Nested logging_context calls are no-ops (outer config wins)"""
+        outer_cfg = {"level": "INFO", "enable_stdout": True, "enable_file": False}
+        inner_cfg = {"level": "WARNING", "enable_stdout": True, "enable_file": False}
+        log = logging.getLogger(f"{ROOT_LOGGER}.reentrant_test")
+        with logging_context(outer_cfg):
+            with logging_context(inner_cfg):
+                log.info("info inside nested")  # should still appear (outer=INFO)
+        assert "info inside nested" in capsys.readouterr().out
+
+
+class TestSetupDefaultLogging:
+    """Test the import-time setup_default_logging() function"""
+
+    def test_installs_handler_on_hispecdrp(self):
+        """setup_default_logging attaches a handler to the hispecdrp logger"""
+        log = logging.getLogger(ROOT_LOGGER)
+        log.handlers = []
+        setup_default_logging()
+        assert len(log.handlers) > 0
+
+    def test_installs_handler_on_capture_packages(self):
+        """setup_default_logging attaches handlers to LOG_CAPTURE_PACKAGES loggers"""
+        # Clear everything first
+        for name in [ROOT_LOGGER] + list(LOG_CAPTURE_PACKAGES):
+            logging.getLogger(name).handlers = []
+
+        setup_default_logging()
+
+        for pkg in LOG_CAPTURE_PACKAGES:
+            assert len(logging.getLogger(pkg).handlers) > 0
+
+    def test_idempotent(self):
+        """setup_default_logging is a no-op when handlers already exist"""
+        log = logging.getLogger(ROOT_LOGGER)
+        log.handlers = []
+        setup_default_logging()
+        handler_count = len(log.handlers)
+        setup_default_logging()  # second call
+        assert len(log.handlers) == handler_count
+
+    def test_stdout_output_outside_context(self, capsys):
+        """Records emitted outside logging_context reach stdout via default handler"""
+        log = logging.getLogger(ROOT_LOGGER)
+        log.handlers = []
+        setup_default_logging()
+
+        log.info("outside context message")
+        assert "outside context message" in capsys.readouterr().out
+
+    def test_capture_packages_output_outside_context(self, capsys):
+        """LOG_CAPTURE_PACKAGES records are visible outside logging_context"""
+        for name in [ROOT_LOGGER] + list(LOG_CAPTURE_PACKAGES):
+            logging.getLogger(name).handlers = []
+        setup_default_logging()
+
+        koa_log = logging.getLogger("koa_middleware.default_test")
+        koa_log.info("koa outside context")
+        assert "koa outside context" in capsys.readouterr().out
+
