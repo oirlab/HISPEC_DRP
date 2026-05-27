@@ -125,6 +125,7 @@ ENV/
 .mypy_cache/
 
 # IDE related settings
+.cursor/
 .vscode
 
 .pytest_cache
