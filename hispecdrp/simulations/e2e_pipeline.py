@@ -1,46 +1,34 @@
 """
-End-to-end HISPEC simulation: dummy calibrations, simulated UTR ramp, Stage 0 → 1 → 2.
+End-to-end HISPEC simulation: calibrations (KOA → user config → simulated), UTR ramp, Stage 0 → 1 → 2.
 
-This module chains the same building blocks as ``benchmarks/end_to_end_simulation.py``,
-with **explicit** hand-off of each stage’s product to the next (Stage 0 rate model →
-Stage 1 L2 input; Stage 1 output → Stage 2). Dummy fiberflats and the fiberflat
-pipeline run between Stage 0 and Stage 1 when ``run_stage1`` is true.
+Chains helpers in :mod:`hispecdrp.simulations.simulate_up_the_ramp` and
+:mod:`hispecdrp.simulations.e2e_support` with explicit hand-off of each stage product
+to the next. When trace/fiberflat masters are not available from KOA or config, dummy
+fiberflat rates and the fiberflat pipeline run between Stage 0 and Stage 1.
 
-**Repository layout:** importing :mod:`benchmarks.end_to_end_simulation` requires the
-repository root (parent of the ``hispecdrp`` package) on ``sys.path``. The helper
-:func:`ensure_repo_on_path` is called automatically by :func:`run_e2e_simulation`.
-Running ``python -m hispecdrp.simulations.run_e2e_sim`` from the clone root is enough.
+Run from the repository root with the ``hispec`` conda env::
+
+    python -m hispecdrp.simulations.run_e2e_sim
 """
 
 from __future__ import annotations
 
-import importlib
 import logging
-import sys
+import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
+from . import e2e_calibrations, e2e_support
+from .simulate_up_the_ramp import (
+    create_dummy_fiberflat_rate_files,
+    create_ramp_and_calibrations,
+    create_wavelength_solution_model_from_sim,
+    get_default_stage0_prim_args,
+    run_fiberflat_pipeline,
+    run_stage0_simulation,
+)
+
 logger = logging.getLogger(__name__)
-
-
-def ensure_repo_on_path() -> Path:
-    """
-    Insert the HISPEC_DRP repository root on ``sys.path`` so ``benchmarks`` resolves.
-
-    ``hispecdrp/simulations/e2e_pipeline.py`` → parents[2] is the repo root.
-    """
-    repo_root = Path(__file__).resolve().parents[2]
-    s = str(repo_root)
-    if s not in sys.path:
-        sys.path.insert(0, s)
-    return repo_root
-
-
-def import_benchmarks_end_to_end():
-    """Load ``benchmarks.end_to_end_simulation`` (must exist in a source checkout)."""
-    ensure_repo_on_path()
-    return importlib.import_module("benchmarks.end_to_end_simulation")
 
 
 @dataclass
@@ -54,7 +42,14 @@ class E2EConfig:
     spectrograph: str = "BSPEC"
     fibers: list[int] | None = None
     fiberflat_fibers: list[int] | None = None
-    use_master_calibrations: bool = False
+    use_master_calibrations: bool = True
+    calibration_config: str | dict | None = None
+    instrument_name: str | None = None
+    instrument_era: str = "0.0.1"
+    mjd_start: float | None = None
+    datetime_obs: str | None = None
+    connect_remote: bool = True
+    sync_caldb_first: bool = True
     run_stage1: bool = True
     run_stage2: bool = True
     poisson_noise: bool = True
@@ -73,37 +68,45 @@ class E2EResult:
     stage1_model: Any | None
     stage2_model: Any | None
     fiberflat_bundle: dict | None
+    calibration_sources: dict[str, str] = field(default_factory=dict)
 
 
 def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     """
     Build a simulated ramp + calibrations, then run Stage 0, fiberflat pipeline, Stage 1, Stage 2.
 
-    Stage flow
-    ----------
-    1. **Ramp + calibrations** — :func:`benchmarks.end_to_end_simulation.create_ramp_and_calibrations`
-       (BT-Settl template or user spectrum; dummy or master cals).
-    2. **Stage 0** — ramp and cal dict → rate/slope product.
-    3. **Fiberflats** (if ``run_stage1``) — dummy per-fiber rates under ``<output_dir>/cals/``,
-       then :class:`~hispecdrp.pipelines.calibration.process_fiberflats_pipeline.ProcessFiberflatsPipeline`.
-    4. **Stage 1** — Stage 0 product + trace models + sim wavelength solution → L2-style product.
-    5. **Stage 2** (if ``run_stage2`` and Stage 1 ran) — Stage 1 product + fiberflat bundle.
+    Calibrations are resolved in order: explicit paths in ``calibration_config``, KOA store
+    (when ``use_master_calibrations`` is True), then simulated products for any missing keys.
     """
-    m = import_benchmarks_end_to_end()
-    import os
-
-    out_dir_abs = m._ensure_output_directory(config.output_dir)
+    out_dir_abs = e2e_support.ensure_output_directory(config.output_dir)
     os.makedirs(out_dir_abs, exist_ok=True)
-    m._ensure_koa_calibration_cache_env(out_dir_abs)
 
-    logger.info("E2E: building ramp and calibrations (output_dir=%s).", out_dir_abs)
-    ramp_model, calibration_models = m.create_ramp_and_calibrations(
+    cal_bundle = e2e_calibrations.resolve_e2e_calibrations(
+        output_dir=out_dir_abs,
+        spectrograph=config.spectrograph,
+        use_koa=config.use_master_calibrations,
+        calibration_config=config.calibration_config,
+        instrument_name=config.instrument_name,
+        instrument_era=config.instrument_era,
+        mjd_start=config.mjd_start,
+        datetime_obs=config.datetime_obs,
+        connect_remote=config.connect_remote,
+        sync_caldb_first=config.sync_caldb_first,
+    )
+
+    stage0_seed = dict(cal_bundle.stage0) if cal_bundle.stage0 else None
+    logger.info(
+        "E2E: building ramp and calibrations (output_dir=%s, stage0_from_koa_or_config=%s).",
+        out_dir_abs,
+        sorted(cal_bundle.stage0.keys()),
+    )
+    ramp_model, calibration_models, rate_map = create_ramp_and_calibrations(
         rate_map=None,
         shape=(4096, 4096),
         fibers=config.fibers,
         output_dir=out_dir_abs,
-        calibration_models=None,
-        use_master_calibrations=config.use_master_calibrations,
+        calibration_models=stage0_seed,
+        use_master_calibrations=False,
         readtime=config.readtime,
         n_reads=config.n_reads,
         spectrograph=config.spectrograph,
@@ -116,66 +119,113 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         **config.calibration_kwargs,
     )
 
-    stage0_prim_args = m.get_default_stage0_prim_args()
+    e2e_calibrations.complete_stage0_calibrations(
+        calibration_models,
+        rate_map,
+        out_dir_abs,
+        cal_bundle.sources,
+        calibration_kwargs=config.calibration_kwargs,
+    )
+    for k in calibration_models:
+        cal_bundle.sources.setdefault(k, "simulated")
+
+    stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
     logger.info("E2E: Stage 0 (ramp → rate/slope).")
-    stage0_model = m.run_stage0_simulation(
+    stage0_model = run_stage0_simulation(
         ramp_model,
         calibration_models,
         output_dir=out_dir_abs,
         prim_args=stage0_prim_args,
         max_cores=config.max_cores,
-        profile_records=None,
     )
 
     stage1_model = None
     stage2_model = None
     ff_bundle = None
-    cal_dir = m._calibration_dir(out_dir_abs)
+    wavesol_model = None
+    cal_dir = e2e_support.calibration_dir(out_dir_abs)
 
     if config.run_stage1:
         ff_list = config.fiberflat_fibers if config.fiberflat_fibers is not None else [1, 2, 3]
         ff_list = [f for f in ff_list if f in (1, 2, 3)]
         if ff_list:
-            logger.info("E2E: dummy fiberflats + fiberflat pipeline + Stage 1.")
-            ff_paths = m.create_dummy_fiberflat_rate_files(
-                ff_list,
-                config.spectrograph,
-                out_dir_abs,
-                calibration_models,
-                readtime=config.readtime,
-                n_reads=config.n_reads,
-                max_cores=config.max_cores,
-                stage0_prim_args=stage0_prim_args,
-            )
-            ff_bundle = m.run_fiberflat_pipeline(ff_paths, output_dir=cal_dir)
-            wavesol_model = m.create_wavelength_solution_model_from_sim(config.spectrograph)
-            stage1_prim_args = m.get_default_stage1_prim_args(max_cores=config.max_cores)
-            stage1_model = m.run_stage1_simulation(
+            if cal_bundle.has_master_trace_bundle:
+                logger.info("E2E: using trace/fiberflat masters from config or KOA; Stage 1.")
+                ff_bundle = {
+                    "trace_pos": cal_bundle.trace_pos,
+                    "trace_prof": cal_bundle.trace_prof,
+                    "fiberflat": cal_bundle.fiberflat,
+                }
+            else:
+                if all(f in cal_bundle.fiberflat_rate_paths for f in ff_list):
+                    logger.info("E2E: user fiberflat rate files + fiberflat pipeline + Stage 1.")
+                    ff_paths = [
+                        cal_bundle.fiberflat_rate_paths[f] for f in sorted(ff_list)
+                    ]
+                    for f in sorted(ff_list):
+                        path = cal_bundle.fiberflat_rate_paths[f]
+                        cal_bundle.sources[f"fiberflat_rate_fib{f}"] = f"config:{path}"
+                else:
+                    logger.info("E2E: dummy fiberflats + fiberflat pipeline + Stage 1.")
+                    ff_paths = create_dummy_fiberflat_rate_files(
+                        ff_list,
+                        config.spectrograph,
+                        out_dir_abs,
+                        calibration_models,
+                        readtime=config.readtime,
+                        n_reads=config.n_reads,
+                        max_cores=config.max_cores,
+                        stage0_prim_args=stage0_prim_args,
+                    )
+                    for f, path in zip(sorted(ff_list), ff_paths):
+                        cal_bundle.sources[f"fiberflat_rate_fib{f}"] = (
+                            f"simulated_dummy_rate:{path}"
+                        )
+                ff_bundle = run_fiberflat_pipeline(ff_paths, output_dir=cal_dir)
+                for key in ("trace_pos", "trace_prof", "fiberflat"):
+                    cal_bundle.sources[key] = "fiberflat_pipeline"
+
+            if cal_bundle.wavesol is not None:
+                wavesol_model = cal_bundle.wavesol
+            else:
+                wavesol_model = create_wavelength_solution_model_from_sim(
+                    config.spectrograph
+                )
+                cal_bundle.sources["wavesol"] = "simulated_hdf"
+
+            stage1_model = e2e_support.run_stage1_simulation(
                 stage0_model,
                 ff_bundle["trace_pos"],
                 ff_bundle["trace_prof"],
-                prim_args=stage1_prim_args,
                 wavesol_model=wavesol_model,
                 output_dir=out_dir_abs,
                 max_cores=config.max_cores,
-                profile_records=None,
             )
         else:
             logger.warning("E2E: run_stage1 is True but fiberflat_fibers is empty; skipping Stage 1/2.")
 
     if config.run_stage2 and stage1_model is not None and ff_bundle is not None:
         logger.info("E2E: Stage 2.")
-        stage2_prim_args = m.get_default_stage2_prim_args(max_cores=config.max_cores)
-        stage2_model = m.run_stage2_simulation(
+        stage2_model = e2e_support.run_stage2_simulation(
             stage1_model,
             fiberflat_model=ff_bundle["fiberflat"],
-            prim_args=stage2_prim_args,
             output_dir=out_dir_abs,
             max_cores=config.max_cores,
-            profile_records=None,
         )
     elif config.run_stage2:
         logger.warning("E2E: run_stage2 is True but Stage 1 or fiberflat bundle missing; skipping.")
+
+    e2e_support.log_e2e_calibration_summary(
+        calibration_models=calibration_models,
+        sources=cal_bundle.sources,
+        fiberflat_bundle=ff_bundle,
+        wavesol_model=wavesol_model,
+    )
+    e2e_support.log_e2e_rv_performance_summary(
+        stage2_model,
+        injected_rv_km_s=config.radial_velocity_km_s,
+        fibers=config.fibers,
+    )
 
     return E2EResult(
         ramp_model=ramp_model,
@@ -184,4 +234,5 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         stage1_model=stage1_model,
         stage2_model=stage2_model,
         fiberflat_bundle=ff_bundle,
+        calibration_sources=dict(cal_bundle.sources),
     )

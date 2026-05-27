@@ -1,0 +1,33 @@
+# Example E2E calibration config (pass path via E2EConfig.calibration_config).
+#
+# Resolution order per product: explicit path below → KOA store → simulated fallback.
+
+koa:
+  instrument_era: "0.0.1"
+  # mjd_start: 58941.35
+  # datetime_obs: "2026-04-30T12:00:00"
+  connect_remote: true
+  sync_first: true
+
+calibrations:
+  # Stage 0 detector products (FITS paths)
+  # dq: /path/to/dq.fits
+  # saturation: /path/to/saturation.fits
+  # gain: /path/to/gain.fits
+  # detflat: /path/to/detflat.fits
+  # bias: /path/to/bias.fits
+  # dark: /path/to/dark.fits
+  # rn: /path/to/rn.fits
+  # nonlin: /path/to/nonlin.fits
+
+  # Stage 1 / fiberflat pipeline (skip dummy fiberflat generation when all three are set)
+  # trace_pos: /path/to/mastercal-tracepos.fits
+  # trace_prof: /path/to/mastercal-traceprof.fits
+  # fiberflat: /path/to/mastercal-fiberflat.fits
+  # wavesol: /path/to/wavesol.fits
+
+# Per-fiber fiberflat rate FITS (used when trace masters are not provided)
+fiberflat_rates:
+  1: /path/to/HB.20240924.00000.00_rate-FIBERFLAT-FIB1.fits
+  2: /path/to/HB.20240924.00000.00_rate-FIBERFLAT-FIB2.fits
+  3: /path/to/HB.20240924.00000.00_rate-FIBERFLAT-FIB3.fits

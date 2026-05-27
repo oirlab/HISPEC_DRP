@@ -7,26 +7,22 @@ Run from the **repository root** with the ``hispec`` conda env::
     python -m hispecdrp.simulations.run_e2e_sim
 
 Adjust the literals in ``main()`` below for output directory, reads, cores, etc.
+Set ``calibration_config`` to a YAML path (see ``e2e_calibrations.example.yaml``)
+to pin specific FITS files; set ``use_master_calibrations=False`` to skip KOA.
 """
 
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
-
-# Repo root on path (needed for ``benchmarks`` when hispecdrp is not editable-only).
-_repo = Path(__file__).resolve().parents[2]
-if str(_repo) not in sys.path:
-    sys.path.insert(0, str(_repo))
 
 from hispecdrp.simulations.e2e_pipeline import E2EConfig, run_e2e_simulation
+from hispecdrp.simulations.e2e_support import repository_root
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
 
-    output_dir = str(_repo / "test_data")
+    output_dir = str(repository_root() / "test_data")
     n_reads = 10
     max_cores = 1
     spectrograph = "BSPEC"
@@ -39,7 +35,8 @@ def main() -> int:
         spectrograph=spectrograph,
         fibers=[1, 2, 3],
         fiberflat_fibers=[1, 2, 3],
-        use_master_calibrations=False,
+        use_master_calibrations=True,
+        calibration_config=None,
         run_stage1=True,
         run_stage2=True,
         poisson_noise=True,
@@ -51,7 +48,8 @@ def main() -> int:
     )
 
     res = run_e2e_simulation(config)
-    logging.getLogger(__name__).info(
+    log = logging.getLogger(__name__)
+    log.info(
         "Done: ramp=%s stage0=%s stage1=%s stage2=%s cal_keys=%s",
         type(res.ramp_model).__name__,
         type(res.stage0_model).__name__,

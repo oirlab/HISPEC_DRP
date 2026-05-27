@@ -8,8 +8,8 @@ The end-to-end (E2E) simulation exercises HISPEC DRP from a known input stellar 
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `hispecdrp.simulations.e2e_pipeline`         | Orchestrates ramp build → Stage 0 → fiberflats → Stage 1 → Stage 2                                                         |
 | `hispecdrp.simulations.run_e2e_sim`          | Hard-coded CLI:`python -m hispecdrp.simulations.run_e2e_sim` (from repo root, `hispec` conda env)                          |
-| `hispecdrp.simulations.simulate_up_the_ramp` | Ramp/calibration builders and Stage 0/1/fiberflat helpers                                                                      |
-| `benchmarks.end_to_end_simulation`           | Extended helpers used by `e2e_pipeline` (Stage 2 defaults, KOA cache layout, template scaling); must be present at repo root |
+| `hispecdrp.simulations.simulate_up_the_ramp` | Ramp/calibration builders and Stage 0/fiberflat helpers                                                                       |
+| `hispecdrp.simulations.e2e_support`         | KOA cache paths, Stage 1/2 runners, default `prim_args`                                                                     |
 
 ---
 
@@ -119,7 +119,7 @@ When `run_stage1=True`, `create_dummy_fiberflat_rate_files()` builds one **rate 
 
 Default fiberflat primitive ranges: `yrange=(500, 4000)`, `xrange=(100, 4050)`, `deg_pos=4`, `deg_width=2`, `extraction_aperture=10`.
 
-Fiberflat pipeline outputs are written under **`output_dir/cals/`** (via `_calibration_dir` in the benchmarks module).
+Fiberflat pipeline outputs are written under **`output_dir/cals/`** (see `e2e_support.calibration_dir`).
 
 ### 5. Stage 1 (L0 → L1/L2-style spectra)
 
@@ -132,7 +132,7 @@ Fiberflat pipeline outputs are written under **`output_dir/cals/`** (via `_calib
 
 ### 6. Stage 2 (blaze + stellar RV)
 
-Implemented in **`benchmarks.end_to_end_simulation`** (`run_stage2_simulation`, `get_default_stage2_prim_args`). Typical steps:
+Implemented in **`hispecdrp.simulations.e2e_support`** (`run_stage2_simulation`, `get_default_stage2_prim_args`) via :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`. Typical steps:
 
 1. **`BlazeCorrectionPrimitive`** — divides by the `FiberflatModel` from the fiberflat pipeline.
 2. **`StellarRVPrimitive`** — default **`algorithm="ccf_line_mask"`**:
@@ -155,7 +155,10 @@ Default Stage 2 stellar-RV grid (see `test_data/stage2_config.yaml` for a full e
 | `fibers`                                    | `[1, 2, 3]`             | Fibers illuminated in science rate map                                         |
 | `fiberflat_fibers`                          | `[1, 2, 3]`             | Fibers for dummy fiberflat rates                                               |
 | `radial_velocity_km_s`                      | `0.0`                   | Injected RV for template Doppler shift                                         |
-| `use_master_calibrations`                   | `False`                 | If `True`, load Stage 0 cals from KOA store                                  |
+| `use_master_calibrations`                   | `True`                  | If `True`, query KOA for calibrations not set in `calibration_config`        |
+| `calibration_config`                        | `None`                  | YAML path or dict with optional `calibrations`, `fiberflat_rates`, `koa` keys  |
+| `instrument_era` / `mjd_start` / `datetime_obs` | defaults            | KOA selection metadata (overridden by `koa:` block in config file)           |
+| `connect_remote` / `sync_caldb_first`       | `True`                  | KOA store connection and sync before fetch                                     |
 | `run_stage1` / `run_stage2`               | `True`                  | Toggle spectral and RV stages                                                  |
 | `poisson_noise` / `convert_to_uint16`     | `True`                  | Ramp realism                                                                   |
 | `calibration_kwargs`                        | `{}`                    | Passed to `create_simulated_calibration_models` (gain, dark, `seed`, etc.) |
@@ -189,9 +192,15 @@ These are **created automatically** unless you supply alternatives:
 
 ### C. Detector calibrations — simulated vs Keck Observatory Archive (KOA)
 
-**Default E2E (`use_master_calibrations=False`)**: seven 2D maps are synthesized in memory (`create_simulated_calibration_models`). They are **not** required on disk beforehand. Optional naming in manual/perf runs (e.g. under `test_data/`): `simulated_dq.fits`, `simulated_bias.fits`, `simulated_dark.fits`, `simulated_gain.fits`, `simulated_rn.fits`, `simulated_detflat.fits`, `simulated_saturation.fits`, `simulated_nonlin.fits`.
+**Default E2E** (`use_master_calibrations=True`, no `calibration_config`): for each product below, the pipeline tries the **KOA calibration store** first; any key that cannot be fetched is filled with **simulated** models (`create_simulated_calibration_models`) after the rate map shape is known. Set `use_master_calibrations=False` to skip KOA and use only config paths + simulation.
 
-**Archive mode (`use_master_calibrations=True`)**: the same logical products are selected and downloaded from the **HISPEC calibration store** (KOA middleware):
+**User config** (`calibration_config`): pass a YAML file (see `hispecdrp/simulations/e2e_calibrations.example.yaml`) or a dict with:
+
+- `calibrations`: explicit FITS paths per key (`dq`, `bias`, `trace_pos`, `wavesol`, …)
+- `fiberflat_rates`: per-fiber rate FITS when trace masters are not supplied
+- `koa`: optional overrides for `instrument_era`, `mjd_start`, `connect_remote`, `sync_first`
+
+**KOA products** (via `hispecdrp.simulations.e2e_calibrations.fetch_koa_calibrations`):
 
 | Calibration key | Selector                 | Used when                           |
 | --------------- | ------------------------ | ----------------------------------- |
@@ -202,8 +211,13 @@ These are **created automatically** unless you supply alternatives:
 | `bias`        | `BiasSelector`         | Stage 0 `bias_sub` (if enabled)   |
 | `dark`        | `DarkSelector`         | Stage 0 `dark_sub`                |
 | `rn`          | `ReadNoiseSelector`    | Stage 0 `ramp_fit`                |
+| `nonlin`      | `NonlinearCorrectionSelector` | Stage 0 `nonlin_corr` (identity if missing) |
+| `trace_pos`   | `TracePosSelector`     | Stage 1 (skip fiberflat pipeline when combined with trace prof + fiberflat) |
+| `trace_prof`  | `TraceProfSelector`    | Stage 1 |
+| `fiberflat`   | `FiberFlatSelector`    | Stage 2 blaze |
+| `wavesol`     | `WavelengthSolutionSelector` | Stage 1 (else HDF-derived sim wavesol) |
 
-**Nonlinearity** (`nonlin`): required only if `nonlin_corr.run=True` in Stage 0; not part of `get_master_calibrations()` today—use a separate nonlin master file or keep `run=False` in simulation.
+**Nonlinearity** (`nonlin`): if missing after KOA/config, a simulated nonlin map is created; Stage 0 still defaults to `nonlin_corr.run=False` unless you enable it in `stage0_prim_args`.
 
 **How to populate the KOA cache**
 
@@ -242,7 +256,7 @@ conda activate hispec
 python -m hispecdrp.simulations.run_e2e_sim
 ```
 
-Edit `E2EConfig` in `run_e2e_sim.py` (or construct `E2EConfig` programmatically and call `run_e2e_simulation()`). Ensure `benchmarks/end_to_end_simulation.py` exists in the checkout—`e2e_pipeline` imports it for ramp creation with template options, Stage 2, and KOA cache helpers.
+Edit `E2EConfig` in `run_e2e_sim.py` (or construct `E2EConfig` programmatically and call `run_e2e_simulation()`). All logic lives under `hispecdrp/simulations/`; no separate `benchmarks` package is required.
 
 **Related tests** (RV validation with BT-Settl + delta mask, not the full E2E driver):
 

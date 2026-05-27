@@ -19,6 +19,7 @@ class HISPECCalibrationStore(CalibrationStore):
     def __init__(
         self, *args,
         instrument_name : str | None = None,
+        sync_on_init: bool = False,
         **kwargs
     ):
         if instrument_name is None:
@@ -29,8 +30,31 @@ class HISPECCalibrationStore(CalibrationStore):
         super().__init__(
             *args,
             instrument_name=instrument_name,
+            sync_on_init=sync_on_init,
             **kwargs
         )
+
+    def sync_records_from_remote(self, cals=None, mode: str = "id"):
+        """
+        Sync local DB from remote (koa_middleware >= 0.x requires ``cals``; optional on init).
+
+        Accepts the legacy ``sync_records_from_remote(mode=...)`` call signature used
+        throughout HISPEC_DRP when ``cals`` is omitted.
+        """
+        if cals is None:
+            cals = []
+        try:
+            return super().sync_records_from_remote(cals, mode=mode)
+        except TypeError:
+            return super().sync_records_from_remote(mode=mode)
+
+    def sync_local_db_from_local_files(self):
+        """
+        Register calibration FITS already in the local cache into the local DB.
+
+        Legacy name used across HISPEC_DRP (koa_middleware renamed the API).
+        """
+        return self.sync_records_from_cached_files()
 
     # Select and get calibration
     def select_and_get_calibration(
@@ -136,7 +160,18 @@ class HISPECCalibrationStore(CalibrationStore):
                 cal_model = cal
 
             cal_record = self._prepare_cal_record(cal_model, origin='LOCAL')
-            cal_record_added = self.local_db.add(cal_record)
+            if self.calibration_record_in_cache(cal_record, mode="id") is not None:
+                continue
+            try:
+                cal_record_added = self.local_db.add(cal_record)
+            except Exception as e:
+                if "UNIQUE constraint failed" in str(e):
+                    logger.debug(
+                        "Skipping cached file already in local DB: %s",
+                        cal_record.get("filename"),
+                    )
+                    continue
+                raise
             cal_records_added.append(cal_record_added)
 
         # Return new new records

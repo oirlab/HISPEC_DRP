@@ -70,7 +70,7 @@ class SetInitialWLSPrimitive(BasePrimitive):
             # Update unreliable DQ flags
             input_dq = getattr(output_model, f'spec_dq_fib{fiber}')
             wavesol_dq = getattr(wavesol_model, f'spec_dq_fib{fiber}')
-            flag_value = output_model.DQ_FLAGS['UNRELIABLE_WS']
+            flag_value = datamodels.DQ_FLAGS['UNRELIABLE_WS']
             mask = (wavesol_dq & flag_value) != 0
             input_dq[mask] |= flag_value
 
