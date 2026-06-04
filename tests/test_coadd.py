@@ -23,7 +23,8 @@ def test_coadd_frames(tmp_path, datadir):
 
     # Setup and call the coadd primitive
     prim = CoaddFramesPrimitive()
-    model_coadded = prim.apply(input_models, output_dir=tmp_path)[0]
+    result = prim.apply(input_models, output_dir=tmp_path)
+    model_coadded = result[0]
 
     # Test values are reasonable
     for m in input_models:

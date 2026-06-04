@@ -60,9 +60,7 @@ def test_gaia_to_2mass_crossmatch():
 
     assert result is not None
     assert len(result) > 0
-
-    twomass_id = result["twomass_id"][0]
-
+    twomass_id = result["twomass_id"]
     assert twomass_id is not None
     assert twomass_id == source_params["source_id_2mass"]
 
@@ -76,5 +74,5 @@ def test_gaia_to_2mass_fallback_path():
     assert result is not None
     assert len(result) > 0
 
-    twomass_id = result["twomass_id"][0]
+    twomass_id = result["twomass_id"]
     assert twomass_id == source_params["source_id_2mass"]

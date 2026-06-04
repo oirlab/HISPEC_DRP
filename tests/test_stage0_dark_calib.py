@@ -300,7 +300,7 @@ def test_stage0_dark_calib(tmp_path):
     assert np.sum(rel_residuals > 5) == 0
     # Check 1 sigma statistics
     confidence_level = np.sum(rel_residuals < 1) / np.size(rel_residuals)
-    assert abs(confidence_level-0.683)<0.1
+    assert abs(confidence_level-0.683)<0.1    
 
     # print("rate dark")
     # print(model_result['dark'].rate)
