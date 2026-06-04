@@ -96,6 +96,30 @@ def identity_nonlin_calibration_model(ny: int, nx: int) -> datamodels.NonlinearC
     )
 
 
+def apply_e2e_save_and_preview_flags(
+    prim_args: dict,
+    primitives: dict[str, type],
+) -> dict:
+    """
+    Enable ``save_result`` and ``save_preview`` on every primitive that supports them.
+
+    Used by E2E simulation runners so each pipeline step writes FITS products and
+    generates available previews under ``output_dir``.
+    """
+    out = copy.deepcopy(prim_args)
+    for name, cls in primitives.items():
+        flags: dict[str, bool] = {}
+        if "save_result" in cls.ARGUMENTS:
+            flags["save_result"] = True
+        if "save_preview" in cls.ARGUMENTS:
+            flags["save_preview"] = True
+        if name == "stellar_rv" and "save_overlay_debug" in cls.ARGUMENTS:
+            flags["save_overlay_debug"] = True
+        if flags:
+            out.setdefault(name, {}).update(flags)
+    return out
+
+
 def apply_max_cores_to_stage0_prim_args(prim_args: dict, max_cores: int) -> dict:
     out = copy.deepcopy(prim_args)
     for name, cls in _stage0_pipeline.Stage0Pipeline.PRIMITIVES.items():
@@ -204,6 +228,10 @@ def run_stage1_simulation(
         prim_args["set_wavesol"].pop("run", None)
         prim_args["set_wavesol"]["wavesol"] = wavesol_model
 
+    prim_args = apply_e2e_save_and_preview_flags(
+        prim_args, _stage1_pipeline.Stage1Pipeline.PRIMITIVES
+    )
+
     pipe = _stage1_pipeline.Stage1Pipeline(prim_args=prim_args)
     apply_kw: dict = {}
     if output_dir is not None:
@@ -226,6 +254,10 @@ def run_stage2_simulation(
         prim_args = copy.deepcopy(prim_args)
         if max_cores is not None:
             prim_args = apply_max_cores_to_stage2_prim_args(prim_args, max_cores)
+
+    prim_args = apply_e2e_save_and_preview_flags(
+        prim_args, _stage2_pipeline.Stage2Pipeline.PRIMITIVES
+    )
 
     pipe = _stage2_pipeline.Stage2Pipeline(prim_args=prim_args)
     pipe.blaze_corr.fiberflat = fiberflat_model

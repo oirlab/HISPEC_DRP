@@ -634,6 +634,9 @@ def run_stage0_simulation(
         prim_args = get_default_stage0_prim_args()
     if max_cores is not None:
         prim_args = e2e_support.apply_max_cores_to_stage0_prim_args(prim_args, max_cores)
+    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
+        prim_args, Stage0Pipeline.PRIMITIVES
+    )
 
     output_dir = e2e_support.ensure_output_directory(output_dir)
     logger.info("Running Stage 0 pipeline (output_dir=%s).", output_dir)
@@ -1152,6 +1155,9 @@ def run_fiberflat_pipeline(
             deg_width=deg_width,
             extraction_aperture=extraction_aperture,
         )
+    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
+        prim_args, ProcessFiberflatsPipeline.PRIMITIVES
+    )
     pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
     apply_kw: dict = {}
     if output_dir is not None:

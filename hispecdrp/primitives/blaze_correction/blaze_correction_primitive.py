@@ -8,6 +8,7 @@ from scipy.ndimage import median_filter, gaussian_filter
 from astropy.stats import mad_std
 
 from ...calibrations import FiberFlatSelector
+from ...datamodels.dqflags import DQ_FLAGS
 
 __all__ = ['BlazeCorrectionPrimitive']
 
@@ -70,8 +71,14 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                             np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_var_poisson'].dtype))
                     setattr(output_model, f'SPEC_VAR_RNOISE_FIB{fiber}', 
                             np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_var_rnoise'].dtype))
-                    setattr(output_model, f'SPEC_DQ_FIB{fiber}', 
-                            np.zeros((n_orders, npx), dtype=input_model.traces[int(fiber)]['spec_dq'].dtype))
+                    src_dq = getattr(output_model, f'SPEC_DQ_FIB{fiber}', None)
+                    if src_dq is None:
+                        src_dq = getattr(input_model, f'SPEC_DQ_FIB{fiber}', None)
+                    if src_dq is not None:
+                        dq_init = np.asarray(src_dq, dtype=np.uint32).copy()
+                    else:
+                        dq_init = np.zeros((n_orders, npx), dtype=np.uint32)
+                    setattr(output_model, f'SPEC_DQ_FIB{fiber}', dq_init)
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
                 blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],
@@ -239,6 +246,46 @@ def normalize_blaze_array(blaze_array, blaze_std, wavelengths, order_vec, do_ord
     return normalized_blaze, blaze_std_normalized
 
 
+def build_calibrated_spec_dq(
+    output_model,
+    fiber,
+    spec_blaze_cal: np.ndarray,
+    spec_blaze_cal_err: np.ndarray,
+    order_vec,
+    do_orders,
+    *,
+    pixels_per_spline_knot: int = 16,
+) -> np.ndarray:
+    """
+    Build ``SPEC_DQ_FIB#`` for blaze-corrected spectra.
+
+    Copies the L1 extraction DQ, flags dispersion-edge pixels where the blaze
+    spline is unreliable (same pixel axis as :func:`estimate_blaze_spline`), and
+    marks pixels where blaze correction produced non-finite flux or error.
+    """
+    do_not_use = DQ_FLAGS["DO_NOT_USE"]
+    input_dq = getattr(output_model, f"SPEC_DQ_FIB{fiber}", None)
+    if input_dq is None:
+        input_dq = getattr(output_model, f"SPEC_UNCAL_DQ_FIB{fiber}", None)
+    if input_dq is None:
+        input_dq = np.zeros_like(spec_blaze_cal, dtype=np.uint32)
+
+    output_dq = np.asarray(input_dq, dtype=np.uint32).copy()
+    n_orders, npx = output_dq.shape
+    edge = int(pixels_per_spline_knot * 10)
+    if edge > 0 and npx > 2 * edge:
+        output_dq[:, :edge] |= do_not_use
+        output_dq[:, -edge:] |= do_not_use
+
+    bad_cal = ~np.isfinite(spec_blaze_cal) | ~np.isfinite(spec_blaze_cal_err)
+    do_orders_set = set(do_orders)
+    for o, order in enumerate(order_vec):
+        if order in do_orders_set:
+            output_dq[o, bad_cal[o]] |= do_not_use
+
+    return output_dq
+
+
 def apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, order_vec, do_orders, pixels_per_spline_knot=16):
     """Apply blaze correction to science spectrum and propagate errors for all orders, then add to output model.
     
@@ -271,14 +318,19 @@ def apply_blaze_array(output_model, blaze_array, blaze_std_array, fiber, order_v
             spec_blaze_cal_array[o] = spec_blaze_cal
             spec_blaze_cal_err_array[o] = spec_blaze_cal_err
 
-    output_dq = output_model.traces[int(fiber)]['spec_dq']
-    # array edges cannot be smoothed properly with spline
-    output_dq[:int(pixels_per_spline_knot*10)] = 1 
-    output_dq[-int(pixels_per_spline_knot*10):] = 1 
+    output_dq = build_calibrated_spec_dq(
+        output_model,
+        fiber,
+        spec_blaze_cal_array,
+        spec_blaze_cal_err_array,
+        order_vec,
+        do_orders,
+        pixels_per_spline_knot=pixels_per_spline_knot,
+    )
 
     setattr(output_model, f'SPEC_FIB{fiber}', spec_blaze_cal_array)
     setattr(output_model, f'SPEC_ERR_FIB{fiber}', spec_blaze_cal_err_array)
-    setattr(output_model, f'SPEC_DQ_FIB{fiber}', output_dq )
+    setattr(output_model, f'SPEC_DQ_FIB{fiber}', output_dq)
 
     
 def apply_blaze(science_flux, science_std, blaze, blaze_std):

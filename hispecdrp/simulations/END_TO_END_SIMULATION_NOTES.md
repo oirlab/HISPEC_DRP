@@ -40,6 +40,39 @@ flowchart LR
 
 ---
 
+## Primitives by pipeline stage
+
+Every `apply()` call in the E2E chain, in execution order. Pipeline **alias** keys match `PRIMITIVES` in each pipeline class and the `prim_args` dictionaries used by the simulation runners.
+
+| Stage | Step | Alias | Primitive class | Role |
+| ----- | ---- | ----- | ----------------- | ---- |
+| **Stage 0** (`Stage0Pipeline`) | 1 | `dq_init` | `DQInitPrimitive` | Initialize data-quality flags from DQ calibration |
+| | 2 | `saturation_check` | `CheckSaturationPrimitive` | Flag saturated pixels |
+| | 3 | `bias_sub` | `BiasSubtractionPrimitive` | Subtract bias (default E2E: `run=False`) |
+| | 4 | `refpix_corr` | `RefPixelCorrectionPrimitive` | Reference-pixel correction |
+| | 5 | `nonlin_corr` | `NonlinearCorrectionPrimitive` | Nonlinearity correction (default E2E: `run=False`) |
+| | 6 | `jump_detec` | `JumpDetectionPrimitive` | Cosmic-ray / jump detection (default E2E: `run=False`) |
+| | 7 | `ramp_fit` | `FitRampPrimitive` | Fit UTR ramp → rate/slope image |
+| | 8 | `dark_sub` | `DarkSubtractionPrimitive` | Subtract dark current |
+| | 9 | `gain_corr` | `GainCorrectionPrimitive` | Apply gain correction |
+| | 10 | `detflat_corr` | `DetectorFlatCorrectionPrimitive` | Apply detector flat field |
+| **Fiberflat** (`ProcessFiberflatsPipeline`) | 1 | `coadd_frames` | `CoaddFramesPrimitive` | Coadd fiberflat rate frames per fiber |
+| | 2 | `trace_pos` | `TracePositionPrimitive` | Fit trace positions → trace-pos master cal |
+| | 3 | `trace_prof` | `TraceProfilePrimitive` | Fit trace profiles → trace-prof master cal |
+| | 4 | `register_tracepos_cal` | `RegisterCalibrationPrimitive` | Register trace-pos cal in cal database |
+| | 5 | `register_traceprof_cal` | `RegisterCalibrationPrimitive` | Register trace-prof cal in cal database |
+| | 6 | `spec_extract` | `SpectralExtractionPrimitive` | Extract 1D spectra from coadded fiberflats |
+| | 7 | `set_wavesol` | `SetInitialWLSPrimitive` | Attach wavelength solution to fiberflat product (default E2E: `run=False`) |
+| | 8 | `register_fiberflat_cal` | `RegisterCalibrationPrimitive` | Register fiberflat cal (default E2E: `run=False`) |
+| **Stage 1** (`Stage1Pipeline`) | 1 | `spec_extract` | `SpectralExtractionPrimitive` | Box/optimal extraction using trace pos/prof |
+| | 2 | `set_wavesol` | `SetInitialWLSPrimitive` | Set wavelength grid (default E2E: `run=False`; wavelengths from HDF sim model) |
+| **Stage 2** (`Stage2Pipeline`) | 1 | `blaze_corr` | `BlazeCorrectionPrimitive` | Divide by `FiberflatModel` (blaze correction) |
+| | 2 | `stellar_rv` | `StellarRVPrimitive` | Line-mask CCF RV (`algorithm="ccf_line_mask"` by default) |
+
+**Note:** Dummy fiberflat rate files run **Stage 0** again (same ten primitives) once per fiber before the fiberflat pipeline. When KOA or user config supplies trace/fiberflat masters, the fiberflat pipeline is skipped and Stage 1 uses those calibrations directly.
+
+---
+
 ## Step-by-step
 
 ### 1. Template → rate map
@@ -103,7 +136,7 @@ Product: **`simulated_ramp.fits`** (`DEFAULT_SIMULATED_RAMP_FILENAME`).
 | `ramp_fit`    | `method="jwst_likely"`, JWST-style jump detection inside ramp fit |
 | Others          | `max_cores` as configured                                         |
 
-**Output**: Stage 0 rate/slope `DataModel` (saved under `output_dir` when `save_result` is enabled).
+**Output**: Stage 0 rate/slope `DataModel` plus per-primitive FITS and previews under `output_dir` (E2E enables `save_result` and `save_preview` on every Stage 0 primitive).
 
 ### 4. Dummy fiberflats → trace calibrations
 
@@ -142,7 +175,7 @@ Implemented in **`hispecdrp.simulations.e2e_support`** (`run_stage2_simulation`,
 
 Default Stage 2 stellar-RV grid (see `test_data/stage2_config.yaml` for a full example): coarse search ±20 000 m s⁻¹ at 50 m s⁻¹ steps; optional hybrid fine leg when `ccf_input_velocity` is set.
 
-**Previews** (not enabled in default E2E): set `save_preview=True` and `save_overlay_debug=True` on `stellar_rv` for Plotly HTML and mask-overlay debug pages.
+**Previews and intermediate products**: E2E simulation runners set `save_result=True` and `save_preview=True` on every pipeline primitive (and `save_overlay_debug=True` on `stellar_rv`) so FITS and Plotly/HTML previews are written under `output_dir` after each step.
 
 ---
 
