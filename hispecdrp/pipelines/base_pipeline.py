@@ -11,12 +11,15 @@ class BasePipeline(ProcessingComponent):
     """
     Base pipeline class for managing a sequence of primitives.
     
-    ARGUMENTS:
-        output_dir (str | None): Directory to save results.
-        suffix (str | None): Suffix to append to the output filename for the pipeline only.
+    ARGUMENTS
+    ---------
+    output_dir (str | None): Directory to save results.
+    suffix (str | None): Suffix to append to the output filename for the pipeline only.
     """
 
-    ARGUMENTS = {}
+    ARGUMENTS = {
+        'save_result': True,
+    }
 
     PRIMITIVES = {}
 
@@ -71,15 +74,15 @@ class BasePipeline(ProcessingComponent):
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {valids_args}")
             
         # Propagate output directory to primitives
-        primary_input_dir = self.get_primary_input_dir()
+        input_dir = self.get_input_dir()
         for prim_alias in self.PRIMITIVES:
             prim_instance = getattr(self, prim_alias)
             if (prim_instance.save_result or prim_instance.save_preview) and prim_instance.output_dir is None:
                 if self.output_dir is not None:
                     prim_instance.output_dir = self.output_dir
-                elif primary_input_dir is not None:
-                    prim_instance.output_dir = primary_input_dir
-    
+                elif input_dir is not None:
+                    prim_instance.output_dir = input_dir
+
     def init_primitives(self, prim_args : dict | None = None):
         """
         Initialize each primitive object in the primitive table passing the appropriate configuration.
@@ -114,13 +117,13 @@ class BasePipeline(ProcessingComponent):
 
                 self.set_args(input=input, **kwargs)
 
-                primary_dir = self.get_primary_input_dir()
+                input_dir = self.get_input_dir()
 
                 #if self.save_result in (None, False) and self.output_dir is not None:
                 if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
-                    self.output_dir = primary_dir
+                    self.output_dir = input_dir
 
                 self.set_prim_args(prim_args)
 
