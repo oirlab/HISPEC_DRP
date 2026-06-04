@@ -141,13 +141,13 @@ def get_stellar_data_gaia_by_coordinates(
     return _row_to_dict(results[0], results.colnames)
 
 
-def get_stellar_data_gaia_from_source_id(source_id: int) -> dict | None:
+def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
     """
     Query Gaia DR3 for basic stellar properties using a specific Gaia source_id.
 
     Parameters
     ----------
-    source_id : int
+    source_id : int | str
         Gaia DR3 source_id of the star.
 
     Returns
@@ -156,7 +156,7 @@ def get_stellar_data_gaia_from_source_id(source_id: int) -> dict | None:
         Gaia DR3 properties for the specified source, or None if not found.
     """
     cols = ", ".join(_GAIA_COLUMNS)
-
+    
     query = f"""
         SELECT TOP 1 {cols}
         FROM gaiadr3.gaia_source
@@ -249,28 +249,6 @@ def _convert_epoch_gaia(
     return c2.ra.deg, c2.dec.deg
 
 
-def set_gaia_meta(input_model : datamodels.DataModel, gaia_id : int | str | None = None):
-    if gaia_id is None:
-        gaia_id = input_model.meta.target_gaia_id
-    assert gaia_id is not None, "No Gaia ID provided and none found in input model metadata"
-    
-    result = get_stellar_data_gaia_from_source_id(gaia_id)
-
-    # Populate metadata
-    input_model.meta.target_gaia_id = result["source_id"]
-    input_model.meta.target_gaia_ra = result["ra"]
-    input_model.meta.target_gaia_dec = result["dec"]
-    input_model.meta.target_gaia_epoch = result["ref_epoch"]
-    input_model.meta.target_gaia_rapm = result["pmra"]
-    input_model.meta.target_gaia_decpm = result["pmdec"]
-    input_model.meta.target_gaia_px = result["parallax"]
-    input_model.meta.target_gaia_rvsys = result["radial_velocity"]
-    
-    input_model.meta.target_gaia_teff = result["teff_gspphot"]
-
-    return input_model
-
-
 def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
     # --- primary: Gaia-provided crossmatch ---
     query_primary = f"""
@@ -278,6 +256,9 @@ def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
         tm.designation AS twomass_id,
         tm.ra AS tm_ra,
         tm.dec AS tm_dec,
+        tm.j_m, tm.j_msigcom,
+        tm.h_m, tm.h_msigcom,
+        tm.ks_m, tm.ks_msigcom,
         DISTANCE(
             POINT('ICRS', g.ra, g.dec),
             POINT('ICRS', tm.ra, tm.dec)
@@ -294,7 +275,7 @@ def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
     res = job.get_results()
 
     if len(res) > 0:
-        return res
+        return _row_to_dict(res[0], res.colnames)
 
     # --- fallback: cone search ---
     query_pos = f"""
@@ -316,6 +297,9 @@ def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
         designation AS twomass_id,
         ra AS tm_ra,
         dec AS tm_dec,
+        j_m, j_msigcom,
+        h_m, h_msigcom,
+        ks_m, ks_msigcom,
         DISTANCE(
             POINT('ICRS', {ra}, {dec}),
             POINT('ICRS', ra, dec)
@@ -333,5 +317,6 @@ def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
 
     if len(res) == 0:
         return None
-
-    return res
+    
+    # Convert res to dict
+    return _row_to_dict(res[0], res.colnames)
