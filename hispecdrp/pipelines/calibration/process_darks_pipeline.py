@@ -92,7 +92,8 @@ class ProcessDarksPipeline(CalibrationPipeline):
             results[k] = _result
 
         # Get the flat field using all processed inputs. Coadding first.
-        coadded_rate = self.coadd.apply(results)[0]
+        result = self.coadd.apply(results)
+        coadded_rate = result[0]
         dark_result = self.make_dark.apply(coadded_rate)
 
         # Register the detector gain calibration to the calibration database
