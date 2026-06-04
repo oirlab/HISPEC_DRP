@@ -264,7 +264,6 @@ class BasePrimitive(ProcessingComponent):
                     self.output_dir = input_dir
 
                 if not self._pre_condition():
-                    #logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
                     logger.info(f"Skipping {self.__class__.__name__}")
                     self._status = "SKIPPED"
                     self.on_skip()
@@ -274,18 +273,24 @@ class BasePrimitive(ProcessingComponent):
                 else:
                     logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
                     self._output = self._perform()
-                    if isinstance(self._output, dict):
-                        if 'output' not in self._output:
-                            self._output = dict(output=self._output)
+                    # Check again if skipped since primitives can do this dynamically during processing.
+                    if not self.run:
+                        logger.info(f"Skipping {self.__class__.__name__} after processing due to run=False.")
+                        self._status = "SKIPPED"
+                        self.on_skip()
                     else:
-                        self._output = dict(output=self._output)
-                    if self._status is None:
-                        self._status = "COMPLETE"
-                    self.finalize_output()
-                    if self.save_result:
-                        self.save_output()
-                    if self.save_preview or self.show_preview:
-                        self._create_preview()
+                        if isinstance(self._output, dict):
+                            if 'output' not in self._output:
+                                self._output = dict(output=self._output)
+                        else:
+                            self._output = dict(output=self._output)
+                        if self._status is None:
+                            self._status = "COMPLETE"
+                        self.finalize_output()
+                        if self.save_result:
+                            self.save_output()
+                        if self.save_preview or self.show_preview:
+                            self._create_preview()
             except Exception as e:
                 self._output = dict(output=input)
                 self._status = "FAILED"
