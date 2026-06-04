@@ -257,14 +257,15 @@ class BasePrimitive(ProcessingComponent):
             try:
                 self.set_args(input=input, **kwargs)
 
-                primary_dir = self.get_primary_input_dir(self.input)
+                input_dir = self.get_input_dir(self.input)
                 if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
-                    self.output_dir = primary_dir
+                    self.output_dir = input_dir
 
                 if not self._pre_condition():
-                    logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
+                    #logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
+                    logger.info(f"Skipping {self.__class__.__name__}")
                     self._status = "SKIPPED"
                     self.on_skip()
                     self._output = dict(output=input)
@@ -286,11 +287,13 @@ class BasePrimitive(ProcessingComponent):
                     if self.save_preview or self.show_preview:
                         self._create_preview()
             except Exception as e:
-                logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
                 self._output = dict(output=input)
                 self._status = "FAILED"
                 self.on_exception(e)
                 self.finalize_output()
+                logger.exception(
+                    f"Failed executing primitive {self.__class__.__name__}"
+                )
                 raise
             
             # Get main output
@@ -692,28 +695,6 @@ class BasePrimitive(ProcessingComponent):
         **kwargs
     ) -> 'DataModel':
         """
-        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-
-        Parameters
-        ----------
-        input : Any
-            The input data model or filepath.
-        output_model : str | DataModel | type[DataModel], optional
-            The desired output model type or specification. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-        **kwargs
-            Additional keyword arguments passed to `DataModel.from_datamodels()`.
-        """
-        if output_model is None:
-            output_model = getattr(self, 'output_model', None)
-        return self._get_output_model(input, output_model, **kwargs)
-    
-    @staticmethod
-    def _get_output_model(
-        input,
-        output_model : str | 'DataModel' | type['DataModel'] = None,
-        **kwargs
-    ) -> 'DataModel':
-        """
         Get the output model based on the input model and the specified output model type.
 
         Parameters
@@ -729,15 +710,17 @@ class BasePrimitive(ProcessingComponent):
                 - Valid filepath (str): Opens and returns the model from the specified file.
                 - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
                 - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - None (default value): Raises an error.
+                - None (default value): Falls back to ``self.output_model``.
 
-        **kwargs: Additional keyword arguments passed to `DataModel.from_datamodels()`.
+        **kwargs : Additional keyword arguments passed to `DataModel.from_datamodels()`.
 
         Returns
         -------
         datamodels.DataModel
             The instantiated output DataModel class.
         """
+        if output_model is None:
+            output_model = getattr(self, 'output_model', None)
 
         ###################################
         #### Return output model as is ####
@@ -752,7 +735,7 @@ class BasePrimitive(ProcessingComponent):
             assert isinstance(
                 input, (datamodels.DataModel, str)
             ), "Input DataModel or filepath must be provided if output_model is 'input'."
-            return datamodels.open(input) # Assume only one input
+            return datamodels.open(input)
 
         ####################################
         #### Return copy of input model ####
@@ -761,28 +744,30 @@ class BasePrimitive(ProcessingComponent):
             assert isinstance(
                 input, (datamodels.DataModel, str)
             ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
-            input_model = datamodels.open(input) # Assume only one input
+            input_model = datamodels.open(input)
+            kwargs.setdefault('primitive', self)
             return input_model.from_datamodels(input_model, **kwargs)
 
         ##################
         #### Filepath ####
         ##################
         if isinstance(output_model, str) and os.path.isfile(output_model):
-            out_model = datamodels.open(output_model)
-            return out_model
+            return datamodels.open(output_model)
 
         #####################################
         #### DataModel class name (str) #####
         #####################################
         if isinstance(output_model, str):
             model_class = datamodels.get_model_type(output_model)
+            kwargs.setdefault('primitive', self)
             return model_class.from_datamodels(input, **kwargs)
 
         #################################
         #### DataModel class (type) #####
         #################################
         if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
-            return model_class.from_datamodels(input, **kwargs)
+            kwargs.setdefault('primitive', self)
+            return output_model.from_datamodels(input, **kwargs)
 
         #####################################
         #### Everything else is an error ####
