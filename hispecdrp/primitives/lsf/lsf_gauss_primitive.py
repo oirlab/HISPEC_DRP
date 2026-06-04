@@ -83,6 +83,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
         # Get the target output model
         output_model = datamodels.GaussianLSFModel.from_datamodels(
             input_model, include_data=True,
+            primitive=self
         )
 
         for fiber in do_fibers:

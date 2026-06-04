@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 import numpy as np
+from numba import njit
 import scipy.signal
 from typing import Sequence
 from ...utils.math import median_filter_2d
@@ -30,10 +31,12 @@ class TracePositionPrimitive(BasePrimitive):
         Degree of polynomial to fit for trace width as a function of pixel.
     window_size : int
         Size of window (in pixels) to use when computing centroids and widths.
-    yrange : tuple or dict
-        Optional y range (in pixels) to restrict trace finding. Can be a single tuple for all fibers or a dict mapping fiber numbers to tuples.
-    xrange : tuple or dict
-        Optional x range (in pixels) to restrict trace finding. Can be a single tuple for all fibers or a dict mapping fiber numbers to tuples.
+    xdisp_range : tuple or dict
+        Range in the cross dispersion direction (in pixels) to restrict trace finding for the central slice.
+        Can be a single tuple for all fibers or a dict mapping fiber numbers to tuples.
+    disp_range : tuple or dict
+        Range in the dispersion direction (in pixels) to restrict trace finding.
+        Can be a single tuple for all fibers or a dict mapping fiber numbers to tuples.
 
     Returns
     -------
@@ -45,8 +48,8 @@ class TracePositionPrimitive(BasePrimitive):
         'deg_pos' : None,
         'deg_width' : None,
         'window_size' : 8,
-        'xrange' : None,
-        'yrange' : None,
+        'xdisp_range' : None,
+        'disp_range' : None,
         'output_model' : 'TracePosModel',
     }
 
@@ -54,17 +57,27 @@ class TracePositionPrimitive(BasePrimitive):
 
         # Associate inputs by fiber number
         if isinstance(self.input, (datamodels.DataModel, str)):
-            self._input_by_fiber = datamodels.group_by_illuminated_fiber([self.input])
-        if  isinstance(self.input, Sequence):
-            self._input_by_fiber = datamodels.group_by_illuminated_fiber(self.input)
+            self._input_by_fiber = datamodels.group_by_fiber_combination([self.input])
+        if isinstance(self.input, Sequence):
+            self._input_by_fiber = datamodels.group_by_fiber_combination(self.input)
         elif isinstance(self.input, dict):
             self._input_by_fiber = self.input
         else:
             raise ValueError(f"Unsupported input type: {type(self.input)}")
+        
+        first_key = next(iter(self._input_by_fiber))
+
+        # Current keys: ('WHITELIGHT', 'BLOCKED', 'BLOCKED') : file, etc.
+        # Want: ('1' : file, '2' : file, '3' : file)
+        if not str(first_key).isdigit():
+            self._input_by_fiber = {
+                str(t.index(next(x for x in t if x.upper() != "BLOCKED")) + 1) : v
+                for t, v in self._input_by_fiber.items()
+            }
 
         # Prepare output model
         first_model = datamodels.open(list(self._input_by_fiber.values())[0])
-        output_model = datamodels.TracePosModel.from_datamodels(list(self._input_by_fiber.values()))
+        output_model = datamodels.TracePosModel.from_datamodels(list(self._input_by_fiber.values()), primitive=self)
 
         # Init trace dict
         trace_results = {}
@@ -86,24 +99,25 @@ class TracePositionPrimitive(BasePrimitive):
             # Open input model for this fiber
             input_model = datamodels.open(self._input_by_fiber[fiber])
 
-            # Get y range for this fiber
-            yrange = self.yrange[fiber] if isinstance(self.yrange, dict) else self.yrange
+            # Get xdisp_range and disp range for this fiber.
+            xdisp_range = self.xdisp_range[fiber] if isinstance(self.xdisp_range, dict) else self.xdisp_range
+            disp_range = self.disp_range[fiber] if isinstance(self.disp_range, dict) else self.disp_range
+
+            # Transpose if needed
+            if input_model.meta.orders_are_vertical:
+                _input_rate, _input_dq = input_model.rate, input_model.dq
+            else:
+                _input_rate, _input_dq = input_model.rate.T, input_model.dq.T
+
+            logger.info(f"Performing trace finding on {input_model} fiber {fiber}")
 
             # Find trace positions
-            logger.info(f"Performing trace finding on {input_model} fiber {fiber}")
-            if input_model.meta.orders_are_vertical:
-                r = find_trace_positions(
-                    input_model.rate.T, input_model.dq.T,
-                    #xrange=self.xrange, yrange=yrange,
-                    xrange=self.yrange, yrange=self.xrange,
-                    deg_pos=self.deg_pos, deg_width=self.deg_width, window_size=self.window_size,
-                )
-            else:
-                r = find_trace_positions(
-                    input_model.rate, input_model.dq,
-                    xrange=self.xrange, yrange=yrange,
-                    deg_pos=self.deg_pos, deg_width=self.deg_width, window_size=self.window_size,
-                )
+            r = find_trace_positions(
+                data=_input_rate, dq=_input_dq,
+                disp_range=disp_range, xdisp_range=xdisp_range,
+                deg_pos=self.deg_pos, deg_width=self.deg_width,
+                window_size=self.window_size,
+            )
 
             # Sanity check
             num_orders_found = r['coeffs_pos'].shape[0]
@@ -125,8 +139,7 @@ class TracePositionPrimitive(BasePrimitive):
 
         # Return
         return dict(output=output_model, trace_results=trace_results)
-    
-
+        
     def _create_preview(self):
 
         active_fibers = list(self._input_by_fiber.keys())
@@ -138,13 +151,17 @@ class TracePositionPrimitive(BasePrimitive):
 
         # Create subplots
         n_fibers = len(active_fibers)
-        fig = make_subplots(
-            rows=n_fibers, cols=1,
-            subplot_titles=[f"Fiber {f}" for f in active_fibers],
-            vertical_spacing=0.05
+        fig, axes = plt.subplots(
+            nrows=1, ncols=n_fibers,
+            figsize=(4 * n_fibers, 4),
+            squeeze=False,
+            dpi=150,
         )
-            
+
         for i, fiber in enumerate(active_fibers):
+
+            ax = axes[0, i]
+            ax.set_title(f"Fiber {fiber}")
 
             input_model = datamodels.open(self._input_by_fiber[fiber])
             im_data = input_model.rate
@@ -159,33 +176,18 @@ class TracePositionPrimitive(BasePrimitive):
             # Adjust x/y coordinates to center the large pixels
             x_small = np.arange(0, nx, res) + res/2 - 0.5
             y_small = np.arange(0, ny, res) + res/2 - 0.5
-            
+
             # Heatmap
-            fig.add_trace(
-                go.Heatmap(
-                    z=im_data_small,
-                    x=x_small,
-                    y=y_small,
-                    zmin=zmin, zmax=zmax,
-                    colorscale='Viridis',
-                    showscale=False
-                ),
-                row=i+1, col=1
-            )
-            
-            # Force square pixels
-            # Note: valid constraints for scaleanchor are 'x', 'x2', 'x3' etc. 
-            # We need to anchor to the x-axis of the CURRENT subplot.
-            xaxis_name = 'x' if i == 0 else f'x{i+1}'
-            
-            fig.update_yaxes(
-                scaleanchor=xaxis_name,
-                scaleratio=1,
-                row=i+1, col=1
-            )
-            fig.update_xaxes(
-                constrain='domain',
-                row=i+1, col=1
+            extent = [x_small[0] - res/2, x_small[-1] + res/2,
+                    y_small[-1] + res/2, y_small[0] - res/2]
+            ax.imshow(
+                im_data_small,
+                origin='upper',
+                extent=extent,
+                vmin=zmin, vmax=zmax,
+                cmap='viridis',
+                interpolation='nearest',
+                aspect='equal'
             )
 
             # Get traces
@@ -233,49 +235,33 @@ class TracePositionPrimitive(BasePrimitive):
                     y_trace = curr_trace_pos
 
                 # Add center line
-                fig.add_trace(
-                    go.Scatter(
-                        x=x_trace,
-                        y=y_trace,
-                        mode='lines',
-                        line=dict(color='red', width=1),
-                        showlegend=False,
-                        name=f'Order {ord_idx}'  
-                    ),
-                    row=i+1, col=1
+                ax.plot(
+                    x_trace,
+                    y_trace,
+                    color='red', linewidth=1,
+                    label=f'Order {ord_idx}'
                 )
 
-                #breakpoint()
+            ax.grid(False)
 
         # Update layout
-        height = 400 * n_fibers
-        fig.update_layout(
-            height=height,
-            width=1000,
-            title_text=f"Trace Positions: {tracepos_model.meta.filename}",
-            showlegend=False
-        )
-        fig.update_xaxes(showgrid=False)
-        fig.update_yaxes(showgrid=False)
+        fig.suptitle(f"Trace Positions: {tracepos_model.meta.filename}")
+        fig.tight_layout()
         
         # File paths
-        base_path = tracepos_model.get_output_path(output_dir=self.output_dir, suffix=self.suffix)
-        output_path_html = base_path.replace(".fits", "_preview.html")
-        output_path_png = base_path.replace(".fits", "_preview.png")
+        output_path = tracepos_model._generate_output_path(
+            suffix=self.suffix
+        ).replace(".fits", "_preview.png")
 
         if self.save_preview:
-            fig.write_html(output_path_html, include_plotlyjs='cdn')
-            fig.write_image(output_path_png, scale=2)
+            fig.savefig(output_path, dpi=150, bbox_inches='tight')
 
         if self.show_preview:
             logger.info("Showing trace position preview...")
-            fig.show()
+            plt.show()
 
-        self._output['preview'] = {
-            "html": output_path_html,
-            "png": output_path_png,
-            "fig": fig
-        }
+        plt.close(fig)
+        self._output['preview'] = output_path
 
 
 
@@ -284,8 +270,8 @@ def find_trace_positions(
     dq : np.ndarray,
     deg_pos : int,
     deg_width : int,
-    xrange : tuple = None,
-    yrange : tuple = None,
+    xdisp_range : tuple = None,
+    disp_range : tuple = None,
     fwhm : float = 2.5,
     window_size : int | None = None,
     distance_factor : float = 0.5,
@@ -294,148 +280,172 @@ def find_trace_positions(
 
     # Initial parameters
     ny, nx = data.shape
-    if xrange is None:
-        xrange = (16, nx - 16)
-    if yrange is None:
-        yrange = (8, ny - 8)
+    if xdisp_range is None:
+        xdisp_range = (16, nx - 16)
+    if disp_range is None:
+        disp_range = (16, ny - 16)
     if window_size is None:
         window_size = int(np.round(fwhm * 2.5))
     window_size_half = int(np.round(window_size / 2))
     min_distance = max(1, int(fwhm * distance_factor))
 
     # Find peaks for center column
-    x0 = nx // 2
-    ki, kf = max(0, x0 - 3), min(nx, x0 + 3)
-    y = np.nanmedian(median_filter_2d(data[:, ki:kf+1], dq[:, ki:kf+1], window_size=(3, 3)), axis=1)
-    y = y[yrange[0]:yrange[1] + 1]
-    y_max = np.nanmax(y) if y.size else np.nan
-    if not np.isfinite(y_max) or y_max <= 0:
-        raise ValueError(
-            "Trace finding failed: no valid signal in center columns (all NaN or zero). "
-            "Check that the fiber flat rate image has real flux in the trace region."
-        )
-    min_prominence = y_max * prominence_factor
-    peaks0, _ = scipy.signal.find_peaks(y, prominence=min_prominence, distance=min_distance)
-    peaks0 += yrange[0]
-    # Reverse so trace order index 0 matches the intended end of the order list in the rate image (180° flip)
-    peaks0 = np.asarray(peaks0)[::-1]
+    y0 = ny // 2
+    ki, kf = max(0, y0 - 3), min(ny, y0 + 3)
+    y = np.nanmedian(median_filter_2d(data[ki:kf+1, :], dq[ki:kf+1, :], window_size=(3, 3)), axis=0)
+    y = y[xdisp_range[0]:xdisp_range[1] + 1]
+    min_prominence = np.nanmax(y) * prominence_factor
+    peaks0, _ = scipy.signal.find_peaks(
+        y,
+        prominence=min_prominence,
+        distance=min_distance
+    )
+    peaks0 += xdisp_range[0]
     num_traces = len(peaks0)
 
     # NOTE: Keep for debugging
     #import matplotlib
     #matplotlib.use("QTAGG")
-    #if num_traces != 39:
-    #    breakpoint()
-        #plt.imshow(data, vmin=0, vmax=10); plt.ylim(0, ny); plt.show()
-    #xarr = np.arange(nx); plt.plot(xarr[yrange[0]:yrange[1] + 1], y); [plt.axvline(p, color='r', ls='--') for p in peaks0]; plt.show()
+    #plt.imshow(data, vmin=0, vmax=10); plt.ylim(0, ny); plt.show()
+    #xd_pix = np.arange(nx); plt.plot(xd_pix[xdisp_range[0]:xdisp_range[1] + 1], y); [plt.axvline(p, color='r', ls='--') for p in peaks0]; plt.show()
 
     coeffs_pos = np.full((num_traces, deg_pos + 1), np.nan)
     coeffs_width = np.full((num_traces, deg_width + 1), np.nan)
-    y_centroids = np.full((num_traces, nx), np.nan)
-    y_widths = np.full((num_traces, nx), np.nan)
+    trace_centroids = np.full((num_traces, nx), np.nan)
+    trace_widths = np.full((num_traces, nx), np.nan)
 
-    # Walk each trace left/right from initial peak position (write in-place to avoid broadcast unpacking)
+    pixel_arr = np.arange(ny)
+
+    # Walk each trace up/down from initial peak position
     for i in range(num_traces):
-        walk_trace_left_right(
-            data, x0, peaks0[i], xrange, window_size_half,
-            ycs_out=y_centroids[i, :], widths_out=y_widths[i, :],
+        trace_centroids[i, :], trace_widths[i, :] = walk_trace_up_down(
+            pixel_arr,
+            data, y0,
+            peaks0[i],
+            disp_range,
+            window_size_half
         )
-        good = np.where(np.isfinite(y_centroids[i, :]))[0]
+        good = np.where(np.isfinite(trace_centroids[i, :]))[0]
         if len(good) >= deg_pos + 1:
-            coeffs_pos[i, :] = np.polyfit(good, y_centroids[i, good], deg_pos)
-        good = np.where(np.isfinite(y_widths[i, :]))[0]
+            coeffs_pos[i, :] = np.polyfit(good, trace_centroids[i, good], deg_pos)
+        good = np.where(np.isfinite(trace_widths[i, :]))[0]
         if len(good) >= deg_width + 1:
-            coeffs_width[i, :] = np.polyfit(good, y_widths[i, good], deg_width)
+            coeffs_width[i, :] = np.polyfit(good, trace_widths[i, good], deg_width)
 
     # NOTE: Keep for debugging
+    # import matplotlib
+    # matplotlib.use("QTAGG")
+    # breakpoint()
     # plt.imshow(data, origin='lower', aspect='auto')
-    # xarr = np.arange(nx)
     # for i in range(num_traces):
-    #     plt.plot(xarr, np.polyval(coeffs_pos[i, :], xarr), color='r', lw=0.5)
+    #     plt.plot(np.polyval(coeffs_pos[i, :], pixel_arr), pixel_arr, color='r', lw=0.5)
     # plt.title("Traced orders")
     # plt.show()
-    # breakpoint()
 
     return dict(
         coeffs_pos=coeffs_pos,
         coeffs_width=coeffs_width,
-        y_centroids=y_centroids,
-        y_widths=y_widths
+        trace_centroids=trace_centroids,
+        trace_widths=trace_widths
     )
 
 
-def walk_trace_left_right(
+def walk_trace_up_down(
+    pixels : np.ndarray,
     data : np.ndarray,
-    x0 : float, yc0 : float,
-    xrange : tuple,
-    window_size_half : int,
-    *,
-    ycs_out : np.ndarray | None = None,
-    widths_out : np.ndarray | None = None,
-) -> None:
-    """Fill ycs_out and widths_out in place (or allocate and discard if not provided)."""
-    n = data.shape[1]
-    # Always use contiguous 1D buffers for Numba; row-slice views can trigger broadcast errors
-    buf_y = np.full(n, np.nan, dtype=np.float64)
-    buf_w = np.full(n, np.nan, dtype=np.float64)
-    _walk_trace_left_right(
-        data, x0, yc0, xrange, window_size_half, buf_y, buf_w
+    y0 : float,
+    xc0 : float,
+    disp_range : tuple,
+    window_size_half : float,
+) -> np.ndarray:
+    trace_centroids = np.full(data.shape[1], np.nan)
+    trace_widths = np.full(data.shape[1], np.nan)
+    _walk_trace_up_down(
+        pixels,
+        data,
+        y0, xc0,
+        disp_range,
+        window_size_half,
+        trace_centroids, trace_widths
     )
-    if ycs_out is not None:
-        ycs_out[:] = buf_y
-    if widths_out is not None:
-        widths_out[:] = buf_w
+    return trace_centroids, trace_widths
 
-def _compute_centroid_and_width_py(
-    col_data: np.ndarray,
-    yc: float,
-    window_size_half: int,
-) -> tuple[float, float]:
-    """Pure Python/NumPy: compute centroid and FWHM along a column. Returns (centroid, fwhm) as Python floats.
-    Centroid is along the row (y) direction, so coordinates are row indices [yi, yf], not column indices.
+@njit(nogil=True, parallel=False, cache=True)
+def _walk_trace_up_down(
+    pixels : np.ndarray,
+    data : np.ndarray,
+    y0 : int, xc0 : float,
+    disp_range : tuple,
+    window_size_half : float,
+    trace_centroids : np.ndarray,
+    trace_widths : np.ndarray,
+):
+    
+    # Central slice
+    xc = xc0
+    trace_centroids[y0], trace_widths[y0] = _compute_centroid_and_width(
+        pixels, data[y0, :],
+        xc0,
+        window_size_half
+    )
+
+    # Walk down
+    for y in range(y0 - 1, disp_range[0] - 1, -1):
+        xc = trace_centroids[y + 1]
+        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
+            pixels, data[y, :],
+            xc,
+            window_size_half
+        )
+
+    # Walk up
+    xc = xc0
+    for y in range(y0 + 1, disp_range[1] + 1):
+        xc = trace_centroids[y - 1]
+        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
+            pixels, data[y, :],
+            xc,
+            window_size_half
+        )
+
+
+@njit(nogil=True, parallel=False, cache=True)
+def _compute_centroid_and_width(
+    pixels : np.ndarray,
+    trace_slice : np.ndarray,
+    xc : float,
+    window_size_half : float,
+):
     """
-    nrow = col_data.shape[0]
-    yi = int(max(0, yc - window_size_half))
-    yf = int(min(nrow - 1, yc + window_size_half))  # inclusive end index so slice [yi:yf+1] is in bounds
-    slice_y = col_data[yi : yf + 1].astype(np.float64)
-    slice_x = np.arange(yi, yf + 1, dtype=np.float64)  # same length as slice_y
-    total_flux = float(np.nansum(slice_y))
-    SIGMA_TO_FWHM = 2.0 * np.sqrt(2.0 * np.log(2.0))
+    Compute the centroid and width of a trace slice.
+
+    Parameters
+    ----------
+    pixels : np.ndarray
+        Pixel coordinates corresponding to the trace_slice.
+    trace_slice : np.ndarray
+        1D array of pixel values along the slice of the trace.
+    xc : float
+        Initial guess for the centroid position (in pixel coordinates).
+    window_size_half : float
+        Half the size of the window (in pixels) to use when computing the centroid and width.
+    """
+
+    xi = int(np.round(xc - window_size_half))
+    xf = int(np.round(xc + window_size_half + 1))
+    if xi < 0 or xf > trace_slice.size - 1:
+        return np.nan, np.nan
+
+    slice_x = pixels[xi:xf+1]
+    slice_y = trace_slice[xi:xf+1]
+    total_flux = np.sum(slice_y)
+
     if total_flux > 0:
-        centroid = float(np.nansum(slice_x * slice_y) / total_flux)
-        variance = float(np.nansum(((slice_x - centroid) ** 2) * slice_y) / total_flux)
-        fwhm = SIGMA_TO_FWHM * np.sqrt(max(0.0, variance))
-        return centroid, float(fwhm)
-    return float("nan"), float("nan")
-
-
-def _walk_trace_left_right(
-    data: np.ndarray,
-    x0: float,
-    yc0: float,
-    xrange: tuple,
-    window_size_half: int,
-    ycs_out: np.ndarray,
-    widths_out: np.ndarray,
-) -> None:
-    """Walk trace left/right from initial position; fill ycs_out and widths_out (pure Python to avoid Numba broadcast issues)."""
-    ny, nx = data.shape
-    x0_i = int(x0)
-    yc = float(yc0)
-    ycs_out[x0_i] = yc
-    c, w = _compute_centroid_and_width_py(data[:, x0_i], yc, window_size_half)
-    ycs_out[x0_i] = c
-    widths_out[x0_i] = w
-
-    for x in range(x0_i - 1, xrange[0] - 1, -1):
-        yc = float(ycs_out[x + 1])
-        c, w = _compute_centroid_and_width_py(data[:, x], yc, window_size_half)
-        ycs_out[x] = c
-        widths_out[x] = w
-
-    yc = float(yc0)
-    for x in range(x0_i + 1, xrange[1] + 1):
-        yc = float(ycs_out[x - 1])
-        c, w = _compute_centroid_and_width_py(data[:, x], yc, window_size_half)
-        ycs_out[x] = c
-        widths_out[x] = w
+        centroid = np.sum(slice_x * slice_y) / total_flux
+        variance = np.sum(((slice_x - centroid) ** 2) * slice_y) / total_flux
+        if variance < 0:
+            return np.nan, np.nan
+        fwhm = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(variance)
+        return centroid, fwhm
+    else:
+        return np.nan, np.nan

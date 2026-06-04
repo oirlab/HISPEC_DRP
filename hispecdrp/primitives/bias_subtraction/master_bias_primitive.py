@@ -7,7 +7,6 @@ from copy import copy
 import logging
 
 from ...utils.parallelization_utils import numba_thread_scope
-from ..coadd.coadd_frames_primitive import coadd_group
 
 logger = logging.getLogger(__name__)
 from .make_bias_primitive import _find_bad_pixels_bias

@@ -1,14 +1,11 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
-from typing import Sequence
-from copy import copy
 import logging
 
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
-from ..coadd.coadd_frames_primitive import coadd_group
+from ..coadd.coadd_frames_primitive import coadd_frames
 
 logger = logging.getLogger(__name__)
 from .make_dark_primitive import _detect_hot_pixels
@@ -72,7 +69,12 @@ class MakeMasterDarkPrimitive(BasePrimitive):
             logger.warning("Input is a single model or path, returning without coadding.")
             output_dark = _inputs.copy()
         if input_type in (list, tuple):
-            output_dark = coadd_group(_inputs, self, self.mean_calc, self.err_calc)
+            output_dark = coadd_frames(
+                _inputs,
+                #self.mean_calc,
+                #self.err_calc
+                primitive=self
+            )
 
         # Flag this calibration as a master calibration
         output_dark.meta.master_cal = True
