@@ -104,14 +104,7 @@ class HISPECConfig:
             The metadata schema dictionary.
         """
 
-        # Calibration
-        if hasattr(model, 'CAL_TYPE'):
-            if model.meta.master_cal is None:
-                model.meta.master_cal = True
-
         # Instrument
-        if model.meta.instrument_era is None:
-           model.meta.instrument_era = "0.0.1"
         if model.meta.instrument_mode is None:
             model.meta.instrument_mode = 'YJHK'
         if model.meta.spectrograph is None:
