@@ -5,7 +5,7 @@ $defs:
     type: string
     enum: [
       "SCIENCE",
-      "FIBERFLAT-R", "FIBERFLAT-B",
+      "WHITELIGHT",
       "LFC-R", "LFC-B",
       "ETALON-R", "ETALON-B",
       "UNe", "GASCELL",
@@ -18,7 +18,6 @@ properties:
   target_name:
     title: "Target or object name, internal or on-sky"
     fits_keyword: OBJECT
-    default: NONE
     cal_db: true
     include_ancestors: true
 
@@ -106,6 +105,7 @@ properties:
       fits_keyword: OBJFIB1
       cal_db: true
       include_ancestors: true
+      merge_rule: fiber_state
 
   object_fiber2:
     allOf:
@@ -114,6 +114,7 @@ properties:
       fits_keyword: OBJFIB2
       cal_db: true
       include_ancestors: true
+      merge_rule: fiber_state
 
   object_fiber3:
     allOf:
@@ -122,11 +123,12 @@ properties:
       fits_keyword: OBJFIB3
       cal_db: true
       include_ancestors: true
+      merge_rule: fiber_state
 
   # Target OB contents
   # NOTE: Final home TBD
   target_gaia_epoch:
-    title: "Epoch of Gaia coordinates for the target"
+    title: "Epoch of Gaia coordinates"
     fits_keyword: GAIAEPCH
     type: number
     unit: year
@@ -134,80 +136,87 @@ properties:
     merge_rule: first
   
   target_gaia_id:
-    title: "Gaia DR3 source ID for the target"
+    title: "Gaia DR3 source ID"
     fits_keyword: GAIAID
     type: string
     merge_rule: first
 
   target_gaia_px:
-    title: "Gaia DR3 parallax for the target"
+    title: "Gaia DR3 parallax"
     fits_keyword: GAIAPX
     type: number
     unit: mas
     merge_rule: first
 
   target_gaia_ra:
-    title: "Gaia DR3 RA for the target"
+    title: "Gaia DR3 RA"
     fits_keyword: GAIARA
     type: number
     unit: degrees
     merge_rule: first
 
   target_gaia_dec:
-    title: "Gaia DR3 Dec for the target"
+    title: "Gaia DR3 Dec"
     fits_keyword: GAIADEC
     type: number
     unit: degrees
     merge_rule: first
 
   target_gaia_decpm:
-    title: "Gaia DR3 proper motion in Dec for the target"
+    title: "Gaia DR3 proper motion in Dec"
     fits_keyword: GAIADCPM
     type: number
     unit: degrees
     merge_rule: first
 
   target_gaia_rapm:
-    title: "Gaia DR3 proper motion in RA for the target"
+    title: "Gaia DR3 proper motion in RA"
     fits_keyword: GAIARAPM
     type: number
     unit: degrees
     merge_rule: first
 
   target_gaia_teff:
-    title: "Gaia DR3 effective temperature for the target"
+    title: "Gaia DR3 effective temperature"
     fits_keyword: GAIATEFF
     type: number
     unit: K
     merge_rule: first
 
   target_gaia_rvsys:
-    title: "Gaia DR3 radial velocity for the target"
-    fits_keyword: GAIARV
+    title: "Gaia DR3 radial velocity"
+    fits_keyword: GAIARVSY
+    type: number
+    unit: km/s
+    merge_rule: first
+
+  target_gaia_vbroad:
+    title: "Gaia DR3 broadening (vsini)"
+    fits_keyword: GAIAVBRO
     type: number
     unit: km/s
     merge_rule: first
 
   target_2mass_id:
-    title: "2MASS ID for the target"
+    title: "2MASS ID"
     fits_keyword: TMASSID
     type: string
     merge_rule: first
 
   target_2mass_mag_j:
-    title: "2MASS J-band magnitude for the target"
+    title: "2MASS J-band magnitude"
     fits_keyword: TMAGJ
     type: number
     merge_rule: first
 
   target_2mass_mag_h:
-    title: "2MASS H-band magnitude for the target"
+    title: "2MASS H-band magnitude"
     fits_keyword: TMAGH
     type: number
     merge_rule: first
 
   target_2mass_mag_ks:
-    title: "2MASS Ks-band magnitude for the target"
+    title: "2MASS Ks-band magnitude"
     fits_keyword: TMAGKS
     type: number
     merge_rule: first
