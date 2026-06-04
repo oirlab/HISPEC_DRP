@@ -24,3 +24,12 @@ class NonlinearCorrectionModel(CalibrationModel):
         **DQ_L0
     }
     CAL_TYPE = 'nonlin'
+
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'DETFLAT')
+        self.meta.set_default('target_name', 'WHITELIGHT')
+
+    @property
+    def primary_extension_name(self):
+        return 'coeffs'

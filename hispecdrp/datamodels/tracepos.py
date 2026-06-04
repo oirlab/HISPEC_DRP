@@ -44,14 +44,13 @@ class TracePosModel(CalibrationModel):
     FWHM_FIB#         Image      Float64     Nord x Ncoeff    Pixels    Evaluated fwhm for fiber #.
     """
     CAL_TYPE = 'tracepos'
-    def __init__(self, *args, **kwargs):
-        config = kwargs.get('config', None)
-        if config is None:
-            config = self._get_instrument_config(
-                meta=kwargs.get('meta', None),
-                filepath=kwargs.get('filepath', None),
-                instrument_name=kwargs.get('instrument_name', None),
-            )
-        self.EXTENSIONS = self.EXTENSIONS.copy()
-        self.EXTENSIONS.update(_create_tracepos_extensions(config.num_fibers))
-        super().__init__(*args, **kwargs)
+
+    def _get_extensions(self):
+        ext = self.EXTENSIONS.copy()
+        ext.update(_create_tracepos_extensions(self.config.num_fibers))
+        return ext
+    
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'SPEC')
+        self.meta.set_default('target_name', 'WHITELIGHT')
