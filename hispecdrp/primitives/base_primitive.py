@@ -501,10 +501,10 @@ class BasePrimitive(ProcessingComponent):
                 self.finalize_model(item)
             elif isinstance(item, dict):
                 for val in item.values():
-                    _finalize(val)
+                    self.finalize_model(val)
             elif isinstance(item, list):
                 for val in item:
-                    _finalize(val)
+                    self.finalize_model(val)
 
         _finalize(output)
         
