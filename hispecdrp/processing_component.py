@@ -149,13 +149,8 @@ class ProcessingComponent(_BasePrimitive):
         str
             The file path where the model was saved.
         """
-        # output_dir = self.get_output_dir(model)
-        # if suffix is None:
-        #     suffix = self.suffix
         output_path = self.generate_output_path(model)
-        #model.save(filepath=filepath, output_dir=output_dir, suffix=suffix)
         model.save(filepath=output_path)
-        #logger.info(f"Saved {model.__class__.__name__} to {model._filepath}")
         logger.info(f"Saved {model}")
         return filepath
 
