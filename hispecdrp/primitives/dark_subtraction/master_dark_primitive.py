@@ -3,7 +3,6 @@ from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
 import logging
 
-from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
 from ..coadd.coadd_frames_primitive import coadd_frames
 
