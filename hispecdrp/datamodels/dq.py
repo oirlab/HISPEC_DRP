@@ -21,6 +21,8 @@ class DQModel(CalibrationModel):
         super().on_init()
         self.meta.set_default('exposure_type', 'NONE')
         self.meta.set_default('target_name', 'NONE')
+        for fiber in range(1, self.num_fibers + 1):
+            self.meta.set_default(f'object_fiber{fiber}', 'NONE')
 
     @property
     def primary_extension_name(self):
