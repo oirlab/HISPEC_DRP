@@ -139,8 +139,7 @@ class BasePipeline(ProcessingComponent):
             except Exception as e:
                 self._output = dict(output=input)
                 self._status = "FAILED"
-                self.on_exception(e)
-                self.finalize_output()
+                #self.finalize_output()
                 logger.exception(
                     f"Failed executing pipeline {self.__class__.__name__}"
                 )
