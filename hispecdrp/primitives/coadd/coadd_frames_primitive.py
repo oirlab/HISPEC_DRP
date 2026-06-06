@@ -57,6 +57,9 @@ class CoaddFramesPrimitive(BasePrimitive):
         'do_sigma_clip' : False,
         'sigma_thresh_low' : 5.0,
         'sigma_thresh_high' : 5.0,
+        'min_keep' : 3,
+        'mean_calc' : 'wmean',
+        'err_calc' : 'wse',
     }
 
     def _perform(self):
@@ -86,17 +89,23 @@ class CoaddFramesPrimitive(BasePrimitive):
                 do_sigma_clip=self.do_sigma_clip,
                 sigma_thresh_low=self.sigma_thresh_low,
                 sigma_thresh_high=self.sigma_thresh_high,
+                min_keep=self.min_keep,
+                mean_calc=self.mean_calc,
+                err_calc=self.err_calc,
                 primitive=self,
             )
             outputs.append(output)
 
         return dict(output=outputs)
-    
+
 def coadd_frames(
     input : list[str | 'DataModel'],
     do_sigma_clip : bool = False,
     sigma_thresh_low : float | None = None,
     sigma_thresh_high : float | None = None,
+    min_keep : int | float = 3,
+    mean_calc : str = 'wmean',
+    err_calc : str = 'wse',
     primitive : BasePrimitive | None = None,
 ):
     
@@ -115,6 +124,9 @@ def coadd_frames(
         do_sigma_clip=do_sigma_clip,
         sigma_thresh_low=sigma_thresh_low,
         sigma_thresh_high=sigma_thresh_high,
+        mean_calc=mean_calc,
+        err_calc=err_calc,
+        min_keep=min_keep,
     )
 
     # Output model class
@@ -229,6 +241,9 @@ def _coadd_frames(
     do_sigma_clip : bool = False,
     sigma_thresh_low : float | None = None,
     sigma_thresh_high : float | None = None,
+    min_keep : int | float = 3,
+    mean_calc : str = 'wmean',
+    err_calc : str = 'wse'
 ) -> dict:
     """
     Coadd a cube of frames using a specified method.
@@ -244,6 +259,17 @@ def _coadd_frames(
         Lower threshold for sigma clipping. Default is None (no sigma clipping).
     sigma_thresh_high : float | None, optional
         Upper threshold for sigma clipping. Default is None (no sigma clipping).
+    min_keep : int or float, optional
+        Minimum number of good frames to keep after sigma clipping.
+        If a float between 0 and 1, it is interpreted as a fraction of the total number of frames.
+        If an integer greater than or equal to 1, it is interpreted as the absolute number of frames.
+        Default is 3 (int).
+    mean_calc : str, optional
+        Method for calculating the mean. Currently only 'wmean' (weighted mean) is implemented.
+        Default is 'wmean'.
+    err_calc : str, optional
+        Method for calculating the error. Currently only 'wse' (weighted standard error) is implemented.
+        Default is 'wse'.
     """
 
     # Data
@@ -275,10 +301,14 @@ def _coadd_frames(
 
     # Sigma clipping if requested
     if do_sigma_clip and n_frames > 3:
+        if min_keep < 1:
+            min_keep = int(np.ceil(min_keep * n_frames))
+        min_keep = int(min_keep)
         sigma_clip_frames(
             data_cube, mask,
             sigma_thresh_low=sigma_thresh_low,
             sigma_thresh_high=sigma_thresh_high,
+            min_keep=min_keep,
         )
 
         bad = ~mask
@@ -406,8 +436,9 @@ def sigma_clip_frames(
     mask_cube : np.ndarray,
     sigma_thresh_low : float | None = None,
     sigma_thresh_high : float | None = None,
+    min_keep : int = 3,
 ):
-    ny, nx = data_cube.shape
+    n_frames, ny, nx = data_cube.shape
     for i in prange(ny):
         for j in range(nx):
             sigma_clip(
@@ -415,6 +446,7 @@ def sigma_clip_frames(
                 mask_cube[:, i, j],
                 sigma_thresh_low=sigma_thresh_low,
                 sigma_thresh_high=sigma_thresh_high,
+                min_keep=min_keep,
             )
 
 
@@ -425,6 +457,7 @@ def sigma_clip(
     sigma_thresh_low: float | None = None,
     sigma_thresh_high: float | None = None,
     maxiters: int = 50,
+    min_keep: int = 3,
 ) -> tuple[np.ndarray, float, float, int]:
     """
     Perform sigma clipping on an input array.
@@ -441,6 +474,8 @@ def sigma_clip(
         High sigma threshold for sigma clipping. If None, no high sigma clipping is performed.
     maxiters : int, optional
         Maximum number of iterations for sigma clipping. Default is 50.
+    min_keep : int, optional
+        Minimum number of good values to keep after sigma clipping. Default is 3.
 
     Returns
     -------
@@ -463,7 +498,7 @@ def sigma_clip(
             break
 
         center = biweight_location(x_masked)
-        var = biweight_midvariance(x_masked, center=center)
+        var = biweight_midvariance(x_masked, M=center)
         stddev = np.sqrt(var)
 
         n_good = np.sum(mask)
@@ -471,6 +506,7 @@ def sigma_clip(
             x, center, stddev, mask,
             sigma_thresh_low=sigma_thresh_low,
             sigma_thresh_high=sigma_thresh_high,
+            min_keep=min_keep,
         )
         n_good_new = np.sum(mask)
         if n_good_new == n_good:
@@ -482,17 +518,73 @@ def sigma_clip(
     return mask, center, stddev, iters_out
 
 
+# @njit(nogil=True)
+# def _mask_outliers(
+#     x : np.ndarray,
+#     center : float, stddev : float,
+#     mask : np.ndarray,
+#     sigma_thresh_low : float | None = None,
+#     sigma_thresh_high : float | None = None,
+#     min_keep : int = 3,
+# ) -> np.ndarray:
+#     """
+#     Mask outliers in a dataset based on specified thresholds.
+    
+#     Parameters
+#     ----------
+#     x : np.ndarray
+#         1D array of data values.
+#     center : float
+#         Central location (e.g. mean or median) of the data.
+#     stddev : float
+#         Standard deviation of the data.
+#     mask : np.ndarray
+#         1D data mask where 0 is bad, 1 is good.
+#     sigma_thresh_low : float | None, optional
+#         Low sigma threshold for outlier rejection. If None, no low sigma clipping is performed.
+#     sigma_thresh_high : float | None, optional
+#         High sigma threshold for outlier rejection. If None, no high sigma clipping is performed.
+#     min_keep : int, optional
+#         Minimum number of good values to keep after clipping. Default is 3.
+
+#     Returns
+#     -------
+#     mask_out : np.ndarray
+#         Mask is updated in-place and returned.
+#     """
+    
+#     do_low = sigma_thresh_low is not None
+#     do_high = sigma_thresh_high is not None
+#     if do_low:
+#         low_thresh = -sigma_thresh_low * stddev
+#     if do_high:
+#         high_thresh = sigma_thresh_high * stddev
+
+#     for i in np.ndindex(x.shape):
+#         res = x[i] - center
+#         if not mask[i]:
+#             continue
+#         if do_low and res < low_thresh:
+#             mask[i] = False
+#         elif do_high and res > high_thresh:
+#             mask[i] = False
+#     return mask
+
+
 @njit(nogil=True)
 def _mask_outliers(
-    x : np.ndarray,
-    center : float, stddev : float,
-    mask : np.ndarray,
-    sigma_thresh_low : float | None = None,
-    sigma_thresh_high : float | None = None,
+    x: np.ndarray,
+    center: float,
+    stddev: float,
+    mask: np.ndarray,
+    sigma_thresh_low: float | None = None,
+    sigma_thresh_high: float | None = None,
+    min_keep: int = 3,
 ) -> np.ndarray:
     """
-    Mask outliers in a dataset based on specified thresholds.
-    
+    Mask outliers in a dataset based on sigma thresholds, respecting a
+    minimum number of good values to retain.
+
     Parameters
     ----------
     x : np.ndarray
@@ -502,31 +594,79 @@ def _mask_outliers(
     stddev : float
         Standard deviation of the data.
     mask : np.ndarray
-        1D data mask where 0 is bad, 1 is good.
+        1D data mask where False is bad, True is good. Updated in-place.
     sigma_thresh_low : float | None, optional
-        Low sigma threshold for outlier rejection. If None, no low sigma clipping is performed.
+        Low sigma threshold for outlier rejection. If None, no low-side
+        clipping is performed.
     sigma_thresh_high : float | None, optional
-        High sigma threshold for outlier rejection. If None, no high sigma clipping is performed.
+        High sigma threshold for outlier rejection. If None, no high-side
+        clipping is performed.
+    min_keep : int, optional
+        Minimum number of unmasked values to retain after clipping.
+        Candidates are ranked from most to least extreme; the least extreme
+        are preserved when the clip budget would otherwise be exceeded.
+        Default is 3.
 
     Returns
     -------
-    mask_out : np.ndarray
-        Mask is updated in-place and returned.
+    mask : np.ndarray
+        Mask updated in-place and returned.
     """
-    
-    do_low = sigma_thresh_low is not None
+    do_low  = sigma_thresh_low  is not None
     do_high = sigma_thresh_high is not None
-    if do_low:
-        low_thresh = -sigma_thresh_low * stddev
-    if do_high:
-        high_thresh = sigma_thresh_high * stddev
 
+    if do_low:
+        low_thresh  = -sigma_thresh_low  * stddev
+    if do_high:
+        high_thresh =  sigma_thresh_high * stddev
+
+    # --- Pass 1: count good values and collect clipping candidates -------
+    # Each candidate records its absolute residual and flat index so we can
+    # rank by extremeness and honour min_keep.
+    n_good = 0
+    cand_resid = np.empty(x.size, dtype=np.float64)
+    cand_idx   = np.empty(x.size, dtype=np.int64)
+    n_cand = 0
+
+    flat = 0
     for i in np.ndindex(x.shape):
-        res = x[i] - center
-        if not mask[i]:
-            continue
-        if do_low and res < low_thresh:
-            mask[i] = False
-        elif do_high and res > high_thresh:
-            mask[i] = False
+        if mask[i]:
+            n_good += 1
+            res = x[i] - center
+            if (do_low and res < low_thresh) or (do_high and res > high_thresh):
+                cand_resid[n_cand] = abs(res)
+                cand_idx[n_cand]   = flat
+                n_cand += 1
+        flat += 1
+
+    if n_cand == 0:
+        return mask
+
+    # --- Determine how many we can actually clip -------------------------
+    max_clip = n_good - min_keep
+    if max_clip <= 0:
+        return mask  # Already at or below min_keep; clip nothing.
+
+    n_clip = min(n_cand, max_clip)
+
+    # --- Pass 2: apply the mask ------------------------------------------
+    if n_clip == n_cand:
+        # Clip all candidates — no ranking needed.
+        for k in range(n_cand):
+            mask.flat[cand_idx[k]] = False
+    else:
+        # Keep the (n_cand - n_clip) least extreme candidates.
+        # np.partition places the n_clip-th largest at index [n_cand - n_clip]
+        # with everything to its right being >= that value.
+        resids = cand_resid[:n_cand].copy()
+        clip_threshold = np.partition(resids, n_cand - n_clip)[n_cand - n_clip]
+
+        clipped = 0
+        for k in range(n_cand):
+            if clipped >= n_clip:
+                break
+            if cand_resid[k] >= clip_threshold:
+                mask.flat[cand_idx[k]] = False
+                clipped += 1
+
     return mask
