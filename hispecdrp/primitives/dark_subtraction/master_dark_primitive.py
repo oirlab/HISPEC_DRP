@@ -70,8 +70,8 @@ class MakeMasterDarkPrimitive(BasePrimitive):
         if input_type in (list, tuple):
             output_dark = coadd_frames(
                 _inputs,
-                #self.mean_calc,
-                #self.err_calc
+                mean_calc=self.mean_calc,
+                err_calc=self.err_calc,
                 primitive=self
             )
 
