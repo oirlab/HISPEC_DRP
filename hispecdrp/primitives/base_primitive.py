@@ -20,6 +20,8 @@ from ..processing_component import ProcessingComponent
 import logging
 logger = logging.getLogger(__name__)
 
+from typing import Any
+
 
 __all__ = ['BasePrimitive']
 
@@ -32,6 +34,7 @@ class BasePrimitive(ProcessingComponent):
         self,
         config : dict | str | None = None,
         log_config : dict | str | None = None,
+        parent : Any | None = None,
         **kwargs
     ):
         """
@@ -42,6 +45,8 @@ class BasePrimitive(ProcessingComponent):
         log_config : dict | str | None
             Logging configuration override. Can be a dict of logging keys, a path
             to a logging YAML file, or None to use package defaults.
+        parent : Any | None
+            The parent object that instantiated this primitive.
         **kwargs
             Any additional keyword arguments to set or override (including ``config``) for this primitive.
         """
@@ -59,6 +64,8 @@ class BasePrimitive(ProcessingComponent):
         self._output = None
         self._status = None
         self._calibrations_used = {}
+
+        self._parent = parent
 
     def init_config(
         self,
@@ -306,6 +313,11 @@ class BasePrimitive(ProcessingComponent):
 
             # Reset input
             self.input = None
+
+        # import threading
+        # import multiprocessing as mp
+        # print(mp.active_children())
+        # print(threading.enumerate())
 
         # Return main output
         return output

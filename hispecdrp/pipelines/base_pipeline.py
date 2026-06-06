@@ -88,7 +88,7 @@ class BasePipeline(ProcessingComponent):
         Initialize each primitive object in the primitive table passing the appropriate configuration.
         """
         for prim_alias, prim_class in self.PRIMITIVES.items():
-            primitive = prim_class(config=self.config['primitives'][prim_alias])
+            primitive = prim_class(config=self.config['primitives'][prim_alias], parent=self)
             primitive.log_config = self.log_config
             setattr(self, prim_alias, primitive)
         self.set_prim_args(prim_args)
@@ -120,10 +120,10 @@ class BasePipeline(ProcessingComponent):
                 input_dir = self.get_input_dir()
 
                 #if self.save_result in (None, False) and self.output_dir is not None:
-                if self.save_result is None and self.output_dir is not None:
-                    self.save_result = True
-                if self.save_result and self.output_dir is None:
-                    self.output_dir = input_dir
+                #if self.save_result is None and self.output_dir is not None:
+                #    self.save_result = True
+                #if self.save_result and self.output_dir is None:
+                #    self.output_dir = input_dir
 
                 self.set_prim_args(prim_args)
 
@@ -133,8 +133,17 @@ class BasePipeline(ProcessingComponent):
 
                 if self.save_result:
                     self.save_output() # Already finalized in the primitive's perform.
+            #except Exception as e:
+                #logger.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
+                #raise
             except Exception as e:
-                logger.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
+                self._output = dict(output=input)
+                self._status = "FAILED"
+                self.on_exception(e)
+                self.finalize_output()
+                logger.exception(
+                    f"Failed executing pipeline {self.__class__.__name__}"
+                )
                 raise
 
         # Get main output
