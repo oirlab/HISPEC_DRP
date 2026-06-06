@@ -12,6 +12,7 @@ $defs:
       "SKY", "SPECKLE",
       "BLOCKED", "NONE"
     ]
+    default: "NONE"
 
 type: object
 properties:
