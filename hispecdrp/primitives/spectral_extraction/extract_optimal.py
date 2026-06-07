@@ -165,6 +165,7 @@ def _extract_optimal_numba(
             D_var_rnoise = input_var_rnoise[x, window_inds].copy()
             D_dq = input_dq[x, window_inds]
             P = profile[x, window_inds].copy()
+            T = input_mid_time[x, window_inds].copy()
         else:
             D = input_data[window_inds, x].copy()
             D_var = input_err[window_inds, x]**2
@@ -172,6 +173,7 @@ def _extract_optimal_numba(
             D_var_rnoise = input_var_rnoise[window_inds, x].copy()
             D_dq = input_dq[window_inds, x].copy()
             P = profile[window_inds, x].copy()
+            T = input_mid_time[window_inds, x].copy()
 
         # Mask bad pixels
         M = (D_dq & DO_NOT_USE) == 0
@@ -253,4 +255,4 @@ def _extract_optimal_numba(
         dq_output[x] = 0
 
         # Mid time
-        mid_time_output[x] = np.sum(input_mid_time[window_inds] * M * w_tot) / np.sum(w_tot * M)
+        mid_time_output[x] = np.sum(T * M * w_tot) / np.sum(w_tot * M)
