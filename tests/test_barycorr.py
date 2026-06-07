@@ -53,11 +53,11 @@ def test_calc_barycorr(tmp_path, datadir):
     assert 0.001 < abs(mbjd_out - mjd_utc) < 0.01
     assert -30_000 < berv_out < 30_000
 
-def _test_calc_solar_barycenter_corrections(tmp_path, datadir):
+def test_calc_solar_barycenter_corrections(tmp_path, datadir):
     mjd_utc = 49254.5
     star_data = get_stellar_data_gaia_from_source_id(source_id=source_params["source_id"])
     meta = {
-        'target_name': 'HD189733',
+        'target_name': 'SOLAR',
         'target_gaia_id' : '1827242816201846144',
         'target_gaia_ra': star_data['ra'],
         'target_gaia_dec': star_data['dec'],
@@ -87,4 +87,4 @@ def _test_calc_solar_barycenter_corrections(tmp_path, datadir):
 
     assert mjdutc_out == mjd_utc
     assert 0.001 < abs(mbjd_out - mjd_utc) < 0.01
-    assert -30_000 < berv_out < 30_000
+    assert -1000 < berv_out < 1000

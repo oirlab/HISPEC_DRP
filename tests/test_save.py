@@ -1,11 +1,12 @@
 from hispecdrp import datamodels
 from hispecdrp.simulations.utr import create_ramp
 from hispecdrp.pipelines import Stage0Pipeline
+from hispecdrp.primitives import DarkSubtractionPrimitive
 import os
 import copy
 import numpy as np
 
-def _test_save_result_primitive(tmp_path, datadir):
+def test_save_result_primitive(tmp_path, datadir):
     
     shape = (100, 100)
 
