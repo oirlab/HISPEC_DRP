@@ -9,9 +9,9 @@ def test_process_fiberflats(tmp_path, datadir):
 
     # RSPEC
     fiberflats = [
-        download_gdrive_file('HR.20231006.00000.00_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
-        download_gdrive_file('HR.20231006.00000.00_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
-        download_gdrive_file('HR.20231006.00000.00_rate-FIBERFLAT-FIB3.fits', output_dir=datadir)
+        download_gdrive_file('HR.20260606.00000.00_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
+        download_gdrive_file('HR.20260606.00000.00_rate-FIBERFLAT-FIB2.fits', output_dir=datadir),
+        download_gdrive_file('HR.20260606.00000.00_rate-FIBERFLAT-FIB3.fits', output_dir=datadir)
     ]
 
     ff_models = [datamodels.open(fp) for fp in fiberflats]
@@ -56,25 +56,10 @@ def test_process_fiberflats(tmp_path, datadir):
         }
     }
 
-    pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
+    pipe = ProcessFiberflatsPipeline(prim_args=prim_args, output_dir=str(tmp_path))
     ff_results = pipe.apply(ff_models)
 
-    # # Trace pos
-    # model = ff_results['trace_pos']
-    # model.meta.origin = 'KECK'
-    # model.meta.pprint()
-    # model.save(out_dir + 'Cals/' + model.generate_filename())
-
-    # # Trace prof
-    # model = ff_results['trace_prof']
-    # model.meta.origin = 'KECK'
-    # model.meta.pprint()
-    # model.save(out_dir + 'Cals/' + model.generate_filename())
-
-    # # Fiberflat cal
-    # model = ff_results['fiberflat']
-    # model.meta.origin = 'KECK'
-    # model.meta.pprint()
-    # model.save(out_dir + 'Cals/' + model.generate_filename())
-
-    return ff_results
+    assert isinstance(ff_results, dict)
+    assert isinstance(ff_results['trace_pos'], datamodels.TracePosModel)
+    assert isinstance(ff_results['trace_prof'], datamodels.TraceProfModel)
+    assert isinstance(ff_results['fiberflat'], datamodels.FiberflatModel)
