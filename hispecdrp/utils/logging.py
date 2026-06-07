@@ -11,10 +11,8 @@ from datetime import datetime
 import os
 import sys
 
-_QUEUE = None
-_LISTENER = None
-_CONFIGURED = False
-_SUPPRESSED_PKG_HANDLERS: dict[str, dict] = {}
+_QUEUE: mp.queues.Queue | None = None
+_LISTENER: QueueListener | None = None
 
 RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S")
 ROOT_LOGGER = "hispecdrp"
@@ -22,6 +20,10 @@ LOG_CAPTURE_PACKAGES = [
     "koa_middleware",
 ]
 DEFAULT_FILENAME_PREFIX = "hispecdrp_log"
+
+# The only loggers we ever touch. Children of these propagate naturally
+# upward and fire exactly once on the top-level logger's single handler.
+_MANAGED_LOGGERS = [ROOT_LOGGER] + LOG_CAPTURE_PACKAGES
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -39,39 +41,65 @@ def _make_formatter():
     )
 
 
-def _suppress_package_handlers() -> dict[str, dict]:
-    """
-    Remove all handlers from each captured-package logger and ensure
-    propagate=True so records flow to the root QueueHandler only.
+def _make_stdout_handler(level: int) -> logging.StreamHandler:
+    h = logging.StreamHandler(sys.stdout)
+    h.setFormatter(_make_formatter())
+    h.setLevel(level)
+    return h
 
-    koa_middleware may have no handlers right now, but this guards against
-    duplication if it ever adds its own in a future version or environment.
 
-    Returns the saved state so it can be restored later.
-    """
-    suppressed: dict[str, dict] = {}
-    for pkg in LOG_CAPTURE_PACKAGES:
-        logger = logging.getLogger(pkg)
-        suppressed[pkg] = {
-            "handlers": logger.handlers[:],
-            "propagate": logger.propagate,
-            "level": logger.level,
+def _make_file_handler(
+    level: int,
+    log_dir: str,
+    filename_prefix: str,
+    rotate: bool,
+    max_bytes: int,
+    backup_count: int,
+) -> logging.Handler:
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(log_dir, f"{filename_prefix}_{RUN_ID}_{os.getpid()}.txt")
+    if rotate:
+        h = RotatingFileHandler(path, mode="a", maxBytes=max_bytes, backupCount=backup_count)
+    else:
+        h = logging.FileHandler(path, mode="a")
+    h.setFormatter(_make_formatter())
+    h.setLevel(level)
+    return h
+
+
+def _save_managed_loggers() -> dict:
+    state = {}
+    for name in _MANAGED_LOGGERS:
+        lg = logging.getLogger(name)
+        state[name] = {
+            "handlers": list(lg.handlers),
+            "level": lg.level,
+            "propagate": lg.propagate,
         }
-        logger.handlers = []
-        logger.propagate = True
-        # Ensure the logger doesn't silently filter records before propagation.
-        if logger.level == logging.NOTSET:
-            logger.setLevel(logging.DEBUG)
-    return suppressed
+    return state
 
 
-def _restore_package_handlers(suppressed: dict[str, dict]) -> None:
-    """Restore previously suppressed package-logger handlers."""
-    for pkg, state in suppressed.items():
-        logger = logging.getLogger(pkg)
-        logger.handlers = state["handlers"]
-        logger.propagate = state["propagate"]
-        logger.setLevel(state["level"])
+def _restore_managed_loggers(state: dict) -> None:
+    for name, s in state.items():
+        lg = logging.getLogger(name)
+        lg.handlers = list(s["handlers"])
+        lg.setLevel(s["level"])
+        lg.propagate = s["propagate"]
+
+
+def _install_handler_on_managed_loggers(handler: logging.Handler, level: int) -> None:
+    """
+    Replace all handlers on every managed logger with the given handler.
+    Sets propagate=False so records stop here and never reach root.
+    Child loggers (e.g. hispecdrp.processing_component) are untouched —
+    they have no handlers and propagate=True by default, so their records
+    bubble up to the managed logger and fire exactly once.
+    """
+    for name in _MANAGED_LOGGERS:
+        lg = logging.getLogger(name)
+        lg.handlers = [handler]
+        lg.setLevel(level)
+        lg.propagate = False
 
 
 # ── Filters ───────────────────────────────────────────────────────────────────
@@ -93,6 +121,11 @@ class PackageCaptureFilter(logging.Filter):
 # ── LogConfig ─────────────────────────────────────────────────────────────────
 
 class LogConfig:
+    # Class-level sentinel: set to the active LogConfig while a
+    # logging_context is live, None otherwise. Inner logging_context
+    # calls check this and become no-ops.
+    applied: "LogConfig | None" = None
+
     def __init__(
         self,
         *,
@@ -129,214 +162,101 @@ class LogConfig:
         self.rotate = rotate
         self.max_bytes = max_bytes
         self.backup_count = backup_count
-        self.handlers: list[logging.Handler] = []
-        self._previous_levels: dict[str, int] = {}
-        self.formatter = _make_formatter()
-        self.runid_filter = RunIdFilter()
-        self.capture_filter = PackageCaptureFilter()
 
-    def _make_file_handler(self, path: str) -> logging.Handler:
-        if self.rotate:
-            return RotatingFileHandler(
-                path,
-                mode="a",
-                maxBytes=self.max_bytes,
-                backupCount=self.backup_count,
-            )
-        return logging.FileHandler(path, mode="a")
-
-    def _setup_handlers(self) -> None:
-        handlers: list[logging.Handler] = []
-
+    def make_handlers(self) -> list[logging.Handler]:
+        """Build the real output handlers (stdout and/or file)."""
+        handlers = []
         if self.enable_stdout:
-            sh = logging.StreamHandler(sys.stdout)
-            sh.setFormatter(self.formatter)
-            sh.addFilter(self.runid_filter)
-            sh.addFilter(self.capture_filter)
-            handlers.append(sh)
-
+            handlers.append(_make_stdout_handler(self.level))
         if self.enable_file and self.log_dir:
-            os.makedirs(self.log_dir, exist_ok=True)
-            path = os.path.join(
-                self.log_dir,
-                f"{self.filename_prefix}_{RUN_ID}_{os.getpid()}.txt",
-            )
-            fh = self._make_file_handler(path)
-            fh.setFormatter(self.formatter)
-            fh.addFilter(self.runid_filter)
-            fh.addFilter(self.capture_filter)
-            handlers.append(fh)
-
-        self.handlers = handlers
-
-    def apply(self, log_names: list[str] | None = None) -> None:
-        if not self.handlers:
-            self._setup_handlers()
-
-        if log_names is None:
-            log_names = [ROOT_LOGGER]
-
-        # Suppress BEFORE adding our handlers, not after
-        global _SUPPRESSED_PKG_HANDLERS
-        _SUPPRESSED_PKG_HANDLERS = _suppress_package_handlers()
-
-        for name in log_names:
-            logger = logging.getLogger(name)
-            self._previous_levels[name] = logger.level
-            logger.setLevel(self.level)
-            for h in self.handlers:
-                if h not in logger.handlers:
-                    logger.addHandler(h)
-
-        # Directly attach our handlers to captured packages
-        for pkg in LOG_CAPTURE_PACKAGES:
-            pkg_logger = logging.getLogger(pkg)
-            pkg_logger.setLevel(self.level)
-            for h in self.handlers:
-                if h not in pkg_logger.handlers:
-                    pkg_logger.addHandler(h)
-
-    def undo(self, log_names: list[str] | None = None, close_handlers: bool = True) -> None:
-        if log_names is None:
-            log_names = [ROOT_LOGGER]
-
-        for name in log_names:
-            logger = logging.getLogger(name)
-            for h in self.handlers:
-                logger.removeHandler(h)
-            if name in self._previous_levels:
-                logger.setLevel(self._previous_levels[name])
-
-        # Clean up package loggers too
-        for pkg in LOG_CAPTURE_PACKAGES:
-            pkg_logger = logging.getLogger(pkg)
-            for h in self.handlers:
-                pkg_logger.removeHandler(h)
-
-        global _SUPPRESSED_PKG_HANDLERS
-        _restore_package_handlers(_SUPPRESSED_PKG_HANDLERS)
-        _SUPPRESSED_PKG_HANDLERS = {}
-
-        for h in self.handlers:
-            h.flush()
-            if close_handlers:
-                h.close()
-        self.handlers = []
-
-    @contextmanager
-    def context(self, log_names: list[str] | None = None):
-        self.apply(log_names)
-        try:
-            yield
-        finally:
-            self.undo(log_names)
+            handlers.append(_make_file_handler(
+                self.level, self.log_dir, self.filename_prefix,
+                self.rotate, self.max_bytes, self.backup_count,
+            ))
+        return handlers
 
 
-# ── Queue / Multiprocessing ───────────────────────────────────────────────────
+# ── Queue / Listener ─────────────────────────────────────────────────────────
 
-def _start_listener(queue: mp.queues.Queue, config: LogConfig) -> None:
+def _start_listener(queue: mp.queues.Queue, handlers: list[logging.Handler]) -> None:
     global _LISTENER
-    if not config.handlers:
-        config._setup_handlers()
-    _LISTENER = QueueListener(queue, *config.handlers, respect_handler_level=True)
+    _LISTENER = QueueListener(queue, *handlers, respect_handler_level=True)
     _LISTENER.start()
 
 
 def _stop_listener() -> None:
     global _LISTENER
     if _LISTENER is not None:
-        _LISTENER.stop()
+        _LISTENER.stop()  # drains queue and joins listener thread
         _LISTENER = None
 
 
-def _configure_process(queue: mp.queues.Queue, level) -> None:
-    """
-    Point the root logger exclusively at the queue so every record from
-    every package (including koa_middleware) travels through one path.
-    Suppresses any handlers the captured packages may have installed on
-    their own loggers to prevent double-emission.
-    """
-    root = logging.getLogger()
-    root.setLevel(_get_level(level))
-    root.handlers.clear()
-    root.addHandler(QueueHandler(queue))
-
-
-def _restore_root_logger(handlers, level):
-    """Restore root logger handlers and level (used when exiting logging_context)."""
-    root = logging.getLogger()
-    root.handlers.clear()
-    for h in handlers:
-        root.addHandler(h)
-    root.setLevel(level)
-
-
-# Main API
-    global _SUPPRESSED_PKG_HANDLERS
-    _SUPPRESSED_PKG_HANDLERS = _suppress_package_handlers()
+def _close_queue() -> None:
+    global _QUEUE
+    if _QUEUE is not None:
+        _QUEUE.close()
+        _QUEUE.join_thread()  # stops feeder thread, prevents process hang
+        _QUEUE = None
 
 
 # ── Main public API ───────────────────────────────────────────────────────────
 
 @contextmanager
 def logging_context(config_dict: dict, queue: mp.queues.Queue | None = None):
-    global _QUEUE, _CONFIGURED
+    """
+    The single entry point for all logging in hispecdrp.
 
-    # Save root logger state so we can restore it when exiting (so script/caller
-    # loggers continue to work after the pipeline runs).
-    root = logging.getLogger()
-    _saved_root_handlers = list(root.handlers)
-    _saved_root_level = root.level
+    Outermost call owns the queue and listener for its full lifetime.
+    Nested calls (e.g. a pipeline invoking a primitive that also calls
+    logging_context) are no-ops — they yield immediately without touching
+    the queue, so the outer context stays alive.
+    """
+    if LogConfig.applied is not None:
+        yield
+        return
 
-    # Save and clear the hispecdrp logger's default handlers so they don't
-    # fire alongside the queue-based handlers during pipeline execution.
-    hispecdrp_logger = logging.getLogger(ROOT_LOGGER)
-    _saved_hispecdrp_handlers = list(hispecdrp_logger.handlers)
-    _saved_hispecdrp_level = hispecdrp_logger.level
-    hispecdrp_logger.handlers = []
+    global _QUEUE
 
-    if not _CONFIGURED:
-        if queue is None:
-            _QUEUE = mp.Queue(-1)
-        else:
-            _QUEUE = queue
+    cfg = LogConfig(
+        level=config_dict.get("level", "INFO"),
+        enable_stdout=config_dict.get("enable_stdout"),
+        enable_file=config_dict.get("enable_file"),
+        log_dir=config_dict.get("log_dir"),
+        filename_prefix=config_dict.get("filename_prefix", DEFAULT_FILENAME_PREFIX),
+        rotate=config_dict.get("rotate", False),
+        max_bytes=config_dict.get("max_bytes", 50_000_000),
+        backup_count=config_dict.get("backup_count", 5),
+    )
 
-        cfg = LogConfig(
-            level=config_dict.get("level", "INFO"),
-            enable_stdout=config_dict.get("enable_stdout"),
-            enable_file=config_dict.get("enable_file"),
-            log_dir=config_dict.get("log_dir"),
-            filename_prefix=config_dict.get("filename_prefix", DEFAULT_FILENAME_PREFIX),
-            rotate=config_dict.get("rotate", False),
-            max_bytes=config_dict.get("max_bytes", 50_000_000),
-            backup_count=config_dict.get("backup_count", 5),
-        )
+    _saved_state = _save_managed_loggers()
 
-        _configure_process(_QUEUE, cfg.level)
+    _QUEUE = queue if queue is not None else mp.Queue(-1)
+    real_handlers = cfg.make_handlers()
+    _start_listener(_QUEUE, real_handlers)
 
-        if queue is None:
-            _start_listener(_QUEUE, cfg)
+    qh = QueueHandler(_QUEUE)
+    qh.setLevel(cfg.level)
+    _install_handler_on_managed_loggers(qh, cfg.level)
 
-        _CONFIGURED = True
+    LogConfig.applied = cfg
 
     try:
         yield
     finally:
-        _restore_package_handlers(_SUPPRESSED_PKG_HANDLERS)
-        _stop_listener()
-        _CONFIGURED = False
-        _restore_root_logger(_saved_root_handlers, _saved_root_level)
-        hispecdrp_logger.handlers = _saved_hispecdrp_handlers
-        hispecdrp_logger.setLevel(_saved_hispecdrp_level)
+        LogConfig.applied = None
+        _stop_listener()   # drain first
+        _close_queue()     # then kill feeder thread
+        for h in real_handlers:
+            h.flush()
+            h.close()
+        _restore_managed_loggers(_saved_state)
+
 
 def setup_default_logging() -> None:
     """
-    Install a default stdout handler on the ``hispecdrp`` logger and each
-    package in ``LOG_CAPTURE_PACKAGES`` so logs emitted outside of any
-    ``logging_context`` are visible.  Called once at package import time.
-    Skipped if the ``hispecdrp`` logger already has handlers (avoids
-    duplicates when called multiple times or when the user has pre-configured
-    logging before importing hispecdrp).
+    Install a default stdout handler on all managed loggers so records
+    are visible outside any logging_context (e.g. at import time or in
+    scripts). Idempotent — skipped if hispecdrp already has handlers.
     """
     hispecdrp_logger = logging.getLogger(ROOT_LOGGER)
     if hispecdrp_logger.handlers:
@@ -348,25 +268,10 @@ def setup_default_logging() -> None:
     except FileNotFoundError:
         cfg_dict = {}
 
-    cfg = LogConfig(
-        level=cfg_dict.get("level", "INFO"),
-        enable_stdout=cfg_dict.get("enable_stdout", True),
-        enable_file=False,  # never write files as part of the import-time default
-    )
-    cfg._setup_handlers()
+    level = _get_level(cfg_dict.get("level", "INFO"))
+    handler = _make_stdout_handler(level)
+    _install_handler_on_managed_loggers(handler, level)
 
-    hispecdrp_logger.setLevel(cfg.level)
-    for h in cfg.handlers:
-        hispecdrp_logger.addHandler(h)
 
-    # Also attach to each captured package so their records are visible
-    # outside of logging_context (mirrors what logging_context does at runtime).
-    for pkg in LOG_CAPTURE_PACKAGES:
-        pkg_logger = logging.getLogger(pkg)
-        pkg_logger.setLevel(cfg.level)
-        for h in cfg.handlers:
-            if h not in pkg_logger.handlers:
-                pkg_logger.addHandler(h)
-
-def get_queue():
+def get_queue() -> mp.queues.Queue | None:
     return _QUEUE
