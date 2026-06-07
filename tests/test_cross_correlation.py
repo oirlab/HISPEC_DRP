@@ -337,7 +337,7 @@ def test_cross_correlation_recovers_rv_per_chunk(spectrograph):
     # apply() returns the main output (L2Model) directly, not a dict
     out = result
 
-    tbl_attr = f"rvccf_{spectrograph.lower()}_fib1"
+    tbl_attr = f"rvccf_fib1"
     tbl = getattr(out, tbl_attr, None)
     assert tbl is not None and hasattr(tbl, "columns"), (
         f"Output L2 missing {tbl_attr}"

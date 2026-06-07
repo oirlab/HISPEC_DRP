@@ -635,7 +635,7 @@ class CrossCorrelationPrimitive(BasePrimitive):
             "RV_ABS_ERR": rv_abs_err,
         })
         def _ext(name: str) -> str:
-            return (f"{name}_{spectrograph}_FIB{fiber}").lower()
+            return (f"{name}_FIB{fiber}").lower()
 
         setattr(output_model, _ext("RVCCF"), tbl)
         avg_tbl = astropy.table.Table({
