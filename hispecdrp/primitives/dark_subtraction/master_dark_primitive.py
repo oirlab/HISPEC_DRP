@@ -1,13 +1,14 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
-import logging
-
+from .make_dark_primitive import _detect_hot_pixels
 from ...utils.parallelization_utils import numba_thread_scope
 from ..coadd.coadd_frames_primitive import coadd_frames
 
+import numpy as np
+import logging
 logger = logging.getLogger(__name__)
-from .make_dark_primitive import _detect_hot_pixels
+
 
 
 __all__ = ['MakeMasterDarkPrimitive']
@@ -75,15 +76,12 @@ class MakeMasterDarkPrimitive(BasePrimitive):
                 primitive=self
             )
 
-        # Flag this calibration as a master calibration
-        output_dark.meta.master_cal = True
-
-        # # Median dark rate for instrument monitoring
-        # median_dark_level = np.nanmedian(output_dark.rate)
-        # output_dark.meta["MEDDARK"] = median_dark_level
-
         with numba_thread_scope(self.max_cores):
-            _detect_hot_pixels(output_dark.rate, output_dark.dq,self.hot_pixel_threshold)
+            _detect_hot_pixels(output_dark.rate, output_dark.dq, self.hot_pixel_threshold)
+
+        mask = output_dark.dq == 0
+        output_dark.meta.median_dark_current = np.nanmedian(output_dark.rate[mask])
+        output_dark.meta.master_cal = True
 
         return dict(output=output_dark)
 
