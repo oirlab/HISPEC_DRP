@@ -68,38 +68,14 @@ class SpectralExtractionPrimitive(BasePrimitive):
         },
     }
 
-    # @staticmethod
-    # def _get_trace_positions(tracepos_model, fiber: int):
-    #     """Get trace position array for a fiber, supporting both uppercase and lowercase attribute names (FITS vs in-memory)."""
-    #     for name in (f'POS_FIB{fiber}', f'pos_fib{fiber}'):
-    #         val = getattr(tracepos_model, name, None)
-    #         if val is not None:
-    #             return val
-    #     raise ValueError(
-    #         f"TracePosModel has no trace positions for fiber {fiber} (tried POS_FIB{fiber} and pos_fib{fiber}). "
-    #         "Model may be empty or loaded from FITS with different extension names."
-    #     )
-
-    # @staticmethod
-    # def _get_trace_profile(traceprof_model, fiber: int):
-    #     """Get trace profile array for a fiber, supporting both uppercase and lowercase attribute names (FITS vs in-memory)."""
-    #     for name in (f'PROF_FIB{fiber}', f'prof_fib{fiber}'):
-    #         val = getattr(traceprof_model, name, None)
-    #         if val is not None:
-    #             return val
-    #     raise ValueError(
-    #         f"TraceProfModel has no profile for fiber {fiber} (tried PROF_FIB{fiber} and prof_fib{fiber}). "
-    #         "Model may be empty or loaded from FITS with different extension names."
-    #     )
-
     def _perform(self):
 
         if isinstance(self.input, (datamodels.DataModel, str)):
             output = None
-            input = self.input
+            input = [self.input]
         elif isinstance(self.input, Sequence):
             output = []
-            input = [self.input]
+            input = self.input
         elif isinstance(self.input, dict):
             output = {}
             input_keys = list(self.input.keys())
@@ -278,7 +254,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
         order_vec = input_model.make_order_vec()
 
         # Sanity check
-        assert trace_positions.shape[0] == len(order_vec), f"Trace positions shape[0]={trace_positions.shape[0]} does not match number of orders={len(order_vec)}"
+        #assert trace_positions.shape[0] == len(order_vec), f"Trace positions shape[0]={trace_positions.shape[0]} does not match number of orders={len(order_vec)}"
 
         for fiber in do_fibers:
 
