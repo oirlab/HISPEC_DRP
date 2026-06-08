@@ -3,10 +3,11 @@ from hispecdrp.primitives.utils import (
     get_stellar_data_gaia_from_source_id,
     get_2mass_from_gaia,
 )
+from hispecdrp import datamodels
 
 # HD 189733
 source_params = {
-    "source_id": 1827242816201846144,
+    "source_id": '1827242816201846144',
     "ra": 300.18213726402,  # degrees
     "dec": 22.71085364818,  # degrees
     "pm_ra": -3.208,  # mas/yr
@@ -17,6 +18,20 @@ source_params = {
     "source_id_2mass" : "20004370+2242391",
 }
 
+def test_gaia_query_auto():
+    meta = {
+        'target_gaia_id': source_params["source_id"]
+    }
+    model = datamodels.RampModel(meta=meta)
+
+    assert model.meta.target_gaia_id == source_params["source_id"]
+
+    # NOTE: The Gaia DR3 coordinates are at epoch J2016.0, so won't be exactly equal.
+    assert abs(model.meta.target_gaia_ra - source_params["ra"]) < 1e-4
+    assert abs(model.meta.target_gaia_dec - source_params["dec"]) < 1e-2
+
+    # Check 2mass cross match
+    assert model.meta.target_2mass_id == source_params["source_id_2mass"]
 
 def test_gaia_query_by_coordinates():
     _id, ra, dec = source_params["source_id"], source_params["ra"], source_params["dec"]

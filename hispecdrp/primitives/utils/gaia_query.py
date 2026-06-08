@@ -138,7 +138,12 @@ def get_stellar_data_gaia_by_coordinates(
         print(f"No Gaia {release.upper()} sources found within {radius_arcsec}\" of ({ra}, {dec})")
         return None
 
-    return _row_to_dict(results[0], results.colnames)
+    results = _row_to_dict(results[0], results.colnames)
+
+    # Convert ID to string
+    results["source_id"] = str(results["source_id"])
+
+    return results
 
 
 def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
@@ -170,7 +175,12 @@ def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
         print(f"No Gaia DR3 source found with source_id = {source_id}")
         return None
 
-    return _row_to_dict(results[0], results.colnames)
+    results = _row_to_dict(results[0], results.colnames)
+    
+    # Convert ID to string
+    results["source_id"] = str(results["source_id"])
+
+    return results
 
 
 def _convert_epoch_gaia(
