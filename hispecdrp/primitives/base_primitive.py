@@ -2,6 +2,7 @@ from __future__ import annotations
 import datetime
 import numpy as np
 import copy
+from typing import Sequence
 import os
 
 from koa_middleware import CalibrationSelector
@@ -739,45 +740,77 @@ class BasePrimitive(ProcessingComponent):
         if output_model is None:
             output_model = getattr(self, 'output_model', None)
 
+        def _get_first_input(input):
+            if isinstance(input, datamodels.DataModel):
+                return input, None, 1
+            if isinstance(input, str):
+                return datamodels.open(input), None, 1
+            if isinstance(input, Sequence):
+                for item in input:
+                    if isinstance(item, datamodels.DataModel):
+                        return item, list, len(input)
+                    if isinstance(item, str) and os.path.isfile(item):
+                        return datamodels.open(item), list, len(input)
+            if isinstance(input, dict):
+                for val in input.values():
+                    if isinstance(val, datamodels.DataModel):
+                        return val, dict, len(input)
+                    if isinstance(val, str) and os.path.isfile(val):
+                        return datamodels.open(val), dict, len(input)
+            raise ValueError("Input must be a datamodel, filepath, sequence, or dict.")
+
+        # Get the first input model and its container type
+        input_model, input_type, input_len = _get_first_input(input)
+
         ###################################
         #### Return output model as is ####
         ###################################
         if isinstance(output_model, datamodels.DataModel):
             return output_model
 
-        ##################################
-        #### Return input model as is ####
-        ##################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input, (datamodels.DataModel, str)
-            ), "Input DataModel or filepath must be provided if output_model is 'input'."
-            return datamodels.open(input)
-
-        ####################################
-        #### Return copy of input model ####
-        ####################################
-        if isinstance(output_model, str) and output_model.lower() == 'input_copy':
-            assert isinstance(
-                input, (datamodels.DataModel, str)
-            ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
-            input_model = datamodels.open(input)
-            kwargs.setdefault('primitive', self)
-            return input_model.from_datamodels(input_model, **kwargs)
-
-        ##################
-        #### Filepath ####
-        ##################
-        if isinstance(output_model, str) and os.path.isfile(output_model):
-            return datamodels.open(output_model)
-
-        #####################################
-        #### DataModel class name (str) #####
-        #####################################
+        # String ('input', 'input_copy', filepath or datamodel class name)
         if isinstance(output_model, str):
-            model_class = datamodels.get_model_type(output_model)
+
+            ##################################
+            #### Return input model as is ####
+            ##################################
+            if output_model.lower() == 'input':
+                assert isinstance(
+                    input, (datamodels.DataModel, str)
+                ), "Input DataModel or filepath must be provided if output_model is 'input'."
+                return datamodels.open(input)
+
+            ####################################
+            #### Return copy of input model ####
+            ####################################
+            if output_model.lower() == 'input_copy':
+                assert isinstance(
+                    input, (datamodels.DataModel, str)
+                ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
+                input_model = datamodels.open(input)
+                kwargs.setdefault('primitive', self)
+                return input_model.from_datamodels(input_model, **kwargs)
+
+            ##################
+            #### Filepath ####
+            ##################
+            if os.path.isfile(output_model):
+                return datamodels.open(output_model)
+
+            #####################################
+            #### DataModel class name (str) #####
+            #####################################
+            output_model_class = datamodels.get_model_type(output_model)
+            if (
+                output_model_class is not None
+                and input_len == 1
+                and input_model.__class__ is output_model_class
+            ):
+                return input_model
+
             kwargs.setdefault('primitive', self)
-            return model_class.from_datamodels(input, **kwargs)
+            return output_model_class.from_datamodels(input, **kwargs)
+            
 
         #################################
         #### DataModel class (type) #####
@@ -799,4 +832,3 @@ class BasePrimitive(ProcessingComponent):
         ):
             return self.__dict__['_output'][attr]
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")
-    
