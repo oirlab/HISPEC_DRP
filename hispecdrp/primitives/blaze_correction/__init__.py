@@ -1,1 +1,2 @@
 from .blaze_correction_primitive import BlazeCorrectionPrimitive
+from .make_fiberflat_primitive import MakeFiberflatPrimitive

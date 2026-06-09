@@ -103,8 +103,8 @@ All primitive parameters are specified through a primitive's ``ARGUMENTS`` class
 - **run**: Whether or not to run the primitive. Default is True.
 - **save_result**: Whether or not to save the results. Default is False.
 - **output_model**: The output data model to use. See :py:meth:`~hispecdrp.datamodels.base_model.DataModel._get_output_model` for more information. Default is None.
-- **output_path**: The full explicit output path of where to save the results. Overrides output_dir and suffix. Default is None.
 - **output_dir**: The directory where output files will be saved. Default is None.
+- **output_file**: The base filename where output will be saved. Default is None.
 - **suffix**: A suffix to append to output filenames. Default is None.
 - **save_preview**: Whether or not to save the preview of the results. Default is False.
 - **show_preview**: Whether or not to display the preview of the results. Default is False.

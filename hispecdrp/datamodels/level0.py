@@ -22,3 +22,7 @@ class L0Model(DataModel):
     @property
     def data_level_suffix(self):
         return 'rate'
+    
+    @property
+    def primary_extension_name(self):
+        return 'rate'

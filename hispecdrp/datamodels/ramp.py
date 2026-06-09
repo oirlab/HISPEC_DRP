@@ -23,6 +23,10 @@ class RampModel(DataModel):
     @property
     def data_level_suffix(self) -> str:
         return "raw"
+    
+    @property
+    def primary_extension_name(self):
+        return 'data'
 
     def get_delta_readtimes(self, n_channels=None, vertical = None) -> np.ndarray:
         """

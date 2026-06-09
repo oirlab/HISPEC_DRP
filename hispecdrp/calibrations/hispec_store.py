@@ -32,6 +32,34 @@ class HISPECCalibrationStore(CalibrationStore):
             **kwargs
         )
 
+    def register_calibration(
+        self,
+        cal : CalibrationModel,
+        origin : str | None = None,
+        new_version : bool = False,
+    ) -> tuple[str, dict]:
+        """
+        Registers a calibration to the local cache and metadata database.
+
+        Parameters
+        ----------
+        cal : CalibrationModel | str
+            The filepath or Calibration Datamodel object to register.
+        origin : str, optional
+            The origin to register the calibration under.
+        new_version : bool, optional
+            Whether to generate a new version for this calibration. If False, the method will check if a calibration with the same version family already exists in the cache and skip registration if so. Defaults to False.
+
+        Returns
+        -------
+        tuple[str, dict]
+            A tuple containing:
+                - ``str``: The local file path where the calibration was saved.
+                - ``dict``: The calibration metadata dictionary as added to the database.
+        """
+        cal = datamodels.open(cal)
+        return super().register_calibration(cal, origin=origin, new_version=new_version)
+
     # Select and get calibration
     def select_and_get_calibration(
         self,

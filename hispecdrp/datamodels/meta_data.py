@@ -51,8 +51,6 @@ class MetaModel(MutableMapping):
                 self[k] = v
         self.set_default_values()
 
-        
-
     def __getitem__(self, key):
         if key in self._schema['properties']:
             return self._data.get(key)
@@ -238,6 +236,20 @@ class MetaModel(MutableMapping):
                 default_value = sub_schema.get('default')
                 if default_value is not None:
                     self[prop_name] = default_value
+
+    def set_default(self, prop_name : str, value):
+        """
+        Set a default value for a specific metadata field.
+
+        Parameters
+        ----------
+        prop_name : str
+            The property name for which to set the default value.
+        value : Any
+            The default value to set if the property is not already set.
+        """
+        if self[prop_name] is None:
+            self[prop_name] = value
     
     def group_meta_by_section(self, flat: bool = False) -> dict:
         """
@@ -319,6 +331,13 @@ class MetaModel(MutableMapping):
 
     def __len__(self):
         return len(self._data)
+    
+    @property
+    def fields(self) -> list[str]:
+        """
+        Return a view of metadata fields names, including those with None values.
+        """
+        return self._schema['properties'].keys()
 
 
 def get_meta_schema(
@@ -438,6 +457,8 @@ def merge_meta(models: list[dict]) -> dict:
             merged_value = min(values)
         elif merge_rule == 'mean': # Mean of the values
             merged_value = np.mean(values)
+        elif merge_rule == 'fiber_state': # Special rule for fibers
+            merged_value = _merge_fiber_state(values)
         else:
             raise ValueError(f"Unknown merge rule '{merge_rule}' for meta field '{prop_name}'")
         merged_data[prop_name] = merged_value
@@ -448,3 +469,22 @@ def merge_meta(models: list[dict]) -> dict:
     )
 
     return meta_merged
+
+
+_FIBER_EMPTY_STATES = ["BLOCKED", "NONE"]
+
+def _merge_fiber_state(values) -> str:
+    values = [v for v in values if v is not None]
+
+    if not values:
+        return "NONE"
+
+    illuminated = [v for v in values if v not in _FIBER_EMPTY_STATES]
+
+    if illuminated:
+        return illuminated[0]
+
+    if "BLOCKED" in values:
+        return "BLOCKED"
+
+    return "NONE"

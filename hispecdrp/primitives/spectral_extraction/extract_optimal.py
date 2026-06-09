@@ -12,6 +12,7 @@ def extract_spectrum_optimal(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     profile : np.ndarray,
     extraction_aperture : float,
@@ -21,6 +22,7 @@ def extract_spectrum_optimal(
     var_rnoise_output : np.ndarray | None = None,
     var_poisson_output : np.ndarray | None = None,
     dq_output : np.ndarray | None = None,
+    mid_time_output : np.ndarray | None = None,
     orders_are_vertical : bool = True,
 ) -> dict:
     """
@@ -38,6 +40,8 @@ def extract_spectrum_optimal(
         2D array of input read noise variance.
     input_var_poisson : np.ndarray
         2D array of input Poisson noise variance.
+    input_mid_time : np.ndarray
+        2D array of input mid times for each pixel.
     trace_positions : np.ndarray
         2D array of y-coordinates for the extraction (order, ypos).
     profile : np.ndarray
@@ -56,6 +60,8 @@ def extract_spectrum_optimal(
         1D array to store extracted Poisson noise variance.
     dq_output : np.ndarray
         1D array to store extracted data quality flags.
+    mid_time_output : np.ndarray
+        1D array to store extracted mid times.
     orders_are_vertical : bool
         Whether the orders are oriented vertically.
 
@@ -87,6 +93,8 @@ def extract_spectrum_optimal(
         var_poisson_output = np.full(npix, np.nan, dtype=input_var_poisson.dtype)
     if dq_output is None:
         dq_output = np.full(npix, 0, dtype=input_dq.dtype)
+    if mid_time_output is None:
+        mid_time_output = np.full(npix, np.nan, dtype=input_mid_time.dtype)
 
     # Call numba extraction routine
     _extract_optimal_numba(
@@ -95,6 +103,7 @@ def extract_spectrum_optimal(
         input_dq=input_dq,
         input_var_rnoise=input_var_rnoise,
         input_var_poisson=input_var_poisson,
+        input_mid_time=input_mid_time,
         trace_positions=trace_positions,
         profile=profile,
         extraction_aperture=extraction_aperture,
@@ -104,6 +113,7 @@ def extract_spectrum_optimal(
         var_rnoise_output=var_rnoise_output,
         var_poisson_output=var_poisson_output,
         dq_output=dq_output,
+        mid_time_output=mid_time_output,
         orders_are_vertical=orders_are_vertical,
     )
 
@@ -113,7 +123,8 @@ def extract_spectrum_optimal(
         err=err_output,
         var_rnoise=var_rnoise_output,
         var_poisson=var_poisson_output,
-        dq=dq_output
+        dq=dq_output,
+        mid_time=mid_time_output,
     )
 
 
@@ -124,6 +135,7 @@ def _extract_optimal_numba(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     profile : np.ndarray,
     extraction_aperture : float,
@@ -133,6 +145,7 @@ def _extract_optimal_numba(
     var_rnoise_output : np.ndarray,
     var_poisson_output : np.ndarray,
     dq_output : np.ndarray,
+    mid_time_output : np.ndarray,
     orders_are_vertical : bool = True,
 ):
 
@@ -152,6 +165,7 @@ def _extract_optimal_numba(
             D_var_rnoise = input_var_rnoise[x, window_inds].copy()
             D_dq = input_dq[x, window_inds]
             P = profile[x, window_inds].copy()
+            T = input_mid_time[x, window_inds].copy()
         else:
             D = input_data[window_inds, x].copy()
             D_var = input_err[window_inds, x]**2
@@ -159,6 +173,7 @@ def _extract_optimal_numba(
             D_var_rnoise = input_var_rnoise[window_inds, x].copy()
             D_dq = input_dq[window_inds, x].copy()
             P = profile[window_inds, x].copy()
+            T = input_mid_time[window_inds, x].copy()
 
         # Mask bad pixels
         M = (D_dq & DO_NOT_USE) == 0
@@ -173,6 +188,7 @@ def _extract_optimal_numba(
             var_rnoise_output[x] = np.nan
             var_poisson_output[x] = np.nan
             dq_output[x] = DO_NOT_USE
+            mid_time_output[x] = np.nan
             continue
 
                 # Set bad pixels to zero / inf
@@ -237,3 +253,6 @@ def _extract_optimal_numba(
         )
 
         dq_output[x] = 0
+
+        # Mid time
+        mid_time_output[x] = np.sum(T * M * w_tot) / np.sum(w_tot * M)

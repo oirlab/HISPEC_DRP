@@ -32,8 +32,18 @@ class TraceProfilePrimitive(BasePrimitive):
         else:
             raise ValueError(f"Unsupported input type: {type(self.input)}")
         
+        first_key = next(iter(input))
+
+        # Current keys: ('WHITELIGHT', 'BLOCKED', 'BLOCKED') : file, etc.
+        # Want: ('1' : file, '2' : file, '3' : file)
+        if not str(first_key).isdigit():
+            input = {
+                str(t.index(next(x for x in t if x.upper() != "BLOCKED")) + 1) : v
+                for t, v in input.items()
+            }
+        
         # Prepare output model
-        output_model = datamodels.TraceProfModel.from_datamodels(input)
+        output_model = datamodels.TraceProfModel.from_datamodels(input, primitive=self)
 
         # Loop over fibers and copy profile data
         for fiber in input.keys():
