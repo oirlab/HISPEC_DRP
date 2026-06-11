@@ -57,6 +57,7 @@ class E2EConfig:
     radial_velocity_km_s: float = 0.0
     template_mag_ab: float | None = None
     template_2mass_band: str | None = None
+    overwrite_ramp: bool = True
     calibration_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -116,6 +117,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         radial_velocity_km_s=config.radial_velocity_km_s,
         template_mag_ab=config.template_mag_ab,
         template_2mass_band=config.template_2mass_band,
+        overwrite_ramp=config.overwrite_ramp,
         **config.calibration_kwargs,
     )
 

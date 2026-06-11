@@ -44,6 +44,7 @@ def main() -> int:
         radial_velocity_km_s=0.0,
         template_mag_ab=None,
         template_2mass_band=None,
+        overwrite_ramp=True,
         calibration_kwargs={},
     )
 

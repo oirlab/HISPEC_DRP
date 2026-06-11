@@ -686,6 +686,7 @@ def create_ramp_and_calibrations(
     sync_caldb_first: bool = True,
     template_mag_ab: float | None = None,
     template_2mass_band: str | None = None,
+    overwrite_ramp: bool = False,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -880,7 +881,7 @@ def create_ramp_and_calibrations(
         poisson_noise=poisson_noise,
         convert_to_uint16=convert_to_uint16,
     )
-    if not os.path.isfile(ramp_path):
+    if overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
     return ramp_model, calibration_models, np.asarray(rate_map, dtype=np.float64)
 
