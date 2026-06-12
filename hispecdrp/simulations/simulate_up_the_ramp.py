@@ -30,7 +30,7 @@ from ..utils.spectral_templates_utils import (
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
 from . import e2e_support
-from .create_ramp import create_ramp
+from .utr import create_ramp
 from .run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 
@@ -342,6 +342,8 @@ def simulate_ramp_from_rate_map(
     clip_ramps: bool = True,
     poisson_noise: bool = True,
     kTC_noise: float = 50.0,
+    mjd_start: float | None = None,
+    target_meta: dict | None = None,
 ) -> datamodels.RampModel:
     """
     Simulate a ramp from a rate map (e-/s/pixel) using create_ramp and calibration models.
@@ -400,6 +402,7 @@ def simulate_ramp_from_rate_map(
     rn_dn = np.asarray(rn_map, dtype=np.float64)
     read_noise_e = rn_dn * gain_arr
 
+    eff_mjd_start = 60577.0 if mjd_start is None else float(mjd_start)
     ramp_dict = create_ramp(
         rate_map,
         readtime=readtime,
@@ -412,12 +415,17 @@ def simulate_ramp_from_rate_map(
         read_noise=read_noise_e,
         kTC_noise=kTC_noise,
         poisson_noise=poisson_noise,
+        mjd_start=eff_mjd_start,
         convert_to_uint16=convert_to_uint16,
         clip_ramps=clip_ramps,
         max_cores=max_cores,
     )
 
     ramp_dict["meta"]["spectrograph"] = spectrograph
+    if target_meta:
+        ramp_dict["meta"].update(
+            {k: v for k, v in target_meta.items() if v is not None}
+        )
     ramp_model = datamodels.RampModel(
         data=ramp_dict["data"],
         dq_raw=ramp_dict["dq_raw"],
@@ -588,8 +596,8 @@ def create_dummy_fiberflat_rate_files(
             prim_args=stage0_prim_args,
             max_cores=max_cores,
         )
-        # Set object_fiber meta so group_by_illuminated_fiber (fiber flat pipeline) finds this fiber
-        obj_flat = "FIBERFLAT-B" if spectrograph.upper() == "BSPEC" else "FIBERFLAT-R"
+        # Set object_fiber meta so ProcessFiberflatsPipeline groups by fiber (see target.yaml enum).
+        obj_flat = "WHITELIGHT"
         for fib in (1, 2, 3):
             setattr(rate_model.meta, f"object_fiber{fib}", obj_flat if fib == f else "BLOCKED")
         filename = fiberflat_filename(spectrograph, f)
@@ -687,6 +695,7 @@ def create_ramp_and_calibrations(
     template_mag_ab: float | None = None,
     template_2mass_band: str | None = None,
     overwrite_ramp: bool = False,
+    target_meta: dict | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -880,6 +889,8 @@ def create_ramp_and_calibrations(
         spectrograph=spectrograph,
         poisson_noise=poisson_noise,
         convert_to_uint16=convert_to_uint16,
+        mjd_start=mjd_start,
+        target_meta=target_meta,
     )
     if overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
@@ -1048,13 +1059,13 @@ def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepa
 
     Existing FITS (e.g. from disk or GDrive) may lack these; the fiber flat pipeline and
     trace primitives require them. Infers fiber from ...FIB1.../FIB2.../FIB3... and
-    FIBERFLAT-B vs -R from HB vs HR in the path.
+    Uses WHITELIGHT for the illuminated fiber (per target.yaml object_fiber enum).
     """
     name = os.path.basename(filepath).upper()
     # Infer illuminated fiber from filename (e.g. rate-FIBERFLAT-FIB1.fits or ...FIB1...)
     match = re.search(r"FIB(?:ERFLAT-)?FIB([123])", name) or re.search(r"FIB([123])\b", name)
     fiber = int(match.group(1)) if match else 1
-    obj_flat = "FIBERFLAT-B" if "HB" in name or "BSPEC" in name else "FIBERFLAT-R"
+    obj_flat = "WHITELIGHT"
     for f in (1, 2, 3):
         setattr(model.meta, f"object_fiber{f}", obj_flat if f == fiber else "BLOCKED")
 
@@ -1079,11 +1090,16 @@ def prepare_fiberflat_models(fiberflat_filepaths: list[str]) -> list[datamodels.
     return ff_models
 
 
+_DEFAULT_FIBERFLAT_DISP_RANGE = {"BSPEC": (300, 4000), "RSPEC": (400, 4000)}
+# BSPEC order 110 sits near cross-disp pixel ~105; (135, …) clips it and yields 38/39 traces.
+_DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
+
+
 def get_fiberflat_prim_args(
     ff_models: list[datamodels.DataModel],
     *,
-    yrange: tuple[int, int] = (500, 4000),
-    xrange: tuple[int, int] = (100, 4050),
+    disp_range: tuple[int, int] | None = None,
+    xdisp_range: tuple[int, int] | None = None,
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
@@ -1092,14 +1108,26 @@ def get_fiberflat_prim_args(
     do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
     ff_by_fiber = datamodels.group_by_illuminated_fiber(ff_models)
     do_fibers = sorted(ff_by_fiber.keys(), key=int)
+    spectrograph = str(getattr(ff_models[0].meta, "spectrograph", "RSPEC") or "RSPEC").upper()
+    if disp_range is None:
+        disp_range = _DEFAULT_FIBERFLAT_DISP_RANGE.get(spectrograph, (500, 4000))
+    if xdisp_range is None:
+        xdisp_range = _DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050))
     return {
-        "trace_pos": {"deg_pos": deg_pos, "deg_width": deg_width, "yrange": yrange, "xrange": xrange},
+        "trace_pos": {
+            "deg_pos": deg_pos,
+            "deg_width": deg_width,
+            "disp_range": disp_range,
+            "xdisp_range": xdisp_range,
+        },
         "spec_extract": {
             "extraction_aperture": extraction_aperture,
             "do_orders": do_orders,
             "do_fibers": do_fibers,
         },
         "set_wavesol": {"run": False},
+        "register_tracepos_cal": {"run": False},
+        "register_traceprof_cal": {"run": False},
         "register_fiberflat_cal": {"run": False},
     }
 
@@ -1109,8 +1137,8 @@ def run_fiberflat_pipeline(
     prim_args: dict | None = None,
     *,
     output_dir: str | None = None,
-    yrange: tuple[int, int] = (500, 4000),
-    xrange: tuple[int, int] = (100, 4050),
+    disp_range: tuple[int, int] | None = None,
+    xdisp_range: tuple[int, int] | None = None,
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
@@ -1127,10 +1155,10 @@ def run_fiberflat_pipeline(
         Default is None.
     output_dir : str or None, optional
         If set, pipeline products are written under this directory. Default is None.
-    yrange : tuple of int, optional
-        Fitting range in spectral direction (pixels). Default is (500, 4000).
-    xrange : tuple of int, optional
-        XD direction range. Default is (100, 4050).
+    disp_range : tuple of int or None, optional
+        Fitting range in spectral direction (pixels). Default depends on spectrograph.
+    xdisp_range : tuple of int or None, optional
+        Cross-dispersion (order) range in pixels. Default depends on spectrograph.
     deg_pos : int, optional
         Polynomial degree for trace position. Default is 4.
     deg_width : int, optional
@@ -1150,8 +1178,8 @@ def run_fiberflat_pipeline(
     if prim_args is None:
         prim_args = get_fiberflat_prim_args(
             ff_models,
-            yrange=yrange,
-            xrange=xrange,
+            disp_range=disp_range,
+            xdisp_range=xdisp_range,
             deg_pos=deg_pos,
             deg_width=deg_width,
             extraction_aperture=extraction_aperture,

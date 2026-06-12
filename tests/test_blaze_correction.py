@@ -15,7 +15,7 @@ def test_blaze_correction():
         setattr(science_model, f"SPEC_UNCAL_ERR_FIB{fib}", np.ones((39,4096)) / 100)
         setattr(science_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fib}", np.zeros((39,4096)))
         setattr(science_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fib}", np.zeros((39,4096)))
-        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((39,4096)))
+        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((39, 4096), dtype=np.uint32))
 
 
     fiberflat_model = datamodels.FiberflatModel()
@@ -23,7 +23,7 @@ def test_blaze_correction():
 
         setattr(fiberflat_model, f"SPEC_FIB{fib}", np.ones((39,4096)))
         setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", np.ones((39,4096))/100)
-        setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((39,4096)))
+        setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((39, 4096), dtype=np.uint32))
 
     prim = BlazeCorrectionPrimitive()
     blaze_corrected = prim.apply(science_model, fiberflat=fiberflat_model)

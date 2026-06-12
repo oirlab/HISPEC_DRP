@@ -27,7 +27,7 @@ def test_process_fiberflats(tmp_path, datadir):
         'RSPEC' : (400, 4000) # Fitting range in spectral direction (pixels)
     }
     xdisp_range = {
-        'BSPEC' : (135, 4050), # Which orders to consider (XD direction)
+        'BSPEC' : (100, 4050), # Which orders to consider (XD direction); 110 @ x~105
         'RSPEC' : (100, 4050) # Which orders to consider (XD direction)
     }
 

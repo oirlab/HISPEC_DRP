@@ -8,6 +8,7 @@ koa:
   # datetime_obs: "2026-04-30T12:00:00"
   connect_remote: true
   sync_first: true
+  download_missing: true
 
 calibrations:
   # Stage 0 detector products (FITS paths)

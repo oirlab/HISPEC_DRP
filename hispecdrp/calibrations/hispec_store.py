@@ -170,6 +170,20 @@ class HISPECCalibrationStore(CalibrationStore):
         # Return new new records
         return cal_records_added
 
+    def sync_records_from_remote(
+        self,
+        cals=None,
+        mode: str = "id",
+    ) -> list[dict]:
+        """
+        Synchronize the local DB with the remote KOA catalog.
+
+        ``cals`` is accepted for compatibility with callers that pass an explicit
+        remote query result; when omitted, records are discovered via
+        ``get_missing_records`` (same as ``koa_middleware``).
+        """
+        return super().sync_records_from_remote(cals, mode=mode)
+
     def calibration_record_in_cache(
         self,
         cal: dict | str | 'CalibrationModel',

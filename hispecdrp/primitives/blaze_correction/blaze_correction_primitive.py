@@ -71,7 +71,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                     setattr(output_model, f'SPEC_VAR_RNOISE_FIB{fiber}', 
                             np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_var_rnoise'].dtype))
                     setattr(output_model, f'SPEC_DQ_FIB{fiber}', 
-                            np.zeros((n_orders, npx), dtype=input_model.traces[int(fiber)]['spec_dq'].dtype))
+                            np.zeros((n_orders, npx), dtype=np.uint32))
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
                 blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],

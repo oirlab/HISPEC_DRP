@@ -13,6 +13,7 @@ import os
 import sys
 from logging.handlers import QueueHandler
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -20,12 +21,24 @@ from .. import datamodels
 from ..pipelines.stage0 import stage0_pipeline as _stage0_pipeline
 from ..pipelines.stage1 import stage1_pipeline as _stage1_pipeline
 from ..pipelines.stage2 import stage2_pipeline as _stage2_pipeline
+from ..primitives import (
+    BarycenterCorrectionPrimitive,
+    BlazeCorrectionPrimitive,
+    StellarRVPrimitive,
+)
 from ..utils.line_mask_utils import packaged_default_line_mask_path
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE_FILENAME = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
 DEFAULT_RATE_MAP_FIBERS: list[int] = [1, 2, 3]
+
+# E2E Stage 2 runs barycenter correction between blaze correction and stellar RV.
+E2E_STAGE2_PRIMITIVES: dict[str, type] = {
+    "blaze_corr": BlazeCorrectionPrimitive,
+    "barycorr": BarycenterCorrectionPrimitive,
+    "stellar_rv": StellarRVPrimitive,
+}
 
 
 def repository_root() -> Path:
@@ -168,6 +181,10 @@ def get_default_stage2_prim_args(*, max_cores: int | None = None) -> dict:
         if max_cores is not None and "max_cores" in args:
             args["max_cores"] = max_cores
         out[name] = args
+    if "barycorr" not in out:
+        out["barycorr"] = {}
+    if max_cores is not None and "max_cores" in BarycenterCorrectionPrimitive.ARGUMENTS:
+        out["barycorr"]["max_cores"] = max_cores
     if "stellar_rv" in out:
         out["stellar_rv"]["mask_path"] = packaged_default_line_mask_path()
     return out
@@ -239,6 +256,16 @@ def run_stage1_simulation(
     return pipe.apply(rate_model, **apply_kw)
 
 
+def _init_e2e_primitive(prim_cls: type, prim_arg_dict: dict, output_dir: str | None):
+    """Construct a primitive with E2E ``prim_args`` and optional output directory."""
+    prim = prim_cls()
+    valid = prim.ARGUMENTS | prim.CALIBRATIONS
+    prim.init_args(**{k: v for k, v in prim_arg_dict.items() if k in valid})
+    if output_dir is not None and (prim.save_result or prim.save_preview):
+        prim.set_args(output_dir=output_dir)
+    return prim
+
+
 def run_stage2_simulation(
     stage1_output: datamodels.DataModel,
     *,
@@ -247,7 +274,7 @@ def run_stage2_simulation(
     output_dir: str | None = None,
     max_cores: int | None = None,
 ) -> datamodels.DataModel:
-    """Run Stage 2 (blaze correction + stellar RV) on the Stage 1 product."""
+    """Run Stage 2 (blaze + barycenter correction + stellar RV) on the Stage 1 product."""
     if prim_args is None:
         prim_args = get_default_stage2_prim_args(max_cores=max_cores)
     else:
@@ -255,17 +282,16 @@ def run_stage2_simulation(
         if max_cores is not None:
             prim_args = apply_max_cores_to_stage2_prim_args(prim_args, max_cores)
 
-    prim_args = apply_e2e_save_and_preview_flags(
-        prim_args, _stage2_pipeline.Stage2Pipeline.PRIMITIVES
-    )
+    prim_args = apply_e2e_save_and_preview_flags(prim_args, E2E_STAGE2_PRIMITIVES)
 
-    pipe = _stage2_pipeline.Stage2Pipeline(prim_args=prim_args)
-    pipe.blaze_corr.fiberflat = fiberflat_model
-
-    apply_kw: dict = {}
-    if output_dir is not None:
-        apply_kw["output_dir"] = ensure_output_directory(output_dir)
-    return pipe.apply(stage1_output, **apply_kw)
+    out_dir = ensure_output_directory(output_dir) if output_dir is not None else None
+    model = stage1_output
+    for prim_name, prim_cls in E2E_STAGE2_PRIMITIVES.items():
+        prim = _init_e2e_primitive(prim_cls, prim_args.get(prim_name, {}), out_dir)
+        if prim_name == "blaze_corr":
+            prim.fiberflat = fiberflat_model
+        model = prim.apply(model)
+    return model
 
 
 def ensure_e2e_console_logging() -> None:
@@ -326,6 +352,10 @@ def _format_calibration_source_label(source: str) -> str:
         return "Simulated (dummy fiberflat rate)"
     if source.startswith("simulated_cached:"):
         return "Simulated (cached local)"
+    if source.startswith("local_cache:"):
+        return "Local cache"
+    if source.startswith("testing_data:"):
+        return "Test data (Google Drive)"
     if source.startswith("config:"):
         return "User config"
     if source.startswith("simulated_dummy_rate:"):
@@ -337,6 +367,10 @@ def _calibration_summary_filepath(source: str, model: datamodels.DataModel | Non
     if source.startswith("config:"):
         return os.path.abspath(source.split(":", 1)[1])
     if source.startswith("simulated_cached:"):
+        return os.path.abspath(source.split(":", 1)[1])
+    if source.startswith("local_cache:"):
+        return os.path.abspath(source.split(":", 1)[1])
+    if source.startswith("testing_data:"):
         return os.path.abspath(source.split(":", 1)[1])
     if source.startswith("simulated_dummy_rate:"):
         return os.path.abspath(source.split(":", 1)[1])
@@ -446,10 +480,22 @@ def read_rvccfavg(
     return rv, rv_err
 
 
+def read_berv_km_s(l2_model: datamodels.DataModel, fiber: int) -> float | None:
+    """Return measured BERV (km/s) from ``BARYCORR_FIB#``, or None if unavailable."""
+    tbl = getattr(l2_model, f"barycorr_fib{fiber}", None)
+    if tbl is None or len(tbl) == 0:
+        return None
+    berv_m_s = float(tbl["BERV"][0])
+    if not np.isfinite(berv_m_s):
+        return None
+    return berv_m_s / 1000.0
+
+
 def log_e2e_rv_performance_summary(
     stage2_model: datamodels.DataModel | None,
     *,
     injected_rv_km_s: float,
+    gaia_target: Any | None = None,
     fibers: list[int] | None = None,
     log: logging.Logger | None = None,
 ) -> None:
@@ -477,6 +523,29 @@ def log_e2e_rv_performance_summary(
             injected_m_s,
         )
         return
+
+    if gaia_target is not None:
+        log.info(
+            "E2E Gaia target %s (source_id=%s): Gaia RV=%.3f km/s, injected BERV=%.3f km/s, "
+            "total injected RV=%.3f km/s",
+            gaia_target.target_meta.get("target_name"),
+            gaia_target.source_id,
+            gaia_target.gaia_rv_km_s,
+            gaia_target.berv_km_s,
+            gaia_target.injected_rv_km_s,
+        )
+        berv_rows: list[str] = []
+        for fiber in sorted({int(f) for f in fiber_list}):
+            meas_berv = read_berv_km_s(stage2_model, fiber)
+            if meas_berv is None:
+                berv_rows.append(f"  fib{fiber}: (no BARYCORR)")
+            else:
+                delta = meas_berv - gaia_target.berv_km_s
+                berv_rows.append(
+                    f"  fib{fiber}: measured BERV={meas_berv:.3f} km/s "
+                    f"(Δ vs injected {delta:+.3f} km/s)"
+                )
+        log.info("E2E barycenter correction summary\n%s", "\n".join(berv_rows))
 
     header = (
         "E2E RV performance summary "

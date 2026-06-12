@@ -75,6 +75,15 @@ KOA_SELECTOR_BY_KEY: dict[str, Any] = {
     "wavesol": WavelengthSolutionSelector(),
 }
 
+STAGE1_TRACE_KEYS: tuple[str, ...] = ("trace_pos", "trace_prof", "fiberflat")
+
+# Legacy KOA masters may still carry pre-schema object_fiber labels.
+_LEGACY_OBJECT_FIBER: dict[str, str] = {
+    "FIBERFLAT-B": "WHITELIGHT",
+    "FIBERFLAT-R": "WHITELIGHT",
+}
+_OBJECT_FIBER_FITS_KEYS: tuple[str, ...] = ("OBJFIB1", "OBJFIB2", "OBJFIB3")
+
 
 @dataclass
 class E2ECalibrationBundle:
@@ -171,6 +180,96 @@ def _observation_meta(
     return meta, input_model
 
 
+def _sync_koa_store(
+    store: HISPECCalibrationStore,
+    *,
+    connect_remote: bool,
+    sync_first: bool,
+    download_missing: bool = True,
+) -> None:
+    """Sync KOA metadata into the local DB and download missing calibration files."""
+    if not sync_first:
+        return
+    if connect_remote and store.remote_db is not None:
+        try:
+            remote_cals = store.remote_db.query() or []
+            store.sync_records_from_remote(remote_cals, mode="id")
+            logger.info("Synced %d calibration record(s) from remote KOA.", len(remote_cals))
+        except Exception as e:
+            logger.warning("KOA remote metadata sync failed: %s", e)
+    try:
+        added = store.sync_records_from_cached_files()
+        if added:
+            logger.info("Indexed %d calibration file(s) from local KOA cache.", len(added))
+    except Exception as e:
+        logger.warning("KOA local cache indexing failed: %s", e)
+    if not download_missing:
+        return
+    try:
+        missing = store.get_missing_local_files() or []
+    except Exception as e:
+        logger.warning("Could not list missing KOA calibration files: %s", e)
+        return
+    if not missing:
+        return
+    logger.info("Downloading %d missing KOA calibration file(s).", len(missing))
+    for i, rec in enumerate(missing, 1):
+        filename = rec.get("filename", "?")
+        try:
+            local_path, _ = store.get_calibration(cal=rec)
+            logger.info("[%d/%d] Downloaded KOA cal: %s", i, len(missing), local_path or filename)
+        except Exception as e:
+            logger.warning("[%d/%d] Failed to download KOA cal %s: %s", i, len(missing), filename, e)
+
+
+def _open_calibration_file(key: str, path: str) -> datamodels.CalibrationModel:
+    """Open a calibration FITS, tolerating legacy ``FIBERFLAT-*`` object_fiber metadata."""
+    import tempfile
+
+    from astropy.io import fits
+
+    p = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(p):
+        raise FileNotFoundError(f"Calibration {key!r}: file not found: {p}")
+    try:
+        model = datamodels.open(p)
+        logger.info("Opened calibration %s: %s", key, p)
+        return model
+    except ValueError as exc:
+        if "object_fiber" not in str(exc):
+            raise
+
+    with fits.open(p) as hdul:
+        header = hdul[0].header
+        changed = False
+        for kw in _OBJECT_FIBER_FITS_KEYS:
+            val = header.get(kw)
+            if isinstance(val, str) and val in _LEGACY_OBJECT_FIBER:
+                header[kw] = _LEGACY_OBJECT_FIBER[val]
+                changed = True
+        if not changed:
+            raise
+        fd, tmp_path = tempfile.mkstemp(suffix=".fits", prefix="koa_cal_")
+        os.close(fd)
+        hdul.writeto(tmp_path, overwrite=True)
+
+    try:
+        model = datamodels.open(tmp_path)
+        logger.info(
+            "Opened calibration %s with legacy object_fiber remap: %s (temp %s)",
+            key,
+            p,
+            tmp_path,
+        )
+        return model
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def fetch_koa_calibrations(
     keys: Sequence[str],
     meta: dict[str, Any],
@@ -179,6 +278,7 @@ def fetch_koa_calibrations(
     instrument_name: str | None = None,
     connect_remote: bool = True,
     sync_first: bool = True,
+    download_missing: bool = True,
 ) -> dict[str, datamodels.CalibrationModel]:
     """
     Fetch calibration FITS from the KOA store for ``keys`` (best-effort per key).
@@ -196,13 +296,12 @@ def fetch_koa_calibrations(
             connect_remote=connect_remote,
             sync_on_init=False,
         ) as store:
-            if sync_first and not (connect_remote and store.remote_db is None):
-                try:
-                    if connect_remote and store.remote_db is not None:
-                        store.sync_records_from_remote(mode="id")
-                    store.sync_local_db_from_local_files()
-                except Exception as e:
-                    logger.warning("KOA sync before calibration fetch failed: %s", e)
+            _sync_koa_store(
+                store,
+                connect_remote=connect_remote,
+                sync_first=sync_first,
+                download_missing=download_missing,
+            )
 
             store_meta = (
                 input_for_store.meta if hasattr(input_for_store, "meta") else meta
@@ -213,7 +312,7 @@ def fetch_koa_calibrations(
                     filepath, _ = store.select_and_get_calibration(
                         store_meta, selector=selector
                     )
-                    result[key] = datamodels.open(filepath)
+                    result[key] = _open_calibration_file(key, filepath)
                     logger.info("KOA calibration %s: %s", key, filepath)
                 except Exception as e:
                     logger.warning(
@@ -235,12 +334,146 @@ def fetch_koa_calibrations(
 
 
 def _open_calibration_path(key: str, path: str) -> datamodels.CalibrationModel:
-    p = os.path.abspath(os.path.expanduser(path))
-    if not os.path.isfile(p):
-        raise FileNotFoundError(f"Calibration {key!r}: file not found: {p}")
-    model = datamodels.open(p)
-    logger.info("User calibration %s: %s", key, p)
-    return model
+    return _open_calibration_file(key, path)
+
+
+def _local_master_search_dirs(output_dir: str) -> list[str]:
+    dirs = [e2e_support.calibration_dir(output_dir)]
+    cache_root = (os.environ.get("KOA_CALIBRATION_CACHE") or "").strip()
+    if cache_root:
+        dirs.append(os.path.join(cache_root, "calibrations", "hispec"))
+    seen: set[str] = set()
+    out: list[str] = []
+    for d in dirs:
+        d_abs = os.path.abspath(d)
+        if os.path.isdir(d_abs) and d_abs not in seen:
+            seen.add(d_abs)
+            out.append(d_abs)
+    return out
+
+
+def _glob_local_master_path(key: str, spectrograph: str, search_dirs: Sequence[str]) -> str | None:
+    prefix = "HB" if spectrograph.upper() == "BSPEC" else "HR"
+    patterns = {
+        "trace_pos": f"{prefix}.*mastercal-tracepos*.fits",
+        "trace_prof": f"{prefix}.*mastercal-traceprof*.fits",
+        "fiberflat": f"{prefix}.*mastercal-fiberflat*.fits",
+    }
+    pattern = patterns.get(key)
+    if pattern is None:
+        return None
+    matches: list[str] = []
+    for directory in search_dirs:
+        matches.extend(str(p) for p in Path(directory).glob(pattern))
+    if not matches:
+        return None
+    return sorted(matches)[-1]
+
+
+def resolve_local_stage1_masters(
+    bundle: E2ECalibrationBundle,
+    *,
+    output_dir: str,
+    spectrograph: str,
+) -> None:
+    """Fill missing Stage 1 masters from local ``cals/`` or KOA cache directories."""
+    search_dirs = _local_master_search_dirs(output_dir)
+    for key in STAGE1_TRACE_KEYS:
+        if getattr(bundle, key) is not None:
+            continue
+        local_path = _glob_local_master_path(key, spectrograph, search_dirs)
+        if local_path is None:
+            continue
+        try:
+            model = _open_calibration_file(key, local_path)
+        except Exception as e:
+            logger.warning("Local master %r at %s could not be opened: %s", key, local_path, e)
+            continue
+        setattr(bundle, key, model)
+        bundle.sources[key] = f"local_cache:{local_path}"
+        logger.info("Using local master calibration %s: %s", key, local_path)
+
+
+_TESTING_DATA_STAGE1_REL_PATHS: dict[str, dict[str, str]] = {
+    "BSPEC": {
+        "trace_pos": "HISPEC/Cals/HB.20260606.00000.00.mastercal-tracepos.001.fits",
+        "trace_prof": "HISPEC/Cals/HB.20260606.00000.00.mastercal-traceprof.001.fits",
+        "fiberflat": "HISPEC/Cals/HB.20260606.00000.00.mastercal-fiberflat.001.fits",
+    },
+    "RSPEC": {
+        "trace_pos": "HISPEC/Cals/HR.20260606.00000.00.mastercal-tracepos.001.fits",
+        "trace_prof": "HISPEC/Cals/HR.20260606.00000.00.mastercal-traceprof.001.fits",
+        "fiberflat": "HISPEC/Cals/HR.20260606.00000.00.mastercal-fiberflat.001.fits",
+    },
+}
+
+
+def resolve_testing_data_stage1_masters(
+    bundle: E2ECalibrationBundle,
+    *,
+    output_dir: str,
+    spectrograph: str,
+) -> None:
+    """Download missing Stage 1 masters from bundled Google Drive test data (last resort)."""
+    spec = spectrograph.upper()
+    rel_paths = _TESTING_DATA_STAGE1_REL_PATHS.get(spec)
+    if rel_paths is None:
+        return
+
+    from ..utils.gdrive import download_gdrive_file
+
+    cal_dir = e2e_support.calibration_dir(output_dir)
+    for key in STAGE1_TRACE_KEYS:
+        if getattr(bundle, key) is not None:
+            continue
+        rel_path = rel_paths.get(key)
+        if rel_path is None:
+            continue
+        try:
+            local_path = download_gdrive_file(rel_path, output_dir=cal_dir, use_cached=True)
+        except Exception as e:
+            logger.warning("Could not download test-data master %r: %s", key, e)
+            continue
+        if local_path is None or not os.path.isfile(local_path):
+            continue
+        try:
+            model = _open_calibration_file(key, local_path)
+        except Exception as e:
+            logger.warning("Downloaded test-data master %r at %s could not be opened: %s", key, local_path, e)
+            continue
+        setattr(bundle, key, model)
+        bundle.sources[key] = f"testing_data:{local_path}"
+        logger.info("Using test-data master calibration %s: %s", key, local_path)
+
+
+def log_stage1_trace_bundle_status(bundle: E2ECalibrationBundle) -> None:
+    """Log whether Stage 1 will use KOA/local masters or the fiberflat pipeline."""
+    if bundle.has_master_trace_bundle:
+        logger.info(
+            "Stage 1 trace bundle complete (%s); ProcessFiberflatsPipeline will be skipped.",
+            ", ".join(f"{k}={bundle.sources.get(k, '?')}" for k in STAGE1_TRACE_KEYS),
+        )
+        return
+    missing = [k for k in STAGE1_TRACE_KEYS if getattr(bundle, k) is None]
+    logger.warning(
+        "Stage 1 trace bundle incomplete (missing %s); trace_pos and trace_prof will be "
+        "generated on-the-fly by ProcessFiberflatsPipeline from dummy fiberflats.",
+        missing,
+    )
+
+
+def log_missing_stage1_trace_masters(bundle: E2ECalibrationBundle) -> None:
+    """Log which Stage 1 trace/fiberflat masters are still missing from KOA/config."""
+    if bundle.has_master_trace_bundle:
+        return
+    missing = [k for k in STAGE1_TRACE_KEYS if getattr(bundle, k) is None]
+    if missing:
+        logger.warning(
+            "KOA/config trace bundle incomplete (missing %s); dummy fiberflat "
+            "simulation and ProcessFiberflatsPipeline will run unless paths are "
+            "provided in calibration_config.",
+            missing,
+        )
 
 
 def complete_stage0_calibrations(
@@ -299,6 +532,7 @@ def resolve_e2e_calibrations(
     datetime_obs: str | None = None,
     connect_remote: bool = True,
     sync_caldb_first: bool = True,
+    download_missing_koa: bool = True,
 ) -> E2ECalibrationBundle:
     """
     Resolve E2E calibrations: explicit config paths, then KOA, then simulated (Stage 0 completed later).
@@ -322,6 +556,7 @@ def resolve_e2e_calibrations(
     datetime_obs = koa_cfg.get("datetime_obs", datetime_obs)
     connect_remote = bool(koa_cfg.get("connect_remote", connect_remote))
     sync_first = bool(koa_cfg.get("sync_first", sync_caldb_first))
+    download_missing = bool(koa_cfg.get("download_missing", download_missing_koa))
 
     user_paths = cfg.get("calibrations") if isinstance(cfg.get("calibrations"), dict) else {}
     fiberflat_rates = _normalize_fiberflat_rates(cfg.get("fiberflat_rates"))
@@ -375,6 +610,7 @@ def resolve_e2e_calibrations(
                     instrument_name=instrument_name,
                     connect_remote=connect_remote,
                     sync_first=sync_first,
+                    download_missing=download_missing,
                 )
             except Exception as e:
                 logger.warning(
@@ -395,5 +631,17 @@ def resolve_e2e_calibrations(
                     bundle.fiberflat = model
                 elif key == "wavesol":
                     bundle.wavesol = model
+
+    resolve_local_stage1_masters(
+        bundle,
+        output_dir=out_dir,
+        spectrograph=spectrograph.upper(),
+    )
+    resolve_testing_data_stage1_masters(
+        bundle,
+        output_dir=out_dir,
+        spectrograph=spectrograph.upper(),
+    )
+    log_stage1_trace_bundle_status(bundle)
 
     return bundle

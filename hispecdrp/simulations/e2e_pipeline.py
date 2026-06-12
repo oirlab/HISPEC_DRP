@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import e2e_calibrations, e2e_support
+from . import e2e_calibrations, e2e_gaia, e2e_support
 from .simulate_up_the_ramp import (
     create_dummy_fiberflat_rate_files,
     create_ramp_and_calibrations,
@@ -50,11 +50,16 @@ class E2EConfig:
     datetime_obs: str | None = None
     connect_remote: bool = True
     sync_caldb_first: bool = True
+    download_missing_koa: bool = True
     run_stage1: bool = True
     run_stage2: bool = True
     poisson_noise: bool = True
     convert_to_uint16: bool = True
     radial_velocity_km_s: float = 0.0
+    use_gaia_target: bool = True
+    gaia_source_id: str | None = None
+    gaia_max_g_mag: float = 8.0
+    gaia_random_seed: int | None = None
     template_mag_ab: float | None = None
     template_2mass_band: str | None = None
     overwrite_ramp: bool = True
@@ -69,6 +74,7 @@ class E2EResult:
     stage1_model: Any | None
     stage2_model: Any | None
     fiberflat_bundle: dict | None
+    gaia_target: e2e_gaia.E2EGaiaTarget | None = None
     calibration_sources: dict[str, str] = field(default_factory=dict)
 
 
@@ -82,6 +88,26 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     out_dir_abs = e2e_support.ensure_output_directory(config.output_dir)
     os.makedirs(out_dir_abs, exist_ok=True)
 
+    gaia_target: e2e_gaia.E2EGaiaTarget | None = None
+    injected_rv_km_s = config.radial_velocity_km_s
+    target_meta: dict | None = None
+    eff_mjd_start = config.mjd_start
+    if config.use_gaia_target:
+        if eff_mjd_start is None:
+            import astropy.time as at
+
+            eff_mjd_start = float(at.Time.now().mjd)
+        gaia_target = e2e_gaia.resolve_e2e_gaia_target(
+            source_id=config.gaia_source_id,
+            mjd_mid=float(eff_mjd_start),
+            max_g_mag=config.gaia_max_g_mag,
+            random_seed=config.gaia_random_seed,
+            extra_rv_km_s=config.radial_velocity_km_s,
+        )
+        injected_rv_km_s = gaia_target.injected_rv_km_s
+        target_meta = gaia_target.target_meta
+        eff_mjd_start = gaia_target.mjd_mid
+
     cal_bundle = e2e_calibrations.resolve_e2e_calibrations(
         output_dir=out_dir_abs,
         spectrograph=config.spectrograph,
@@ -89,13 +115,16 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         calibration_config=config.calibration_config,
         instrument_name=config.instrument_name,
         instrument_era=config.instrument_era,
-        mjd_start=config.mjd_start,
+        mjd_start=eff_mjd_start,
         datetime_obs=config.datetime_obs,
         connect_remote=config.connect_remote,
         sync_caldb_first=config.sync_caldb_first,
+        download_missing_koa=config.download_missing_koa,
     )
+    e2e_calibrations.log_stage1_trace_bundle_status(cal_bundle)
 
     stage0_seed = dict(cal_bundle.stage0) if cal_bundle.stage0 else None
+
     logger.info(
         "E2E: building ramp and calibrations (output_dir=%s, stage0_from_koa_or_config=%s).",
         out_dir_abs,
@@ -114,7 +143,10 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         max_cores=config.max_cores,
         poisson_noise=config.poisson_noise,
         convert_to_uint16=config.convert_to_uint16,
-        radial_velocity_km_s=config.radial_velocity_km_s,
+        radial_velocity_km_s=injected_rv_km_s,
+        mjd_start=eff_mjd_start,
+        datetime_obs=config.datetime_obs,
+        target_meta=target_meta,
         template_mag_ab=config.template_mag_ab,
         template_2mass_band=config.template_2mass_band,
         overwrite_ramp=config.overwrite_ramp,
@@ -152,7 +184,11 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         ff_list = [f for f in ff_list if f in (1, 2, 3)]
         if ff_list:
             if cal_bundle.has_master_trace_bundle:
-                logger.info("E2E: using trace/fiberflat masters from config or KOA; Stage 1.")
+                logger.info(
+                    "E2E: using trace_pos, trace_prof, and fiberflat masters "
+                    "(KOA and/or local cache); skipping dummy fiberflat simulation "
+                    "and ProcessFiberflatsPipeline."
+                )
                 ff_bundle = {
                     "trace_pos": cal_bundle.trace_pos,
                     "trace_prof": cal_bundle.trace_prof,
@@ -225,7 +261,8 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     )
     e2e_support.log_e2e_rv_performance_summary(
         stage2_model,
-        injected_rv_km_s=config.radial_velocity_km_s,
+        injected_rv_km_s=injected_rv_km_s,
+        gaia_target=gaia_target,
         fibers=config.fibers,
     )
 
@@ -236,5 +273,6 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         stage1_model=stage1_model,
         stage2_model=stage2_model,
         fiberflat_bundle=ff_bundle,
+        gaia_target=gaia_target,
         calibration_sources=dict(cal_bundle.sources),
     )
