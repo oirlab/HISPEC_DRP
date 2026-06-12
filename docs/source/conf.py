@@ -61,11 +61,11 @@ html_css_files = [
 # https://sphinxawesome.xyz/how-to/configure/
 html_theme = 'sphinxawesome_theme'
 #html_theme = 'sphinx_rtd_theme'
-#from sphinxawesome_theme.postprocess import Icons
+from sphinxawesome_theme.postprocess import Icons
 from pygments.styles import get_all_styles
 pygments_style = "friendly"
 pygments_style_dark = "friendly"
-#html_permalinks_icon = Icons.permalinks_icon
+html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
 html_css_files = ["custom.css"]
 
