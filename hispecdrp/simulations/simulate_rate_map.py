@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 # Default output filenames for saved products
 DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
 DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
+
+logger = logging.getLogger(__name__)
+
+# Default output filenames for saved products
+DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
+DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
 from numba import njit
 
 from scipy.interpolate import interp1d
@@ -40,6 +46,12 @@ from astropy.units import Quantity
 from astropy.io import fits
 import astropy.utils.data
 
+__all__ = [
+    "DEFAULT_RATE_MAP_FILENAME",
+    "DEFAULT_PYECHELLE_FILENAME",
+    "SimulateRateMap",
+    "read_pyechelle_hdf",
+]
 __all__ = [
     "DEFAULT_RATE_MAP_FILENAME",
     "DEFAULT_PYECHELLE_FILENAME",

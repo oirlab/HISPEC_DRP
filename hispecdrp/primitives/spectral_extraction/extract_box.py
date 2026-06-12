@@ -12,6 +12,7 @@ def extract_spectrum_box(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     extraction_aperture : float,
     pix_range : tuple | None = None,
@@ -20,6 +21,7 @@ def extract_spectrum_box(
     var_rnoise_output : np.ndarray = None,
     var_poisson_output : np.ndarray = None,
     dq_output : np.ndarray = None,
+    mid_time_output : np.ndarray = None,
     orders_are_vertical : bool = True,
 ) -> dict:
     """
@@ -37,6 +39,8 @@ def extract_spectrum_box(
         2D array of input read noise variance.
     input_var_poisson : np.ndarray
         2D array of input Poisson noise variance.
+    input_mid_time : np.ndarray
+        2D array of input mid times for each pixel.
     trace_positions : np.ndarray
         2D array of y-coordinates for the extraction (order, ypos).
     extraction_aperture : float
@@ -53,6 +57,8 @@ def extract_spectrum_box(
         1D array to store extracted Poisson noise variance.
     dq_output : np.ndarray
         1D array to store extracted data quality flags.
+    mid_time_output : np.ndarray
+        1D array to store extracted mid times.
     orders_are_vertical : bool
         Whether the orders are oriented vertically.
 
@@ -80,13 +86,16 @@ def extract_spectrum_box(
         var_poisson_output = np.full(npix, np.nan, dtype=input_var_poisson.dtype)
     if dq_output is None:
         dq_output = np.full(npix, 0, dtype=input_dq.dtype)
-    
+    if mid_time_output is None:
+        mid_time_output = np.full(npix, np.nan, dtype=input_mid_time.dtype)
+
     _extract_box_numba(
         input_data=input_data,
         input_err=input_err,
         input_dq=input_dq,
         input_var_rnoise=input_var_rnoise,
         input_var_poisson=input_var_poisson,
+        input_mid_time=input_mid_time,
         trace_positions=trace_positions,
         extraction_aperture=extraction_aperture,
         pix_range=pix_range,
@@ -95,6 +104,7 @@ def extract_spectrum_box(
         var_rnoise_output=var_rnoise_output,
         var_poisson_output=var_poisson_output,
         dq_output=dq_output,
+        mid_time_output=mid_time_output,
         orders_are_vertical=orders_are_vertical,
     )
 
@@ -104,6 +114,7 @@ def extract_spectrum_box(
         var_rnoise=var_rnoise_output,
         var_poisson=var_poisson_output,
         dq=dq_output,
+        mid_time=mid_time_output,
     )
 
 @njit(nogil=True, parallel=False, cache=True)
@@ -113,6 +124,7 @@ def _extract_box_numba(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     extraction_aperture : float,
     pix_range : tuple,
@@ -121,6 +133,7 @@ def _extract_box_numba(
     var_rnoise_output : np.ndarray,
     var_poisson_output : np.ndarray,
     dq_output : np.ndarray,
+    mid_time_output : np.ndarray,
     orders_are_vertical : bool = True,
 ):
 
@@ -183,3 +196,6 @@ def _extract_box_numba(
         var_rnoise_output[x] = np.sum(M * W**2 * D_var_rnoise) / N**2
         var_poisson_output[x] = np.sum(M * W**2 * D_var_poisson) / N**2
         dq_output[x] = 0
+
+        # Mid times
+        mid_time_output[x] = np.sum(M * W * input_mid_time[x, window_inds]) / np.sum(M * W)

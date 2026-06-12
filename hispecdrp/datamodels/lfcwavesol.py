@@ -34,14 +34,21 @@ class LFCWavesolModel(CalibrationModel):
     CC_COEFF_FIB#             Image      Float64     (deg_pix + 1) x (deg_ord + 1)   None       Chebyshev coefficients for the wavelength solution.
     """
     CAL_TYPE = 'lfc_wavesol'
-    def __init__(self, *args, **kwargs):
-        config = kwargs.get('config', None)
-        if config is None:
-            config = self._get_instrument_config(
-                meta=kwargs.get('meta', None),
-                filepath=kwargs.get('filepath', None),
-                instrument_name=kwargs.get('instrument_name', None),
-            )
-        self.EXTENSIONS = self.EXTENSIONS.copy()
-        self.EXTENSIONS.update(_create_lfcwavesol_extensions(config.num_fibers))
-        super().__init__(*args, **kwargs)
+
+    def _get_extensions(self):
+        ext = self.EXTENSIONS.copy()
+        ext.update(_create_lfcwavesol_extensions(self.config.num_fibers))
+        return ext
+        
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'SPEC')
+
+    @property
+    def primary_extension_name(self):
+        for fiber in range(1, self.config.num_fibers + 1):
+            if self.has_extension_value(f'spec_fib{fiber}'):
+                return f'spec_fib{fiber}'
+            if self.has_extension_value(f'wave_fib{fiber}'):
+                return f'wave_fib{fiber}'
+        return None

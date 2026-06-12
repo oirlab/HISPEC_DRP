@@ -1,5 +1,3 @@
-from hispecdrp.datamodels.base_model import CalibrationModel
-
 from .base_primitive import BasePrimitive
 from .dq_init import *
 from .saturation import *
@@ -21,6 +19,8 @@ from .spectral_extraction import *
 from .blaze_correction import *
 from .stellar_rv import *
 from .refpix import *
+from .barycenter_correction import *
+from .cross_correlation import *
 
 # Registry of primitives
 _local_dict = locals()

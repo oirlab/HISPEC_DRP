@@ -65,12 +65,17 @@ class DQInitPrimitive(BasePrimitive):
         # Output
         result = self.get_output_model(input_model)
 
-        # Log
+        # Log (use input_model.data if result.data is not set; avoid "or" so numpy arrays are not used in boolean context)
+        _r_data = getattr(result, "data", None)
+        data_ref = _r_data if _r_data is not None else getattr(input_model, "data", None)
         logger.info(f"Applying DQ initialization with {dq} to {input_model}")
-        logger.info(f"Note: UTR data type is {result.data.dtype}")
+        if data_ref is not None:
+            logger.info(f"Note: UTR data type is {data_ref.dtype}")
 
         if not hasattr(input_model, 'DQ_RAW') or  input_model.dq_raw is None:
-            result.dq_raw = np.zeros_like(result.data, dtype=np.uint8)
+            if data_ref is None:
+                raise ValueError("Cannot initialize DQ_RAW: result and input have no data array.")
+            result.dq_raw = np.zeros_like(data_ref, dtype=np.uint8)
         # if hasattr(input_model, 'DQ_RAW'):
             # result.dq_raw = _apply_dq_mask(input_model.dq_raw, dq_model.dq)
         if hasattr(input_model, 'DQ') and input_model.dq is not None:

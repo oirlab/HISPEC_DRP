@@ -1,6 +1,6 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import os
-import astropy.table
+from astropy.table import Table, Column
 from astropy.io import fits
 from copy import deepcopy
 
@@ -9,15 +9,25 @@ import numpy as np
 import warnings
 from astropy.io.fits.verify import VerifyWarning
 from uuid import uuid4 as make_uuid4
-from typing import Any, Sequence, Self, ClassVar
+from typing import Any, Sequence, Self, ClassVar, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..primitives.base_primitive import BasePrimitive
 
 from hispecdrp.calibrations.hispec_store import HISPECCalibrationStore
 
-from .utils import open as datamodel_open, get_instrument_config
+from .utils import (
+    open as datamodel_open,
+    get_instrument_config,
+    append_ancestors as _append_ancestors,
+    append_receipts as _append_receipts,
+    append_calibrations as _append_calibrations,
+)
+
 from .meta_data import MetaModel, merge_meta, get_meta_schema
 from ..utils import convert_endianness
 from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS
-from .utils import _set_datetime_meta, _set_koa_meta
+from .utils import _set_datetime_meta, _set_koa_meta, _set_target_meta
 
 from koa_middleware import CalibrationStore
 from koa_middleware.utils import get_koa_id_timestamp_from_datetime, get_env_var_bool
@@ -212,7 +222,7 @@ class DataModel:
             extl = extname.lower()
             if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, astropy.table.Table({
+                    setattr(self, extl, Table({
                         name: np.array([], dtype=dtype)
                         for name, dtype in self.EXTENSIONS[extname]['columns'].items()
                     }))
@@ -222,7 +232,7 @@ class DataModel:
     def read_extension_data(
         self, hdu : _VALID_HDU,
         correct_dtype : bool = False
-    ) -> np.ndarray | astropy.table.Table:
+    ) -> np.ndarray | Table:
         """
         Read data from a specific HDU.
 
@@ -235,7 +245,7 @@ class DataModel:
 
         Returns
         -------
-        data : np.ndarray or astropy.table.Table
+        data : np.ndarray or Table
             If an ImageHDU, returns a numpy ndarray.
             If a BinTableHDU, returns an astropy Table.
         """
@@ -250,7 +260,7 @@ class DataModel:
                         data = data.astype(dtype, copy=False)
                 data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
-            data = astropy.table.Table(data)
+            data = Table(data)
         return data
 
     def save(
@@ -283,19 +293,19 @@ class DataModel:
             Whether to include empty extensions in the output. Defaults to False.
         correct_dtypes : bool, optional
             Whether to correct the data types of the data arrays. Defaults to False.
-        output_verify : str, optional
         **kwargs
             Additional keyword arguments to pass to the fits.HDUList.writeto method.
-
         """
+        # TODO: Reconsider how _filepath is set.
         if filepath is not None:
             self._filepath = filepath
         else:
-            self._filepath = self.get_output_path(
+            self._filepath = self._generate_output_path(
                 filename=filename,
                 output_dir=output_dir,
                 suffix=suffix
             )
+            
         self.on_save()
         hdulist = self.to_hdulist(
             include_empty_extensions=include_empty_extensions,
@@ -305,26 +315,30 @@ class DataModel:
         self._save_fits(hdulist, **kwargs)
         return self._filepath
     
-    def get_output_path(
+    def _generate_output_path(
         self,
         filename : str | None = None,
         output_dir : str | None = None,
         suffix : str | None = None,
     ) -> str:
         if output_dir is not None and filename is not None:
-            filepath = os.path.join(output_dir, filename)
+            self.meta.filename = filename
+            return os.path.join(
+                os.path.abspath(output_dir),
+                filename
+            )
         elif output_dir is not None and filename is None:
             filename = self.generate_filename(suffix=suffix)
-            filepath = os.path.abspath(os.path.join(output_dir, filename))
+            return os.path.join(
+                os.path.abspath(output_dir),
+                filename
+            )
         elif output_dir is None and filename is not None:
-            raise ValueError("output_dir must be specified if filename is specified")
-            #filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
+            return os.path.join(os.getcwd(), filename)
         else:
-            raise ValueError("Either output_dir or filename must be specified")
-            #filename = self.generate_filename(suffix=suffix)
-            #filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
-        return filepath
-
+            filename = self.generate_filename(suffix=suffix)
+            return os.path.join(os.getcwd(), filename)
+    
     def to_hdulist(
         self,
         include_empty_extensions : bool = False,
@@ -363,7 +377,8 @@ class DataModel:
                 include_missing_metadata=include_missing_metadata,
                 correct_dtypes=correct_dtypes
             )
-            hdulist.append(hdu)
+            if hdu is not None:
+                hdulist.append(hdu)
         
         return hdulist
 
@@ -381,7 +396,7 @@ class DataModel:
         val = getattr(self, extl, None)
         if val is None:
             return True
-        if isinstance(val, astropy.table.Table) and len(val) == 0:
+        if isinstance(val, Table) and len(val) == 0:
             return True
         return False
 
@@ -411,9 +426,16 @@ class DataModel:
 
         _set_datetime_meta(self)
         _set_koa_meta(self)
+        _set_target_meta(self)
 
         if self.meta.last_processed is None:
             self.meta.last_processed = self.meta.datetime_obs
+
+        if self.meta.instrument_era is None:
+           self.meta.instrument_era = "0.0.1"
+
+        # Apply instrument metadata defaults
+        self.config.set_meta_defaults(self)
 
         # if self.meta.filename is None:
         #     self.generate_filename()
@@ -427,7 +449,6 @@ class DataModel:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
         _set_koa_meta(self)
-        self.meta.model_type = self.__class__.__name__
 
     def make_hdu(
         self,
@@ -469,10 +490,23 @@ class DataModel:
         # Nothing special for BIN tables
         elif hdu_class is fits.BinTableHDU:
             data = getattr(self, extl, None)
-            hdu = hdu_class(data=data, name=extname)
+            if data is None:
+                return None
+            elif len(data) == 0:
+                dtypes = {name: data[name].dtype for name in data.colnames}
+                if any(dtype == object for dtype in dtypes.values()):
+                    return None
+                else:
+                    return hdu_class(data=data, name=extname)
+            else:
+                return hdu_class(data=data, name=extname)
+            #if data is None:
+            #    hdu = hdu_class(data=data, name=extname)
+            #elif isinstance(data, Table):
+
 
         return hdu
-
+    
     def __repr__(self):
         if self.meta.filename is not None:
             return f"{self.__class__.__name__}('{self.meta.filename}')"
@@ -573,7 +607,7 @@ class DataModel:
             keyl = key.lower()
             val = kwargs[key]
             if keyu in self.EXTENSIONS:
-                if isinstance(val, astropy.table.Table):
+                if isinstance(val, Table):
                     setattr(self, keyl, val)
                 elif isinstance(val, np.ndarray):
                     if correct_dtypes:
@@ -582,16 +616,36 @@ class DataModel:
                         setattr(self, keyl, val)
             else:
                 raise ValueError(f"Unknown extension: {key.upper()}")
+            
+        def _init_empty_table(extdef : dict) -> Table:
+            cols = []
+            for name, spec in extdef["columns"].items():
+                if isinstance(spec, dict):
+                    dtype = spec.get("dtype")
+                    shape = spec.get("shape")
+                else:
+                    dtype = spec
+                    shape = None
+                if shape is not None:
+                    data = np.empty((0, *shape), dtype=dtype)
+                else:
+                    data = np.empty(0, dtype=dtype)
+                cols.append(Column(name=name, data=data))
+            return Table(cols)
 
         # Initialize remaining extensions
         for extname in self.EXTENSIONS:
             extl = extname.lower()
             if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, astropy.table.Table({
-                        name: np.array([], dtype=dtype)
-                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    }))
+                    # setattr(self, extl, Table({
+                    #     name: np.array([], dtype=dtype)
+                    #     for name, dtype in self.EXTENSIONS[extname]['columns'].items()
+                    # }))
+                    setattr(
+                        self, extl,
+                        _init_empty_table(self.EXTENSIONS[extname])
+                    )
                 else:
                     setattr(self, extl, None)
 
@@ -628,9 +682,6 @@ class DataModel:
                 merged |= meta
 
             self.meta = MetaModel(meta_schema, merged)
-
-        # Apply instrument metadata defaults
-        self.config.set_meta_defaults(self)
 
     def read_meta_from_fits_headers(self, schema : dict) -> dict:
         """
@@ -672,7 +723,7 @@ class DataModel:
             col = col.upper()
             if col not in self.data_ancestors.colnames:
                 # Add new column with object dtype to support None
-                self.data_ancestors.add_column(astropy.table.Column(
+                self.data_ancestors.add_column(Column(
                     name=col,
                     data=[None] * len(self.data_ancestors),
                     dtype=_json_schema_to_python_dtype(
@@ -717,9 +768,11 @@ class DataModel:
         cls,
         input : Any,
         append_receipts: bool = True,
-        append_ancestors: bool = True,
+        ancestor_rule : str = 'these', # 'these', 'append', 'none'
         append_calibrations: bool = True,
         include_data : bool = False,
+        primitive : 'BasePrimitive' | None = None,
+        **kwargs
     ) -> 'DataModel':
         """
         Create a new DataModel by merging metadata from multiple input models.
@@ -730,8 +783,13 @@ class DataModel:
             Input DataModel(s) or file path(s) to merge.
         append_receipts : bool, optional
             Whether to append receipts from input models. Defaults to True.
-        append_ancestors : bool, optional
-            Whether to append data ancestors from input models. Defaults to True.
+        ancestor_rule : str, optional
+            Rule for handling data ancestors. Defaults to 'these'.
+            Rules are:
+                - 'these': Add the input models themselves to the data ancestors of the output model, but do not copy their ancestors.
+                - 'append': Copy the data ancestors from the input models to the output model, but do not include the input models themselves as ancestors.
+                - 'none': Do not copy ancestors or add input models as ancestors.
+
         append_calibrations : bool, optional
             Whether to append calibrations from input models. Defaults to True.
         include_data : bool, optional
@@ -781,22 +839,35 @@ class DataModel:
             for extname in model_out.EXTENSIONS:
                 if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS', 'RECEIPT'):
                     continue
-                extl = extname.lower()
                 if extname in first_model.EXTENSIONS:
+                    extl = extname.lower()
                     setattr(model_out, extl, getattr(first_model, extl, None))
 
+        ancestor_rule = ancestor_rule.lower()
         for _input in input:
 
             input_model = datamodel_open(_input)
 
             if append_receipts:
-                model_out.append_receipts(input_model)
+                _append_receipts(model_out, input_model)
 
-            if append_ancestors:
-                model_out.append_ancestors(input_model)
+            if ancestor_rule == 'append':
+                _append_ancestors(model_out, input_model)
+            elif ancestor_rule == 'these':
+                # Add THIS model to the ancestors table, not its ancestors
+                primitive.add_data_ancestors(model_out, input_model)
+            elif ancestor_rule == 'none':
+                # Do nothing
+                pass
+            else:
+                raise ValueError(f"Unknown ancestor_rule: {ancestor_rule}")
 
             if append_calibrations:
-                model_out.append_calibrations(input_model)
+                _append_calibrations(model_out, input_model)
+
+        for k in kwargs:
+            if hasattr(model_out, k):
+                setattr(model_out, k, kwargs[k])
 
         return model_out
     
@@ -1013,53 +1084,25 @@ class DataModel:
     def instrument_name(self) -> str:
         return self.config.instrument_name
     
-    def append_receipts(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-        for other_model in others:
-            for row in other_model.receipt:
-                self.receipt.add_row(row)
+    @classmethod
+    def has_extension(cls, extname: str) -> bool:
+        return extname.upper() in cls.EXTENSIONS
 
-    def append_calibrations(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-        for other_model in others:
-            for row in other_model.calibrations:
-                self.calibrations.add_row(row)
+    def has_extension_value(self, extname: str) -> bool:
+        """NOTE: Utility of this method TBD"""
+        return getattr(self, extname.upper(), None) is not None
 
-    def append_ancestors(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-            
-        for other_model in others:
-            # Check for new columns to add to self
-            new_cols = [c for c in other_model.data_ancestors.colnames if c not in self.data_ancestors.colnames]
-            if new_cols:
-                self._extend_data_ancestors_columns(new_cols)
-                
-            for row in other_model.data_ancestors:
-                # astropy.table.row -> dict to handle column mapping
-                row_dict = {c: row[c] for c in other_model.data_ancestors.colnames}
-                self.data_ancestors.add_row(row_dict)
-
+    @property
+    def shape(self):
+        ext = self.primary_extension_name
+        if ext is None:
+            return None
+        val = getattr(self, ext, None)
+        if val is None:
+            return None
+        if isinstance(val, np.ndarray):
+            return val.shape
+        return None
 
 class CalibrationModel(DataModel):
 
@@ -1067,6 +1110,8 @@ class CalibrationModel(DataModel):
 
     def on_init(self):
         self.meta.cal_type = self.CAL_TYPE
+        if self.meta.master_cal is None:
+            self.meta.master_cal = True
         if self.meta.cal_id is None:
             self.generate_calibration_id()
         super().on_init()

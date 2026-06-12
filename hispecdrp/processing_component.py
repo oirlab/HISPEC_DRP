@@ -4,6 +4,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 
 from .datamodels import DataModel
 from . import datamodels
+from .utils.config import get_config_path, read_config_file
 
 from typing import Sequence
 
@@ -17,25 +18,48 @@ class ProcessingComponent(_BasePrimitive):
     ARGUMENTS = {
         'input': None,
         'run' : True,
-        'save_result': False,
+        'save_result': None,
         'output_model': 'input',
-        'output_path': None,
+        'output_file' : None,
         'output_dir': None,
         'suffix': None,
         'save_preview' : False,
         'show_preview' : False,
     }
 
-    LOGGING = {
-        'level' : 'INFO',                     # str or int
-        'enable_stdout' : None,               # enable StreamHandler
-        'enable_file' : None,                 # enable FileHandler
-        'log_dir' : None,                     # Path to log directory
-        'filename_prefix' : 'hispecdrp_log',  # prefix for log files
-        'rotate' : False,                     # enable rotating files (NOTE: TBD)
-        'max_bytes' : 50000000,               # rotation size (NOTE: TBD)
-        'backup_count' : 5                    # number of rotated files (NOTE: TBD)
-    }
+    def _init_log_config(self, log_config=None) -> None:
+        """
+        Resolve and store ``self.log_config`` by merging (lowest → highest priority):
+
+        1. Package defaults from ``hispecdrp/configs/logging.yaml``
+        2. ``logging`` key embedded in ``self.config`` (removed from ``self.config`` after reading)
+        3. ``log_config`` kwarg passed at construction time (dict or file path/name)
+        """
+
+        from .pipelines.base_pipeline import BasePipeline
+        if isinstance(self, BasePipeline):
+            logging_file = "logging_pipeline.yaml"
+        else:
+            logging_file = "logging_primitive.yaml"
+
+        # 1. Package defaults
+        try:
+            defaults = read_config_file(get_config_path(logging_file))
+        except FileNotFoundError:
+            defaults = {}
+
+        # 2. Embedded logging block inside the run config (mutates self.config)
+        config_log = self.config.pop("logging", {}) or {}
+
+        # 3. Runtime kwarg
+        if isinstance(log_config, str):
+            kwarg_log = read_config_file(get_config_path(log_config))
+        elif isinstance(log_config, dict):
+            kwarg_log = log_config
+        else:
+            kwarg_log = {}
+
+        self.log_config = defaults | config_log | kwarg_log
 
     def apply(self, *args, **kwargs):
         """
@@ -107,11 +131,9 @@ class ProcessingComponent(_BasePrimitive):
         self,
         model : 'DataModel',
         filepath : str | None = None,
-        output_dir : str | None = None,
-        suffix : str | None = None
     ) -> str:
         """
-        Save a DataModel to a file.
+        Save a DataModel to a file in the context of this processing component.
         The file suffix will be added to the existing filename (``model.meta.filename``) if present and filepath is not set.
 
         Parameters
@@ -119,25 +141,17 @@ class ProcessingComponent(_BasePrimitive):
         model : DataModel
             The model to save.
         filepath : str | None, optional
-            The full filepath where to save the model. Supersedes output_dir and suffix.
-        output_dir : str | None, optional
-            The output directory.
-        suffix : str | None, optional
-            The file suffix.
+            The full filepath where to save the model.
+            Supersedes ``self.output_dir`` and ``self.suffix``.
 
         Returns
         -------
         str
             The file path where the model was saved.
         """
-        if filepath is None:
-            filepath = self.output_path
-        if output_dir is None:
-            output_dir = self.output_dir
-        if suffix is None:
-            suffix = self.suffix
-        model.save(filepath=filepath, output_dir=output_dir, suffix=suffix)
-        logger.info(f"Saved {model.__class__.__name__} to {model._filepath}")
+        output_path = self.generate_output_path(model)
+        model.save(filepath=output_path)
+        logger.info(f"Saved {model}")
         return filepath
 
     def get_args(self) -> dict:
@@ -214,31 +228,134 @@ class ProcessingComponent(_BasePrimitive):
         """
         pass
 
-    def get_primary_input_dir(self, input=None):
+    def generate_output_path(
+        self,
+        model : str | DataModel,
+        output_dir : str | None = None,
+    ):
+        """
+        Generate an output filepath for a model.
+        """
+
+        # Open model
+        #model = datamodels.open(model, meta_only=True)
+
+        # If the model has a filepath, use it
+        #if model._filepath is not None:
+        #    return model._filepath
         
-        if input is None:
-            input = self.input
+        # Get output directory
+        output_dir = self.get_output_dir(model)
+
+        # Get the filename
+        if self.output_file is not None:
+            filename = self.output_file
+        else:
+            filename = model.generate_filename(suffix=self.suffix)
+        output_path = os.path.abspath(os.path.join(output_dir, filename))
+        return output_path
+
+    def get_output_dir(
+        self,
+        model : str | DataModel
+    ) -> str:
+        """
+        Get the output directory for saving any results in the context of a model.
+        The priority for determining the output directory is as follows:
+            1. ``self.output_dir`` if explicitly set (input model not used).
+            2. ``model._filepath`` directory if available.
+            3. Current working directory as a fallback.
+
+
+
+        - If ``self.output_dir`` is set, it is returned and the input model is not used.
+        - Otherwise, the output dir is determined from the input model's filepath if available, and if not, the current working directory is used.
+
+        Parameters
+        ----------
+        model : str | DataModel
+            The input model to determine the output directory from if ``self.output_dir`` is not set.
+
+        Returns
+        -------
+        str
+            The output directory for saving results.
+        """
         
-        # Case 1: String path
-        if isinstance(input, str) and os.path.exists(input):
-            return os.path.dirname(os.path.abspath(input))
+        # If output_dir is explicitly set, use it regardless of the input model
+        if self.output_dir is not None:
+            return self.output_dir
+
+        # Get the input directory for this model
+        input_dir = self.get_input_dir(model)
+        if input_dir is not None:
+            return input_dir
+
+        # Fallback is the current working directory
+        return os.getcwd()
+
+    def get_input_dir(self, model=None):
+        """
+        Get the input directory for a given model.
+        """
         
-        # Case 2: DataModel (or similar object with _filepath)
-        elif hasattr(input, '_filepath') and input._filepath:
-            return os.path.dirname(os.path.abspath(input._filepath))
+        # Model contenxt
+        if model is None:
+            model = self.input
+
+        # Helper function for below.
+        def _get_filepath(model):
+            _filepath = getattr(model, '_filepath', None)
+            if _filepath is not None:
+                return os.path.dirname(os.path.abspath(_filepath))
+            else:
+                return None
         
-        # Case 3: Dict container
-        elif isinstance(input, dict):
-            for val in input.values():
-                res = self.get_primary_input_dir(val)
-                if res:
-                    return res
+        # Case 1: Filepath string
+        if isinstance(model, str) and os.path.exists(model):
+            return os.path.dirname(os.path.abspath(model))
         
-        # Case 4: List/Tuple container
-        elif isinstance(input, (list, tuple)):
-            for val in input:
-                res = self.get_primary_input_dir(val)
-                if res:
-                    return res
+        # Case 2: DataModel instance with _filepath attr
+        elif isinstance(model, datamodels.DataModel):
+            return _get_filepath(model)
+        
+        # Case 3: Sequence
+        elif isinstance(model, (list, tuple)):
+            first_input = model[0]
+            return _get_filepath(first_input)
+        
+        # Case 4: Dict
+        elif isinstance(model, dict):
+            first_input = next(iter(model.values()))
+            return _get_filepath(first_input)
         
         return None
+    
+    def _iter_inputs(self, input=None):
+        """
+        Yields (key, item) pairs from self.input, normalized
+        to a single item, list, or dict depending on the input.
+        """
+        if input is None:
+            input = self.input
+        if isinstance(input, (DataModel, str)):
+            yield None, input
+        elif isinstance(input, dict):
+            yield from input.items()
+        elif isinstance(input, Sequence):
+            yield from enumerate(input)
+        else:
+            raise ValueError(f"Unsupported input type: {type(input)}")
+
+    def _wrap_outputs(self, keyed_outputs: dict, input=None):
+        """
+        Reconstruct a keyed_outputs dict (built via _iter_inputs) into the original container shape.
+        """
+        if input is None:
+            input = self.input
+        if isinstance(input, (DataModel, str)):
+            return keyed_outputs[None]
+        elif isinstance(input, dict):
+            return keyed_outputs
+        else:  # Sequence
+            return [keyed_outputs[i] for i in range(len(keyed_outputs))]

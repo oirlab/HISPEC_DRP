@@ -49,9 +49,9 @@ logger = logging.getLogger(__name__)
 # SVO Filter Profile Service (https://svo2.cab.inta-csic.es/theory/fps3/)
 SVO_FILTER_URL = "https://svo2.cab.inta-csic.es/theory/fps3/getdata.php?format=ascii&id=2MASS/2MASS.{band}"
 
-# Default directory for bundled spectrum data (e.g. BT-Settl .h5 in simulations/data)
+# Default directory for bundled spectrum templates (BT-Settl .h5 under hispecdrp/data/templates)
 _DEFAULT_SPECTRUM_DATA_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "simulations", "data"
+    os.path.dirname(__file__), "..", "data", "templates"
 )
 
 try:
@@ -247,7 +247,7 @@ def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
         Absolute path, or a filename / relative path joined to ``base_dir``.
     base_dir : str or None, optional
         Root directory for relative ``path``. If ``None``, uses
-        ``hispecdrp/simulations/data/`` (see :data:`_DEFAULT_SPECTRUM_DATA_DIR`).
+        ``hispecdrp/data/templates/`` (see :data:`_DEFAULT_SPECTRUM_DATA_DIR`).
 
     Returns
     -------

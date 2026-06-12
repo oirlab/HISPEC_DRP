@@ -2,6 +2,7 @@ from __future__ import annotations
 import datetime
 import numpy as np
 import copy
+from typing import Sequence
 import os
 
 from koa_middleware import CalibrationSelector
@@ -20,6 +21,8 @@ from ..processing_component import ProcessingComponent
 import logging
 logger = logging.getLogger(__name__)
 
+from typing import Any
+
 
 __all__ = ['BasePrimitive']
 
@@ -31,6 +34,8 @@ class BasePrimitive(ProcessingComponent):
     def __init__(
         self,
         config : dict | str | None = None,
+        log_config : dict | str | None = None,
+        parent : Any | None = None,
         **kwargs
     ):
         """
@@ -38,12 +43,20 @@ class BasePrimitive(ProcessingComponent):
         ----------
         config : dict | str | None
             A configuration dictionary, or the path to to a configuration file.
+        log_config : dict | str | None
+            Logging configuration override. Can be a dict of logging keys, a path
+            to a logging YAML file, or None to use package defaults.
+        parent : Any | None
+            The parent object that instantiated this primitive.
         **kwargs
             Any additional keyword arguments to set or override (including ``config``) for this primitive.
         """
 
         # Load the configuration file or Config object
         self.init_config(config)
+
+        # Resolve logging config (merges defaults -> config file -> kwarg)
+        self._init_log_config(log_config)
 
         # Set any kwargs passed to init
         self.init_args(**kwargs)
@@ -52,6 +65,8 @@ class BasePrimitive(ProcessingComponent):
         self._output = None
         self._status = None
         self._calibrations_used = {}
+
+        self._parent = parent
 
     def init_config(
         self,
@@ -77,8 +92,6 @@ class BasePrimitive(ProcessingComponent):
             self.config = {
                 'class': class_name,
                 'arguments': self.ARGUMENTS.copy(),
-                #'calibrations': copy.deepcopy(self.CALIBRATIONS),
-                'logging': self.LOGGING.copy(),
             }
             return self.config
         
@@ -101,25 +114,8 @@ class BasePrimitive(ProcessingComponent):
             self.config['arguments'] = self.ARGUMENTS.copy()
         else:
             self.config['arguments'] = self.ARGUMENTS | self.config['arguments']
-
-        # Default logging
-        if 'logging' not in self.config:
-            self.config['logging'] = self.LOGGING.copy()
-        else:
-            self.config['logging'] = self.LOGGING | self.config['logging']
-
-        # Default calibrations
-        # if 'calibrations' not in self.config:
-        #     self.config['calibrations'] = copy.deepcopy(self.CALIBRATIONS)
-        # else:
         #
         self._init_calibrations()
-
-        # Logging config
-        if 'logging' not in self.config:
-            self.config['logging'] = self.LOGGING.copy()
-        else:
-            self.config['logging'] = self.LOGGING | self.config['logging']
 
         return self.config
     
@@ -178,7 +174,13 @@ class BasePrimitive(ProcessingComponent):
                     if 'selector_kwargs' not in cal_config:
                         cal_config['selector_kwargs'] = {}
             
-            # Case 3: No selector class specified, but user may have kwargs
+            # Case 3: Filepath provided
+            elif isinstance(cal_config, str):
+                # Assume it's a filepath to a calibration model, but do not validate here
+                # User can provide filepath directly as argument value instead of using selector logic
+                continue
+
+            # Case 4: No selector class specified, but user may have kwargs
             # -> Use default selector and merge kwargs
             else:
                 cal_config['selector'] = self.CALIBRATIONS[cal]['selector']
@@ -222,9 +224,6 @@ class BasePrimitive(ProcessingComponent):
                 )
             setattr(self, k, v)
 
-        if self.output_dir is not None:
-            self.save_result = True
-
     def _pre_condition(self):
         """
         Checks if all preconditions are met in order to run this primitive.
@@ -258,24 +257,22 @@ class BasePrimitive(ProcessingComponent):
         self._status = None
         self._calibrations_used = {}
 
-        log_cfg = self.config['logging']
-
-        with logging_context(log_cfg):
+        with logging_context(self.log_config):
 
             # Start time of processing
-            self._datetime_start = datetime.datetime.now().isoformat(timespec='milliseconds')
+            self._datetime_start = datetime.datetime.now().isoformat(timespec='microseconds')
 
             try:
                 self.set_args(input=input, **kwargs)
 
-                primary_dir = self.get_primary_input_dir(self.input)
-                if self.save_result in (None, False) and self.output_dir is not None:
+                input_dir = self.get_input_dir(self.input)
+                if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
-                    self.output_dir = primary_dir
+                    self.output_dir = input_dir
 
                 if not self._pre_condition():
-                    logger.info(f"Skipping {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
+                    logger.info(f"Skipping {self.__class__.__name__}")
                     self._status = "SKIPPED"
                     self.on_skip()
                     self._output = dict(output=input)
@@ -284,24 +281,32 @@ class BasePrimitive(ProcessingComponent):
                 else:
                     logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
                     self._output = self._perform()
-                    if isinstance(self._output, dict):
-                        if 'output' not in self._output:
-                            self._output = dict(output=self._output)
+                    # Check again if skipped since primitives can do this dynamically during processing.
+                    if not self.run:
+                        logger.info(f"Skipping {self.__class__.__name__} after processing due to run=False.")
+                        self._status = "SKIPPED"
+                        self.on_skip()
                     else:
-                        self._output = dict(output=self._output)
-                    if self._status is None:
-                        self._status = "COMPLETE"
-                    self.finalize_output()
-                    if self.save_result:
-                        self.save_output()
-                    if self.save_preview or self.show_preview:
-                        self._create_preview()
+                        if isinstance(self._output, dict):
+                            if 'output' not in self._output:
+                                self._output = dict(output=self._output)
+                        else:
+                            self._output = dict(output=self._output)
+                        if self._status is None:
+                            self._status = "COMPLETE"
+                        self.finalize_output()
+                        if self.save_result:
+                            self.save_output()
+                        if self.save_preview or self.show_preview:
+                            self._create_preview()
             except Exception as e:
-                logger.error(f"Failed executing primitive {self.__class__.__name__}: {e}", exc_info=True)
                 self._output = dict(output=input)
                 self._status = "FAILED"
                 self.on_exception(e)
                 self.finalize_output()
+                logger.exception(
+                    f"Failed executing primitive {self.__class__.__name__}"
+                )
                 raise
             
             # Get main output
@@ -309,6 +314,11 @@ class BasePrimitive(ProcessingComponent):
 
             # Reset input
             self.input = None
+
+        # import threading
+        # import multiprocessing as mp
+        # print(mp.active_children())
+        # print(threading.enumerate())
 
         # Return main output
         return output
@@ -485,17 +495,17 @@ class BasePrimitive(ProcessingComponent):
         """
         assert self._output is not None and 'output' in self._output, 'No output to finalize.'
         output = self._output['output']
-        self._datetime_end = datetime.datetime.now().isoformat(timespec='milliseconds')
+        self._datetime_end = datetime.datetime.now().isoformat(timespec='microseconds')
         
         def _finalize(item):
             if isinstance(item, (str, DataModel)):
                 self.finalize_model(item)
             elif isinstance(item, dict):
                 for val in item.values():
-                    _finalize(val)
+                    self.finalize_model(val)
             elif isinstance(item, list):
                 for val in item:
-                    _finalize(val)
+                    self.finalize_model(val)
 
         _finalize(output)
         
@@ -703,28 +713,6 @@ class BasePrimitive(ProcessingComponent):
         **kwargs
     ) -> 'DataModel':
         """
-        Get the output model based on the input model and the specified output model type. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-
-        Parameters
-        ----------
-        input : Any
-            The input data model or filepath.
-        output_model : str | DataModel | type[DataModel], optional
-            The desired output model type or specification. See :py:meth:`_get_output_model <hispecdrp.primitives.base_primitive.BasePrimitive._get_output_model>` for details.
-        **kwargs
-            Additional keyword arguments passed to `DataModel.from_datamodels()`.
-        """
-        if output_model is None:
-            output_model = getattr(self, 'output_model', None)
-        return self._get_output_model(input, output_model, **kwargs)
-    
-    @staticmethod
-    def _get_output_model(
-        input,
-        output_model : str | 'DataModel' | type['DataModel'] = None,
-        **kwargs
-    ) -> 'DataModel':
-        """
         Get the output model based on the input model and the specified output model type.
 
         Parameters
@@ -740,15 +728,39 @@ class BasePrimitive(ProcessingComponent):
                 - Valid filepath (str): Opens and returns the model from the specified file.
                 - DataModel class (type[DataModel]): Instantiates and returns a new instance of the specified DataModel class using `input_model` as a template with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
                 - DataModel class name for specific instrument or instrument agnostic class (str): Instantiates and returns a new instance of the specified DataModel class with ``output_model.from_datamodels(input_model)``. If input_model.meta.instrument_name is set, it will attempt to use an instrument-specific subclass if available.
-                - None (default value): Raises an error.
+                - None (default value): Falls back to ``self.output_model``.
 
-        **kwargs: Additional keyword arguments passed to `DataModel.from_datamodels()`.
+        **kwargs : Additional keyword arguments passed to `DataModel.from_datamodels()`.
 
         Returns
         -------
         datamodels.DataModel
             The instantiated output DataModel class.
         """
+        if output_model is None:
+            output_model = getattr(self, 'output_model', None)
+
+        def _get_first_input(input):
+            if isinstance(input, datamodels.DataModel):
+                return input, None, 1
+            if isinstance(input, str):
+                return datamodels.open(input), None, 1
+            if isinstance(input, Sequence):
+                for item in input:
+                    if isinstance(item, datamodels.DataModel):
+                        return item, list, len(input)
+                    if isinstance(item, str) and os.path.isfile(item):
+                        return datamodels.open(item), list, len(input)
+            if isinstance(input, dict):
+                for val in input.values():
+                    if isinstance(val, datamodels.DataModel):
+                        return val, dict, len(input)
+                    if isinstance(val, str) and os.path.isfile(val):
+                        return datamodels.open(val), dict, len(input)
+            raise ValueError("Input must be a datamodel, filepath, sequence, or dict.")
+
+        # Get the first input model and its container type
+        input_model, input_type, input_len = _get_first_input(input)
 
         ###################################
         #### Return output model as is ####
@@ -756,44 +768,56 @@ class BasePrimitive(ProcessingComponent):
         if isinstance(output_model, datamodels.DataModel):
             return output_model
 
-        ##################################
-        #### Return input model as is ####
-        ##################################
-        if isinstance(output_model, str) and output_model.lower() == 'input':
-            assert isinstance(
-                input, (datamodels.DataModel, str)
-            ), "Input DataModel or filepath must be provided if output_model is 'input'."
-            return datamodels.open(input) # Assume only one input
-
-        ####################################
-        #### Return copy of input model ####
-        ####################################
-        if isinstance(output_model, str) and output_model.lower() == 'input_copy':
-            assert isinstance(
-                input, (datamodels.DataModel, str)
-            ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
-            input_model = datamodels.open(input) # Assume only one input
-            return input_model.from_datamodels(input_model, **kwargs)
-
-        ##################
-        #### Filepath ####
-        ##################
-        if isinstance(output_model, str) and os.path.isfile(output_model):
-            out_model = datamodels.open(output_model)
-            return out_model
-
-        #####################################
-        #### DataModel class name (str) #####
-        #####################################
+        # String ('input', 'input_copy', filepath or datamodel class name)
         if isinstance(output_model, str):
-            model_class = datamodels.get_model_type(output_model)
-            return model_class.from_datamodels(input, **kwargs)
+
+            ##################################
+            #### Return input model as is ####
+            ##################################
+            if output_model.lower() == 'input':
+                assert isinstance(
+                    input, (datamodels.DataModel, str)
+                ), "Input DataModel or filepath must be provided if output_model is 'input'."
+                return datamodels.open(input)
+
+            ####################################
+            #### Return copy of input model ####
+            ####################################
+            if output_model.lower() == 'input_copy':
+                assert isinstance(
+                    input, (datamodels.DataModel, str)
+                ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
+                input_model = datamodels.open(input)
+                kwargs.setdefault('primitive', self)
+                return input_model.from_datamodels(input_model, **kwargs)
+
+            ##################
+            #### Filepath ####
+            ##################
+            if os.path.isfile(output_model):
+                return datamodels.open(output_model)
+
+            #####################################
+            #### DataModel class name (str) #####
+            #####################################
+            output_model_class = datamodels.get_model_type(output_model)
+            if (
+                output_model_class is not None
+                and input_len == 1
+                and input_model.__class__ is output_model_class
+            ):
+                return input_model
+
+            kwargs.setdefault('primitive', self)
+            return output_model_class.from_datamodels(input, **kwargs)
+            
 
         #################################
         #### DataModel class (type) #####
         #################################
         if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
-            return model_class.from_datamodels(input, **kwargs)
+            kwargs.setdefault('primitive', self)
+            return output_model.from_datamodels(input, **kwargs)
 
         #####################################
         #### Everything else is an error ####
@@ -808,4 +832,3 @@ class BasePrimitive(ProcessingComponent):
         ):
             return self.__dict__['_output'][attr]
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")
-    
