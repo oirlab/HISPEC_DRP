@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ..utils.gaia_query import _convert_epoch_gaia
 from ... import datamodels
+from ...utils.physical_constants import C_M_S
 
 import logging
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ def calc_barycenter_corrections(
     mbjd : float
         Modified Barycentric Julian Date.
     vel_bc : float
-        Barycentric Earth Radial Velocity correction in km/s.
+        Barycentric Earth Radial Velocity correction in m/s (``barycorrpy`` convention).
     """
 
     # if epoch != 2000.0:
@@ -156,7 +157,7 @@ def calc_solar_barycenter_corrections(
     mbjd : float
         Modified Barycentric Julian Date.
     vel_bc : float
-        Barycentric Earth Radial Velocity correction in km/s.
+        Barycentric Earth Radial Velocity correction in m/s (``barycorrpy`` convention).
     """
 
     obs_loc = _resolve_location(observatory)
@@ -187,3 +188,47 @@ def calc_solar_barycenter_corrections(
     mbjd = bjd - 2400000.5
 
     return mbjd, vel_bc
+
+
+def read_berv_m_s_from_model(
+    input_model: datamodels.DataModel,
+    fiber: int | str,
+) -> float | None:
+    """Return ``BERV`` (m/s) from ``BARYCORR_FIB#``, or ``None`` when unavailable."""
+    tbl = getattr(input_model, f"barycorr_fib{fiber}", None)
+    if tbl is None or len(tbl) == 0:
+        return None
+    berv_m_s = float(tbl["BERV"][0])
+    if not np.isfinite(berv_m_s):
+        return None
+    return berv_m_s
+
+
+def berv_m_s_to_ccf_zb(berv_m_s: float) -> float:
+    """
+    Convert ``BARYCORR`` ``BERV`` (m/s) to the CCF barycentric factor :math:`z_b`.
+
+    Matches :func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_observed_wavelength_um`
+    where ``zb1 = 1 + z_b`` and trial velocity enters as ``v / c``.
+    """
+    return float(berv_m_s) / C_M_S
+
+
+def resolve_ccf_zb(
+    input_model: datamodels.DataModel,
+    fiber: int | str,
+    *,
+    ccf_zb: float = 0.0,
+    from_barycorr: bool = True,
+) -> float:
+    """
+    Resolve the CCF barycentric factor for one fiber.
+
+    When ``from_barycorr`` is True and ``BARYCORR_FIB#`` is populated, ``BERV`` (m/s)
+    is converted to dimensionless :math:`z_b`. Otherwise returns ``ccf_zb``.
+    """
+    if from_barycorr:
+        berv_m_s = read_berv_m_s_from_model(input_model, fiber)
+        if berv_m_s is not None:
+            return berv_m_s_to_ccf_zb(berv_m_s)
+    return float(ccf_zb)

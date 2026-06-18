@@ -11,6 +11,7 @@ import copy
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from logging.handlers import QueueHandler
 from pathlib import Path
 from typing import Any
@@ -273,6 +274,7 @@ def run_stage2_simulation(
     prim_args: dict | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
+    stellar_rv_mask_path: str | None = None,
 ) -> datamodels.DataModel:
     """Run Stage 2 (blaze + barycenter correction + stellar RV) on the Stage 1 product."""
     if prim_args is None:
@@ -281,6 +283,9 @@ def run_stage2_simulation(
         prim_args = copy.deepcopy(prim_args)
         if max_cores is not None:
             prim_args = apply_max_cores_to_stage2_prim_args(prim_args, max_cores)
+
+    if stellar_rv_mask_path is not None and "stellar_rv" in prim_args:
+        prim_args["stellar_rv"]["mask_path"] = stellar_rv_mask_path
 
     prim_args = apply_e2e_save_and_preview_flags(prim_args, E2E_STAGE2_PRIMITIVES)
 
@@ -480,6 +485,116 @@ def read_rvccfavg(
     return rv, rv_err
 
 
+@dataclass
+class E2ERVPerformanceRow:
+    """Per-fiber RV recovery metrics for E2E summary tables."""
+
+    fiber: int
+    injected_rv_km_s: float
+    measured_rv_km_s: float | None
+    measured_rv_m_s: float | None
+    rv_err_m_s: float | None
+    bias_km_s: float | None
+    bias_m_s: float | None
+    berv_km_s: float | None
+    inlier_scatter_m_s: float | None
+    n_inlier_chunks: int
+    n_total_chunks: int
+
+
+def read_rvccf_inlier_scatter_m_s(
+    l2_model: datamodels.DataModel,
+    fiber: int,
+    *,
+    rv_mean_m_s: float | None = None,
+) -> tuple[float | None, int, int]:
+    """
+    RMS scatter of inlier chunk RVs about ``RVCCFAVG`` (m/s), matching the stellar-RV preview.
+
+    Returns ``(scatter_m_s, n_inlier, n_total)``.
+    """
+    tbl = getattr(l2_model, f"rvccf_fib{fiber}", None)
+    if tbl is None or len(tbl) == 0:
+        return None, 0, 0
+    rv_all = np.asarray(tbl["RV"], dtype=np.float64)
+    n_total = int(rv_all.size)
+    if "INLIER" in tbl.colnames:
+        inlier = np.asarray(tbl["INLIER"], dtype=np.uint8).astype(bool)
+    else:
+        inlier = np.isfinite(rv_all)
+    valid = inlier & np.isfinite(rv_all)
+    n_inlier = int(np.sum(valid))
+    if n_inlier == 0:
+        return None, 0, n_total
+    if rv_mean_m_s is None:
+        avg = read_rvccfavg(l2_model, fiber)
+        rv_mean_m_s = avg[0] if avg is not None else float(np.nanmean(rv_all[valid]))
+    if not np.isfinite(rv_mean_m_s):
+        return None, n_inlier, n_total
+    biases = rv_all[valid] - float(rv_mean_m_s)
+    scatter = float(np.sqrt(np.sum(biases**2) / n_inlier))
+    return scatter, n_inlier, n_total
+
+
+def collect_e2e_rv_performance_rows(
+    stage2_model: datamodels.DataModel | None,
+    *,
+    injected_rv_km_s: float,
+    injected_berv_km_s: float | None = None,
+    fibers: list[int] | None = None,
+) -> list[E2ERVPerformanceRow]:
+    """Build per-fiber RV performance rows for logging and HTML summaries."""
+    if stage2_model is None:
+        return []
+    fiber_list = sorted({int(f) for f in (fibers if fibers is not None else DEFAULT_RATE_MAP_FIBERS)})
+    injected_m_s = float(injected_rv_km_s) * 1000.0
+    rows: list[E2ERVPerformanceRow] = []
+    for fiber in fiber_list:
+        berv_km_s = read_berv_km_s(stage2_model, fiber)
+        if berv_km_s is None and injected_berv_km_s is not None and np.isfinite(injected_berv_km_s):
+            berv_km_s = float(injected_berv_km_s)
+        pair = read_rvccfavg(stage2_model, fiber)
+        if pair is None:
+            scatter, n_in, n_tot = read_rvccf_inlier_scatter_m_s(stage2_model, fiber)
+            rows.append(
+                E2ERVPerformanceRow(
+                    fiber=fiber,
+                    injected_rv_km_s=float(injected_rv_km_s),
+                    measured_rv_km_s=None,
+                    measured_rv_m_s=None,
+                    rv_err_m_s=None,
+                    bias_km_s=None,
+                    bias_m_s=None,
+                    berv_km_s=berv_km_s,
+                    inlier_scatter_m_s=scatter,
+                    n_inlier_chunks=n_in,
+                    n_total_chunks=n_tot,
+                )
+            )
+            continue
+        meas_m_s, err_m_s = pair
+        bias_m_s = meas_m_s - injected_m_s
+        scatter, n_in, n_tot = read_rvccf_inlier_scatter_m_s(
+            stage2_model, fiber, rv_mean_m_s=meas_m_s
+        )
+        rows.append(
+            E2ERVPerformanceRow(
+                fiber=fiber,
+                injected_rv_km_s=float(injected_rv_km_s),
+                measured_rv_km_s=meas_m_s / 1000.0,
+                measured_rv_m_s=meas_m_s,
+                rv_err_m_s=err_m_s,
+                bias_km_s=bias_m_s / 1000.0,
+                bias_m_s=bias_m_s,
+                berv_km_s=berv_km_s,
+                inlier_scatter_m_s=scatter,
+                n_inlier_chunks=n_in,
+                n_total_chunks=n_tot,
+            )
+        )
+    return rows
+
+
 def read_berv_km_s(l2_model: datamodels.DataModel, fiber: int) -> float | None:
     """Return measured BERV (km/s) from ``BARYCORR_FIB#``, or None if unavailable."""
     tbl = getattr(l2_model, f"barycorr_fib{fiber}", None)
@@ -526,8 +641,8 @@ def log_e2e_rv_performance_summary(
 
     if gaia_target is not None:
         log.info(
-            "E2E Gaia target %s (source_id=%s): Gaia RV=%.3f km/s, injected BERV=%.3f km/s, "
-            "total injected RV=%.3f km/s",
+            "E2E Gaia target %s (source_id=%s): Gaia RV=%.3f km/s, reference BERV=%.3f km/s, "
+            "injected stellar RV=%.3f km/s (BERV via CCF ccf_zb only)",
             gaia_target.target_meta.get("target_name"),
             gaia_target.source_id,
             gaia_target.gaia_rv_km_s,
@@ -543,13 +658,24 @@ def log_e2e_rv_performance_summary(
                 delta = meas_berv - gaia_target.berv_km_s
                 berv_rows.append(
                     f"  fib{fiber}: measured BERV={meas_berv:.3f} km/s "
-                    f"(Δ vs injected {delta:+.3f} km/s)"
+                    f"(Δ vs reference {delta:+.3f} km/s)"
                 )
         log.info("E2E barycenter correction summary\n%s", "\n".join(berv_rows))
 
     header = (
         "E2E RV performance summary "
-        f"(injected RV = {injected_rv_km_s:.3f} km/s = {injected_m_s:.1f} m/s)"
+        f"(injected stellar RV = {injected_rv_km_s:.3f} km/s = {injected_m_s:.1f} m/s; "
+        "barycentric, excludes BERV)"
+    )
+    perf_rows = collect_e2e_rv_performance_rows(
+        stage2_model,
+        injected_rv_km_s=injected_rv_km_s,
+        injected_berv_km_s=(
+            float(gaia_target.berv_km_s)
+            if gaia_target is not None and np.isfinite(gaia_target.berv_km_s)
+            else None
+        ),
+        fibers=fiber_list,
     )
     col_fiber = "Fiber"
     col_meas = "Measured RV (m/s)"
@@ -563,26 +689,22 @@ def log_e2e_rv_performance_summary(
     w_bias_km = len(col_bias_km)
 
     rows: list[str] = []
-    for fiber in sorted({int(f) for f in fiber_list}):
-        pair = read_rvccfavg(stage2_model, fiber)
-        if pair is None:
+    for row in perf_rows:
+        if row.measured_rv_m_s is None:
             rows.append(
-                f"{fiber:>{w_fiber}}  "
+                f"{row.fiber:>{w_fiber}}  "
                 f"{'—':>{w_meas}}  "
                 f"{'—':>{w_err}}  "
                 f"{'—':>{w_bias}}  "
                 f"{'(no RVCCFAVG)':>{w_bias_km}}"
             )
             continue
-        meas_m_s, err_m_s = pair
-        bias_m_s = meas_m_s - injected_m_s
-        bias_km_s = bias_m_s / 1000.0
         rows.append(
-            f"{fiber:>{w_fiber}}  "
-            f"{meas_m_s:>{w_meas}.3f}  "
-            f"{err_m_s:>{w_err}.3f}  "
-            f"{bias_m_s:>{w_bias}.3f}  "
-            f"{bias_km_s:>{w_bias_km}.6f}"
+            f"{row.fiber:>{w_fiber}}  "
+            f"{row.measured_rv_m_s:>{w_meas}.3f}  "
+            f"{row.rv_err_m_s:>{w_err}.3f}  "
+            f"{row.bias_m_s:>{w_bias}.3f}  "
+            f"{row.bias_km_s:>{w_bias_km}.6f}"
         )
 
     sep = "-" * (w_fiber + w_meas + w_err + w_bias + w_bias_km + 8)

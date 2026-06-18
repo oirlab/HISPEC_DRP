@@ -338,6 +338,13 @@ class SimulateRateMap:
         Temporary CSV files are created during this process to feed pyechelle custom spectra.
         A sinc^2 blaze efficiency is applied internally by pyechelle, it cannot be turned off."""
 
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed. Install the HISPEC fork "
+                "(see docs/source/installation.rst) or use "
+                "SimulateRateMap.create_native_rate_map instead."
+            )
+
         spectrograph = spectrograph.upper()
 
         if spectrograph not in ("BSPEC", "RSPEC"):

@@ -37,6 +37,10 @@ class TracePositionPrimitive(BasePrimitive):
     disp_range : tuple or dict
         Range in the dispersion direction (in pixels) to restrict trace finding.
         Can be a single tuple for all fibers or a dict mapping fiber numbers to tuples.
+    prominence_factor : float
+        Initial peak-finding threshold as a fraction of the maximum cross-dispersion
+        profile value (default 0.05). Lower values recover fainter echelle orders on
+        high dynamic-range fiber flats.
 
     Returns
     -------
@@ -50,6 +54,7 @@ class TracePositionPrimitive(BasePrimitive):
         'window_size' : 8,
         'xdisp_range' : None,
         'disp_range' : None,
+        'prominence_factor' : 0.05,
         'output_model' : 'TracePosModel',
     }
 
@@ -99,9 +104,13 @@ class TracePositionPrimitive(BasePrimitive):
             # Open input model for this fiber
             input_model = datamodels.open(self._input_by_fiber[fiber])
 
-            # Get xdisp_range and disp range for this fiber.
+            # Get xdisp_range, disp_range, and prominence for this fiber.
             xdisp_range = self.xdisp_range[fiber] if isinstance(self.xdisp_range, dict) else self.xdisp_range
             disp_range = self.disp_range[fiber] if isinstance(self.disp_range, dict) else self.disp_range
+            if isinstance(self.prominence_factor, dict):
+                prominence_factor = self.prominence_factor[fiber]
+            else:
+                prominence_factor = self.prominence_factor
 
             # Transpose if needed
             if input_model.meta.orders_are_vertical:
@@ -117,6 +126,7 @@ class TracePositionPrimitive(BasePrimitive):
                 disp_range=disp_range, xdisp_range=xdisp_range,
                 deg_pos=self.deg_pos, deg_width=self.deg_width,
                 window_size=self.window_size,
+                prominence_factor=prominence_factor,
             )
 
             # Sanity check
@@ -248,10 +258,10 @@ class TracePositionPrimitive(BasePrimitive):
         fig.suptitle(f"Trace Positions: {tracepos_model.meta.filename}")
         fig.tight_layout()
         
-        # File paths
-        output_path = tracepos_model._generate_output_path(
-            suffix=self.suffix
-        ).replace(".fits", "_preview.png")
+        # File paths (same directory as FITS products from save_output)
+        output_path = self.generate_output_path(tracepos_model).replace(
+            ".fits", "_preview.png"
+        )
 
         if self.save_preview:
             fig.savefig(output_path, dpi=150, bbox_inches='tight')

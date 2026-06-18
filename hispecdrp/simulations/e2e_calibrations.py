@@ -533,6 +533,7 @@ def resolve_e2e_calibrations(
     connect_remote: bool = True,
     sync_caldb_first: bool = True,
     download_missing_koa: bool = True,
+    auto_resolve_stage1_masters: bool = False,
 ) -> E2ECalibrationBundle:
     """
     Resolve E2E calibrations: explicit config paths, then KOA, then simulated (Stage 0 completed later).
@@ -542,6 +543,11 @@ def resolve_e2e_calibrations(
     use_koa : bool
         When True, query the KOA calibration store for keys not set in ``calibration_config``.
         When False, only user config paths are used (remaining keys filled after rate map is built).
+    auto_resolve_stage1_masters : bool
+        When True, fill missing ``trace_pos``, ``trace_prof``, and ``fiberflat`` from local
+        ``cals/``, the KOA cache, or bundled test data. Default is False so Stage 1 trace
+        products are derived from simulated fiberflats built with the same instrument model
+        as the science ramp (avoids stale master drift).
     """
     out_dir = e2e_support.ensure_output_directory(output_dir)
     e2e_support.ensure_koa_calibration_cache_env(out_dir)
@@ -590,10 +596,14 @@ def resolve_e2e_calibrations(
             except Exception as e:
                 logger.warning("User calibration path for %r failed: %s", key, e)
 
+    koa_keys = list(all_keys)
+    if not auto_resolve_stage1_masters:
+        koa_keys = [k for k in koa_keys if k not in STAGE1_TRACE_KEYS]
+
     if use_koa:
         need_koa = [
             k
-            for k in all_keys
+            for k in koa_keys
             if k not in bundle.sources and k in KOA_SELECTOR_BY_KEY
         ]
         if need_koa:
@@ -632,16 +642,17 @@ def resolve_e2e_calibrations(
                 elif key == "wavesol":
                     bundle.wavesol = model
 
-    resolve_local_stage1_masters(
-        bundle,
-        output_dir=out_dir,
-        spectrograph=spectrograph.upper(),
-    )
-    resolve_testing_data_stage1_masters(
-        bundle,
-        output_dir=out_dir,
-        spectrograph=spectrograph.upper(),
-    )
+    if auto_resolve_stage1_masters:
+        resolve_local_stage1_masters(
+            bundle,
+            output_dir=out_dir,
+            spectrograph=spectrograph.upper(),
+        )
+        resolve_testing_data_stage1_masters(
+            bundle,
+            output_dir=out_dir,
+            spectrograph=spectrograph.upper(),
+        )
     log_stage1_trace_bundle_status(bundle)
 
     return bundle

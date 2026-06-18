@@ -16,6 +16,7 @@ import copy
 import logging
 import os
 import re
+import shutil
 
 import numpy as np
 
@@ -32,7 +33,7 @@ from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
 from . import e2e_support
 from .utr import create_ramp
 from .run_caldb import get_master_calibrations
-from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
+from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -40,10 +41,13 @@ SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
 
-def _fiberflat_rate_filename(spectrograph: str, fiber: int) -> str:
+def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -> str:
     """Default filename for a single-fiber fiberflat rate FITS (matches KOA-style naming)."""
     prefix = "HB" if spectrograph.upper() == "BSPEC" else "HR"
-    return f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}.fits"
+    base = f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}"
+    if exposure <= 1:
+        return f"{base}.fits"
+    return f"{base}.{exposure:03d}.fits"
 
 
 def get_expected_ramp_path(output_dir: str) -> str:
@@ -150,7 +154,11 @@ get_default_stage1_prim_args = e2e_support.get_default_stage1_prim_args
 get_default_stage2_prim_args = e2e_support.get_default_stage2_prim_args
 
 
-def create_wavelength_solution_model_from_sim(spectrograph: str):
+def create_wavelength_solution_model_from_sim(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+):
     """
     Build an LFCWavesolModel from the SimulateRateMap HDF wavelength solution for the given spectrograph.
 
@@ -160,6 +168,8 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     ----------
     spectrograph : str
         'BSPEC' or 'RSPEC'.
+    meta : dict or None, optional
+        Extra metadata fields (e.g. ``mjd_start``) merged into the model meta.
 
     Returns
     -------
@@ -175,9 +185,12 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     order_list = hispec_config.HISPECConfig.get_order_list(spectrograph)
 
     # Use the real HISPEC instrument config (provides metadata schema, num_fibers, etc.)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
     wavesol_model = LFCWavesolModel(
         config=hispec_config.HISPECConfig,
-        meta={"spectrograph": spectrograph},
+        meta=model_meta,
     )
     for fiber in (1, 2, 3):
         if fiber not in ws_dict or not ws_dict[fiber]:
@@ -422,10 +435,18 @@ def simulate_ramp_from_rate_map(
     )
 
     ramp_dict["meta"]["spectrograph"] = spectrograph
+    exposure_mid_mjd = eff_mjd_start + 0.5 * max(int(n_reads) - 1, 0) * float(readtime) / 86400.0
+    ramp_dict["meta"]["mjd_start"] = float(eff_mjd_start)
+    ramp_dict["meta"]["mjd_mid"] = float(exposure_mid_mjd)
     if target_meta:
         ramp_dict["meta"].update(
             {k: v for k, v in target_meta.items() if v is not None}
         )
+        ramp_dict["meta"]["mjd_start"] = float(eff_mjd_start)
+        if target_meta.get("mjd_mid") is not None:
+            ramp_dict["meta"]["mjd_mid"] = float(target_meta["mjd_mid"])
+        else:
+            ramp_dict["meta"]["mjd_mid"] = float(exposure_mid_mjd)
     ramp_model = datamodels.RampModel(
         data=ramp_dict["data"],
         dq_raw=ramp_dict["dq_raw"],
@@ -490,58 +511,68 @@ def get_default_stage0_prim_args(
     }
 
 
+def _build_fiberflat_rate_map(
+    srm: SimulateRateMap,
+    spectrograph: str,
+    *,
+    rate_map_method: str = "pyechelle",
+    pyechelle_exposure_time_s: float = 300.0,
+) -> np.ndarray:
+    """Build a 2-D fiberflat rate map with pyechelle raytracing or the native PRF convolver."""
+    method = str(rate_map_method).strip().lower()
+    if method == "pyechelle":
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed but rate_map_method='pyechelle'. "
+                "Install pyechelle (see docs/source/installation.rst) or pass rate_map_method='native'."
+            )
+        import astropy.units as u
+
+        return srm.create_pyechelle_rate_map(
+            spectrograph=spectrograph,
+            exposure_time=pyechelle_exposure_time_s * u.s,
+            save=False,
+        )
+    if method == "native":
+        return srm.create_native_rate_map(
+            spectrograph=spectrograph,
+            method="prf_convolution",
+            save=False,
+        )
+    raise ValueError(
+        f"Unknown fiberflat rate_map_method {rate_map_method!r}; use 'pyechelle' or 'native'."
+    )
+
+
 def create_dummy_fiberflat_rate_files(
     fibers: list[int],
     spectrograph: str,
     output_dir: str,
     calibration_models: dict[str, datamodels.CalibrationModel],
     *,
-    flat_scale: float = 1e-14,
+    flat_scale: float = 2e-14,
     flat_temperature_k: float = 1000.0,
     readtime: float = 1.7,
     n_reads: int = 10,
     max_cores: int = 1,
     stage0_prim_args: dict | None = None,
     fiberflat_filename: callable | None = None,
+    fiberflat_coadd_exposures: int = 1,
+    fiberflat_duplicate_single_reduction: bool = False,
+    rate_map_method: str = "pyechelle",
+    pyechelle_exposure_time_s: float = 300.0,
 ) -> list[str]:
     """
-    Create dummy fiber flat rate FITS files using the same create_ramp / Stage 0 path as the science ramp.
+    Create simulated fiber flat rate FITS files using the same Stage 0 path as the science ramp.
 
-    For each requested fiber (1, 2, 3), a blackbody spectrum at the given temperature (0.8–3.0 µm,
-    optionally scaled) is placed on that fiber only, a rate map is built, a ramp is simulated,
-    Stage 0 is run, and the rate product is saved to output_dir. The resulting file paths can be
-    passed to :func:`run_fiberflat_pipeline`.
+    For each requested fiber (1, 2, 3), a whitelight blackbody spectrum (0.8–3.0 µm, scaled by
+    ``flat_scale``) is placed on that fiber only. A rate map is built with pyechelle raytracing
+    (default) or the native PRF convolver, then one or more ramp + Stage 0 reductions are run.
+    Paths are passed to :func:`run_fiberflat_pipeline`, which coadds frames sharing the same
+    fiber illumination pattern and derives trace positions with :class:`TracePositionPrimitive`.
 
-    Parameters
-    ----------
-    fibers : list of int
-        Fiber numbers (1, 2, 3) to create fiber flat rate files for.
-    spectrograph : str
-        Spectrograph name (e.g. "BSPEC", "RSPEC").
-    output_dir : str
-        Directory to save each rate FITS file.
-    calibration_models : dict
-        Calibration models (same as used for the science ramp). Must contain
-        dq, saturation, bias, gain, rn, dark, detflat.
-    flat_scale : float, optional
-        Scale factor for the fiber flat spectrum flux. Default is 1e-14.
-    flat_temperature_k : float, optional
-        Blackbody temperature in Kelvin for the fiber flat spectrum. Default is 1000.0.
-    readtime : float, optional
-        Time between reads in seconds. Default is 1.7.
-    n_reads : int, optional
-        Number of reads in each ramp. Default is 10.
-    max_cores : int, optional
-        Cores for create_ramp and Stage 0. Default is 1.
-    stage0_prim_args : dict or None, optional
-        Primitive arguments for Stage 0. If None, use :func:`get_default_stage0_prim_args`(max_cores).
-    fiberflat_filename : callable or None, optional
-        (spectrograph, fiber) -> filename. If None, use default KOA-style naming.
-
-    Returns
-    -------
-    list of str
-        Paths to the saved rate FITS files (one per fiber), in fiber order.
+    By default one rate FITS is written per fiber (``fiberflat_coadd_exposures=1``). Optional
+    multi-exposure coadd inputs are supported when ``fiberflat_coadd_exposures`` > 1.
     """
     import astropy.units as u
     from astropy.modeling.models import BlackBody
@@ -550,9 +581,11 @@ def create_dummy_fiberflat_rate_files(
         stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
+    if fiberflat_coadd_exposures < 1:
+        raise ValueError(f"fiberflat_coadd_exposures must be >= 1, got {fiberflat_coadd_exposures}")
 
-    # Blackbody spectrum 0.8–3.0 µm at high resolution to avoid interpolation errors in the simulation
-    n_wl_flat = 100_000
+    # Coarse BB grid; upsampled to R~3e5 when continuous=True (required for smooth native PRF maps).
+    n_wl_flat = 5_000 if str(rate_map_method).strip().lower() == "pyechelle" else 10_000
     wl_flat = np.linspace(0.8, 3.0, n_wl_flat) * u.micron
     wl_aa = wl_flat.to(u.AA)
     bb_scale = 1.0 * u.erg / (u.cm**2 * u.s * u.AA * u.sr)
@@ -569,42 +602,114 @@ def create_dummy_fiberflat_rate_files(
     for f in sorted(fibers):
         if f not in (1, 2, 3):
             continue
-        logger.info("Creating dummy fiber flat rate file for fiber %s.", f)
+        logger.info(
+            "Creating simulated fiber flat rate file(s) for fiber %s "
+            "(rate_map_method=%s, coadd_exposures=%s, duplicate_single_reduction=%s).",
+            f,
+            rate_map_method,
+            fiberflat_coadd_exposures,
+            fiberflat_duplicate_single_reduction,
+        )
         srm = SimulateRateMap()
         srm.output_directory = out_dir_abs
+        srm.pyechelle_outname = f"pyechelle_fiberflat_fib{f}.fits"
+        # Continuum blackbody: upsample to R~3e5 so the native PRF convolver stamps overlap
+        # along each order (continuous=False leaves ~15–20% of dispersion pixels empty).
         srm.set_fiber_spectrum(
             fiber_number=f,
             spectrum_wavelengths=wl_flat,
             spectrum_flux=flux_flat,
             continuous=True,
         )
-        rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
-        ramp_model = simulate_ramp_from_rate_map(
-            rate_map,
-            calibration_models,
-            readtime=readtime,
-            n_reads=n_reads,
-            max_cores=max_cores,
-            spectrograph=spectrograph,
-            poisson_noise=True,
-            convert_to_uint16=True,
+        rate_map = _build_fiberflat_rate_map(
+            srm,
+            spectrograph,
+            rate_map_method=rate_map_method,
+            pyechelle_exposure_time_s=pyechelle_exposure_time_s,
         )
-        rate_model = run_stage0_simulation(
-            ramp_model,
-            calibration_models,
-            output_dir=out_dir_abs,
-            prim_args=stage0_prim_args,
-            max_cores=max_cores,
-        )
-        # Set object_fiber meta so ProcessFiberflatsPipeline groups by fiber (see target.yaml enum).
-        obj_flat = "WHITELIGHT"
-        for fib in (1, 2, 3):
-            setattr(rate_model.meta, f"object_fiber{fib}", obj_flat if fib == f else "BLOCKED")
-        filename = fiberflat_filename(spectrograph, f)
-        filepath = os.path.join(out_dir_abs, filename)
-        rate_model.save(filepath=filepath)
-        paths.append(filepath)
-        logger.debug("Saved dummy fiber flat rate file: %s", filepath)
+
+        def _finalize_and_save(rate_model: datamodels.DataModel, exposure: int) -> str:
+            obj_flat = "WHITELIGHT"
+            for fib in (1, 2, 3):
+                setattr(
+                    rate_model.meta,
+                    f"object_fiber{fib}",
+                    obj_flat if fib == f else "BLOCKED",
+                )
+            filename = fiberflat_filename(spectrograph, f, exposure)
+            filepath = os.path.join(out_dir_abs, filename)
+            rate_model.save(filepath=filepath)
+            logger.debug("Saved dummy fiber flat rate file: %s", filepath)
+            return filepath
+
+        if fiberflat_coadd_exposures == 1:
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            paths.append(_finalize_and_save(rate_model, 1))
+            continue
+
+        if fiberflat_duplicate_single_reduction:
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            primary_path = _finalize_and_save(rate_model, 1)
+            paths.append(primary_path)
+            for exposure in range(2, fiberflat_coadd_exposures + 1):
+                dup_path = os.path.join(
+                    out_dir_abs, fiberflat_filename(spectrograph, f, exposure)
+                )
+                shutil.copy2(primary_path, dup_path)
+                paths.append(dup_path)
+            continue
+
+        for exposure in range(1, fiberflat_coadd_exposures + 1):
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            paths.append(_finalize_and_save(rate_model, exposure))
 
     return paths
 
@@ -694,6 +799,7 @@ def create_ramp_and_calibrations(
     sync_caldb_first: bool = True,
     template_mag_ab: float | None = None,
     template_2mass_band: str | None = None,
+    template_filename: str | None = None,
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
     **cal_kw,
@@ -800,7 +906,7 @@ def create_ramp_and_calibrations(
             flux = spectrum_flux
         else:
             template_path = get_spectrum_path(
-                e2e_support.DEFAULT_TEMPLATE_FILENAME,
+                template_filename or e2e_support.DEFAULT_TEMPLATE_FILENAME,
                 base_dir=e2e_support.templates_data_dir(),
             )
             wl, flux = load_btsettl_spectrum(
@@ -826,6 +932,10 @@ def create_ramp_and_calibrations(
                     f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
                 )
             rv_quantity = radial_velocity_km_s * u.km / u.s
+            logger.info(
+                "Applying template Doppler shift (topocentric) radial_velocity_km_s=%.6f",
+                float(radial_velocity_km_s),
+            )
             for f in fibers:
                 if f in (1, 2, 3):
                     srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
@@ -1093,6 +1203,13 @@ def prepare_fiberflat_models(fiberflat_filepaths: list[str]) -> list[datamodels.
 _DEFAULT_FIBERFLAT_DISP_RANGE = {"BSPEC": (300, 4000), "RSPEC": (400, 4000)}
 # BSPEC order 110 sits near cross-disp pixel ~105; (135, …) clips it and yields 38/39 traces.
 _DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
+# Per-fiber peak-finding thresholds for simulated BSPEC fiberflats (blaze dynamic range varies by fiber).
+_DEFAULT_FIBERFLAT_PROMINENCE_BSPEC: dict[str, float] = {
+    # Tuned for single-frame fiberflats at flat_scale=2e-14, flat_temperature_k=1000.
+    "1": 0.0015,
+    "2": 0.006,
+    "3": 0.0033,
+}
 
 
 def get_fiberflat_prim_args(
@@ -1103,22 +1220,41 @@ def get_fiberflat_prim_args(
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
+    prominence_factor: float | dict[str, float] | None = None,
 ) -> dict:
     """Build default primitive arguments for ProcessFiberflatsPipeline from opened fiberflat models."""
     do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
-    ff_by_fiber = datamodels.group_by_illuminated_fiber(ff_models)
-    do_fibers = sorted(ff_by_fiber.keys(), key=int)
+    # Multiple rate files per fiber (for coadd) share the same illumination pattern; prim_args
+    # only need the distinct fiber ids, not one model per fiber.
+    do_fibers: list[str] = []
+    seen: set[str] = set()
+    for model in ff_models:
+        for fiber in range(1, model.num_fibers + 1):
+            val = getattr(model.meta, f"object_fiber{fiber}", None)
+            if val is None or val == "BLOCKED":
+                continue
+            key = str(fiber)
+            if key not in seen:
+                seen.add(key)
+                do_fibers.append(key)
+    do_fibers = sorted(do_fibers, key=int)
     spectrograph = str(getattr(ff_models[0].meta, "spectrograph", "RSPEC") or "RSPEC").upper()
     if disp_range is None:
         disp_range = _DEFAULT_FIBERFLAT_DISP_RANGE.get(spectrograph, (500, 4000))
     if xdisp_range is None:
         xdisp_range = _DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050))
+    if prominence_factor is None:
+        if spectrograph == "BSPEC":
+            prominence_factor = dict(_DEFAULT_FIBERFLAT_PROMINENCE_BSPEC)
+        else:
+            prominence_factor = 0.02
     return {
         "trace_pos": {
             "deg_pos": deg_pos,
             "deg_width": deg_width,
             "disp_range": disp_range,
             "xdisp_range": xdisp_range,
+            "prominence_factor": prominence_factor,
         },
         "spec_extract": {
             "extraction_aperture": extraction_aperture,
@@ -1142,6 +1278,7 @@ def run_fiberflat_pipeline(
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
+    prominence_factor: float | dict[str, float] | None = None,
 ) -> dict[str, datamodels.DataModel]:
     """
     Run the ProcessFiberflatsPipeline on a list of fiberflat rate files.
@@ -1149,7 +1286,8 @@ def run_fiberflat_pipeline(
     Parameters
     ----------
     fiberflat_filepaths : list of str
-        Paths to fiberflat rate FITS files (one per fiber).
+        Paths to fiberflat rate FITS files. Multiple paths with the same fiber
+        illumination pattern are coadded before trace finding.
     prim_args : dict or None, optional
         Primitive arguments. If None, built from the other keyword arguments.
         Default is None.
@@ -1183,6 +1321,7 @@ def run_fiberflat_pipeline(
             deg_pos=deg_pos,
             deg_width=deg_width,
             extraction_aperture=extraction_aperture,
+            prominence_factor=prominence_factor,
         )
     prim_args = e2e_support.apply_e2e_save_and_preview_flags(
         prim_args, ProcessFiberflatsPipeline.PRIMITIVES

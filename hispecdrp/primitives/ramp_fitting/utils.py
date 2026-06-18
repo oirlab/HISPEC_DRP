@@ -6,6 +6,16 @@ SATURATED_FLAG_uint8 = np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 
+# MJD is in days; ramp readout offsets from :func:`get_mid_delta_times_ramp` are in seconds.
+SECONDS_PER_DAY: float = 86400.0
+
+
+@njit(inline="always")
+def seconds_to_mjd_offset(seconds: float) -> float:
+    """Convert a time offset in seconds to fractional days (MJD units)."""
+    return float(seconds) / SECONDS_PER_DAY
+
+
 @njit(inline="always")
 def mean_numba_if_not_zero(arr: np.ndarray) -> float:
     total = 0.0
@@ -34,7 +44,7 @@ def get_mid_delta_times_ramp(times: np.ndarray, dq_raw: np.ndarray) -> float:
     Returns
     -------
     mid_delta_time : float
-        The average mid time of the valid exposures, or NaN if no valid exposures exist.
+        Mid-exposure offset from the first read, in **seconds** (not MJD days).
     """
     n_reads = len(times)
     avg_bin_times = (times[0:n_reads - 1] + times[1::]) / 2

@@ -115,8 +115,8 @@ class RampModel(DataModel):
         ny_chan = ny
 
         first_read_mjd_channel = self.meta.mjd_start \
-                        + np.arange(ny_chan*nx_chan, dtype=np.float32).reshape(ny_chan, nx_chan) \
-                        / self.meta.clock_rate
+                        + np.arange(ny_chan * nx_chan, dtype=np.float64).reshape(ny_chan, nx_chan) \
+                        / self.meta.clock_rate / 86400.0
 
         # TODO: Are adjacent channels flipped in the direction of readout?
         # TODO:   (i.e. channel 1 reads left to right, channel 2 reads right to left, etc.)
