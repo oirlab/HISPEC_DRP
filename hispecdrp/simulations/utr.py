@@ -74,15 +74,6 @@ def _create_ramp(
             draw_source = _poisson_like_draw(lam_source, source.shape)
             draw_dark = _poisson_like_draw(lam_dark, source.shape)
             _data[i, :, :] = _data[i-1, :, :] + (draw_source * flat + draw_dark) / gain
-            lam_source = np.asarray(_source[i - 1] * readtime, dtype=np.float64)
-            lam_source = np.nan_to_num(lam_source, nan=0.0, posinf=0.0, neginf=0.0)
-            lam_source = np.maximum(lam_source, 0.0)
-            lam_dark = np.asarray(dark * readtime, dtype=np.float64)
-            lam_dark = np.nan_to_num(lam_dark, nan=0.0, posinf=0.0, neginf=0.0)
-            lam_dark = np.maximum(lam_dark, 0.0)
-            draw_source = _poisson_like_draw(lam_source, source.shape)
-            draw_dark = _poisson_like_draw(lam_dark, source.shape)
-            _data[i, :, :] = _data[i-1, :, :] + (draw_source * flat + draw_dark) / gain
         else:
             _data[i, :, :] = _data[i-1, :, :] + (_source[i-1] * readtime *flat + dark * readtime) / gain
 
