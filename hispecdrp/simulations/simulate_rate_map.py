@@ -105,13 +105,16 @@ class SimulateRateMap:
     """
 
     def __init__(self) -> None:
-        self.hdf_file_directory : str = os.getenv(
-            'HISPEC_TEST_DATA_DIR',
-            str(astropy.utils.data._get_download_cache_loc()) + os.sep
-        ) + 'HISPECDRP_TEST_DATA' + os.sep
+        self.hdf_file_directory = os.getenv('HISPECDRP_TEST_DATA_DIR')+ os.sep
+        if self.hdf_file_directory is None:
+            self.hdf_file_directory = os.path.join(
+                str(astropy.utils.data._get_download_cache_loc()),
+                'HISPECDRP_TEST_DATA' + os.sep
+            )
         self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
         self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
         self.output_directory: str = os.getcwd()
+        self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
         self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
         self.rate_map_outname: str = DEFAULT_RATE_MAP_FILENAME
 
