@@ -182,7 +182,36 @@ class HISPECCalibrationStore(CalibrationStore):
         remote query result; when omitted, records are discovered via
         ``get_missing_records`` (same as ``koa_middleware``).
         """
-        return super().sync_records_from_remote(cals, mode=mode)
+        if cals is not None:
+            mode = str(mode).lower()
+            if mode == "id":
+                ids_local = {cal["id"] for cal in self.local_db.query()}
+                missing = [cal for cal in cals if cal["id"] not in ids_local]
+            elif mode == "last_updated":
+                last_updated_local = self.get_last_updated(source="local")
+                missing = [
+                    cal
+                    for cal in cals
+                    if last_updated_local is None
+                    or cal.get("last_updated", "") > last_updated_local
+                ]
+            else:
+                raise ValueError(
+                    f"Invalid mode {mode!r} for sync_records_from_remote()."
+                )
+            if missing:
+                logger.info(
+                    "Adding %d explicit remote record(s) to local DB (mode=%r).",
+                    len(missing),
+                    mode,
+                )
+                return self.local_db.add(missing)
+            logger.info(
+                "Local DB already contains explicit remote record(s) (mode=%r).",
+                mode,
+            )
+            return []
+        return super().sync_records_from_remote(mode=mode)
 
     def calibration_record_in_cache(
         self,

@@ -13,7 +13,7 @@ import os
 _CALDB_TEST_BASE_MJD = 60200.0  # 2023-10-27 UTC
 
 
-def test_local_caldb(tmp_path, datadir):
+def test_local_caldb(tmp_path, datadir, monkeypatch):
 
     # Calibration cache
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
@@ -59,7 +59,14 @@ def test_local_caldb(tmp_path, datadir):
             DarkSelector()
         )
         assert dark3_filepath == dark_models[2]._filepath, "Wrong dark model retrieved from local DB"
-        # Test retrieval from DarkPrimitive
+        # Test retrieval from DarkPrimitive (local cache only; no remote KOA sync).
+        _store_init = HISPECCalibrationStore.__init__
+
+        def _local_only_store_init(self, *args, **kwargs):
+            kwargs["connect_remote"] = False
+            _store_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(HISPECCalibrationStore, "__init__", _local_only_store_init)
         dark_prim = DarkSubtractionPrimitive()
         dark4_filepath, _ = dark_prim.get_calibration(input_model, 'dark')
         assert dark4_filepath == dark_models[2]._filepath, "Wrong dark model retrieved via DarkSubtractionPrimitive"
