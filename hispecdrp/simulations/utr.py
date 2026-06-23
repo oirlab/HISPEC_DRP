@@ -108,6 +108,7 @@ def _create_ramp(
 
     return
 
+
 def _create_ramp_worker(args):
     """
     Worker function for multiprocessing. Runs create_ramp on a block of rows.
@@ -428,6 +429,7 @@ def create_ramp(
 
     return _outputs
 
+
 def _tpool_init(data, data_shape,
                 dq_raw, dq_raw_shape,
                 source, source_shape,
@@ -479,6 +481,7 @@ def _tpool_init(data, data_shape,
     shared_kTC_noise = kTC_noise
     shared_kTC_noise_shape = kTC_noise_shape
 
+
 def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, clock_rate=1.0, std_1overf=1.0, seed=None):
     """
     Generate a 3D array of 1/f (pink) noise assuming same noise in each readout channel.
@@ -526,6 +529,7 @@ def generate_1overf_noise_map(shape_3d, n_channels=1, vertical=True, clock_rate=
         return noise_1overf
     else:
         return noise_1overf.transpose(0, 2, 1)
+
 
 def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
     """
@@ -585,6 +589,7 @@ def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
         return noise, t
 
     return noise
+
 
 def generate_1overf_noise_integrated(
     n,
@@ -686,6 +691,7 @@ def generate_1overf_noise_integrated(
     noise_int = np.clip(noise_int,0,None)
     return noise_int
 
+
 def compute_psd(x, dt=1.0, detrend=False, onesided=True):
     """
     Compute the power spectral density (PSD) of a time series using an FFT
@@ -733,7 +739,6 @@ def compute_psd(x, dt=1.0, detrend=False, onesided=True):
         psd[1:] *= 2.0
 
     return freqs, psd
-
 
 
 def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detrend=False, onesided=True):
@@ -807,14 +812,13 @@ def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detre
     return freqs, np.asarray(psd_channels)
 
 
-
 def utr_variable_rate_cube(
-        source: np.ndarray,
-        flux_scaling: np.ndarray,
-        flux_scaling_times: np.ndarray,
-        n_reads: int,
-        readtime: float,
-        t0: float = 0.0,
+    source: np.ndarray,
+    flux_scaling: np.ndarray,
+    flux_scaling_times: np.ndarray,
+    n_reads: int,
+    readtime: float,
+    t0: float = 0.0,
 ):
     """
     Build a (n_reads-1, ny, nx) cube of per-read *average* electron rates

@@ -39,3 +39,8 @@ class TraceProfModel(CalibrationModel):
         ext = self.EXTENSIONS.copy()
         ext.update(_create_traceprof_extensions(self.config.num_fibers))
         return ext
+    
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'SPEC')
+        self.meta.set_default('target_name', 'WHITELIGHT')

@@ -64,6 +64,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
         input_model = datamodels.open(self.input)
         output_model = datamodels.LFCFitParamsModel.from_datamodels(
             input_model, include_data=True,
+            primitive=self
         )
 
         # Which traces to process

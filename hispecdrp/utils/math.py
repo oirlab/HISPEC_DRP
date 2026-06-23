@@ -283,10 +283,16 @@ def biweight_midvariance(
     """
     Calculate the biweight midvariance of an array.
 
-    Args:
-        x (np.ndarray): Array of values.
-        c (float): Tuning constant for biweight estimator (default=9.0). See astropy documentation for details.
-        M (float | None): Initial guess of the location. If None, it will be calculated as the median location of x.
+    See https://docs.astropy.org/en/latest/api/astropy.stats.biweight_midvariance.html for details.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of values.
+    c : float
+        Tuning constant for biweight estimator (default=9.0). See astropy documentation for details.
+    M : float | None
+        Initial guess of the location. If None, it will be calculated as the median location of x.
     """
     
     # Flatten

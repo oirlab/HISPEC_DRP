@@ -41,3 +41,10 @@ class L1Model(DataModel):
     @property
     def data_level_suffix(self):
         return 'specuncal'
+    
+    @property
+    def primary_extension_name(self):
+        for fiber in range(1, self.config.num_fibers + 1):
+            if self.has_extension_value(f'spec_uncal_fib{fiber}'):
+                return f'spec_uncal_fib{fiber}'
+        return None

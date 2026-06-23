@@ -7,7 +7,6 @@ from copy import copy
 import logging
 
 from ...utils.parallelization_utils import numba_thread_scope
-from ..coadd.coadd_frames_primitive import coadd_group
 
 logger = logging.getLogger(__name__)
 from .make_bias_primitive import _find_bad_pixels_bias
@@ -83,13 +82,13 @@ class MakeMasterBiasPrimitive(BasePrimitive):
             output_bias.ktc = np.sqrt(_kTC2 / len(input_models))
             output_bias.dq = _dq
 
-        # Flag this calibration as a master calibration
-        output_bias.meta.master_cal = True
-
         with numba_thread_scope(self.max_cores):
-            _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
-                                    self.kTC_threshold, self.bias_threshold)
+            _find_bad_pixels_bias(
+                output_bias.bias, output_bias.ktc , output_bias.dq,
+                self.kTC_threshold, self.bias_threshold
+            )
 
+        output_bias.meta.master_cal = True
         median_bias_level = np.nanmedian(output_bias.bias)
         output_bias.meta.median_bias_level = median_bias_level
         median_kTC_level = np.nanmedian(output_bias.ktc)

@@ -32,14 +32,19 @@ class LFCFitParamsModel(CalibrationModel):
     LFC_FITPARAMS_FIB#        Table      See below   See below       See below  LFC fit parameters for each LFC mode, order, and fiber.
     """
     CAL_TYPE = 'lfc_fitparams'
-    def __init__(self, *args, **kwargs):
-        config = kwargs.get('config', None)
-        if config is None:
-            config = self._get_instrument_config(
-                meta=kwargs.get('meta', None),
-                filepath=kwargs.get('filepath', None),
-                instrument_name=kwargs.get('instrument_name', None),
-            )
-        self.EXTENSIONS = self.EXTENSIONS.copy()
-        self.EXTENSIONS.update(_create_lfcfitparams_extensions(config.num_fibers))
-        super().__init__(*args, **kwargs)
+
+    def _get_extensions(self):
+        ext = self.EXTENSIONS.copy()
+        ext.update(_create_lfcfitparams_extensions(self.config.num_fibers))
+        return ext
+    
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'SPEC')
+
+    @property
+    def primary_extension_name(self):
+        for fiber in range(1, self.config.num_fibers + 1):
+            if self.has_extension_value(f'spec_fib{fiber}'):
+                return f'spec_fib{fiber}'
+        return None

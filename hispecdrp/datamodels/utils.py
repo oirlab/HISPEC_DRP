@@ -316,6 +316,39 @@ def _set_koa_meta(model: 'DataModel') -> 'DataModel':
         model.meta.koa_filepath = model.meta.filename
     return model
 
+def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> 'DataModel':
+
+    from ..primitives.utils import (
+        get_stellar_data_gaia_from_source_id,
+        get_2mass_from_gaia
+    )
+
+    if gaia_id is None:
+        gaia_id = model.meta.target_gaia_id
+    
+    gaia_props = [p for p in model.meta.fields if p.startswith('target_gaia_')]
+    if (
+        model.meta.target_gaia_id is not None
+        and any(getattr(model.meta, p) is None for p in gaia_props)
+    ):
+        gaia_data = get_stellar_data_gaia_from_source_id(model.meta.target_gaia_id)
+        model.meta.set_default('target_gaia_epoch', gaia_data['ref_epoch'])
+        model.meta.set_default('target_gaia_px', gaia_data['parallax'])
+        model.meta.set_default('target_gaia_ra', gaia_data['ra'])
+        model.meta.set_default('target_gaia_dec', gaia_data['dec'])
+        model.meta.set_default('target_gaia_rapm', gaia_data['pmra'])
+        model.meta.set_default('target_gaia_decpm', gaia_data['pmdec'])
+        model.meta.set_default('target_gaia_teff', gaia_data['teff_gspphot'])
+        model.meta.set_default('target_gaia_rvsys', gaia_data['radial_velocity'])
+        model.meta.set_default('target_gaia_vbroad', gaia_data['vbroad'])
+
+        if model.meta.target_2mass_id is None:
+            tmass_data = get_2mass_from_gaia(model.meta.target_gaia_id)
+            model.meta.set_default('target_2mass_id', tmass_data['twomass_id'])
+            model.meta.set_default('target_2mass_mag_j', tmass_data['j_m'])
+            model.meta.set_default('target_2mass_mag_h', tmass_data['h_m'])
+            model.meta.set_default('target_2mass_mag_ks', tmass_data['ks_m'])
+
 def get_instrument_alias(instrument_name : str, spectrograph : str | None = None) -> str:
     """
     Get the instrument alias for a given instrument name.
@@ -333,3 +366,32 @@ def get_instrument_alias(instrument_name : str, spectrograph : str | None = None
     config = get_instrument_config(instrument_name=instrument_name)
     return config.get_instrument_alias(spectrograph=spectrograph)
 
+def _as_model_list(other: DataModel | list[DataModel] | dict[DataModel]) -> list[DataModel]:
+    from .base_model import DataModel
+    if isinstance(other, DataModel):
+        return [other]
+    elif isinstance(other, dict):
+        return list(other.values())
+    elif isinstance(other, list):
+        return other
+    raise ValueError(f"Expected DataModel, list, or dict — got {type(other).__name__}")
+
+def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        for row in model.receipt:
+            target.receipt.add_row(row)
+
+def append_calibrations(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        for row in model.calibrations:
+            target.calibrations.add_row(row)
+
+def append_ancestors(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        new_cols = [c for c in model.data_ancestors.colnames if c not in target.data_ancestors.colnames]
+        if new_cols:
+            target._extend_data_ancestors_columns(new_cols)
+
+        for row in model.data_ancestors:
+            row_dict = {c: row[c] for c in model.data_ancestors.colnames}
+            target.data_ancestors.add_row(row_dict)

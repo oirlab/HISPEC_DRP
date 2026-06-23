@@ -2,7 +2,7 @@
 Create Simulated HISPEC Data
 ============================
 
-This example shows how to create simulated HISPEC data using the simulations folder of the HISPEC_DRP.
+This example shows how to create simulated HISPEC data using the ``benchmarks/`` package at the root of the HISPEC_DRP repository.
 
 Simulated rate maps can be created using a wrapper for the ``pyechelle`` package, or using a native DRP simulator. 
 ``pyechelle`` uses raytracing of individual photons and naturally includes photon noise, whereas the native simulator creates noiseless rate maps.
@@ -22,7 +22,7 @@ Below is an example using the native DRP simulator to create a rate map for a fl
 
     import numpy as np
     import astropy.units as u
-    from hispecdrp import simulations
+    import benchmarks as simulations
 
     srm = simulations.SimulateRateMap()
 

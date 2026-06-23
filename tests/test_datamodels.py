@@ -6,12 +6,12 @@ from hispecdrp.utils import download_gdrive_file
 def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('HR.20231006.00000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
+    filepath = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'HISPEC'
         assert model.meta.exposure_type == "SPEC"
-        assert model.meta.spectrograph == 'RSPEC'
+        assert model.meta.spectrograph == 'BSPEC'
         assert model.meta.model_type == 'L0Model'
         assert model.meta.instrument_mode == 'YJHK'
         shape = (4096, 4096 + 64)

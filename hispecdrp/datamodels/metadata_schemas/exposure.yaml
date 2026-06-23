@@ -9,14 +9,29 @@ properties:
 
   mjd_start:
     title: "Exposure start Modified Julian Date of first read"
-    fits_keyword: EXPMJDST
+    fits_keyword: MJDST
     type: number
     cal_db: true
+    merge_rule: first
 
+  mjd_mid:
+    title: "Exposure mid-point Modified Julian Date"
+    fits_keyword: MJDMID
+    type: number
+    merge_rule: mean
+  
+  mbjd_mid:
+    title: "Exposure mid-point Modified Julian Date"
+    fits_keyword: MBJDMID
+    type: number
+    merge_rule: mean
+
+  # Update this with enum once we have a defined set of read modes
   read_mode:
     title: "Readout mode"
     fits_keyword: READMODE
     cal_db: true
+    default: 'DEFAULT'
 
   exposure_time:
     title: "Effective exposure time"

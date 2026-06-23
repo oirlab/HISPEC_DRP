@@ -36,6 +36,7 @@ from .ref_etalon import *
 from .tracepos import *
 from .traceprof import *
 from .fiberflat import *
+from .sim_wavesol import *
 
 # Instrument config
 from .parvi_config import *

@@ -55,7 +55,7 @@ class PARVIConfig:
             key = f'object_fiber{fiber}'
             props[key]['enum'] = [
                 'SCIENCE',
-                'FIBERFLAT',
+                'WHITELIGHT',
                 'LFC',
                 'ETALON',
                 'UNe',
@@ -83,14 +83,7 @@ class PARVIConfig:
         These will continue to evolve as the DRP is developed.
         """
 
-        # Calibration
-        if hasattr(model, 'CAL_TYPE'):
-            if model.meta.master_cal is None:
-                model.meta.master_cal = True
-
         # Instrument
-        if model.meta.instrument_era is None:
-           model.meta.instrument_era = "0.0.1"
         if model.meta.order_start is None:
             model.meta.order_start = 125
         if model.meta.order_end is None:

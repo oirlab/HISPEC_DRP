@@ -11,18 +11,22 @@ class BasePipeline(ProcessingComponent):
     """
     Base pipeline class for managing a sequence of primitives.
     
-    ARGUMENTS:
-        output_dir (str | None): Directory to save results.
-        suffix (str | None): Suffix to append to the output filename for the pipeline only.
+    ARGUMENTS
+    ---------
+    output_dir (str | None): Directory to save results.
+    suffix (str | None): Suffix to append to the output filename for the pipeline only.
     """
 
-    ARGUMENTS = {}
+    ARGUMENTS = {
+        'save_result': True,
+    }
 
     PRIMITIVES = {}
 
     def __init__(
         self,
         config : dict | str | None = None,
+        log_config : dict | str | None = None,
         prim_args : dict | None = None,
         **kwargs
     ):
@@ -31,12 +35,17 @@ class BasePipeline(ProcessingComponent):
         ----------
         config : str | dict | None
             The configuration file or Config to further specify parameters.
+        log_config : dict | str | None
+            Logging configuration override applied to this pipeline and all its
+            primitives. Can be a dict of logging keys, a path to a logging YAML
+            file, or None to use package defaults.
         prim_args : dict | None
             A dictionary of primitive arguments to set for this pipeline.
         **kwargs
             Any additional keyword arguments to set as direct attributes for this pipeline.
         """
         self.init_config(config)
+        self._init_log_config(log_config)
         self.init_args(**kwargs)
         self.init_primitives(prim_args)
     
@@ -65,21 +74,22 @@ class BasePipeline(ProcessingComponent):
                         raise ValueError(f"Invalid argument '{arg_name}' for primitive {prim_alias}. Valid arguments are: {valids_args}")
             
         # Propagate output directory to primitives
-        primary_input_dir = self.get_primary_input_dir()
+        input_dir = self.get_input_dir()
         for prim_alias in self.PRIMITIVES:
             prim_instance = getattr(self, prim_alias)
             if (prim_instance.save_result or prim_instance.save_preview) and prim_instance.output_dir is None:
                 if self.output_dir is not None:
                     prim_instance.output_dir = self.output_dir
-                elif primary_input_dir is not None:
-                    prim_instance.output_dir = primary_input_dir
-    
+                elif input_dir is not None:
+                    prim_instance.output_dir = input_dir
+
     def init_primitives(self, prim_args : dict | None = None):
         """
         Initialize each primitive object in the primitive table passing the appropriate configuration.
         """
         for prim_alias, prim_class in self.PRIMITIVES.items():
-            primitive = prim_class(config=self.config['primitives'][prim_alias])
+            primitive = prim_class(config=self.config['primitives'][prim_alias], parent=self)
+            primitive.log_config = self.log_config
             setattr(self, prim_alias, primitive)
         self.set_prim_args(prim_args)
 
@@ -102,18 +112,18 @@ class BasePipeline(ProcessingComponent):
             The main output of the pipeline (self._output['output']), which is typically a datamodel or a container of datamodels. This is typically the last primitive's output, but is up to the pipeline implementation.
         """
         self._output = None
-        log_cfg = self.config['logging']
-        with logging_context(log_cfg):
+        with logging_context(self.log_config):
             try:
 
                 self.set_args(input=input, **kwargs)
 
-                primary_dir = self.get_primary_input_dir()
+                input_dir = self.get_input_dir()
 
-                if self.save_result in (None, False) and self.output_dir is not None:
-                    self.save_result = True
-                if self.save_result and self.output_dir is None:
-                    self.output_dir = primary_dir
+                #if self.save_result in (None, False) and self.output_dir is not None:
+                #if self.save_result is None and self.output_dir is not None:
+                #    self.save_result = True
+                #if self.save_result and self.output_dir is None:
+                #    self.output_dir = input_dir
 
                 self.set_prim_args(prim_args)
 
@@ -123,8 +133,16 @@ class BasePipeline(ProcessingComponent):
 
                 if self.save_result:
                     self.save_output() # Already finalized in the primitive's perform.
+            #except Exception as e:
+                #logger.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
+                #raise
             except Exception as e:
-                logger.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
+                self._output = dict(output=input)
+                self._status = "FAILED"
+                #self.finalize_output()
+                logger.exception(
+                    f"Failed executing pipeline {self.__class__.__name__}"
+                )
                 raise
 
         # Get main output
@@ -163,7 +181,6 @@ class BasePipeline(ProcessingComponent):
             self.config = {
                 'class': class_name,
                 'arguments': self.ARGUMENTS.copy(),
-                'logging': self.LOGGING.copy(),
                 'primitives': {key: {} for key in self.PRIMITIVES},
             }
         elif isinstance(config, str):
@@ -184,12 +201,6 @@ class BasePipeline(ProcessingComponent):
             self.config['arguments'] = self.ARGUMENTS.copy()
         else:
             self.config['arguments'] = self.ARGUMENTS | self.config['arguments']
-
-        # Default logging
-        if 'logging' not in self.config:
-            self.config['logging'] = self.LOGGING.copy()
-        else:
-            self.config['logging'] = self.LOGGING | self.config['logging']
 
         # Ensure primitives dict exists
         if 'primitives' not in self.config:
@@ -236,9 +247,6 @@ class BasePipeline(ProcessingComponent):
             # Ensure arguments dict exists
             if 'arguments' not in prim_config:
                 prim_config['arguments'] = {}
-
-            # Pass pipeline logging to primitive (primitive overrides allowed)
-            prim_config['logging'] = self.config['logging'] | prim_config.get('logging', {})
 
             # Set primitive config
             self.config['primitives'][prim_alias] = prim_config
