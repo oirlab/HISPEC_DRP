@@ -7,10 +7,7 @@ from datetime import datetime
 if TYPE_CHECKING:
     from ..datamodels import DataModel
 
-try:
-    from koa_middleware.utils import generate_koa_filehandle
-except ImportError:
-    generate_koa_filehandle = None  # optional; e.g. for unit tests without koa_middleware
+from koa_middleware.utils import generate_koa_filehandle
 
 import logging
 logger = logging.getLogger(__name__)
@@ -306,14 +303,14 @@ def _set_datetime_meta(model : 'DataModel'):
 
 def _set_koa_meta(model: 'DataModel') -> 'DataModel':
     model.meta.koa_id = model.meta.filename
-    if generate_koa_filehandle is not None:
+    if model.meta.koa_id is not None:
         model.meta.koa_filepath = generate_koa_filehandle(
             model.meta.instrument_name,
             model.meta.datetime_obs,
             model.meta.koa_id
         )
     else:
-        model.meta.koa_filepath = model.meta.filename
+        model.meta.koa_filepath = None
     return model
 
 def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> 'DataModel':
