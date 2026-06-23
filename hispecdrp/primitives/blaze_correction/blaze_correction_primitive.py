@@ -52,7 +52,9 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             fiberflat_model = datamodels.open(fiberflat)
 
             # Init output model
-            output_model = self.get_output_model(input_model, include_data=True)
+            output_model = self._model_types(input_model)
+
+            spec_key = 'spec_uncal_' if isinstance(input_model, datamodels.level1.L1Model) else 'spec_'
             
             # Which fibers and orders to process
             do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
@@ -63,9 +65,9 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                 npx = getattr(input_model, f'SPEC_UNCAL_FIB{fiber}').shape[1]
                 if getattr(output_model, f'SPEC_FIB{fiber}') is None:
                     setattr(output_model, f'SPEC_FIB{fiber}', 
-                            np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal'].dtype))
+                            np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)][f'{spec_key}'].dtype))
                     setattr(output_model, f'SPEC_ERR_FIB{fiber}',
-                            np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_err'].dtype))
+                            np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)][f'{spec_key}_err'].dtype))
                     setattr(output_model, f'SPEC_VAR_POISSON_FIB{fiber}', 
                             np.full((n_orders, npx), np.nan, dtype=input_model.traces[int(fiber)]['spec_uncal_var_poisson'].dtype))
                     setattr(output_model, f'SPEC_VAR_RNOISE_FIB{fiber}', 
@@ -107,6 +109,15 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                     output = output_model
 
         return dict(output=output)
+    
+    def _model_types(self, input_model):
+        if isinstance(input_model, datamodels.level1.L1Model):
+            output_model = self.get_output_model(input_model, output_model='L2Model', include_data=True)
+        elif isinstance(input_model, datamodels.level2.L2Model):
+            output_model = self.get_output_model(input_model, output_model='input', include_data=True)
+        else:
+            raise TypeError(f"Unsupported input model type: {type(input_model)}. Expected L1Model or L2Model.")
+        return output_model
     
 
 def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_orders, pixels_per_spline_knot=16):
