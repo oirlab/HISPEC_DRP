@@ -257,3 +257,18 @@ class HISPECCalibrationStore(CalibrationStore):
         new_local_filepath, new_record = self.register_calibration(model_out)
 
         return new_local_filepath, new_record
+
+    def _finalize_cal_record(
+        self,
+        cal : CalibrationModel,
+        cal_record: dict,
+        local_filepath: str
+    ) -> dict:
+        """
+        Finalize a calibration record after the file has been saved to disk.
+        Computes and adds the MD5 checksum.
+        """
+        super()._finalize_cal_record(cal, cal_record, local_filepath)
+        cal_record['koa_id'] = cal.meta.koa_id
+        cal_record['koa_filepath'] = cal.meta.koa_filepath
+        return cal_record
