@@ -54,7 +54,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             # Init output model
             output_model = self._model_types(input_model)
 
-            spec_key = 'spec_uncal_' if isinstance(input_model, datamodels.level1.L1Model) else 'spec_'
+            spec_key = 'spec_uncal' if isinstance(input_model, datamodels.level1.L1Model) else 'spec_'
             
             # Which fibers and orders to process
             do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
