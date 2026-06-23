@@ -21,6 +21,7 @@ from .spectral_extraction import *
 from .blaze_correction import *
 from .stellar_rv import *
 from .refpix import *
+from .sky_subtraction import *
 
 # Registry of primitives
 _local_dict = locals()
