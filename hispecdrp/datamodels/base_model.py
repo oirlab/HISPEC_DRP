@@ -1199,6 +1199,8 @@ class CalibrationModel(DataModel):
 
         self.meta.filename = filename
 
+        _set_koa_meta(self)
+
         if self._filepath is not None:
             input_dir = os.path.dirname(os.path.abspath(self._filepath))
             self._filepath = os.path.join(input_dir, self.meta.filename)
