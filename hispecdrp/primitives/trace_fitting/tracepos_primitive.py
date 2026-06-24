@@ -289,6 +289,10 @@ def find_trace_positions(
     window_size_half = int(np.round(window_size / 2))
     min_distance = max(1, int(fwhm * distance_factor))
 
+    # Fix negative values in data
+    data = data.copy()
+    data[data < 0] = 0
+
     # Find peaks for center column
     y0 = ny // 2
     ki, kf = max(0, y0 - 3), min(ny, y0 + 3)
@@ -304,15 +308,15 @@ def find_trace_positions(
     num_traces = len(peaks0)
 
     # NOTE: Keep for debugging
-    #import matplotlib
-    #matplotlib.use("QTAGG")
+    # breakpoint()
     #plt.imshow(data, vmin=0, vmax=10); plt.ylim(0, ny); plt.show()
-    #xd_pix = np.arange(nx); plt.plot(xd_pix[xdisp_range[0]:xdisp_range[1] + 1], y); [plt.axvline(p, color='r', ls='--') for p in peaks0]; plt.show()
+    #
+    # xd_pix = np.arange(nx); plt.plot(xd_pix[xdisp_range[0]:xdisp_range[1] + 1], y); [plt.axvline(p, color='r', ls='--') for p in peaks0]; plt.show()
 
     coeffs_pos = np.full((num_traces, deg_pos + 1), np.nan)
     coeffs_width = np.full((num_traces, deg_width + 1), np.nan)
-    trace_centroids = np.full((num_traces, nx), np.nan)
-    trace_widths = np.full((num_traces, nx), np.nan)
+    trace_centroids = np.full((num_traces, ny), np.nan)
+    trace_widths = np.full((num_traces, ny), np.nan)
 
     pixel_arr = np.arange(ny)
 
@@ -320,7 +324,7 @@ def find_trace_positions(
     for i in range(num_traces):
         trace_centroids[i, :], trace_widths[i, :] = walk_trace_up_down(
             pixel_arr,
-            data, y0,
+            data, dq, y0,
             peaks0[i],
             disp_range,
             window_size_half
@@ -333,14 +337,12 @@ def find_trace_positions(
             coeffs_width[i, :] = np.polyfit(good, trace_widths[i, good], deg_width)
 
     # NOTE: Keep for debugging
-    # import matplotlib
-    # matplotlib.use("QTAGG")
-    # breakpoint()
-    # plt.imshow(data, origin='lower', aspect='auto')
-    # for i in range(num_traces):
-    #     plt.plot(np.polyval(coeffs_pos[i, :], pixel_arr), pixel_arr, color='r', lw=0.5)
-    # plt.title("Traced orders")
-    # plt.show()
+    #import matplotlib.pyplot as plt
+    #breakpoint()
+    #plt.imshow(data, origin='lower', aspect='auto')
+    #for i in range(num_traces):
+        #plt.plot(np.polyval(coeffs_pos[i, :], pixel_arr), pixel_arr, color='r', lw=0.5)
+    #plt.show()
 
     return dict(
         coeffs_pos=coeffs_pos,
@@ -353,67 +355,66 @@ def find_trace_positions(
 def walk_trace_up_down(
     pixels : np.ndarray,
     data : np.ndarray,
-    y0 : float,
-    xc0 : float,
+    dq : np.ndarray,
+    disp0 : float,
+    xdisp0 : float,
     disp_range : tuple,
     window_size_half : float,
 ) -> np.ndarray:
-    trace_centroids = np.full(data.shape[1], np.nan)
-    trace_widths = np.full(data.shape[1], np.nan)
+    trace_centroids = np.full(data.shape[0], np.nan)
+    trace_widths = np.full(data.shape[0], np.nan)
     _walk_trace_up_down(
         pixels,
         data,
-        y0, xc0,
+        dq,
+        disp0, xdisp0,
         disp_range,
         window_size_half,
         trace_centroids, trace_widths
     )
     return trace_centroids, trace_widths
 
-@njit(nogil=True, parallel=False, cache=True)
-def _walk_trace_up_down(
-    pixels : np.ndarray,
-    data : np.ndarray,
-    y0 : int, xc0 : float,
-    disp_range : tuple,
-    window_size_half : float,
-    trace_centroids : np.ndarray,
-    trace_widths : np.ndarray,
-):
-    
-    # Central slice
-    xc = xc0
-    trace_centroids[y0], trace_widths[y0] = _compute_centroid_and_width(
-        pixels, data[y0, :],
-        xc0,
-        window_size_half
-    )
 
-    # Walk down
-    for y in range(y0 - 1, disp_range[0] - 1, -1):
-        xc = trace_centroids[y + 1]
-        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
-            pixels, data[y, :],
-            xc,
-            window_size_half
+@njit(nogil=True, cache=True)
+def _walk_trace_up_down(
+    pixels, data, dq,
+    disp0, xdisp0,
+    disp_range, window_size_half,
+    trace_centroids, trace_widths,
+):
+    # Central slice
+    c, w = _compute_centroid_and_width(
+        pixels, data[disp0, :], dq[disp0, :], xdisp0, window_size_half
+    )
+    trace_centroids[disp0], trace_widths[disp0] = c, w
+
+    # Walk down — carry forward last good centroid as the guess
+    xdisp_last = xdisp0 if np.isnan(c) else c
+    for disp in range(disp0 - 1, disp_range[0] - 1, -1):
+        c, w = _compute_centroid_and_width(
+            pixels, data[disp, :], dq[disp, :], xdisp_last, window_size_half
         )
+        trace_centroids[disp], trace_widths[disp] = c, w
+        if not np.isnan(c):
+            xdisp_last = c
 
     # Walk up
-    xc = xc0
-    for y in range(y0 + 1, disp_range[1] + 1):
-        xc = trace_centroids[y - 1]
-        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
-            pixels, data[y, :],
-            xc,
-            window_size_half
+    xdisp_last = xdisp0 if np.isnan(trace_centroids[disp0]) else trace_centroids[disp0]
+    for disp in range(disp0 + 1, disp_range[1] + 1):
+        c, w = _compute_centroid_and_width(
+            pixels, data[disp, :], dq[disp, :], xdisp_last, window_size_half
         )
+        trace_centroids[disp], trace_widths[disp] = c, w
+        if not np.isnan(c):
+            xdisp_last = c
 
 
-@njit(nogil=True, parallel=False, cache=True)
+@njit(nogil=True, cache=True)
 def _compute_centroid_and_width(
     pixels : np.ndarray,
     trace_slice : np.ndarray,
-    xc : float,
+    trace_dq : np.ndarray,
+    center_loc : float,
     window_size_half : float,
 ):
     """
@@ -425,19 +426,27 @@ def _compute_centroid_and_width(
         Pixel coordinates corresponding to the trace_slice.
     trace_slice : np.ndarray
         1D array of pixel values along the slice of the trace.
-    xc : float
+    trace_dq : np.ndarray
+        1D array of data quality flags corresponding to the trace_slice.
+    center_loc : float
         Initial guess for the centroid position (in pixel coordinates).
     window_size_half : float
         Half the size of the window (in pixels) to use when computing the centroid and width.
     """
 
-    xi = int(np.round(xc - window_size_half))
-    xf = int(np.round(xc + window_size_half + 1))
+    xi = int(np.round(center_loc - window_size_half))
+    xf = int(np.round(center_loc + window_size_half + 1))
     if xi < 0 or xf > trace_slice.size - 1:
         return np.nan, np.nan
 
     slice_x = pixels[xi:xf+1]
     slice_y = trace_slice[xi:xf+1]
+    slice_dq = trace_dq[xi:xf+1]
+
+    n_good = np.sum(slice_dq == 0)
+    if n_good < slice_dq.size:
+        return np.nan, np.nan
+
     total_flux = np.sum(slice_y)
 
     if total_flux > 0:
