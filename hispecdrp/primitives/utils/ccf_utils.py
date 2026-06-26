@@ -11,7 +11,7 @@ import math
 import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 from typing import Any, Literal
@@ -70,9 +70,9 @@ LINE_MASK_CCF_STORED_NEGATED_FROM_RAW = True
 # (see ``mask_ccf_pixel_interp_order``).
 MAX_MASK_CCF_PIXEL_INTERP_ORDER = 12
 
-# For finite-width (KPF-style) masks, approximate the segment integral by averaging
+# For finite-width (**tophat**) masks, approximate the segment integral by averaging
 # this many point samples uniformly across each segment at each trial velocity.
-KPF_MASK_CCF_SEGMENT_SAMPLES = 8
+TOPHAT_MASK_CCF_SEGMENT_SAMPLES = 8
 
 # Default coarse CCF velocity grid (m/s) for :func:`resolve_ccf_broad_grid_m_s` when any of
 # ``v_min``, ``v_max``, or ``v_step`` are ``None``, and for StellarRVPrimitive coarse kwargs when unset.
@@ -957,7 +957,7 @@ def flat_chunk_wl_lo_hi(
 
 
 # =============================================================================
-# Gaussian CCF fit (KPF-style LM + σ heuristics; config in km/s, public API in m/s)
+# Gaussian CCF fit (LM + σ heuristics; config in km/s, public API in m/s)
 # =============================================================================
 
 
@@ -1078,7 +1078,7 @@ def estimate_ccf_uncertainty_highpass_residual(
 
 
 @dataclass
-class CCFFitKpfConfig:
+class CCFFitConfig:
     """
     Tunables for :func:`fit_ccf_rv` two-pass Gaussian + constant fits to :math:`\\mathrm{CCF}(v)`.
 
@@ -1112,8 +1112,8 @@ class CCFFitKpfConfig:
         Number of initial clipping iterations using the relaxed multiplier.
     sigma_clip_min_keep_frac : float
         Minimum fraction of points to retain when clipping (guards over-aggressive removal).
-    rv_err_cov_kpf_combine : str
-        How to merge KPF-style gradient error with LevMar covariance (e.g. ``"max"``).
+    rv_err_cov_combine : str
+        How to merge gradient-based CCF error with LevMar covariance (e.g. ``"max"``).
     rv_err_bootstrap_samples : int
         Parametric bootstrap draws on ``ccf`` noise; ``0`` disables.
     rv_err_bootstrap_seed : int or None
@@ -1141,18 +1141,65 @@ class CCFFitKpfConfig:
     sigma_clip_n_sigma_relaxed: float = 6.0
     sigma_clip_relax_first_clip_iters: int = 3
     sigma_clip_min_keep_frac: float = 0.30
-    # How to merge KPF gradient error with LevMar covariance when both pass plausibility.
+    # How to merge gradient-based CCF error with LevMar covariance when both pass plausibility.
     # ``"max"`` is more conservative than historic ``"min"`` (often gave tiny σ_RV).
-    rv_err_cov_kpf_combine: str = "max"
+    rv_err_cov_combine: str = "max"
     # Parametric bootstrap: refit Gaussian on CCF + N(0, σ_ccf) noise (same window/weights as
     # the final pass). 0 disables. Typical 24–64 for science; each sample is one LM fit.
     rv_err_bootstrap_samples: int = 0
     rv_err_bootstrap_seed: int | None = None
 
 
+@dataclass
+class CCFBisectorConfig:
+    """
+    Tunables for :func:`fit_ccf_rv_bisector` (traditional CCF bisector RV).
+
+    Follows the NEID-DRP bisector construction (percentile cuts through the CCF in
+    velocity space; see NEID algorithms § CCF Bisector Calculation). Radial velocity
+    is a **weighted mean** of bisector midpoints :math:`(v_\\mathrm{left}+v_\\mathrm{right})/2`
+    at multiple depth percentiles; uncertainty combines per-cut errors in quadrature
+    via inverse-variance weights.
+
+    Attributes
+    ----------
+    rv_percentile_lo, rv_percentile_hi : float
+        Percentile range (0–100, relative to peak depth above baseline) over which
+        bisector midpoints contribute to the RV estimate.
+    rv_percentile_step : float
+        Step between percentile cuts (percent).
+    bis_top_lo, bis_top_hi : float
+        Top section for bisector inverse slope (BIS), NEID default 60–90%.
+    bis_bottom_lo, bis_bottom_hi : float
+        Bottom section for BIS, NEID default 10–40%.
+    core_weight_sigma_percentile : float
+        Gaussian performance weight on percentile cuts, centered at 50% depth
+        (emphasizes the CCF core). Set very large to approximate uniform weighting.
+    rv_err_core_percentile : float
+        Depth percentile whose bisector midpoint uncertainty defines ``rv_err``.
+        Percentile cuts are correlated (same CCF); do not combine their formal
+        errors as independent measurements.
+    min_cuts : int
+        Minimum successful bisector cuts required for a valid RV.
+    """
+
+    rv_percentile_lo: float = 10.0
+    rv_percentile_hi: float = 90.0
+    rv_percentile_step: float = 5.0
+    bis_top_lo: float = 60.0
+    bis_top_hi: float = 90.0
+    bis_bottom_lo: float = 10.0
+    bis_bottom_hi: float = 40.0
+    core_weight_sigma_percentile: float = 25.0
+    rv_err_core_percentile: float = 50.0
+    rv_err_bootstrap_samples: int = 0
+    rv_err_bootstrap_seed: int | None = None
+    min_cuts: int = 5
+
+
 # Lighter LevMar / σ-clip budget for :func:`finalize_ccf_preview_dict` only (Plotly metadata).
-# Pipeline RV fits on order-mean CCFs keep the default :class:`CCFFitKpfConfig`.
-CCF_PREVIEW_SLOT_FIT_CONFIG = CCFFitKpfConfig(
+# Pipeline RV fits on order-mean CCFs keep the default :class:`CCFFitConfig`.
+CCF_PREVIEW_SLOT_FIT_CONFIG = CCFFitConfig(
     levmar_maxiter=450,
     sigma_clip_unclipped_prefit_passes=1,
     sigma_clip_max_iter=6,
@@ -1572,7 +1619,7 @@ def refine_ccf_rv_coarse_grid_parabolic(
     ccf_err: np.ndarray | None = None,
     gaussian_sigma_m_s: float | None = None,
     mask_method: str | None = None,
-    config: CCFFitKpfConfig | None = None,
+    config: CCFFitConfig | None = None,
     smooth_sigma_scale: float = _REFINE_COARSE_GRID_SMOOTH_SIGMA_SCALE_DEFAULT,
     optimize_smooth_sigma_scale: bool = True,
     optimize_scale_lo: float = 0.04,
@@ -1670,7 +1717,7 @@ def refine_ccf_rv_coarse_grid_parabolic(
         :func:`sweep_refine_ccf_rv_coarse_grid_min_abs_bias`, and ``refine_optimizer_anchor``
         (``ccf_grid_subpixel_peak`` vs ``gaussian_v0_gated``).
     """
-    cfg = config or CCFFitKpfConfig()
+    cfg = config or CCFFitConfig()
     vg = np.asarray(v_grid_m_s, np.float64).ravel()
     y0 = np.asarray(ccf, np.float64).ravel()
     ok = np.isfinite(vg) & np.isfinite(y0)
@@ -1985,7 +2032,7 @@ def sweep_refine_ccf_rv_coarse_grid_min_abs_bias(
     ccf_err: np.ndarray | None = None,
     gaussian_sigma_m_s: float | None = None,
     mask_method: str | None = None,
-    config: CCFFitKpfConfig | None = None,
+    config: CCFFitConfig | None = None,
     scale_lo: float = 0.04,
     scale_hi: float = 0.10,
     n_scale: int = 61,
@@ -2339,6 +2386,397 @@ def _ccf_background_sigma_clipped_median(
     return med
 
 
+def _ccf_bisector_wing_crossing_m_s(
+    v_m_s: np.ndarray,
+    y_peak_up: np.ndarray,
+    i_peak: int,
+    target: float,
+    side: str,
+) -> tuple[float, int]:
+    """
+    Velocity (m/s) and bracket index where ``y_peak_up`` crosses ``target``.
+
+    Returns ``(v_cross, i_lo)`` with the crossing lying between ``v_m_s[i_lo]`` and
+    ``v_m_s[i_lo + 1]``.
+    """
+    n = len(v_m_s)
+    if side == "left":
+        for i in range(i_peak - 1, -1, -1):
+            y0, y1 = float(y_peak_up[i]), float(y_peak_up[i + 1])
+            if (y0 - target) * (y1 - target) <= 0.0 and y1 != y0:
+                frac = (target - y0) / (y1 - y0)
+                return float(v_m_s[i] + frac * (v_m_s[i + 1] - v_m_s[i])), int(i)
+        return float("nan"), -1
+    if side == "right":
+        for i in range(i_peak, n - 1):
+            y0, y1 = float(y_peak_up[i]), float(y_peak_up[i + 1])
+            if (y0 - target) * (y1 - target) <= 0.0 and y1 != y0:
+                frac = (target - y0) / (y1 - y0)
+                return float(v_m_s[i] + frac * (v_m_s[i + 1] - v_m_s[i])), int(i)
+        return float("nan"), -1
+    raise ValueError(f"side must be 'left' or 'right', got {side!r}")
+
+
+def _ccf_bisector_wing_velocity_m_s(
+    v_m_s: np.ndarray,
+    y_peak_up: np.ndarray,
+    i_peak: int,
+    target: float,
+    side: str,
+) -> float:
+    """
+    Velocity (m/s) where ``y_peak_up`` crosses ``target`` on the left or right wing of ``i_peak``.
+
+    Uses linear interpolation between bracketing samples. ``y_peak_up`` must be peak-up
+    (non-negative at the extremum).
+    """
+    v_cross, _ = _ccf_bisector_wing_crossing_m_s(v_m_s, y_peak_up, i_peak, target, side)
+    return v_cross
+
+
+def _ccf_bisector_discretization_sigma_m_s(
+    v_m_s: np.ndarray,
+    y_peak_up: np.ndarray,
+    i_lo: int,
+) -> float:
+    """
+    Sub-grid 1σ uncertainty (m/s) for a linearly interpolated wing crossing.
+
+    For a smooth CCF sampled on a uniform grid, interpolation error scales as
+    :math:`\\mathcal{O}(\\Delta v^2)` (not :math:`\\mathcal{O}(\\Delta v)`).
+    """
+    n = len(v_m_s)
+    i_lo = int(i_lo)
+    if i_lo < 0 or i_lo >= n - 1:
+        return float("nan")
+    dv = float(v_m_s[i_lo + 1] - v_m_s[i_lo])
+    if dv <= 0.0:
+        return float("nan")
+    dy_dv = float(y_peak_up[i_lo + 1] - y_peak_up[i_lo]) / dv
+    if abs(dy_dv) <= 1e-30:
+        return float("nan")
+    if 0 < i_lo < n - 2:
+        d2y_dv2 = float(y_peak_up[i_lo + 1] - 2.0 * y_peak_up[i_lo] + y_peak_up[i_lo - 1]) / (dv * dv)
+    elif i_lo == 0:
+        d2y_dv2 = float(y_peak_up[i_lo + 2] - 2.0 * y_peak_up[i_lo + 1] + y_peak_up[i_lo]) / (dv * dv)
+    else:
+        d2y_dv2 = float(y_peak_up[i_lo + 1] - 2.0 * y_peak_up[i_lo] + y_peak_up[i_lo - 1]) / (dv * dv)
+    return float(abs(dv * dv * d2y_dv2 / (2.0 * dy_dv)))
+
+
+def _ccf_bisector_wing_velocity_uncertainty_m_s(
+    v_m_s: np.ndarray,
+    y_peak_up: np.ndarray,
+    i_lo: int,
+    target: float,
+    *,
+    y_err: np.ndarray | None = None,
+    v_step_m_s: float,
+) -> float:
+    """
+    Approximate 1σ uncertainty (m/s) on a bisector wing crossing.
+
+    With per-bin ``y_err``, propagates noise through the linear interpolation that
+    locates the crossing. Without meaningful ``y_err``, uses the
+    :math:`\\mathcal{O}(\\Delta v^2)` discretization estimate for a smooth CCF rather
+    than a full grid-step floor (which over-estimates sub-pixel bisector precision).
+    """
+    n = len(v_m_s)
+    i_lo = int(i_lo)
+    if i_lo < 0 or i_lo >= n - 1:
+        return float(max(v_step_m_s, _ccf_rv_err_numeric_floor(v_step_m_s)))
+    y0 = float(y_peak_up[i_lo])
+    y1 = float(y_peak_up[i_lo + 1])
+    v0 = float(v_m_s[i_lo])
+    v1 = float(v_m_s[i_lo + 1])
+    dy = y1 - y0
+    dv = v1 - v0
+    if abs(dy) <= 0.0:
+        return float(max(v_step_m_s, _ccf_rv_err_numeric_floor(v_step_m_s)))
+
+    use_noise = False
+    s0 = s1 = 0.0
+    if y_err is not None and len(y_err) == n:
+        s0 = float(y_err[i_lo]) if np.isfinite(y_err[i_lo]) else 0.0
+        s1 = float(y_err[i_lo + 1]) if np.isfinite(y_err[i_lo + 1]) else 0.0
+        use_noise = (s0 > 0.0) or (s1 > 0.0)
+
+    # Guard against tiny bracket gradients on noisy samples (would inflate σ_v).
+    local_span = max(abs(dv), float(v_step_m_s))
+    grad_floor = max(abs(y1 - y0) / local_span, 1e-30)
+    if use_noise and abs(dy) < 0.02 * grad_floor * local_span:
+        dy = math.copysign(0.02 * grad_floor * local_span, dy if dy != 0.0 else 1.0)
+
+    if use_noise:
+        # v* = v0 + (target - y0) * (v1 - v0) / (y1 - y0)
+        dv_dy0 = -(v1 - v0) / dy
+        dv_dy1 = (target - y0) * (v1 - v0) / (dy * dy)
+        sig_v = math.sqrt((dv_dy0 * s0) ** 2 + (dv_dy1 * s1) ** 2)
+    else:
+        sig_disc = _ccf_bisector_discretization_sigma_m_s(v_m_s, y_peak_up, i_lo)
+        sig_v = sig_disc if math.isfinite(sig_disc) and sig_disc > 0.0 else 0.0
+
+    # Sub-grid interpolation cannot beat the bracket width (uniform prior).
+    bracket_cap = abs(dv) / math.sqrt(12.0)
+    if math.isfinite(bracket_cap) and bracket_cap > 0.0:
+        sig_v = min(sig_v, bracket_cap)
+
+    if not math.isfinite(sig_v) or sig_v <= 0.0:
+        sig_v = float(max(v_step_m_s, _ccf_rv_err_numeric_floor(v_step_m_s)))
+    return float(sig_v)
+
+
+def _ccf_bisector_cut_m_s(
+    v_m_s: np.ndarray,
+    y_peak_up: np.ndarray,
+    i_peak: int,
+    depth_frac: float,
+    peak_amp: float,
+    *,
+    y_err: np.ndarray | None = None,
+    v_step_m_s: float,
+) -> tuple[float, float, float, float, float] | None:
+    """
+    Bisector midpoint at one depth percentile.
+
+    Returns ``(v_mid, v_mid_err, v_left, v_right, percentile)`` or ``None`` if the
+    cut does not bracket both wings.
+    """
+    if not (0.0 < depth_frac < 1.0) or peak_amp <= 0.0:
+        return None
+    target = depth_frac * peak_amp
+    v_left, i_left = _ccf_bisector_wing_crossing_m_s(v_m_s, y_peak_up, i_peak, target, "left")
+    v_right, i_right = _ccf_bisector_wing_crossing_m_s(v_m_s, y_peak_up, i_peak, target, "right")
+    if not (math.isfinite(v_left) and math.isfinite(v_right)):
+        return None
+    sig_l = _ccf_bisector_wing_velocity_uncertainty_m_s(
+        v_m_s, y_peak_up, i_left, target, y_err=y_err, v_step_m_s=v_step_m_s
+    )
+    sig_r = _ccf_bisector_wing_velocity_uncertainty_m_s(
+        v_m_s, y_peak_up, i_right, target, y_err=y_err, v_step_m_s=v_step_m_s
+    )
+    v_mid = 0.5 * (v_left + v_right)
+    v_mid_err = math.sqrt(0.25 * (sig_l * sig_l + sig_r * sig_r))
+    return v_mid, v_mid_err, v_left, v_right, depth_frac * 100.0
+
+
+def fit_ccf_rv_bisector(
+    v_grid_m_s: np.ndarray,
+    ccf: np.ndarray,
+    v_step_m_s: float,
+    *,
+    ccf_err: np.ndarray | None = None,
+    config: CCFBisectorConfig | None = None,
+    return_diagnostics: bool = False,
+) -> (
+    tuple[float, float]
+    | tuple[float, float, dict]
+):
+    """
+    Radial velocity (m/s) from a traditional CCF bisector analysis.
+
+    At each depth percentile between baseline and peak, finds the left and right
+    wing velocities where the CCF crosses that flux level and takes their midpoint.
+    The RV estimate is a performance-weighted mean of midpoints over
+    ``config.rv_percentile_lo`` … ``config.rv_percentile_hi``, with Gaussian
+    weight emphasizing the CCF core (50% depth). **Uncertainty** is taken from
+    the bisector cut nearest ``config.rv_err_core_percentile`` (default 50%):
+    percentile cuts share the same noisy CCF and must not be combined as if
+    independent (which incorrectly floors ``rv_err`` near ``v_step/2`` on smooth,
+    noise-free profiles).
+
+    Also computes bisector inverse slope (BIS) following NEID-DRP: average midpoints
+    in the top (60–90%) minus bottom (10–40%) sections, with uncertainties combined
+    in quadrature.
+
+    Parameters
+    ----------
+    v_grid_m_s : np.ndarray
+        Velocity samples (m/s), need not be uniform.
+    ccf : np.ndarray
+        CCF values on the same grid.
+    v_step_m_s : float
+        Effective finest velocity spacing (m/s) for uncertainty floors; use
+        :func:`effective_ccf_v_step_for_fit` on ``v_grid_m_s``.
+    ccf_err : np.ndarray or None, optional
+        Per-sample CCF uncertainty for wing-crossing error propagation.
+    config : CCFBisectorConfig or None, optional
+        Bisector percentile ranges and weighting.
+    return_diagnostics : bool, optional
+        If True, return ``(rv, rv_err, diag)`` with per-cut midpoints, BIS, etc.
+
+    Returns
+    -------
+    rv_m_s, rv_err_m_s : float
+        Weighted bisector RV and combined uncertainty (m/s).
+    diag : dict, optional
+        Present when ``return_diagnostics=True``.
+    """
+    cfg = config or CCFBisectorConfig()
+    vg = np.asarray(v_grid_m_s, dtype=np.float64).ravel()
+    y0 = np.asarray(ccf, dtype=np.float64).ravel()
+    ok = np.isfinite(vg) & np.isfinite(y0)
+    if int(np.sum(ok)) < 5:
+        out = (float("nan"), float("nan"), {"ok": False, "message": "insufficient finite samples"})
+        return out if return_diagnostics else (out[0], out[1])
+
+    order = np.argsort(vg[ok])
+    v_m_s = vg[ok][order]
+    y = y0[ok][order]
+    y_err: np.ndarray | None = None
+    has_ccf_err = False
+    if ccf_err is not None:
+        ye = np.asarray(ccf_err, dtype=np.float64).ravel()
+        if ye.size == y0.size:
+            y_err = ye[ok][order]
+            has_ccf_err = bool(np.any(np.isfinite(y_err) & (y_err > 0.0)))
+
+    baseline = _ccf_background_sigma_clipped_median(y)
+    if not math.isfinite(baseline):
+        baseline = float(np.nanmedian(y))
+    y_rel = y - baseline
+    i_peak = int(np.nanargmax(np.abs(y_rel)))
+    peak_amp = float(abs(y_rel[i_peak]))
+    if peak_amp <= 0.0 or not math.isfinite(peak_amp):
+        out = (float("nan"), float("nan"), {"ok": False, "message": "zero peak amplitude"})
+        return out if return_diagnostics else (out[0], out[1])
+
+    sign = 1.0 if y_rel[i_peak] >= 0.0 else -1.0
+    y_peak_up = sign * y_rel
+    v_step = float(v_step_m_s) if math.isfinite(v_step_m_s) and v_step_m_s > 0 else effective_ccf_v_step_for_fit(v_m_s)
+
+    p_lo = float(cfg.rv_percentile_lo)
+    p_hi = float(cfg.rv_percentile_hi)
+    p_step = float(cfg.rv_percentile_step)
+    if p_step <= 0.0 or p_hi <= p_lo:
+        out = (float("nan"), float("nan"), {"ok": False, "message": "invalid percentile grid"})
+        return out if return_diagnostics else (out[0], out[1])
+
+    percentiles = np.arange(p_lo, p_hi + 0.5 * p_step, p_step, dtype=np.float64)
+    cuts: list[dict] = []
+    for pct in percentiles:
+        depth = float(pct) / 100.0
+        row = _ccf_bisector_cut_m_s(
+            v_m_s,
+            y_peak_up,
+            i_peak,
+            depth,
+            peak_amp,
+            y_err=y_err,
+            v_step_m_s=v_step,
+        )
+        if row is None:
+            continue
+        v_mid, v_mid_err, v_left, v_right, pct_out = row
+        core_sig = float(cfg.core_weight_sigma_percentile)
+        if core_sig <= 0.0:
+            w_perf = 1.0
+        else:
+            w_perf = math.exp(-0.5 * ((pct_out - 50.0) / core_sig) ** 2)
+        if has_ccf_err:
+            w_cut = w_perf / max(v_mid_err * v_mid_err, 1e-30)
+        else:
+            w_cut = w_perf
+        cuts.append(
+            {
+                "percentile": float(pct_out),
+                "v_mid_m_s": float(v_mid),
+                "v_mid_err_m_s": float(v_mid_err),
+                "v_left_m_s": float(v_left),
+                "v_right_m_s": float(v_right),
+                "weight": float(w_cut),
+                "target_flux": float(depth * peak_amp),
+            }
+        )
+
+    if len(cuts) < int(cfg.min_cuts):
+        out = (
+            float("nan"),
+            float("nan"),
+            {"ok": False, "message": f"too few bisector cuts ({len(cuts)})", "cuts": cuts},
+        )
+        return out if return_diagnostics else (out[0], out[1])
+
+    w_arr = np.array([c["weight"] for c in cuts], dtype=np.float64)
+    v_arr = np.array([c["v_mid_m_s"] for c in cuts], dtype=np.float64)
+    w_sum = float(np.sum(w_arr))
+    if w_sum <= 0.0 or not math.isfinite(w_sum):
+        out = (float("nan"), float("nan"), {"ok": False, "message": "invalid weights", "cuts": cuts})
+        return out if return_diagnostics else (out[0], out[1])
+
+    rv = float(np.sum(w_arr * v_arr) / w_sum)
+
+    core_pct = float(cfg.rv_err_core_percentile)
+    core_cut = min(cuts, key=lambda c: abs(c["percentile"] - core_pct))
+    rv_err = float(core_cut["v_mid_err_m_s"])
+    rv_err = max(rv_err, _ccf_rv_err_numeric_floor(v_step))
+    boot_sig = float("nan")
+    if has_ccf_err and int(cfg.rv_err_bootstrap_samples) > 0:
+        y_model = CubicSpline(v_m_s, y, extrapolate=False)(v_m_s)
+        rng = np.random.default_rng(cfg.rv_err_bootstrap_seed)
+        boot_cfg = replace(cfg, rv_err_bootstrap_samples=0)
+        ye_draw = np.where(np.isfinite(y_err), y_err, 0.0)
+        boot_rvs: list[float] = []
+        for _ in range(int(cfg.rv_err_bootstrap_samples)):
+            y_boot = y_model + rng.normal(0.0, ye_draw)
+            rv_b, _ = fit_ccf_rv_bisector(
+                v_m_s,
+                y_boot,
+                v_step,
+                ccf_err=y_err,
+                config=boot_cfg,
+            )
+            if math.isfinite(rv_b):
+                boot_rvs.append(float(rv_b))
+        if len(boot_rvs) >= 2:
+            boot_sig = float(np.std(boot_rvs, ddof=1))
+            rv_err = max(rv_err, boot_sig)
+
+    def _section_mean(lo: float, hi: float, rep_pct: float) -> tuple[float, float]:
+        sel = [c for c in cuts if lo <= c["percentile"] <= hi]
+        if not sel:
+            return float("nan"), float("nan")
+        ww = np.array([c["weight"] for c in sel], dtype=np.float64)
+        vv = np.array([c["v_mid_m_s"] for c in sel], dtype=np.float64)
+        wsum = float(np.sum(ww))
+        mean_v = float(np.sum(ww * vv) / wsum) if wsum > 0 else float(np.mean(vv))
+        rep = min(sel, key=lambda c: abs(c["percentile"] - rep_pct))
+        mean_e = float(rep["v_mid_err_m_s"])
+        return mean_v, mean_e
+
+    v_top, e_top = _section_mean(cfg.bis_top_lo, cfg.bis_top_hi, 0.5 * (cfg.bis_top_lo + cfg.bis_top_hi))
+    v_bot, e_bot = _section_mean(
+        cfg.bis_bottom_lo, cfg.bis_bottom_hi, 0.5 * (cfg.bis_bottom_lo + cfg.bis_bottom_hi)
+    )
+    bis = float(v_top - v_bot) if math.isfinite(v_top) and math.isfinite(v_bot) else float("nan")
+    bis_err = float(
+        math.sqrt(e_top * e_top + e_bot * e_bot)
+    ) if math.isfinite(e_top) and math.isfinite(e_bot) else float("nan")
+
+    diag = {
+        "ok": True,
+        "rv_m_s": rv,
+        "rv_err_m_s": rv_err,
+        "rv_err_core_percentile": core_pct,
+        "rv_err_core_cut_percentile": float(core_cut["percentile"]),
+        "rv_err_bootstrap_sigma_m_s": boot_sig,
+        "used_rv_err_bootstrap": math.isfinite(boot_sig) and boot_sig > 0.0,
+        "baseline": float(baseline),
+        "peak_amplitude": float(peak_amp),
+        "v_peak_m_s": float(v_m_s[i_peak]),
+        "n_cuts": len(cuts),
+        "cuts": cuts,
+        "bis_m_s": bis,
+        "bis_err_m_s": bis_err,
+        "bis_top_mean_m_s": v_top,
+        "bis_bottom_mean_m_s": v_bot,
+        "method": "ccf_bisector_weighted_percentile",
+    }
+    if return_diagnostics:
+        return rv, rv_err, diag
+    return rv, rv_err
+
+
 def fit_ccf_rv(
     v_grid_m_s: np.ndarray,
     ccf: np.ndarray,
@@ -2348,7 +2786,7 @@ def fit_ccf_rv(
     *,
     ccf_err: np.ndarray | None = None,
     mask_method: str | None = None,
-    config: CCFFitKpfConfig | None = None,
+    config: CCFFitConfig | None = None,
     vel_span_m_s_per_pixel: float | None = None,
     two_pass: bool = True,
     max_velocity_samples: int | None = 8192,
@@ -2374,7 +2812,7 @@ def fit_ccf_rv(
     The same half-width caps apply when ``ccf_line_mask_stored_negated`` is true (mask-line CCF),
     so fixed-baseline fits on short hybrid grids do not inherit multi-hundred-km pass windows.
     One or two Levenberg–Marquardt passes each use a **wide** velocity
-    window (see :class:`CCFFitKpfConfig`) to stabilize the Gaussian **amplitude** and width.
+    window (see :class:`CCFFitConfig`) to stabilize the Gaussian **amplitude** and width.
     Within each window the fitter runs **unclipped** χ² passes on the full sample
     (repeated LM with ``levmar_maxiter``), then **sigma-clipping** refinement with relaxed
     thresholds on the first clipping rounds. Formal uncertainty may use a KPF-inspired
@@ -2395,9 +2833,9 @@ def fit_ccf_rv(
     return_params : bool, optional
         If True, return ``(rv, rv_err, params_dict, diag_dict)``; else ``(rv, rv_err)``.
     mask_method : str or None, optional
-        If in ``CCFFitKpfConfig.cal_mask_methods``, use absorption-style calibration
+        If in ``CCFFitConfig.cal_mask_methods``, use absorption-style calibration
         peak logic.
-    config : CCFFitKpfConfig or None, optional
+    config : CCFFitConfig or None, optional
         Override fit windows and thresholds.
     vel_span_m_s_per_pixel : float or None, optional
         Spectral sampling scale passed into error heuristics.
@@ -2449,9 +2887,9 @@ def fit_ccf_rv(
     Notes
     -----
     Design parallels public KPF PRV CCF-fitting ideas; see module ``References``.
-    When both the KPF-style gradient error and the Levenberg–Marquardt covariance on
-    the Gaussian mean pass plausibility checks, :class:`CCFFitKpfConfig` field
-    ``rv_err_cov_kpf_combine`` chooses **``min``** (historic) or **``max``**
+    When both the gradient-based CCF error and the Levenberg–Marquardt covariance on
+    the Gaussian mean pass plausibility checks, :class:`CCFFitConfig` field
+    ``rv_err_cov_combine`` chooses **``min``** (historic) or **``max``**
     (more conservative; default).
 
     Optional **parametric bootstrap** (``rv_err_bootstrap_samples`` > 0): repeatedly
@@ -2471,11 +2909,11 @@ def fit_ccf_rv(
     - The Levenberg–Marquardt **covariance** on the Gaussian mean (when returned by
       Astropy) is a **local** linearization error for the weighted nonlinear fit; it
       does not add systematic terms from model mismatch (true line profile ≠ Gaussian).
-    - The **KPF-style** ``_kpf_err_km`` branch uses gradients of the **raw** CCF
+    - The **gradient-based** ``_gradient_ccf_err_km`` branch uses gradients of the **raw** CCF
       (``√|CCF|`` scaling) and **does not** use ``ccf_err``. It returns **0** if any
       CCF sample in the fit window is **negative**, so for strongly absorption-shaped
-      curves the KPF branch may be inactive and ``rv_err`` relies on covariance or
-      fallbacks. With ``rv_err_cov_kpf_combine="min"``, **``min(KPF, cov)``** can still
+      curves the gradient branch may be inactive and ``rv_err`` relies on covariance or
+      fallbacks. With ``rv_err_cov_combine="min"``, **``min(gradient, cov)``** can still
       yield an **optimistically small** ``rv_err``; default ``"max"`` is more conservative.
     - If the LM Gaussian **width** collapses toward zero, the formal covariance on the
       mean can reach ~1e-16 m/s while still passing ``_ok_err``; such fits set
@@ -2486,7 +2924,7 @@ def fit_ccf_rv(
       computed for ``diag["rv_err_slope_propagation_m_s"]`` but is **not** forced as a
       minimum on ``rv_err`` (no 200 km/s-style floor from ``max(rv_err, σ_slope)``).
     """
-    cfg = config or CCFFitKpfConfig()
+    cfg = config or CCFFitConfig()
     free_bl = _line_mask_ccf_fit_free_baseline_requested(
         fit_ccf_baseline_free=fit_ccf_baseline_free,
         line_mask_line_window_by_line=line_mask_line_window_by_line,
@@ -2501,7 +2939,7 @@ def fit_ccf_rv(
             "fit_ok": False,
             "used_covariance_for_error": False,
             "used_sigma_fallback": False,
-            "used_kpf_ccf_error": False,
+            "used_gradient_ccf_error": False,
             "used_ccf_pointwise_error": False,
             "sigma_clip_enabled": bool(cfg.sigma_clip_enable),
             "sigma_clip_iterations": 0,
@@ -2509,7 +2947,7 @@ def fit_ccf_rv(
             "sigma_clip_n_points_final": 0,
             "rv_err_bootstrap_sigma_m_s": float("nan"),
             "used_rv_err_bootstrap": False,
-            "rv_err_cov_kpf_combine": str(cfg.rv_err_cov_kpf_combine),
+            "rv_err_cov_combine": str(cfg.rv_err_cov_combine),
             "applied_slope_propagation_floor": False,
             "message": msg,
         }
@@ -2597,7 +3035,7 @@ def fit_ccf_rv(
         seed_ms = float(vm[imn if profile == "emission" else imx])
     rv_gk = seed_ms / 1000.0
     # Use caller's effective finest step (hybrid grids are mostly coarse in |v|;
-    # recomputing mean spacing here biased KPF errors high).
+    # recomputing mean spacing here biased gradient errors high).
     vstep_k = float(v_step_fit) / 1000.0
     vsp_k = (
         float(vel_span_m_s_per_pixel) / 1000.0
@@ -2829,7 +3267,7 @@ def fit_ccf_rv(
                 np.array([]),
             )
 
-    def _kpf_err_km(fw_km: float, rv0_km: float) -> float:
+    def _gradient_ccf_err_km(fw_km: float, rv0_km: float) -> float:
         v = np.asarray(vk, np.float64).ravel()
         c = np.asarray(y, np.float64).ravel()
         m = np.isfinite(v) & np.isfinite(c)
@@ -2975,7 +3413,7 @@ def fit_ccf_rv(
         else max(vstep, 1e-12) if math.isfinite(vstep) and vstep > 0 else max(float(sig_ms), 1e-12)
     )
     fw_km = 2.0 * (hw2_km if pw == 2 else hw1_km)
-    ek = _kpf_err_km(fw_km, mk)
+    ek = _gradient_ccf_err_km(fw_km, mk)
     ek_ms = float(ek * 1000.0)
     ek_ok = ek > 0 and np.isfinite(ek_ms) and _ok_err(ek_ms, sig_ms, vstep)
     cov_ms = (
@@ -2992,29 +3430,29 @@ def fit_ccf_rv(
     if n_good is not None and int(n_good) > 0:
         rv_err_fb = max(rv_err_fb, float(sig_for_fb_ms / math.sqrt(float(n_good))))
 
-    comb = str(cfg.rv_err_cov_kpf_combine).lower().strip()
+    comb = str(cfg.rv_err_cov_combine).lower().strip()
     if comb not in ("min", "max"):
         comb = "max"
 
-    used_kpf = used_cov = used_fb = False
+    used_gradient = used_cov = used_fb = False
     if cov_ok and ek_ok:
         rv_err_ms = min(cov_ms, ek_ms) if comb == "min" else max(cov_ms, ek_ms)
-        used_kpf = True
+        used_gradient = True
         used_cov = True
-        msg = f"{'min' if comb == 'min' else 'max'}(KPF ccf_error, LevMar cov)"
+        msg = f"{'min' if comb == 'min' else 'max'}(gradient ccf_error, LevMar cov)"
     elif cov_ok:
         rv_err_ms = cov_ms
         used_cov = True
         msg = "LevMar cov"
     elif ek_ok:
         rv_err_ms = ek_ms
-        used_kpf = True
-        msg = "KPF ccf_error"
+        used_gradient = True
+        msg = "gradient ccf_error"
     else:
         rv_err_ms = rv_err_fb
         used_fb = True
         if ek > 0 and np.isfinite(ek):
-            msg = "σ/√n (KPF ccf_error implausible)"
+            msg = "σ/√n (gradient ccf_error implausible)"
         elif sigc is not None and np.isfinite(float(sigc)) and float(sigc) > 0:
             msg = "σ/√n (LevMar cov implausible)"
         else:
@@ -3100,7 +3538,7 @@ def fit_ccf_rv(
         "ccf_line_mask_forced_peak_up_profile": bool(forced_line_mask_peak_up),
         "used_covariance_for_error": used_cov,
         "used_sigma_fallback": used_fb,
-        "used_kpf_ccf_error": used_kpf,
+        "used_gradient_ccf_error": used_gradient,
         "used_ccf_pointwise_error": bool(used_pw_fit),
         "message": msg,
         "ccf_velocity_grid_min_m_s": float(np.min(vm)),
@@ -3108,7 +3546,7 @@ def fit_ccf_rv(
         "fit_v_lo": float(best_vlo),
         "fit_v_hi": float(best_vhi),
         "profile": profile,
-        "kpf_pass_used": pw,
+        "fit_pass_used": pw,
         "ccf_dir_style": "up" if profile == "absorption" else "down",
         "sigma_clip_enabled": bool(clip_used.get("sigma_clip", cfg.sigma_clip_enable)),
         "sigma_clip_iterations": int(clip_used.get("iterations", 0)),
@@ -3116,7 +3554,7 @@ def fit_ccf_rv(
         "sigma_clip_n_points_final": int(clip_used.get("n_final", best_gx.size)),
         "rv_err_bootstrap_sigma_m_s": boot_sig,
         "used_rv_err_bootstrap": used_boot,
-        "rv_err_cov_kpf_combine": comb,
+        "rv_err_cov_combine": comb,
         "lm_gaussian_width_plausible": bool(lm_width_plausible),
         "rv_err_slope_propagation_m_s": slope_prop_ms,
         "applied_slope_propagation_floor": bool(applied_slope_floor),
@@ -4326,8 +4764,8 @@ def _fit_ccf_preview_slot_worker(
             rv = float(rv_ref)
             if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0:
                 rv_err = float(err_ref)
-    kpf_fit = {"rv": rv, "rv_err": rv_err, "params": params, "diagnostics": diag}
-    return kpf_fit, refine_meta
+    gaussian_fit = {"rv": rv, "rv_err": rv_err, "params": params, "diagnostics": diag}
+    return gaussian_fit, refine_meta
 
 
 def finalize_ccf_preview_dict(
@@ -4432,8 +4870,8 @@ def finalize_ccf_preview_dict(
     else:
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             results = list(ex.map(_run_slot, slots))
-    for sl, (kpf_fit, refine_meta) in zip(slots, results):
-        sl["kpf_fit"] = kpf_fit
+    for sl, (gaussian_fit, refine_meta) in zip(slots, results):
+        sl["gaussian_fit"] = gaussian_fit
         if refine_meta is not None and bool(refine_meta.get("ok")):
             sl["line_mask_refine_rmeta"] = refine_meta
     logger.info(
@@ -5543,7 +5981,7 @@ def _calc_mask_ccf_chunks_numba(
     n_line_arr: np.ndarray,
     compute_line_std: bool,
     pixel_interp_order: int,
-    kpf_segment_samples: int,
+    tophat_segment_samples: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Chunk-batched mask CCF(v) with parallelism over chunks.
@@ -5552,10 +5990,10 @@ def _calc_mask_ccf_chunks_numba(
     At trial velocity :math:`v`, the observed wavelength is
     :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}\\,(1+v/c)/(1+z_b)`.
 
-    **KPF segment model (finite width):** each mask entry has rest edges
+    **Tophat segment model (finite width):** each mask entry has rest edges
     :math:`[\\lambda_{\\rm lo},\\lambda_{\\rm hi}]`. At trial velocity the observed segment is
     shifted by the same factor as above. The segment’s contribution is approximated by
-    averaging :math:`F\\cdot\\mathrm{SN}` over ``kpf_segment_samples`` uniformly spaced
+    averaging :math:`F\\cdot\\mathrm{SN}` over ``tophat_segment_samples`` uniformly spaced
     points inside the shifted segment.
 
     For each velocity, let :math:`x_j = F_j\\,\\mathrm{SN}_j` at each contributing line
@@ -5622,7 +6060,7 @@ def _calc_mask_ccf_chunks_numba(
             )
         lag_L_buf = np.empty(MAX_MASK_CCF_PIXEL_INTERP_ORDER + 1, dtype=np.float64)
         coef_pix = np.zeros(n_pix, dtype=np.float64)
-        n_samp = int(kpf_segment_samples)
+        n_samp = int(tophat_segment_samples)
         if n_samp < 1:
             n_samp = 1
         for i_v in range(n_v):
@@ -5647,7 +6085,7 @@ def _calc_mask_ccf_chunks_numba(
                     and lam_lo_r > 0.0
                 )
                 if finite_edges and lam_hi_r > lam_lo_r:
-                    # Finite-width segment (KPF-style): average samples across the segment.
+                    # Finite-width tophat segment: average samples across the segment.
                     lam_lo = lam_lo_r * sh
                     lam_hi = lam_hi_r * sh
                     if lam_hi < chunk_lo or lam_lo > chunk_hi:
@@ -7007,7 +7445,7 @@ def rv_per_chunks_line_mask(
             n_line_arr,
             bool(return_ccf),
             int(pio),
-            int(KPF_MASK_CCF_SEGMENT_SAMPLES),
+            int(TOPHAT_MASK_CCF_SEGMENT_SAMPLES),
         )
         # σ_CCF: quadrature of flux-propagated SE of the mask mean and weighted line
         # dispersion of x_j = F_j·SN_j about that mean (Numba).
@@ -7509,7 +7947,7 @@ def _refine_ccf_rv_gaussian_smooth_after_gaussian_fit_ccf_line_mask(
         ccf_err=ccf_err,
         gaussian_sigma_m_s=sig,
         mask_method="stellar",
-        config=CCFFitKpfConfig(),
+        config=CCFFitConfig(),
     )
     if not meta.get("ok") or not math.isfinite(float(rv_r)):
         return None, None, None

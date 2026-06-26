@@ -11,11 +11,11 @@ function states otherwise.
 
 **Exports**
 
-``CCFFitKpfConfig``
+``CCFFitConfig``
     Gaussian CCF fit configuration.
 
 ``MaskLines``, ``MaskLineStyle`` (from :mod:`hispecdrp.utils.line_mask_utils`)
-    Tabulated line-mask container (**delta** / **kpf** geometry) and style literal.
+    Tabulated line-mask container (**delta** / **tophat** geometry) and style literal.
     Use :meth:`~MaskLines.load` for disk masks (``.mas`` or two-column text).
 
 ``fit_ccf_rv``, ``dv_per_pixel_m_s``, ``continuum_normalize``
@@ -33,7 +33,7 @@ function states otherwise.
 
 ``DEFAULT_PACKAGED_LINE_MASK_BASENAME``, ``packaged_default_line_mask_path``
     Packaged default **delta** line mask for ``mask_path=None`` (see ``hispecdrp/data/masks/``).
-    Optional ``*.kpf.mas`` segment masks are produced by ``regenerate_template_masks.py`` only;
+    Optional ``*.tophat.mas`` segment masks are produced by ``regenerate_template_masks.py`` only;
     they are not part of the default RV API.
 
 ``run_ccf_line_mask_for_fiber``, ``build_ccf_preview_dict``
@@ -57,11 +57,13 @@ from hispecdrp.utils.line_mask_utils import (
 )
 
 from .ccf_utils import (
-    CCFFitKpfConfig,
+    CCFBisectorConfig,
+    CCFFitConfig,
     build_ccf_preview_dict,
     continuum_normalize,
     dv_per_pixel_m_s,
     fit_ccf_rv,
+    fit_ccf_rv_bisector,
     flat_chunk_echelle_orders,
     masked_ccf_rv,
     line_mask_parabolic_vertex_rv_err_levmar_m_s,
@@ -77,7 +79,8 @@ from ..stellar_rv.rv_combine_utils import combine_rvs_median_mad, weighted_mean_
 from .gaia_query import *
 
 __all__ = [
-    "CCFFitKpfConfig",
+    "CCFBisectorConfig",
+    "CCFFitConfig",
     "DEFAULT_PACKAGED_LINE_MASK_BASENAME",
     "MaskLineStyle",
     "MaskLines",
@@ -85,6 +88,7 @@ __all__ = [
     "continuum_normalize",
     "dv_per_pixel_m_s",
     "fit_ccf_rv",
+    "fit_ccf_rv_bisector",
     "flat_chunk_echelle_orders",
     "build_ccf_preview_dict",
     "masked_ccf_rv",

@@ -330,7 +330,7 @@ __SPECTRUM_HELP__
       return bundle;
     }
 
-    function getCcfCurveMaskKpf(order) {
+    function getCcfCurveMaskTophat(order) {
       if (ccfCurveCache.has(currentOrderIdx)) {
         return ccfCurveCache.get(currentOrderIdx);
       }
@@ -435,7 +435,7 @@ __SPECTRUM_HELP__
       if (OVERLAY_KIND === "template") {
         return getCcfCurveTemplateEmbedded(order);
       }
-      return getCcfCurveMaskKpf(order);
+      return getCcfCurveMaskTophat(order);
     }
 
     function spectrumTitleText(order, vMs) {

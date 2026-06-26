@@ -109,6 +109,19 @@ class BlazeCorrectionPrimitive(BasePrimitive):
         return dict(output=output)
     
 
+def _longest_contiguous_true_segment(mask: np.ndarray) -> slice:
+    """Return a slice covering the longest run of True values in ``mask``."""
+    m = np.asarray(mask, dtype=bool)
+    if not np.any(m):
+        return slice(0, 0)
+    padded = np.concatenate(([False], m, [False]))
+    changes = np.diff(padded.astype(np.int8))
+    starts = np.flatnonzero(changes == 1)
+    ends = np.flatnonzero(changes == -1)
+    i = int(np.argmax(ends - starts))
+    return slice(int(starts[i]), int(ends[i]))
+
+
 def get_smooth_blaze(fiberflat_flux, fiberflat_std, fiberflat_dq, order_vec, do_orders, pixels_per_spline_knot=16):
     """
     Collect smoothed blaze function (not normalized) for each order and return in 2D array
@@ -174,26 +187,70 @@ def estimate_blaze_spline(
     smooth_flux : ndarray
         Smoothed fiber flat spectrum
     """
-    #TODO make smoothing resistant to lines in the lamp spectrum
-    px = np.arange(len(flat_flux))
-    weights = 1 / flat_std
+    # TODO: make smoothing resistant to lines in the lamp spectrum
+    px = np.arange(len(flat_flux), dtype=np.float64)
+    flat_flux = np.asarray(flat_flux, dtype=np.float64)
+    flat_std = np.asarray(flat_std, dtype=np.float64)
 
-    mask = (flat_flux > 0) & (flat_std > 0) & (dq_flags == 0) 
-
-    num_knots = len(px[mask]) // pixels_per_spline_knot  
-    knots = np.linspace(px[mask].min(), px[mask].max(), num_knots)[1:-1]
-
-    spline = LSQUnivariateSpline(
-        px[mask],
-        flat_flux[mask],
-        t=knots,
-        k=3,
-        w=weights[mask],
-        ext=3
+    mask = (
+        np.isfinite(flat_flux)
+        & np.isfinite(flat_std)
+        & (flat_flux > 0)
+        & (flat_std > 0)
+        & (dq_flags == 0)
     )
+    if not np.any(mask):
+        return np.full(len(flat_flux), np.nan, dtype=flat_flux.dtype)
 
-    smooth_flux = spline(px)
+    # Trace gaps (NaN extraction) leave holes in the flat; fit the blaze spline on the
+    # longest contiguous good segment only, then evaluate on the full pixel grid.
+    seg = _longest_contiguous_true_segment(mask)
+    fit_mask = np.zeros(len(flat_flux), dtype=bool)
+    fit_mask[seg] = mask[seg]
+    px_fit = px[fit_mask]
+    if px_fit.size < 4:
+        return np.full(len(flat_flux), np.nan, dtype=flat_flux.dtype)
 
+    weights = 1.0 / flat_std[fit_mask]
+    num_knots = max(0, int(px_fit.size // pixels_per_spline_knot))
+    if num_knots >= 2:
+        knots = np.linspace(px_fit.min(), px_fit.max(), num_knots)[1:-1]
+    else:
+        knots = np.empty(0, dtype=np.float64)
+
+    smooth_flux = np.full(len(flat_flux), np.nan, dtype=flat_flux.dtype)
+    try:
+        if knots.size > 0:
+            spline = LSQUnivariateSpline(
+                px_fit,
+                flat_flux[fit_mask],
+                t=knots,
+                k=3,
+                w=weights,
+                ext=3,
+            )
+        else:
+            # Too few points for interior knots — cubic smoothing spline without LSQ knots.
+            from scipy.interpolate import UnivariateSpline
+
+            spline = UnivariateSpline(
+                px_fit,
+                flat_flux[fit_mask],
+                w=weights,
+                k=min(3, px_fit.size - 1),
+                s=len(px_fit),
+            )
+        smooth_flux = np.asarray(spline(px), dtype=flat_flux.dtype)
+    except ValueError:
+        # Last resort: wide median filter on the contiguous segment, constant extrapolation.
+        seg_flux = flat_flux[seg].copy()
+        seg_flux[~mask[seg]] = np.nan
+        filled = np.nan_to_num(seg_flux, nan=np.nanmedian(seg_flux))
+        win = min(max(3, pixels_per_spline_knot * 2 + 1), len(filled) // 2 * 2 + 1)
+        smooth_seg = median_filter(filled, size=win, mode="nearest")
+        smooth_flux[seg] = smooth_seg
+
+    smooth_flux[~mask] = np.nan
     return smooth_flux
 
 

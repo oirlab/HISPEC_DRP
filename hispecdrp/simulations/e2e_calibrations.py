@@ -186,6 +186,7 @@ def _sync_koa_store(
     connect_remote: bool,
     sync_first: bool,
     download_missing: bool = True,
+    skip_cal_types: Sequence[str] | None = None,
 ) -> None:
     """Sync KOA metadata into the local DB and download missing calibration files."""
     if not sync_first:
@@ -210,6 +211,17 @@ def _sync_koa_store(
     except Exception as e:
         logger.warning("Could not list missing KOA calibration files: %s", e)
         return
+    if skip_cal_types:
+        skip = set(skip_cal_types)
+        skipped = [rec for rec in missing if rec.get("cal_type") in skip]
+        missing = [rec for rec in missing if rec.get("cal_type") not in skip]
+        if skipped:
+            logger.info(
+                "Skipping download of %d KOA calibration file(s) for cal types %s "
+                "(Stage 1 trace products will be built with ProcessFiberflatsPipeline).",
+                len(skipped),
+                sorted(skip),
+            )
     if not missing:
         return
     logger.info("Downloading %d missing KOA calibration file(s).", len(missing))
@@ -279,6 +291,7 @@ def fetch_koa_calibrations(
     connect_remote: bool = True,
     sync_first: bool = True,
     download_missing: bool = True,
+    skip_cal_types: Sequence[str] | None = None,
 ) -> dict[str, datamodels.CalibrationModel]:
     """
     Fetch calibration FITS from the KOA store for ``keys`` (best-effort per key).
@@ -301,6 +314,7 @@ def fetch_koa_calibrations(
                 connect_remote=connect_remote,
                 sync_first=sync_first,
                 download_missing=download_missing,
+                skip_cal_types=skip_cal_types,
             )
 
             store_meta = (
@@ -446,6 +460,16 @@ def resolve_testing_data_stage1_masters(
         logger.info("Using test-data master calibration %s: %s", key, local_path)
 
 
+def stage1_masters_from_user_config(bundle: E2ECalibrationBundle) -> bool:
+    """True when trace_pos, trace_prof, and fiberflat were all pinned in calibration_config."""
+    if not bundle.has_master_trace_bundle:
+        return False
+    return all(
+        bundle.sources.get(key, "").startswith("config:")
+        for key in STAGE1_TRACE_KEYS
+    )
+
+
 def log_stage1_trace_bundle_status(bundle: E2ECalibrationBundle) -> None:
     """Log whether Stage 1 will use KOA/local masters or the fiberflat pipeline."""
     if bundle.has_master_trace_bundle:
@@ -478,27 +502,43 @@ def log_missing_stage1_trace_masters(bundle: E2ECalibrationBundle) -> None:
 
 def complete_stage0_calibrations(
     calibration_models: dict[str, datamodels.CalibrationModel],
-    rate_map: np.ndarray,
+    rate_map: np.ndarray | None,
     output_dir: str,
     sources: dict[str, str],
     *,
     calibration_kwargs: dict[str, Any] | None = None,
+    shape: tuple[int, int] = e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE,
 ) -> None:
     """Fill any missing Stage 0 keys with simulated calibration models (in-place)."""
-    rm = np.asarray(rate_map, dtype=np.float64)
-    if rm.ndim != 2:
-        raise ValueError(f"rate_map must be 2D; got shape {rm.shape}")
-    eff_shape = (int(rm.shape[0]), int(rm.shape[1]))
+    if rate_map is not None:
+        rm = np.asarray(rate_map, dtype=np.float64)
+        if rm.ndim != 2:
+            raise ValueError(f"rate_map must be 2D; got shape {rm.shape}")
+        eff_shape = (int(rm.shape[0]), int(rm.shape[1]))
+    else:
+        eff_shape = (int(shape[0]), int(shape[1]))
     cal_kw = calibration_kwargs or {}
 
     for k in STAGE0_CAL_KEYS:
         if k in calibration_models:
-            continue
+            if e2e_support.stage0_calibration_shape_matches(calibration_models[k], eff_shape):
+                continue
+            logger.warning(
+                "Stage 0 calibration %s shape %s != expected %s; will regenerate.",
+                k,
+                e2e_support.calibration_model_detector_shape(calibration_models[k]),
+                eff_shape,
+            )
+            del calibration_models[k]
+            sources.pop(k, None)
+
         fp = e2e_support.dummy_cal_path(output_dir, k)
-        if os.path.isfile(fp):
-            calibration_models[k] = datamodels.open(fp)
+        cached = e2e_support.open_cached_stage0_calibration(
+            fp, eff_shape, key=k
+        )
+        if cached is not None:
+            calibration_models[k] = cached
             sources.setdefault(k, f"simulated_cached:{fp}")
-            continue
 
     missing = [k for k in STAGE0_CAL_KEYS if k not in calibration_models]
     if not missing:
@@ -509,15 +549,42 @@ def complete_stage0_calibrations(
         missing,
         eff_shape,
     )
-    new_models = create_simulated_calibration_models(eff_shape, **cal_kw)
-    for k in missing:
-        if k in new_models:
-            calibration_models[k] = new_models[k]
-            sources[k] = "simulated"
-            try:
-                new_models[k].save(filepath=e2e_support.dummy_cal_path(output_dir, k))
-            except Exception as e:
-                logger.warning("Could not save simulated calibration %s: %s", k, e)
+    sim_keys = [k for k in missing if k != "nonlin"]
+    if sim_keys:
+        new_models = create_simulated_calibration_models(eff_shape, **cal_kw)
+        for k in sim_keys:
+            if k in new_models:
+                calibration_models[k] = new_models[k]
+                sources[k] = "simulated"
+                try:
+                    new_models[k].save(filepath=e2e_support.dummy_cal_path(output_dir, k))
+                except Exception as e:
+                    logger.warning("Could not save simulated calibration %s: %s", k, e)
+    if "nonlin" in missing:
+        ny, nx = eff_shape
+        nonlin_model = e2e_support.identity_nonlin_calibration_model(ny, nx)
+        calibration_models["nonlin"] = nonlin_model
+        sources["nonlin"] = "simulated"
+        try:
+            nonlin_model.save(filepath=e2e_support.dummy_cal_path(output_dir, "nonlin"))
+        except Exception as e:
+            logger.warning("Could not save simulated calibration nonlin: %s", e)
+
+    bad = [
+        k
+        for k in STAGE0_CAL_KEYS
+        if k in calibration_models
+        and not e2e_support.stage0_calibration_shape_matches(calibration_models[k], eff_shape)
+    ]
+    if bad:
+        shapes = {
+            k: e2e_support.calibration_model_detector_shape(calibration_models[k])
+            for k in bad
+        }
+        raise ValueError(
+            f"Stage 0 calibration shape mismatch after completion: {shapes} != {eff_shape}. "
+            f"Delete stale sim_*.fits under {e2e_support.calibration_dir(output_dir)!r} and rerun."
+        )
 
 
 def resolve_e2e_calibrations(
@@ -534,6 +601,7 @@ def resolve_e2e_calibrations(
     sync_caldb_first: bool = True,
     download_missing_koa: bool = True,
     auto_resolve_stage1_masters: bool = False,
+    skip_koa_cal_types: Sequence[str] | None = None,
 ) -> E2ECalibrationBundle:
     """
     Resolve E2E calibrations: explicit config paths, then KOA, then simulated (Stage 0 completed later).
@@ -548,6 +616,9 @@ def resolve_e2e_calibrations(
         ``cals/``, the KOA cache, or bundled test data. Default is False so Stage 1 trace
         products are derived from simulated fiberflats built with the same instrument model
         as the science ramp (avoids stale master drift).
+    skip_koa_cal_types : sequence of str, optional
+        Calibration types to omit from KOA bulk download and explicit fetch (e.g.
+        ``trace_pos``, ``trace_prof``, ``fiberflat`` when using ProcessFiberflatsPipeline).
     """
     out_dir = e2e_support.ensure_output_directory(output_dir)
     e2e_support.ensure_koa_calibration_cache_env(out_dir)
@@ -597,6 +668,9 @@ def resolve_e2e_calibrations(
                 logger.warning("User calibration path for %r failed: %s", key, e)
 
     koa_keys = list(all_keys)
+    if skip_koa_cal_types:
+        skip = set(skip_koa_cal_types)
+        koa_keys = [k for k in koa_keys if k not in skip]
     if not auto_resolve_stage1_masters:
         koa_keys = [k for k in koa_keys if k not in STAGE1_TRACE_KEYS]
 
@@ -621,6 +695,7 @@ def resolve_e2e_calibrations(
                     connect_remote=connect_remote,
                     sync_first=sync_first,
                     download_missing=download_missing,
+                    skip_cal_types=skip_koa_cal_types,
                 )
             except Exception as e:
                 logger.warning(

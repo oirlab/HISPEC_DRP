@@ -41,3 +41,35 @@ def test_blaze_correction():
     assert flagged[:, :edge].all() and flagged[:, -edge:].all()
     assert not flagged[:, edge:-edge].any()
 
+
+def test_blaze_correction_gappy_fiberflat():
+    """NaN holes from failed trace extraction must not break blaze spline fitting."""
+    from hispecdrp.primitives.blaze_correction.blaze_correction_primitive import (
+        estimate_blaze_spline,
+        get_smooth_blaze,
+    )
+
+    n_pix = 4096
+    flat = np.ones(n_pix)
+    flat_err = np.ones(n_pix) / 100.0
+    dq = np.zeros(n_pix, dtype=np.uint32)
+    # Simulate trace-edge NaN gaps plus an internal hole (like real fiberflats).
+    flat[:400] = np.nan
+    flat[1200:1800] = np.nan
+    flat[-350:] = np.nan
+
+    smooth = estimate_blaze_spline(flat, flat_err, dq)
+    assert smooth.shape == (n_pix,)
+    assert np.isfinite(smooth[400:1200]).all()
+    assert np.isnan(smooth[:400]).all()
+    assert np.isnan(smooth[1200:1800]).all()
+
+    order_vec = np.array([110, 111, 113])
+    do_orders = order_vec
+    flux = np.stack([flat, flat.copy(), flat.copy()])
+    err = np.stack([flat_err, flat_err, flat_err])
+    dq3 = np.stack([dq, dq, dq])
+    blaze = get_smooth_blaze(flux, err, dq3, order_vec, do_orders)
+    assert blaze.shape == (3, n_pix)
+    assert np.all(np.isfinite(blaze[:, 400:1200]))
+

@@ -41,6 +41,11 @@ class TracePositionPrimitive(BasePrimitive):
         Initial peak-finding threshold as a fraction of the maximum cross-dispersion
         profile value (default 0.05). Lower values recover fainter echelle orders on
         high dynamic-range fiber flats.
+    min_flux_frac : float
+        Per-order signal floor for the trace walker (default 0.05). Rows whose windowed
+        flux falls below this fraction of the order's peak windowed flux are dropped from
+        the polynomial fit, so faint blaze ends and partially illuminated orders cannot
+        pull the trace into unphysical curves.
 
     Returns
     -------
@@ -55,6 +60,7 @@ class TracePositionPrimitive(BasePrimitive):
         'xdisp_range' : None,
         'disp_range' : None,
         'prominence_factor' : 0.05,
+        'min_flux_frac' : 0.05,
         'output_model' : 'TracePosModel',
     }
 
@@ -127,6 +133,8 @@ class TracePositionPrimitive(BasePrimitive):
                 deg_pos=self.deg_pos, deg_width=self.deg_width,
                 window_size=self.window_size,
                 prominence_factor=prominence_factor,
+                min_flux_frac=self.min_flux_frac,
+                n_expected_orders=n_orders,
             )
 
             # Sanity check
@@ -140,8 +148,13 @@ class TracePositionPrimitive(BasePrimitive):
             pos = np.full((n_orders, len(pixel_arr)), np.nan)
             fwhm = np.full((n_orders, len(pixel_arr)), np.nan)
             for i in range(num_orders_found):
+                cent_row = r['trace_centroids'][i, : len(pixel_arr)]
+                width_row = r['trace_widths'][i, : len(pixel_arr)]
                 pos[i, :] = np.polyval(r['coeffs_pos'][i, :], pixel_arr)
                 fwhm[i, :] = np.polyval(r['coeffs_width'][i, :], pixel_arr)
+                # Do not extrapolate trace polynomials into rows where the walker failed.
+                pos[i, ~np.isfinite(cent_row)] = np.nan
+                fwhm[i, ~np.isfinite(width_row)] = np.nan
             setattr(output_model, f'COEFF_POS_FIB{fiber}', r['coeffs_pos'])
             setattr(output_model, f'COEFF_FWHM_FIB{fiber}', r['coeffs_width'])
             setattr(output_model, f'POS_FIB{fiber}', pos)
@@ -285,7 +298,10 @@ def find_trace_positions(
     fwhm : float = 2.5,
     window_size : int | None = None,
     distance_factor : float = 0.5,
-    prominence_factor : float = 0.05
+    prominence_factor : float = 0.05,
+    min_flux_frac : float = 0.05,
+    max_step : float | None = None,
+    n_expected_orders : int | None = None,
 ) -> dict:
 
     # Initial parameters
@@ -298,13 +314,35 @@ def find_trace_positions(
         window_size = int(np.round(fwhm * 2.5))
     window_size_half = int(np.round(window_size / 2))
     min_distance = max(1, int(fwhm * distance_factor))
+    # When the expected order count is known, require detected peaks to be separated by at
+    # least a fraction of the mean inter-order spacing. This suppresses spurious split
+    # peaks on bright orders (a single order resolving into two adjacent maxima) without
+    # merging genuinely distinct orders, which are spaced far wider than this floor.
+    if n_expected_orders is not None and n_expected_orders > 0:
+        span = max(1, int(xdisp_range[1]) - int(xdisp_range[0]))
+        spacing_distance = int(0.35 * span / n_expected_orders)
+        min_distance = max(min_distance, spacing_distance)
+    # Maximum allowed centroid shift between adjacent rows. Real echelle traces curve by
+    # well under a pixel per row, so a tight cap rejects order-hopping and runaway drift
+    # into inter-order gaps while still following genuine trace curvature.
+    if max_step is None:
+        max_step = float(window_size_half)
 
     # Find peaks for center column
     y0 = ny // 2
     ki, kf = max(0, y0 - 3), min(ny, y0 + 3)
     y = np.nanmedian(median_filter_2d(data[ki:kf+1, :], dq[ki:kf+1, :], window_size=(3, 3)), axis=0)
     y = y[xdisp_range[0]:xdisp_range[1] + 1]
-    min_prominence = np.nanmax(y) * prominence_factor
+    # Interpolate over NaNs (masked / flagged pixels) before peak finding: scipy.signal
+    # find_peaks silently drops nearly all peaks when NaNs are present because comparisons
+    # against NaN are False, so a handful of scattered bad pixels can collapse the detected
+    # order count. Linear interpolation across finite samples preserves the order profile.
+    finite = np.isfinite(y)
+    if finite.any() and not finite.all():
+        idx = np.arange(y.size)
+        y = np.interp(idx, idx[finite], y[finite])
+    y_max = np.nanmax(y) if np.any(np.isfinite(y)) else 0.0
+    min_prominence = y_max * prominence_factor
     peaks0, _ = scipy.signal.find_peaks(
         y,
         prominence=min_prominence,
@@ -323,18 +361,37 @@ def find_trace_positions(
     coeffs_width = np.full((num_traces, deg_width + 1), np.nan)
     trace_centroids = np.full((num_traces, nx), np.nan)
     trace_widths = np.full((num_traces, nx), np.nan)
+    trace_flux = np.full((num_traces, nx), np.nan)
 
     pixel_arr = np.arange(ny)
 
+    # Replace NaN / non-finite pixels (e.g. dq-flagged) with zero before walking: a single
+    # flagged pixel inside the centroid window makes the windowed flux non-finite, which
+    # aborts the walk for the whole order. Treating bad pixels as zero signal lets the walk
+    # bridge isolated flags while contributing negligibly to the local centroid.
+    data_for_walk = np.where(np.isfinite(data), data, 0.0)
+
     # Walk each trace up/down from initial peak position
     for i in range(num_traces):
-        trace_centroids[i, :], trace_widths[i, :] = walk_trace_up_down(
+        trace_centroids[i, :], trace_widths[i, :], trace_flux[i, :] = walk_trace_up_down(
             pixel_arr,
-            data, y0,
+            data_for_walk, y0,
             peaks0[i],
             disp_range,
-            window_size_half
+            window_size_half,
+            max_step,
         )
+        # Reject low-signal rows: where the windowed flux falls below a fraction of the
+        # order's peak windowed flux, the centroid is dominated by noise / inter-order
+        # background and must not enter the polynomial fit (otherwise faint blaze ends and
+        # partially illuminated orders pull the fit into wild, unphysical curves).
+        flux_row = trace_flux[i, :]
+        if np.any(np.isfinite(flux_row)):
+            peak_flux = np.nanmax(flux_row)
+            if np.isfinite(peak_flux) and peak_flux > 0:
+                low = ~(flux_row > (min_flux_frac * peak_flux))
+                trace_centroids[i, low] = np.nan
+                trace_widths[i, low] = np.nan
         good = np.where(np.isfinite(trace_centroids[i, :]))[0]
         if len(good) >= deg_pos + 1:
             coeffs_pos[i, :] = np.polyfit(good, trace_centroids[i, good], deg_pos)
@@ -356,7 +413,8 @@ def find_trace_positions(
         coeffs_pos=coeffs_pos,
         coeffs_width=coeffs_width,
         trace_centroids=trace_centroids,
-        trace_widths=trace_widths
+        trace_widths=trace_widths,
+        trace_flux=trace_flux,
     )
 
 
@@ -367,18 +425,21 @@ def walk_trace_up_down(
     xc0 : float,
     disp_range : tuple,
     window_size_half : float,
+    max_step : float,
 ) -> np.ndarray:
     trace_centroids = np.full(data.shape[1], np.nan)
     trace_widths = np.full(data.shape[1], np.nan)
+    trace_flux = np.full(data.shape[1], np.nan)
     _walk_trace_up_down(
         pixels,
         data,
         y0, xc0,
         disp_range,
         window_size_half,
-        trace_centroids, trace_widths
+        max_step,
+        trace_centroids, trace_widths, trace_flux
     )
-    return trace_centroids, trace_widths
+    return trace_centroids, trace_widths, trace_flux
 
 @njit(nogil=True, parallel=False, cache=True)
 def _walk_trace_up_down(
@@ -387,36 +448,52 @@ def _walk_trace_up_down(
     y0 : int, xc0 : float,
     disp_range : tuple,
     window_size_half : float,
+    max_step : float,
     trace_centroids : np.ndarray,
     trace_widths : np.ndarray,
+    trace_flux : np.ndarray,
 ):
-    
+
     # Central slice
-    xc = xc0
-    trace_centroids[y0], trace_widths[y0] = _compute_centroid_and_width(
+    c, w, f = _compute_centroid_and_width(
         pixels, data[y0, :],
         xc0,
         window_size_half
     )
+    trace_centroids[y0], trace_widths[y0], trace_flux[y0] = c, w, f
+    anchor0 = c if np.isfinite(c) else xc0
 
-    # Walk down
+    # Walk down. The window is anchored on the last accepted centroid (not the previous
+    # row's raw value) so that a row with no real signal cannot seed a runaway drift; a
+    # centroid that jumps by more than ``max_step`` is rejected (order hop / noise spike).
+    anchor = anchor0
     for y in range(y0 - 1, disp_range[0] - 1, -1):
-        xc = trace_centroids[y + 1]
-        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
+        c, w, f = _compute_centroid_and_width(
             pixels, data[y, :],
-            xc,
+            anchor,
             window_size_half
         )
+        trace_flux[y] = f
+        if np.isfinite(c) and abs(c - anchor) <= max_step:
+            trace_centroids[y], trace_widths[y] = c, w
+            anchor = c
+        else:
+            trace_centroids[y], trace_widths[y] = np.nan, np.nan
 
     # Walk up
-    xc = xc0
+    anchor = anchor0
     for y in range(y0 + 1, disp_range[1] + 1):
-        xc = trace_centroids[y - 1]
-        trace_centroids[y], trace_widths[y] = _compute_centroid_and_width(
+        c, w, f = _compute_centroid_and_width(
             pixels, data[y, :],
-            xc,
+            anchor,
             window_size_half
         )
+        trace_flux[y] = f
+        if np.isfinite(c) and abs(c - anchor) <= max_step:
+            trace_centroids[y], trace_widths[y] = c, w
+            anchor = c
+        else:
+            trace_centroids[y], trace_widths[y] = np.nan, np.nan
 
 
 @njit(nogil=True, parallel=False, cache=True)
@@ -427,7 +504,7 @@ def _compute_centroid_and_width(
     window_size_half : float,
 ):
     """
-    Compute the centroid and width of a trace slice.
+    Compute the centroid, width, and integrated flux of a trace slice.
 
     Parameters
     ----------
@@ -439,12 +516,24 @@ def _compute_centroid_and_width(
         Initial guess for the centroid position (in pixel coordinates).
     window_size_half : float
         Half the size of the window (in pixels) to use when computing the centroid and width.
+
+    Returns
+    -------
+    centroid : float
+        Flux-weighted centroid, or NaN when the window has no usable signal.
+    fwhm : float
+        Gaussian-equivalent FWHM, or NaN when the window has no usable signal.
+    total_flux : float
+        Summed flux inside the window (0.0 when the window is out of bounds / empty).
     """
+
+    if not np.isfinite(xc):
+        return np.nan, np.nan, 0.0
 
     xi = int(np.round(xc - window_size_half))
     xf = int(np.round(xc + window_size_half + 1))
     if xi < 0 or xf > trace_slice.size - 1:
-        return np.nan, np.nan
+        return np.nan, np.nan, 0.0
 
     slice_x = pixels[xi:xf+1]
     slice_y = trace_slice[xi:xf+1]
@@ -454,8 +543,8 @@ def _compute_centroid_and_width(
         centroid = np.sum(slice_x * slice_y) / total_flux
         variance = np.sum(((slice_x - centroid) ** 2) * slice_y) / total_flux
         if variance < 0:
-            return np.nan, np.nan
+            return np.nan, np.nan, total_flux
         fwhm = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(variance)
-        return centroid, fwhm
+        return centroid, fwhm, total_flux
     else:
-        return np.nan, np.nan
+        return np.nan, np.nan, 0.0

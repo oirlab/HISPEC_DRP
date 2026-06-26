@@ -18,7 +18,7 @@ Faster CI / local iteration (skips tests marked ``slow``: BT-Settl parallel line
   in :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview` (skips Kaleido PNG when
   ``save_preview`` is set). In ``test_stellar_rv_recovers_rv_per_chunk``, opens the unified preview when
   set. After ``test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask`` or
-  ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel``, runs lte049 + packaged
+  ``test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel``, runs lte049 + packaged
   **delta** mask ``ccf_line_mask``: mask-overlay via ``write_mask_overlay_debug_pages`` (auto-open) and
   ``create_stellar_rv_preview`` → unified ``*_preview.html``, then ``webbrowser.open``, with a timing
   summary (``-s``). After ``test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel``, runs the same
@@ -68,7 +68,7 @@ With ``HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER`` > ``1``, the BT-Settl line-mask 
   HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER=2 HISPEC_DRP_BSPEC_BTSETTL_ORDER=all HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask -s
 
 **Line-mask line-by-line chunking (``window_line_by_line=True``)** —
-``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel`` uses the same lte049
+``test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel`` uses the same lte049
 BSPEC stack and mask file, but chunks the spectrum in the observed frame at each mask line
 (non-overlapping Voronoi intervals around lines shifted by ``ccf_input_velocity`` = injected RV).
 It sets ``window_size_um`` = :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM` (symmetric spectral band about each
@@ -87,7 +87,7 @@ then descending chunk-center λ), including a **SEG k/n** column aligned with ma
 ``test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask``.
 Previews match the parallel test when ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1``::
 
-  HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER=3 HISPEC_DRP_BSPEC_BTSETTL_ORDER=all HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
+  HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER=3 HISPEC_DRP_BSPEC_BTSETTL_ORDER=all HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 pytest tests/test_stellar_rv.py::test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
 
 Mask-overlay spectrum panel: **Lagrange pixel-interpolation** trace (same stencil as
 ``rv_per_chunks_line_mask`` / ``mask_ccf_pixel_interp_order``) is always embedded. The dense λ
@@ -96,18 +96,18 @@ grid size is derived from the displayed spectrum point count:
 Example (single echelle order 139, the default when ``HISPEC_DRP_BSPEC_BTSETTL_ORDER`` is unset)::
 
   HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER=3 HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1 \\
-  pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
+  pytest tests/test_stellar_rv.py::test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
 
 **Line-window line-mask test — per-segment RV vs CCF (JSON + NPZ, no Plotly/mask-overlay HTML)**::
 
-  HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_SERIALIZE_RV_CCF=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
+  HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_SERIALIZE_RV_CCF=1 pytest tests/test_stellar_rv.py::test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel -s
 
 Same schema as ``HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF`` (``lte049_line_mask_ccf_rv_debug.json`` + ``.npz``): one
 slot per line-window segment with ``v_m_s`` and ``ccf`` arrays. With this env var, outputs are written under
 ``examples/data/`` (repository root next to ``tests/``); the test prints ``HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_RV_CCF_JSON=``
 and ``…_NPZ=`` at the end.
 
-**Injected-RV scan (11 × 10 m/s around −110 km/s)** — ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan``
+**Injected-RV scan (11 × 10 m/s around −110 km/s)** — ``test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan``
 
 Rebuilds the lte049 BSPEC line-window stack at each injected RV, runs ``ccf_line_mask``, reads ``RVCCFAVG`` per step,
 fits a **weighted offset** with slope fixed at unity (``RV_rec ≈ RV_inj + β₀``, weights ``1/RV_ERR²``), reports
@@ -115,9 +115,9 @@ scatter about ``y = x + β₀``, writes a Matplotlib PNG under the pytest ``tmp_
 settings match :data:`_BTSETTL_LINE_WINDOW_N1_*` (same MCMC-tuned defaults as the parallel line-window test). Optional
 copy to ``examples/output/``::
 
-  pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan -s
+  pytest tests/test_stellar_rv.py::test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan -s
 
-  HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_RV_SCAN_PLOT_EXAMPLES=1 pytest tests/test_stellar_rv.py::test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan -s
+  HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_RV_SCAN_PLOT_EXAMPLES=1 pytest tests/test_stellar_rv.py::test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan -s
 
 **Parallel BT-Settl BSPEC template-CCF test** — ``test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel``
 
@@ -140,7 +140,7 @@ primitive writes the unified preview HTML under ``tests/output/stellar_rv_plots/
 
 ``HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF=1`` — during ``test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask``,
 after the lte049 ``ccf_line_mask`` preview path (or a lightweight variant if previews are off), write JSON + NPZ
-debug dumps of per-order/mean ``v`` (m/s), ``ccf``, ``ccf_err`` (if present), and ``kpf_fit`` (Gaussian RV / err /
+debug dumps of per-order/mean ``v`` (m/s), ``ccf``, ``ccf_err`` (if present), and ``gaussian_fit`` (Gaussian RV / err /
 params). Prints ``HISPEC_DRP_BSPEC_BTSETTL_MASK_CCF_SERIALIZE=`` with the JSON path (the JSON references the NPZ).
 
 **Post-process CCF JSON (optional)** — ``examples/line_mask_ccf_postprocess_uncertainty.py`` re-runs the high-pass
@@ -189,6 +189,7 @@ from hispecdrp.primitives.utils.ccf_utils import (
 from hispecdrp.utils.line_mask_utils import (
     DEFAULT_PACKAGED_LINE_MASK_BASENAME,
     MaskLines,
+    package_data_masks_dir,
     packaged_default_line_mask_path,
 )
 from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
@@ -214,8 +215,8 @@ ABSORPTION_DEPTH = 0.05
 FLAT_FLUX = 100.0
 _TEMPLATE_PIXELS_PER_ORDER_FACTOR = 3
 WINDOW_UM = 0.3
-# Line-window ``ccf_line_mask`` tests (:func:`test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel`,
-# :func:`test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan`): symmetric spectral band
+# Line-window ``ccf_line_mask`` tests (:func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel`,
+# :func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan`): symmetric spectral band
 # about each predicted observed mask line (Voronoi chunk boundaries); coarse CCF ± span (km/s) and step (m/s);
 # LSTSQ parabolic-vertex window (odd, ≥ 3); Lagrange stencil for mask CCF on the L2 wavelength grid.
 # Values from optimized MCMC (``examples/mcmc_line_window_beta0_sigma.py``).
@@ -273,8 +274,16 @@ def _lte049_btsettl_paired_mask_path() -> str:
     return packaged_default_line_mask_path()
 
 
-def _lte049_btsettl_paired_mask_path_kpf() -> str:
-    """Packaged lte049 template-derived **kpf** (finite-width segment) mask for ``ccf_line_mask`` tests."""
+def _lte049_btsettl_paired_mask_path_tophat() -> str:
+    """Packaged lte049 template-derived **tophat** (finite-width segment) mask for ``ccf_line_mask`` tests."""
+    d = package_data_masks_dir()
+    for name in (
+        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.tophat.mas",
+        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.kpf.mas",
+    ):
+        p = d / name
+        if p.is_file():
+            return str(p)
     here = os.path.dirname(__file__)
     repo_root = os.path.normpath(os.path.join(here, ".."))
     return os.path.join(
@@ -282,7 +291,7 @@ def _lte049_btsettl_paired_mask_path_kpf() -> str:
         "hispecdrp",
         "data",
         "masks",
-        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.kpf.mas",
+        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.tophat.mas",
     )
 
 
@@ -366,7 +375,7 @@ def _want_bspec_btsettl_previews() -> bool:
 
 
 def _want_bspec_btsettl_serialize_mask_ccf() -> bool:
-    """Serialize line-mask CCF preview arrays (``v``, ``ccf``, ``ccf_err``, ``kpf_fit``) to JSON+NPZ."""
+    """Serialize line-mask CCF preview arrays (``v``, ``ccf``, ``ccf_err``, ``gaussian_fit``) to JSON+NPZ."""
     if SERIALIZE_BSPEC_BTSETTL_MASK_CCF is not None:
         return SERIALIZE_BSPEC_BTSETTL_MASK_CCF
     return _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_SERIALIZE_MASK_CCF")
@@ -1101,7 +1110,7 @@ def _serialize_line_mask_ccf_preview_debug(
     print_paths: bool = True,
 ) -> tuple[str, str] | None:
     """
-    Write per-fiber line-mask CCF preview data: large arrays in ``.npz``, metadata + ``kpf_fit`` in ``.json``.
+    Write per-fiber line-mask CCF preview data: large arrays in ``.npz``, metadata + ``gaussian_fit`` in ``.json``.
 
     Returns ``(json_path, npz_path)`` (absolute), or ``None`` if there is nothing to save.
     """
@@ -1137,7 +1146,7 @@ def _serialize_line_mask_ccf_preview_debug(
             npz_arrays[f"{prefix}_ccf"] = ccf
             if sl.get("ccf_err") is not None:
                 npz_arrays[f"{prefix}_ccf_err"] = np.asarray(sl["ccf_err"], dtype=np.float64)
-            kpf = sl.get("kpf_fit")
+            gaussian = sl.get("gaussian_fit")
             slot_meta: dict[str, object] = {
                 "kind": kind,
                 "order": None if order is None else int(order),
@@ -1152,7 +1161,7 @@ def _serialize_line_mask_ccf_preview_debug(
                         else {}
                     ),
                 },
-                "kpf_fit": _jsonify_mask_ccf_debug(kpf) if kpf is not None else None,
+                "gaussian_fit": _jsonify_mask_ccf_debug(gaussian) if gaussian is not None else None,
             }
             slots_out.append(slot_meta)
         fibers_meta[fib_s] = {
@@ -2076,22 +2085,22 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
 
 
 @pytest.mark.slow
-def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
+def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
     tmp_path, lte049_btsettl_session_cache
 ):
     """
     Same as :func:`test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask`, but uses the
-    template-derived **KPF-style finite-width** mask (``*.kpf.mas``) instead of the delta mask.
+    template-derived **tophat finite-width** mask (``*.tophat.mas``) instead of the delta mask.
 
-    The intended behavior difference is in the mask CCF build: for KPF segments, the CCF and
+    The intended behavior difference is in the mask CCF build: for tophat segments, the CCF and
     ``ccf_err`` at each trial velocity should reflect the **mean across the full mask
     segment width**, rather than sampling only at a single interpolated wavelength.
     """
     timing_rows: list[tuple[str, float, str, bool]] = []
-    mas_lte049 = _lte049_btsettl_paired_mask_path_kpf()
+    mas_lte049 = _lte049_btsettl_paired_mask_path_tophat()
     if not os.path.isfile(mas_lte049):
         pytest.skip(
-            "KPF mask file not found (required for this test): "
+            "Tophat mask file not found (required for this test): "
             f"{mas_lte049}"
         )
     input_rv_m_s = INPUT_RV_KM_S * 1000.0
@@ -2104,7 +2113,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
     orders = _bspec_btsettl_ccf_line_mask_order_ids()
     timing_rows.append(
         (
-            "lte049 KPF mask: session cache (w_rest, flux_rest) + BSPEC line-mask order selection",
+            "lte049 tophat mask: session cache (w_rest, flux_rest) + BSPEC line-mask order selection",
             time.perf_counter() - t0,
             "lte049_btsettl_session_cache, _bspec_btsettl_ccf_line_mask_order_ids",
             True,
@@ -2141,7 +2150,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
     window_um_eff = _btsettl_parallel_line_mask_window_um()
     timing_rows.append(
         (
-            "lte049 KPF mask: stack BSPEC 2-D model (interp Doppler-shifted BT-Settl per order)",
+            "lte049 tophat mask: stack BSPEC 2-D model (interp Doppler-shifted BT-Settl per order)",
             time.perf_counter() - t0,
             "_order_wavelength_grid, np.interp (build wave_2d, spec_2d, spec_err_2d)",
             True,
@@ -2179,12 +2188,12 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
         show_preview=False,
         save_preview=False,
         output_dir=str(tmp_path),
-        suffix="parallel_rvccf_hdu_validate_kpf_mask",
+        suffix="parallel_rvccf_hdu_validate_tophat_mask",
     )
     out_rvccf = prim_rvccf.apply(rvccf_l2, do_orders=orders)
     timing_rows.append(
         (
-            "RVCCF_HDU: StellarRVPrimitive ccf_line_mask (KPF mask) → rvccf_fib1 schema check",
+            "RVCCF_HDU: StellarRVPrimitive ccf_line_mask (tophat mask) → rvccf_fib1 schema check",
             time.perf_counter() - t0,
             "StellarRVPrimitive.apply, _write_rv_tables, assemble_rvccf_fib_table",
             True,
@@ -2194,16 +2203,16 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
     tbl_rvccf = getattr(out_rvccf, "rvccf_fib1", None)
     _assert_rvccf_table_matches_hdu_schema(tbl_rvccf, label="rvccf_fib1")
     _print_rvccf_hdu_validation_report(tbl_rvccf, label="rvccf_fib1")
-    assert tbl_rvccf is not None and len(tbl_rvccf) > 0, "expected non-empty rvccf_fib1 from ccf_line_mask (KPF mask)"
+    assert tbl_rvccf is not None and len(tbl_rvccf) > 0, "expected non-empty rvccf_fib1 from ccf_line_mask (tophat mask)"
 
     avg_tbl = getattr(out_rvccf, "rvccfavg_fib1", None)
     assert avg_tbl is not None and len(avg_tbl) > 0
     rv_agg = float(avg_tbl["RV"][0])
     rv_agg_err = float(avg_tbl["RV_ERR"][0])
-    # KPF segments average flux across a finite width, so allow a looser bound than the delta mask test.
+    # Tophat segments average flux across a finite width, so allow a looser bound than the delta mask test.
     tol = max(3.0 * rv_agg_err, 200.0)
     assert abs(rv_agg - input_rv_m_s) <= tol, (
-        f"KPF mask RVCCFAVG bias too large: RV={rv_agg:.3f}±{rv_agg_err:.3f} m/s "
+        f"Tophat mask RVCCFAVG bias too large: RV={rv_agg:.3f}±{rv_agg_err:.3f} m/s "
         f"injected={input_rv_m_s:.3f} m/s tol={tol:.3f} m/s"
     )
 
@@ -2243,7 +2252,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
         bench_chunks[req_cores] = n_chunks_total
         timing_rows.append(
             (
-                f"lte049 KPF mask: ccf_line_mask chunk benchmark req_cores={req_cores} "
+                f"lte049 tophat mask: ccf_line_mask chunk benchmark req_cores={req_cores} "
                 f"(effective={eff_threads[req_cores]}, window={bench_window_um:.4f} um)",
                 bench_times[req_cores],
                 "rv_per_chunks_line_mask, _calc_mask_ccf_chunks_numba (prange over chunks), "
@@ -2302,7 +2311,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
     _print_btsettl_test_timing_summary(
         timing_rows,
         title=(
-            "test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask — "
+            "test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask — "
             "wall time by step (seconds)"
         ),
     )
@@ -2312,12 +2321,12 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask(
         tbl_rvccf,
         injected_rv_m_s=input_rv_m_s,
         outlier_sigma=float(getattr(prim_rvccf, "outlier_sigma", 4.0)),
-        report_title="test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_kpf_mask — RV recovery (m/s)",
+        report_title="test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask — RV recovery (m/s)",
     )
 
 
 @pytest.mark.slow
-def test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel(
+def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     tmp_path, lte049_btsettl_session_cache
 ):
     """
@@ -2560,7 +2569,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     _print_btsettl_test_timing_summary(
         timing_rows,
         title=(
-            "test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel — "
+            "test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel — "
             "wall time by step (seconds)"
         ),
     )
@@ -2571,7 +2580,7 @@ def test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         outlier_sigma=float(getattr(prim_rvccf, "outlier_sigma", 4.0)),
         per_chunk_rows=True,
         report_title=(
-            "test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel — "
+            "test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel — "
             "RV recovery (m/s)"
         ),
     )
@@ -2679,13 +2688,13 @@ def _save_line_window_injected_rv_scan_plot(
 
 
 @pytest.mark.slow
-def test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan(
+def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan(
     tmp_path, lte049_btsettl_session_cache,
 ):
     """
     Eleven line-mask line-window runs: injected BSPEC Doppler RV stepped by 10 m/s from
     ``-110 km/s − 50 m/s`` to ``+50 m/s``. Each run uses the same lte049 stack geometry as
-    :func:`test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel` but Doppler-shifts
+    :func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel` but Doppler-shifts
     the rest template by that trial RV. Reads ``RVCCFAVG`` (aggregate RV and ``RV_ERR``), performs a
     weighted offset fit ``RV_rec ≈ RV_inj + β₀`` (slope fixed at 1, weights ``1/RV_ERR²``), writes a
     Matplotlib PNG under ``tmp_path``, and asserts a modest systematic offset and scatter about ``y=x+β₀``.

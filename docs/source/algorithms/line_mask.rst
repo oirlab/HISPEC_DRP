@@ -29,7 +29,7 @@ Two mask geometries are supported:
    Each mask entry is a **zero-width** line at a single rest wavelength. In the mask CCF, each
    line contributes via interpolation of the spectrum onto the Doppler-shifted line center.
 
-``mask_style="kpf"``
+``mask_style="tophat"``
    Each mask entry is a **finite-width segment** with rest-frame edges
    :math:`[\lambda_{\rm lo}, \lambda_{\rm hi}]`. In the mask CCF, each segment contributes by
    evaluating the spectrum across the full shifted segment width (i.e. a segment-average
@@ -55,7 +55,7 @@ and template-to-mask tooling used by ``ccf_line_mask``.
   prefix ``# HISPEC_DRP_MASK_META`` (see :func:`~hispecdrp.utils.line_mask_utils.read_mask_generation_meta`).
 
 - **In-memory mask model**: :class:`~hispecdrp.utils.line_mask_utils.MaskLines` holds either
-  **delta** (zero-width) or **kpf** (finite segment) geometry in vacuum **µm**, with shared
+  **delta** (zero-width) or **tophat** (finite segment) geometry in vacuum **µm**, with shared
   :attr:`~hispecdrp.utils.line_mask_utils.MaskLines.metadata` conventions.
   Use :meth:`~hispecdrp.utils.line_mask_utils.MaskLines.load` /
   :meth:`~hispecdrp.utils.line_mask_utils.MaskLines.save` for disk I/O (``.mas`` and two-column
@@ -80,7 +80,7 @@ end-to-end mask I/O behaviors. Highlights:
   - ``test_load_mktrans_bundled`` and ``test_mean_transmission_interval`` validate atmospheric
     transmission file loading and a simple velocity-interval mean.
   - ``test_fit_half_width_k2_all_matches_default_constant`` and
-    ``test_masklines_kpf_geometry_from_bundled_template_kpf`` exercise bundled ``*.kpf.mas`` masks
+    ``test_masklines_tophat_geometry_from_bundled_template_tophat`` exercise bundled ``*.tophat.mas`` masks
     when present; tests skip when those optional files are not packaged.
 
 - **Metadata conventions**:
@@ -102,7 +102,7 @@ end-to-end mask I/O behaviors. Highlights:
   - ``test_masklines_delta_zero_width_and_restrict`` validates delta-mask zero widths and
     chunk restriction behavior.
   - ``test_masklines_load_two_column_mas`` validates the two-column ``.mas`` reader.
-  - ``test_masklines_load_mask_style_kpf_requires_three_columns`` /
+  - ``test_masklines_load_mask_style_tophat_requires_three_columns`` /
     ``test_masklines_load_mask_style_delta_requires_two_columns`` /
     ``test_masklines_load_unknown_mask_style_raises`` validate explicit ``mask_style`` metadata rules.
 

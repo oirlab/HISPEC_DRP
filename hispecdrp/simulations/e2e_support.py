@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE_FILENAME = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
 DEFAULT_RATE_MAP_FIBERS: list[int] = [1, 2, 3]
+# HISPEC detector (ny, nx); matches datamodel ramp/calibration image sizes.
+DEFAULT_HISPEC_DETECTOR_SHAPE: tuple[int, int] = (4096, 4160)
 
 # E2E Stage 2 runs barycenter correction between blaze correction and stellar RV.
 E2E_STAGE2_PRIMITIVES: dict[str, type] = {
@@ -108,6 +110,80 @@ def identity_nonlin_calibration_model(ny: int, nx: int) -> datamodels.NonlinearC
         nonlin_max=nonlin_max,
         dq=nonlin_dq,
     )
+
+
+_CALIBRATION_SHAPE_ARRAY_NAMES: tuple[str, ...] = (
+    "dq",
+    "gain",
+    "flat",
+    "bias",
+    "rate",
+    "rn",
+    "sat_thresh",
+    "coeffs",
+    "DQ",
+    "GAIN",
+    "FLAT",
+    "BIAS",
+    "RATE",
+    "RN",
+    "SAT_THRESH",
+    "COEFFS",
+)
+
+
+def calibration_model_detector_shape(model: datamodels.CalibrationModel) -> tuple[int, int]:
+    """Return ``(ny, nx)`` for a Stage 0 calibration model."""
+    for name in _CALIBRATION_SHAPE_ARRAY_NAMES:
+        if hasattr(model, name):
+            arr = getattr(model, name)
+        elif isinstance(model, dict) and name in model:
+            arr = model[name]
+        else:
+            continue
+        data = np.asarray(arr)
+        if data.ndim == 2:
+            return int(data.shape[0]), int(data.shape[1])
+        if data.ndim == 3:
+            return int(data.shape[-2]), int(data.shape[-1])
+    raise ValueError(f"Could not determine detector shape for {type(model)!r}")
+
+
+def stage0_calibration_shape_matches(
+    model: datamodels.CalibrationModel,
+    expected_shape: tuple[int, int],
+) -> bool:
+    """Return True when ``model`` image arrays match ``expected_shape`` ``(ny, nx)``."""
+    try:
+        return calibration_model_detector_shape(model) == expected_shape
+    except ValueError:
+        return False
+
+
+def open_cached_stage0_calibration(
+    filepath: str,
+    expected_shape: tuple[int, int],
+    *,
+    key: str | None = None,
+) -> datamodels.CalibrationModel | None:
+    """
+    Open a cached simulated calibration if its detector shape matches ``expected_shape``.
+
+    Returns ``None`` when the file is missing or stale (wrong shape).
+    """
+    if not os.path.isfile(filepath):
+        return None
+    model = datamodels.open(filepath)
+    if stage0_calibration_shape_matches(model, expected_shape):
+        return model
+    label = key or os.path.basename(filepath)
+    logger.warning(
+        "Ignoring cached Stage 0 calibration %s (shape=%s != expected %s).",
+        label,
+        calibration_model_detector_shape(model),
+        expected_shape,
+    )
+    return None
 
 
 def apply_e2e_save_and_preview_flags(
@@ -380,6 +456,260 @@ def _calibration_summary_filepath(source: str, model: datamodels.DataModel | Non
     if source.startswith("simulated_dummy_rate:"):
         return os.path.abspath(source.split(":", 1)[1])
     return _calibration_model_filepath(model)
+
+
+def calibration_source_category(source: str | None) -> str:
+    """Map internal ``sources`` tag to a coarse provenance category."""
+    if not source or source == "—":
+        return "Unresolved"
+    if source == "koa":
+        return "KOA"
+    if source.startswith("config:"):
+        return "User config"
+    if source in ("simulated", "simulated_hdf"):
+        return "Simulated"
+    if source.startswith("simulated_cached:"):
+        return "Simulated (cached)"
+    if source.startswith("local_cache:"):
+        return "Local cache"
+    if source.startswith("testing_data:"):
+        return "Test data"
+    if source == "fiberflat_pipeline":
+        return "Generated (fiberflat pipeline)"
+    if source.startswith("simulated_dummy_rate"):
+        return "Simulated (fiberflat rate)"
+    return "Other"
+
+
+@dataclass
+class CalibrationProvenanceRow:
+    """One calibration product in the E2E dataset summary."""
+
+    product: str
+    category: str
+    source_tag: str
+    filepath: str
+    file_exists: bool
+    cal_id: str | None = None
+    origin: str | None = None
+    notes: str | None = None
+
+
+@dataclass
+class CalibrationDatasetSummary:
+    """Full calibration dataset report for an E2E or calibrations-only run."""
+
+    output_dir: str
+    rows: list[CalibrationProvenanceRow]
+    expected_products: list[str]
+    missing_products: list[str]
+    validation_warnings: list[str]
+    koa_cache_dir: str | None = None
+
+
+def _model_provenance_fields(model: datamodels.DataModel | None) -> tuple[str | None, str | None]:
+    if model is None:
+        return None, None
+    meta = getattr(model, "meta", None)
+    if meta is None:
+        return None, None
+    cal_id = getattr(meta, "cal_id", None)
+    origin = getattr(meta, "origin", None)
+    return (
+        str(cal_id) if cal_id is not None else None,
+        str(origin) if origin is not None else None,
+    )
+
+
+def build_calibration_dataset_summary(
+    *,
+    output_dir: str,
+    calibration_models: dict[str, datamodels.CalibrationModel],
+    sources: dict[str, str],
+    fiberflat_bundle: dict[str, datamodels.DataModel] | None = None,
+    wavesol_model: datamodels.DataModel | None = None,
+    expected_products: list[str] | None = None,
+) -> CalibrationDatasetSummary:
+    """Build a validated provenance summary for all calibration products."""
+    from .e2e_calibrations import STAGE0_CAL_KEYS, STAGE1_CAL_KEYS
+
+    stage1_models: dict[str, datamodels.DataModel | None] = {
+        "trace_pos": None,
+        "trace_prof": None,
+        "fiberflat": None,
+        "wavesol": wavesol_model,
+    }
+    if fiberflat_bundle:
+        for key in ("trace_pos", "trace_prof", "fiberflat"):
+            stage1_models[key] = fiberflat_bundle.get(key)
+
+    if expected_products is None:
+        expected_products = list(STAGE0_CAL_KEYS)
+        rate_keys = sorted(k for k in sources if k.startswith("fiberflat_rate_fib"))
+        expected_products.extend(rate_keys)
+        for key in STAGE1_CAL_KEYS:
+            if key not in expected_products:
+                expected_products.append(key)
+
+    ordered_keys: list[str] = list(STAGE0_CAL_KEYS)
+    ordered_keys.extend(sorted(k for k in sources if k.startswith("fiberflat_rate_fib")))
+    for key in STAGE1_CAL_KEYS:
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+    ordered_keys.extend(sorted(k for k in sources if k not in ordered_keys))
+
+    rows: list[CalibrationProvenanceRow] = []
+    resolved_keys: set[str] = set()
+    validation_warnings: list[str] = []
+
+    for key in ordered_keys:
+        source = sources.get(key)
+        model = calibration_models.get(key) or stage1_models.get(key)
+        if source is None and model is None:
+            continue
+        if source is None:
+            source = "simulated" if key in calibration_models else "—"
+        resolved_keys.add(key)
+        category = calibration_source_category(source)
+        fpath = _calibration_summary_filepath(source, model)
+        file_exists = (
+            os.path.isfile(fpath)
+            if fpath not in ("—", "(in-memory)") and not fpath.startswith("(")
+            else model is not None
+        )
+        cal_id, origin = _model_provenance_fields(model)
+        notes: list[str] = []
+        if fpath in ("(in-memory)", "—") or fpath.startswith("("):
+            notes.append("in-memory model")
+        elif not file_exists:
+            notes.append("file not found on disk")
+            validation_warnings.append(
+                f"{key}: source={source!r} but file missing: {fpath}"
+            )
+        if source == "koa" and origin is None:
+            notes.append("KOA product (check meta.origin in FITS)")
+        rows.append(
+            CalibrationProvenanceRow(
+                product=key,
+                category=category,
+                source_tag=source,
+                filepath=fpath,
+                file_exists=file_exists,
+                cal_id=cal_id,
+                origin=origin,
+                notes="; ".join(notes) if notes else None,
+            )
+        )
+
+    missing_products = [k for k in expected_products if k not in resolved_keys]
+    for key in missing_products:
+        validation_warnings.append(f"Expected calibration {key!r} was not resolved.")
+
+    koa_cache = (os.environ.get("KOA_CALIBRATION_CACHE") or "").strip() or None
+
+    return CalibrationDatasetSummary(
+        output_dir=os.path.abspath(output_dir),
+        rows=rows,
+        expected_products=list(expected_products),
+        missing_products=missing_products,
+        validation_warnings=validation_warnings,
+        koa_cache_dir=koa_cache,
+    )
+
+
+def log_calibration_dataset_summary(
+    summary: CalibrationDatasetSummary,
+    *,
+    log: logging.Logger | None = None,
+) -> None:
+    """Log the full calibration dataset table, missing products, and validation warnings."""
+    ensure_e2e_console_logging()
+    log = log or logger
+
+    if not summary.rows:
+        log.info("Calibration dataset summary: no products recorded.")
+    else:
+        headers = ("Product", "Category", "Origin", "File", "Exists")
+        entries = [
+            (
+                row.product,
+                row.category,
+                row.origin or row.source_tag,
+                row.filepath,
+                "yes" if row.file_exists else "no",
+            )
+            for row in summary.rows
+        ]
+        w = [max(len(h), *(len(e[i]) for e in entries)) for i, h in enumerate(headers)]
+        sep = "-" * (sum(w) + 2 * (len(w) - 1))
+        log.info(
+            "Calibration dataset summary (output_dir=%s)\n%s\n%s\n%s",
+            summary.output_dir,
+            sep,
+            "  ".join(f"{h:<{w[i]}}" for i, h in enumerate(headers)),
+            "\n".join(
+                "  ".join(f"{e[i]:<{w[i]}}" for i in range(len(headers))) for e in entries
+            ),
+        )
+
+    if summary.koa_cache_dir:
+        log.info("KOA calibration cache: %s", summary.koa_cache_dir)
+
+    if summary.missing_products:
+        log.warning(
+            "Missing expected calibration product(s): %s",
+            ", ".join(summary.missing_products),
+        )
+
+    if summary.validation_warnings:
+        log.warning(
+            "Calibration validation (%d issue(s)):\n  %s",
+            len(summary.validation_warnings),
+            "\n  ".join(summary.validation_warnings),
+        )
+    else:
+        log.info(
+            "Calibration validation: all %d resolved product(s) passed file checks.",
+            len(summary.rows),
+        )
+
+
+def write_calibration_manifest(
+    output_dir: str,
+    summary: CalibrationDatasetSummary,
+    *,
+    filename: str = "calibration_manifest.json",
+) -> str:
+    """Write ``summary`` to ``<output_dir>/cals/calibration_manifest.json``."""
+    import json
+
+    cal_dir = calibration_dir(output_dir)
+    path = os.path.join(cal_dir, filename)
+    payload = {
+        "output_dir": summary.output_dir,
+        "koa_cache_dir": summary.koa_cache_dir,
+        "expected_products": summary.expected_products,
+        "missing_products": summary.missing_products,
+        "validation_warnings": summary.validation_warnings,
+        "products": [
+            {
+                "product": row.product,
+                "category": row.category,
+                "source_tag": row.source_tag,
+                "filepath": row.filepath,
+                "file_exists": row.file_exists,
+                "cal_id": row.cal_id,
+                "origin": row.origin,
+                "notes": row.notes,
+            }
+            for row in summary.rows
+        ],
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+        fh.write("\n")
+    logger.info("Wrote calibration manifest to %s", path)
+    return path
 
 
 def log_e2e_calibration_summary(

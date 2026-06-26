@@ -92,7 +92,7 @@ from ..stellar_rv_primitive import (
     combine_rvs_median_mad,
 )
 from ...utils.ccf_utils import (
-    CCFFitKpfConfig,
+    CCFFitConfig,
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
     _gaussian_ccf_model,
@@ -839,8 +839,8 @@ def _line_mask_refine_ccf_add_plotly_traces(
         trace_indices.append(len(fig.data) - 1)
 
     cached = sl.get("line_mask_refine_rmeta")
-    kpf = sl.get("kpf_fit")
-    rv_slot = kpf.get("rv") if isinstance(kpf, dict) else None
+    gaussian = sl.get("gaussian_fit")
+    rv_slot = gaussian.get("rv") if isinstance(gaussian, dict) else None
     if (
         isinstance(cached, dict)
         and cached.get("ok")
@@ -885,7 +885,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
             ccf_err=_ce_arr,
             gaussian_sigma_m_s=sig_opt,
             mask_method="stellar",
-            config=CCFFitKpfConfig(),
+            config=CCFFitConfig(),
         )
         if not rmeta.get("ok"):
             for _ in range(5):
@@ -904,7 +904,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
         )
 
     except Exception as e:
-        logger.debug("mask-kpf preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
+        logger.debug("mask-line preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
         while len(trace_indices) < 5:
             _placeholder()
         return trace_indices
@@ -1152,8 +1152,8 @@ def _rvcc_hover_order_segment_line(
 def _preview_abbrev_ccf_uncertainty(diag: dict) -> str:
     """Short legend text for how RV uncertainty was estimated (fit_ok only)."""
     wtd = bool(diag.get("used_ccf_pointwise_error"))
-    if diag.get("used_kpf_ccf_error"):
-        s = "min(KPF, LevMar)" if diag.get("used_covariance_for_error") else "KPF ccf_error_calc"
+    if diag.get("used_gradient_ccf_error"):
+        s = "min(gradient, LevMar)" if diag.get("used_covariance_for_error") else "gradient ccf_error_calc"
     elif diag.get("used_covariance_for_error"):
         s = "LevMar cov. (mean)"
     elif diag.get("used_sigma_fallback"):
@@ -1488,7 +1488,7 @@ def collect_mask_overlay_payload_for_primitive(
                 ),
             )
             if mask_o.line_lambda_um.size > 0:
-                # Use full segment widths when present (KPF-style finite edges). For delta masks,
+                # Use full segment widths when present (tophat finite edges). For delta masks,
                 # left/right edges coincide with the center and the overlay expands them only by minDx.
                 mstart = np.asarray(mask_o.line_left_edge.to_value(u.um), dtype=np.float64)
                 mend = np.asarray(mask_o.line_right_edge.to_value(u.um), dtype=np.float64)
@@ -2108,12 +2108,12 @@ def _preview_gaussian_cache_and_slot_legends(
         for sl in slots:
             sid = id(sl)
             if sid not in fit_slot_cache:
-                kpf = sl.get("kpf_fit")
-                if kpf and isinstance(kpf, dict) and kpf.get("params"):
-                    params = kpf.get("params") or {}
-                    diag = kpf.get("diagnostics") or {}
-                    rv_err = float(kpf.get("rv_err", np.nan))
-                    rv_fit = kpf.get("rv")
+                gaussian = sl.get("gaussian_fit")
+                if gaussian and isinstance(gaussian, dict) and gaussian.get("params"):
+                    params = gaussian.get("params") or {}
+                    diag = gaussian.get("diagnostics") or {}
+                    rv_err = float(gaussian.get("rv_err", np.nan))
+                    rv_fit = gaussian.get("rv")
                     rv_final = (
                         float(rv_fit)
                         if rv_fit is not None and np.isfinite(float(rv_fit))

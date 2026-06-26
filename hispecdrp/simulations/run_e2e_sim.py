@@ -9,6 +9,13 @@ Run from the **repository root** with the ``hispec`` conda env::
 Adjust the literals in ``main()`` below for output directory, reads, cores, etc.
 Set ``calibration_config`` to a YAML path (see ``e2e_calibrations.example.yaml``)
 to pin specific FITS files; set ``use_master_calibrations=False`` to skip KOA.
+
+Stage 1 trace / fiberflat products (``mastercal-tracepos``, ``mastercal-traceprof``,
+``mastercal-fiberflat``) are controlled by ``stage1_trace_source``:
+
+* ``"pipeline"`` (default): simulate per-fiber fiberflat rate maps and run
+  ``ProcessFiberflatsPipeline`` — KOA Stage 1 masters are not downloaded.
+* ``"koa"``: fetch/use KOA or local-cache master cals instead.
 """
 
 from __future__ import annotations
@@ -50,8 +57,14 @@ def main() -> int:
         mjd_start=DEFAULT_E2E_MJD_START,
         fibers=[1, 2, 3],
         fiberflat_fibers=[1, 2, 3],
+        # Simulate fiber flats and run the fiber flat pipeline for both spectrographs so
+        # trace-position *_preview.png plots are produced for BSPEC and RSPEC. Science
+        # Stage 1/2 still run on ``spectrograph`` above (BSPEC); RSPEC is inspection-only.
+        fiberflat_spectrographs=["BSPEC", "RSPEC"],
         use_master_calibrations=True,
-        derive_stage1_trace_from_sim=True,
+        # Build trace_pos / trace_prof / fiberflat with ProcessFiberflatsPipeline
+        # (simulated dummy fiberflat rates). Set to "koa" to use KOA master cals instead.
+        stage1_trace_source="pipeline",
         calibration_config=None,
         run_stage1=True,
         run_stage2=True,

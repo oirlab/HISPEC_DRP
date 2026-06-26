@@ -40,8 +40,8 @@ to improve Levenberg–Marquardt conditioning on typical CCF shapes.
 
 The fitted Gaussian center provides the RV estimate, and the code derives a corresponding ``RV_ERR``
 using a combination of fit covariance, local CCF sampling information, and configuration-driven
-heuristics (see :class:`~hispecdrp.primitives.utils.ccf_utils.CCFFitKpfConfig`). Several of these
-heuristics are labeled “KPF” in-code to reflect published/known behavior patterns; this repository
+heuristics (see :class:`~hispecdrp.primitives.utils.ccf_utils.CCFFitConfig`). Attribution to
+published Keck KPF PRV ideas appears in module docstrings and references; this repository
 does **not** include Keck KPF pipeline source.
 
 Parabolic vertex / refinement
@@ -67,7 +67,7 @@ For the template-CCF workflow, parabolic refinement behavior is controlled by th
 refined locally; setting it to ``None`` disables that local refinement step (Gaussian-only).
 
 Per-chunk ``RV_ERR`` combines gradient- and covariance-based estimates (see
-:class:`~hispecdrp.primitives.utils.ccf_utils.CCFFitKpfConfig`) and can optionally use a parametric
+:class:`~hispecdrp.primitives.utils.ccf_utils.CCFFitConfig`) and can optionally use a parametric
 bootstrap on ``ccf_err`` in the final fit window. Formal LM errors can fall below one velocity pixel
 for well-sampled, high-SNR CCFs; bootstrap (when enabled) provides a more conservative floor from
 diagonal ``ccf_err`` perturbations.
