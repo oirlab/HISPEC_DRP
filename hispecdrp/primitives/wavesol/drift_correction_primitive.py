@@ -203,23 +203,36 @@ class ApplyDriftCorrectionPrimitive(BasePrimitive):
         return dict(output=input_model)
     
 
-def calculate_etalon_drifts_pix(
+def calculate_drifts_from_line_centers(
     line_centers : np.ndarray,
     line_centers_err : np.ndarray,
     line_centers_ref : np.ndarray,
-    line_centers_ref_err : float = 0.0,
-    max_sep : int = 5
+    line_centers_ref_err : np.ndarray,
+    max_sep : float = 1
 ) -> list[dict[str, float]]:
     drifts = []
-    for i, lc in enumerate(line_centers):
-        diffs = np.abs(line_centers_ref - lc)
-        if np.count_nonzero(diffs < max_sep) == 1:
-            k = np.argmin(diffs)
-            drift_err = np.sqrt(line_centers_err[i]**2 + line_centers_ref_err[k]**2)
+    for i_ref in range(len(line_centers_ref)):
+        lc_ref = line_centers_ref[i_ref]
+        lc_ref_err = line_centers_ref_err[i_ref]
+        diffs = line_centers - lc_ref
+        k = np.argmin(np.abs(diffs))
+        if abs(diffs[k]) < max_sep:
+            lc = line_centers[k]
+            lc_err = line_centers_err[k]
+            drift = lc - lc_ref
+            drift_err = np.sqrt(lc_err**2 + lc_ref_err**2)
             drifts.append({
-                'PIXEL': lc,
-                'PIXEL_REF': line_centers_ref[k],
-                'DRIFT': lc - line_centers_ref[k],
+                'MU_REF': lc_ref,
+                'MU': lc,
+                'DRIFT': drift,
                 'DRIFT_ERR': drift_err
             })
+        else:
+            drifts.append({
+                'MU_REF': lc_ref,
+                'MU': np.nan,
+                'DRIFT': np.nan,
+                'DRIFT_ERR': np.nan
+            })
+
     return drifts
