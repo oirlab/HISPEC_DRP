@@ -11,11 +11,9 @@ __all__ = [
 
 def _estimate_emission_spectrum_background(
     spec : np.ndarray,
-    min_line_spacing : int = 12,
-    n_lines : int = 10,
+    filter_width : int = 31,
     deg : int = 1
 ) -> np.ndarray:
-    filter_width = int(min_line_spacing / 3 * n_lines)
     if filter_width % 2 == 0:
         filter_width += 1  # Ensure filter width is odd
     background = _nanmin_filter1d(spec, filter_width)
@@ -36,7 +34,7 @@ def find_emission_lines(
     spec : np.ndarray,
     spec_dq : np.ndarray,
     min_line_spacing : int, # Pixels
-    num_lines_background : float | None = 3.0,
+    background_filter_width : int | None = None, # Pixels
     centroid_num_pixels : int = 3,
     refine_with_centroid : bool = True,
     drop_first_last : bool = True
@@ -52,8 +50,9 @@ def find_emission_lines(
         The data quality mask for the spectrum (0=good).
     min_line_spacing : int
         Minimum spacing between lines in pixels.
-    num_lines_background : float | None
-        Number of lines to use for background estimation. If None, no background subtraction is performed.
+    background_filter_width : int | None
+        Number of pixels to use for background estimation.
+        If None, no background subtraction is performed.
     centroid_num_pixels : int
         Number of pixels to use for centroid refinement.
     refine_with_centroid : bool
@@ -70,11 +69,11 @@ def find_emission_lines(
         return np.array([]), None
     
     # Estimate and remove background
-    if num_lines_background is not None:
+    if background_filter_width is not None and background_filter_width > 0:
         background = _estimate_emission_spectrum_background(
             spec,
-            min_line_spacing=min_line_spacing,
-            n_lines=3
+            filter_width=background_filter_width,
+            deg=2
         )
         spec_nobkg = spec - background
     else:
