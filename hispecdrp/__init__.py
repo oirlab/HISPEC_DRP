@@ -6,7 +6,17 @@ from . import datamodels
 from . import calibrations
 from . import keck
 from . import utils
-from . import simulations
 
 from .utils.logging import setup_default_logging
 setup_default_logging()
+
+
+def __getattr__(name: str):
+    if name == "simulations":
+        from . import simulations as _simulations
+        return _simulations
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | {"simulations"})

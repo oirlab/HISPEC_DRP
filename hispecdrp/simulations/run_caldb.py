@@ -239,7 +239,11 @@ def get_master_calibrations(
         ("rn", ReadNoiseSelector()),
     ]
 
-    with HISPECCalibrationStore(instrument_name=instrument_name, connect_remote=connect_remote) as store:
+    with HISPECCalibrationStore(
+        instrument_name=instrument_name,
+        connect_remote=connect_remote,
+        sync_on_init=False,
+    ) as store:
         if sync_first and not (connect_remote and store.remote_db is None):
             try:
                 if connect_remote and store.remote_db is not None:

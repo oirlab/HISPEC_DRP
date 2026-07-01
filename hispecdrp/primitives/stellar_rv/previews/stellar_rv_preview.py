@@ -1343,7 +1343,9 @@ def collect_mask_overlay_payload_for_primitive(
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
     wbl = bool(getattr(primitive, "window_line_by_line", False))
     v_in = getattr(primitive, "ccf_input_velocity", None)
-    zb_prim = float(getattr(primitive, "ccf_zb", 0.0))
+    from ..stellar_rv_primitive import StellarRVPrimitive
+
+    zb_prim = StellarRVPrimitive.resolve_ccf_zb_for_fiber(primitive, input_model, fiber)
     use_line_window = wbl and v_in is not None and math.isfinite(float(v_in))
 
     entries: list[dict] = []
@@ -1481,7 +1483,9 @@ def collect_mask_overlay_payload_for_primitive(
                 w_hi_m,
                 v_min_m_s=vm,
                 v_max_m_s=vx,
-                zb=float(getattr(primitive, "ccf_zb", 0.0)),
+                zb=StellarRVPrimitive.resolve_ccf_zb_for_fiber(
+                    primitive, input_model, fiber
+                ),
             )
             if mask_o.line_lambda_um.size > 0:
                 # Use full segment widths when present (KPF-style finite edges). For delta masks,
@@ -1960,9 +1964,12 @@ def _write_ccf_overlay_debug_html_pages(
     base_path = _fits_base_path(primitive, output_model)
     v_init = _overlay_v_init_m_s(primitive)
     vm, vx, vs = _preview_ccf_velocity_range_m_s(primitive)
-    zb = float(getattr(primitive, "ccf_zb", 0.0))
+    from ..stellar_rv_primitive import StellarRVPrimitive
 
     for fiber, payload in payloads.items():
+        zb = StellarRVPrimitive.resolve_ccf_zb_for_fiber(
+            primitive, output_model, fiber
+        )
         payload_json = json.dumps(
             serialize(payload),
             separators=(",", ":"),

@@ -1,6 +1,7 @@
 import numpy as np
 import astropy.units as u
 from hispecdrp import datamodels, BlazeCorrectionPrimitive
+from hispecdrp.datamodels.dqflags import DQ_FLAGS
 import time
 import os
 
@@ -14,7 +15,7 @@ def test_blaze_correction():
         setattr(science_model, f"SPEC_UNCAL_ERR_FIB{fib}", np.ones((39,4096)) / 100)
         setattr(science_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fib}", np.zeros((39,4096)))
         setattr(science_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fib}", np.zeros((39,4096)))
-        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((39,4096)))
+        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((39, 4096), dtype=np.uint32))
 
 
     fiberflat_model = datamodels.FiberflatModel()
@@ -22,7 +23,7 @@ def test_blaze_correction():
 
         setattr(fiberflat_model, f"SPEC_FIB{fib}", np.ones((39,4096)))
         setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", np.ones((39,4096))/100)
-        setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((39,4096)))
+        setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((39, 4096), dtype=np.uint32))
 
     prim = BlazeCorrectionPrimitive()
     blaze_corrected = prim.apply(science_model, fiberflat=fiberflat_model)
@@ -31,4 +32,12 @@ def test_blaze_correction():
     print(f"Native rate map, elapsed: {step_time - start_time:.2f}s")
 
     assert getattr(blaze_corrected, "SPEC_FIB1").all() == 1.
+
+    do_not_use = DQ_FLAGS["DO_NOT_USE"]
+    dq = getattr(blaze_corrected, "SPEC_DQ_FIB1")
+    edge = 16 * 10
+    flagged = (dq & do_not_use) != 0
+    assert flagged.mean() < 0.2, "blaze DQ should not flag the entire detector"
+    assert flagged[:, :edge].all() and flagged[:, -edge:].all()
+    assert not flagged[:, edge:-edge].any()
 

@@ -170,6 +170,49 @@ class HISPECCalibrationStore(CalibrationStore):
         # Return new new records
         return cal_records_added
 
+    def sync_records_from_remote(
+        self,
+        cals=None,
+        mode: str = "id",
+    ) -> list[dict]:
+        """
+        Synchronize the local DB with the remote KOA catalog.
+
+        ``cals`` is accepted for compatibility with callers that pass an explicit
+        remote query result; when omitted, records are discovered via
+        ``get_missing_records`` (same as ``koa_middleware``).
+        """
+        if cals is not None:
+            mode = str(mode).lower()
+            if mode == "id":
+                ids_local = {cal["id"] for cal in self.local_db.query()}
+                missing = [cal for cal in cals if cal["id"] not in ids_local]
+            elif mode == "last_updated":
+                last_updated_local = self.get_last_updated(source="local")
+                missing = [
+                    cal
+                    for cal in cals
+                    if last_updated_local is None
+                    or cal.get("last_updated", "") > last_updated_local
+                ]
+            else:
+                raise ValueError(
+                    f"Invalid mode {mode!r} for sync_records_from_remote()."
+                )
+            if missing:
+                logger.info(
+                    "Adding %d explicit remote record(s) to local DB (mode=%r).",
+                    len(missing),
+                    mode,
+                )
+                return self.local_db.add(missing)
+            logger.info(
+                "Local DB already contains explicit remote record(s) (mode=%r).",
+                mode,
+            )
+            return []
+        return super().sync_records_from_remote(mode=mode)
+
     def calibration_record_in_cache(
         self,
         cal: dict | str | 'CalibrationModel',

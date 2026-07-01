@@ -369,8 +369,8 @@ def _ab_mag_through_filter(
     tr = trans[valid]
     c_angstrom_per_s = 2.99792458e18
     f_nu = fl * (wl**2) / c_angstrom_per_s
-    num = np.trapz(f_nu * tr, wl)
-    den = np.trapz(tr, wl)
+    num = np.trapezoid(f_nu * tr, wl)
+    den = np.trapezoid(tr, wl)
     if den <= 0:
         raise ValueError("Filter transmission integral is non-positive")
     f_nu_band = num / den

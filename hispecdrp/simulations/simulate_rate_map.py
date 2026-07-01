@@ -1,6 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
 from hispecdrp.datamodels import hispec_config
-import warnings
 
 try:
     from pyechelle.simulator import Simulator
@@ -8,12 +7,10 @@ try:
     from pyechelle.sources import CSVSource
     from pyechelle.spectrograph import ZEMAX
 except ImportError:
-    import multiprocessing
-    if multiprocessing.current_process().name == "MainProcess":
-        warnings.warn(
-            "pyechelle package not found in imports in hispec.simulations.simulate_rate_map.py. "
-            "This is not a problem unless you need it. pyechelle simulations will simply not run."
-        )
+    Simulator = None  # type: ignore[misc, assignment]
+    Telescope = None
+    CSVSource = None
+    ZEMAX = None
 
 import logging
 import os
@@ -345,6 +342,13 @@ class SimulateRateMap:
 
         Temporary CSV files are created during this process to feed pyechelle custom spectra.
         A sinc^2 blaze efficiency is applied internally by pyechelle, it cannot be turned off."""
+
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed. Install the HISPEC fork "
+                "(see docs/source/installation.rst) or use "
+                "SimulateRateMap.create_native_rate_map instead."
+            )
 
         spectrograph = spectrograph.upper()
 

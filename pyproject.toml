@@ -70,7 +70,7 @@ dev = [
   "psutil",  # RSS sampling for profile.json / profile_summary.csv (end_to_end_simulation)
 ]
 test = ["pytest", "pytest-cov", "requests"]
-docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
+docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme==6.0.0"]
 examples = ["emcee"]
 
 [project.urls]
