@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_etalonfitparam_extensions, create_drift_extensions, create_barycorr_extensions
 
@@ -16,7 +17,7 @@ def _create_refetalon_extensions(num_fibers: int):
     return ext
 
 
-class ReferenceEtalonModel(CalibrationModel):
+class ReferenceEtalonModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     Contains the reference etalon and corresponding parameters for wavelength drift corrections.
 
