@@ -303,8 +303,9 @@ class HISPECCalibrationStore(CalibrationStore):
 
     def _finalize_cal_record(
         self,
-        cal_record: dict,
-        local_filepath: str,
+        cal,
+        cal_record: dict | str | None = None,
+        local_filepath: str | None = None,
     ) -> dict:
         """
         Finalize a calibration record after the file has been saved to disk.
@@ -312,8 +313,20 @@ class HISPECCalibrationStore(CalibrationStore):
         Adds filename/MD5 via the base store, then fills KOA identifiers that are
         set on the saved file during :meth:`~datamodels.CalibrationModel.generate_filename`
         but are not yet present on the pre-save metadata record.
+
+        Compatible with both koa_middleware call signatures:
+
+        * ``_finalize_cal_record(cal, cal_record, local_filepath)`` (current git)
+        * ``_finalize_cal_record(cal_record, local_filepath)`` (older releases)
         """
-        cal_record = super()._finalize_cal_record(cal_record, local_filepath)
+        if isinstance(cal_record, str):
+            # Older koa_middleware: (cal_record, local_filepath)
+            record = cal
+            path = cal_record
+            cal_record = super()._finalize_cal_record(record, path)
+        else:
+            cal_record = super()._finalize_cal_record(cal, cal_record, local_filepath)
+
         if cal_record.get("koa_id") is None:
             cal_record["koa_id"] = cal_record.get("filename")
         if cal_record.get("koa_filepath") is None and cal_record.get("koa_id") is not None:
