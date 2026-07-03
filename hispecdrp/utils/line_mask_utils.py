@@ -44,6 +44,7 @@ __all__ = [
     "fit_half_width_linear_from_mas",
     "DEFAULT_PACKAGED_LINE_MASK_BASENAME",
     "packaged_default_line_mask_path",
+    "paired_line_mask_path_for_template",
     "pixel_edges_from_wavelength",
     "resolve_mask_path",
     "restrict_mask_to_chunk",
@@ -142,6 +143,32 @@ DEFAULT_PACKAGED_LINE_MASK_BASENAME: str = (
 def packaged_default_line_mask_path() -> str:
     """Absolute path to the packaged default **delta** mask (same as ``resolve_mask_path(None)``)."""
     return str((package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME).resolve())
+
+
+def paired_line_mask_path_for_template(
+    template_filename: str,
+    *,
+    mask_style: str = MASK_STYLE_DELTA,
+    masks_directory: Path | str | None = None,
+) -> str:
+    """
+    Resolve the packaged line mask paired with a template basename or path.
+
+    For template ``lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5``, returns
+    ``.../lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas`` when ``mask_style`` is
+    ``delta``.
+    """
+    stem = Path(template_filename).stem
+    masks_dir = (
+        Path(masks_directory) if masks_directory is not None else package_data_masks_dir()
+    )
+    suffix = _normalize_mask_style(mask_style)
+    path = masks_dir / f"{stem}.{suffix}.mas"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Paired line mask not found for template {template_filename!r}: {path}"
+        )
+    return str(path.resolve())
 
 
 def resolve_mask_path(mask_path: str | None) -> str:

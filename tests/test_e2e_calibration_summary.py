@@ -9,13 +9,24 @@ from hispecdrp import datamodels
 from hispecdrp.simulations.e2e_calibrations import complete_stage0_calibrations
 from hispecdrp.simulations.e2e_support import (
     DEFAULT_HISPEC_DETECTOR_SHAPE,
+    E2E_STAGE2_PRIMITIVES,
+    apply_e2e_save_and_preview_flags,
     build_calibration_dataset_summary,
     calibration_model_detector_shape,
     calibration_source_category,
     dummy_cal_path,
+    get_default_stage2_prim_args,
     open_cached_stage0_calibration,
     write_calibration_manifest,
 )
+
+
+def test_e2e_stage2_stellar_rv_preview_write_png_disabled():
+    prim_args = apply_e2e_save_and_preview_flags(
+        get_default_stage2_prim_args(),
+        E2E_STAGE2_PRIMITIVES,
+    )
+    assert prim_args["stellar_rv"]["preview_write_png"] is False
 
 
 def test_calibration_source_category():

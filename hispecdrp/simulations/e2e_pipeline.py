@@ -19,9 +19,16 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import numpy as np
+
 STAGE1_TRACE_SOURCE_PIPELINE = "pipeline"
 STAGE1_TRACE_SOURCE_KOA = "koa"
-STAGE1_TRACE_SOURCES = (STAGE1_TRACE_SOURCE_PIPELINE, STAGE1_TRACE_SOURCE_KOA)
+STAGE1_TRACE_SOURCE_SIM_HDF = "sim_hdf"
+STAGE1_TRACE_SOURCES = (
+    STAGE1_TRACE_SOURCE_PIPELINE,
+    STAGE1_TRACE_SOURCE_KOA,
+    STAGE1_TRACE_SOURCE_SIM_HDF,
+)
 
 from . import e2e_calibrations, e2e_gaia, e2e_support
 from .simulate_up_the_ramp import (
@@ -53,7 +60,7 @@ class E2EConfig:
     # ProcessFiberflatsPipeline — KOA Stage 1 masters are not fetched or downloaded.
     # ``"koa"``: use KOA / local-cache / bundled test-data mastercal-tracepos,
     # mastercal-traceprof, and mastercal-fiberflat (pipeline runs only if still incomplete).
-    stage1_trace_source: Literal["pipeline", "koa"] | None = None
+    stage1_trace_source: Literal["pipeline", "koa", "sim_hdf"] | None = None
     # Deprecated alias for ``stage1_trace_source``; ignored when ``stage1_trace_source`` is set.
     derive_stage1_trace_from_sim: bool = True
     calibration_config: str | dict | None = None
@@ -110,6 +117,9 @@ class E2EConfig:
     materialize_stage1_trace: bool = True
     # Write ``cals/calibration_manifest.json`` with full provenance after calibration setup.
     write_calibration_manifest: bool = True
+    # Infinite-S/N RV validation: noiseless rate maps, HDF-truth Stage-1 cals, high-precision RV.
+    infinite_snr_rv_validation: bool = False
+    infinite_snr_rv_assert: bool = False
 
 
 @dataclass
@@ -126,7 +136,7 @@ class E2ECalibrationsResult:
 
 
 def effective_stage1_trace_source(config: E2EConfig) -> str:
-    """Return ``pipeline`` or ``koa`` for Stage 1 trace / fiberflat resolution."""
+    """Return ``pipeline``, ``koa``, or ``sim_hdf`` for Stage 1 trace / fiberflat resolution."""
     if config.stage1_trace_source is not None:
         return config.stage1_trace_source
     return (
@@ -141,6 +151,19 @@ def stage1_uses_fiberflat_pipeline(config: E2EConfig) -> bool:
     return effective_stage1_trace_source(config) == STAGE1_TRACE_SOURCE_PIPELINE
 
 
+def stage1_uses_sim_hdf_trace(config: E2EConfig) -> bool:
+    """True when Stage 1 trace products are built directly from pyechelle HDF models."""
+    return effective_stage1_trace_source(config) == STAGE1_TRACE_SOURCE_SIM_HDF
+
+
+def stage1_trace_materialized_from_sim(config: E2EConfig) -> bool:
+    """True when Stage 1 trace masters are generated in-process rather than from KOA."""
+    return effective_stage1_trace_source(config) in (
+        STAGE1_TRACE_SOURCE_PIPELINE,
+        STAGE1_TRACE_SOURCE_SIM_HDF,
+    )
+
+
 @dataclass
 class E2EResult:
     ramp_model: Any
@@ -151,6 +174,7 @@ class E2EResult:
     fiberflat_bundle: dict | None
     gaia_target: e2e_gaia.E2EGaiaTarget | None = None
     calibration_sources: dict[str, str] = field(default_factory=dict)
+    infinite_snr_rv_evaluation: Any | None = None
 
 
 def _expected_calibration_products(config: E2EConfig) -> list[str]:
@@ -161,7 +185,7 @@ def _expected_calibration_products(config: E2EConfig) -> list[str]:
     for f in ff_list:
         if f in (1, 2, 3):
             keys.append(f"fiberflat_rate_fib{f}")
-    if config.materialize_stage1_trace or not stage1_uses_fiberflat_pipeline(config):
+    if config.materialize_stage1_trace or not stage1_trace_materialized_from_sim(config):
         keys.extend(STAGE1_CAL_KEYS)
     return keys
 
@@ -178,6 +202,60 @@ def _fiberflat_spectrograph_list(config: E2EConfig) -> list[str]:
             seen.add(s)
             out.append(s)
     return out
+
+
+def _fiberflat_rate_paths_for_stage1(
+    config: E2EConfig,
+    cal_bundle: e2e_calibrations.E2ECalibrationBundle,
+    calibration_models: dict,
+    out_dir_abs: str,
+    stage0_prim_args: dict,
+    ff_list: list[int],
+    *,
+    record_sources: bool,
+) -> list[str]:
+    """Simulated or user-config fiberflat rate map paths for Stage 1 materialization."""
+    use_user_rates = record_sources and all(
+        f in cal_bundle.fiberflat_rate_paths for f in ff_list
+    )
+    if use_user_rates:
+        logger.info("E2E: user fiberflat rate files (%s).", config.spectrograph)
+        ff_paths = [cal_bundle.fiberflat_rate_paths[f] for f in sorted(ff_list)]
+        for f in sorted(ff_list):
+            cal_bundle.sources[f"fiberflat_rate_fib{f}"] = (
+                f"config:{cal_bundle.fiberflat_rate_paths[f]}"
+            )
+        return ff_paths
+
+    logger.info("E2E: simulated fiberflat rates (%s).", config.spectrograph)
+    ff_paths = create_dummy_fiberflat_rate_files(
+        ff_list,
+        config.spectrograph,
+        out_dir_abs,
+        calibration_models,
+        readtime=config.readtime,
+        n_reads=config.n_reads,
+        max_cores=config.max_cores,
+        stage0_prim_args=stage0_prim_args,
+        flat_scale=config.flat_scale,
+        flat_temperature_k=config.flat_temperature_k,
+        fiberflat_coadd_exposures=config.fiberflat_coadd_exposures,
+        fiberflat_duplicate_single_reduction=(
+            config.fiberflat_duplicate_single_reduction
+        ),
+        rate_map_method=config.fiberflat_rate_map_method,
+        pyechelle_exposure_time_s=config.fiberflat_pyechelle_exposure_time_s,
+    )
+    if record_sources:
+        for f in sorted(ff_list):
+            fib_paths = [
+                p for p in ff_paths if f"FIBERFLAT-FIB{f}" in os.path.basename(p)
+            ]
+            label = fib_paths[0] if len(fib_paths) == 1 else f"{len(fib_paths)} coadd inputs"
+            cal_bundle.sources[f"fiberflat_rate_fib{f}"] = (
+                f"simulated_dummy_rate:{label}"
+            )
+    return ff_paths
 
 
 def _simulate_fiberflats_and_run_pipeline(
@@ -205,40 +283,17 @@ def _simulate_fiberflats_and_run_pipeline(
     )
     if use_user_rates:
         logger.info("E2E: user fiberflat rate files + fiberflat pipeline (%s).", spectrograph)
-        ff_paths = [cal_bundle.fiberflat_rate_paths[f] for f in sorted(ff_list)]
-        for f in sorted(ff_list):
-            cal_bundle.sources[f"fiberflat_rate_fib{f}"] = (
-                f"config:{cal_bundle.fiberflat_rate_paths[f]}"
-            )
     else:
         logger.info("E2E: simulated fiberflat rates + fiberflat pipeline (%s).", spectrograph)
-        ff_paths = create_dummy_fiberflat_rate_files(
-            ff_list,
-            spectrograph,
-            out_dir_abs,
-            calibration_models,
-            readtime=config.readtime,
-            n_reads=config.n_reads,
-            max_cores=config.max_cores,
-            stage0_prim_args=stage0_prim_args,
-            flat_scale=config.flat_scale,
-            flat_temperature_k=config.flat_temperature_k,
-            fiberflat_coadd_exposures=config.fiberflat_coadd_exposures,
-            fiberflat_duplicate_single_reduction=(
-                config.fiberflat_duplicate_single_reduction
-            ),
-            rate_map_method=config.fiberflat_rate_map_method,
-            pyechelle_exposure_time_s=config.fiberflat_pyechelle_exposure_time_s,
-        )
-        if record_sources:
-            for f in sorted(ff_list):
-                fib_paths = [
-                    p for p in ff_paths if f"FIBERFLAT-FIB{f}" in os.path.basename(p)
-                ]
-                label = fib_paths[0] if len(fib_paths) == 1 else f"{len(fib_paths)} coadd inputs"
-                cal_bundle.sources[f"fiberflat_rate_fib{f}"] = (
-                    f"simulated_dummy_rate:{label}"
-                )
+    ff_paths = _fiberflat_rate_paths_for_stage1(
+        config,
+        cal_bundle,
+        calibration_models,
+        out_dir_abs,
+        stage0_prim_args,
+        ff_list,
+        record_sources=record_sources,
+    )
     ff_bundle = run_fiberflat_pipeline(
         ff_paths,
         output_dir=cal_dir,
@@ -268,7 +323,7 @@ def materialize_stage1_calibrations(
 
     user_config_masters = e2e_calibrations.stage1_masters_from_user_config(cal_bundle)
     use_master_trace_bundle = cal_bundle.has_master_trace_bundle and (
-        user_config_masters or not stage1_uses_fiberflat_pipeline(config)
+        user_config_masters or not stage1_trace_materialized_from_sim(config)
     )
     if use_master_trace_bundle:
         logger.info(
@@ -287,29 +342,81 @@ def materialize_stage1_calibrations(
         if not ff_list:
             logger.warning("E2E: no fiberflat_fibers configured; skipping Stage 1 trace materialization.")
         else:
-            if stage1_uses_fiberflat_pipeline(config):
+            stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
+            if stage1_uses_sim_hdf_trace(config):
+                from .sim_hdf_calibrations import materialize_stage1_bundle_from_sim_hdf
+
+                extraction_aperture = 10.0
+                if config.infinite_snr_rv_validation:
+                    from .e2e_infinite_snr_rv import merge_infinite_snr_stage1_prim_args
+
+                    extraction_aperture = float(
+                        merge_infinite_snr_stage1_prim_args({})
+                        .get("spec_extract", {})
+                        .get("extraction_aperture", extraction_aperture)
+                    )
+                logger.info(
+                    "E2E: sim_hdf Stage-1 bundle (HDF trace + box fiberflat, aperture=%.1f).",
+                    extraction_aperture,
+                )
+                ramp_mjd = e2e_gaia.resolve_e2e_mjd_start(config.mjd_start)
+                ff_paths = _fiberflat_rate_paths_for_stage1(
+                    config,
+                    cal_bundle,
+                    calibration_models,
+                    out_dir_abs,
+                    stage0_prim_args,
+                    ff_list,
+                    record_sources=True,
+                )
+                bundle = materialize_stage1_bundle_from_sim_hdf(
+                    spectrograph=config.spectrograph,
+                    fiberflat_rate_paths=ff_paths,
+                    meta={"mjd_start": float(ramp_mjd)},
+                    extraction_aperture=extraction_aperture,
+                )
+                ff_bundle = {
+                    "trace_pos": bundle["trace_pos"],
+                    "trace_prof": bundle["trace_prof"],
+                    "fiberflat": bundle["fiberflat"],
+                }
+                wavesol_model = bundle["wavesol"]
+                for key in e2e_calibrations.STAGE1_TRACE_KEYS:
+                    cal_bundle.sources[key] = STAGE1_TRACE_SOURCE_SIM_HDF
+                cal_bundle.sources["wavesol"] = STAGE1_TRACE_SOURCE_SIM_HDF
+            elif stage1_uses_fiberflat_pipeline(config):
                 logger.info(
                     "E2E: ProcessFiberflatsPipeline (stage1_trace_source=pipeline): "
                     "materializing trace_pos, trace_prof, fiberflat from %s fiberflat rate map(s).",
                     config.fiberflat_rate_map_method,
+                )
+                ff_bundle = _simulate_fiberflats_and_run_pipeline(
+                    config,
+                    config.spectrograph,
+                    cal_bundle,
+                    calibration_models,
+                    out_dir_abs,
+                    cal_dir,
+                    stage0_prim_args,
+                    ff_list,
+                    record_sources=True,
                 )
             else:
                 logger.info(
                     "E2E: materializing trace_pos, trace_prof, fiberflat via "
                     "ProcessFiberflatsPipeline (KOA masters incomplete)."
                 )
-            stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
-            ff_bundle = _simulate_fiberflats_and_run_pipeline(
-                config,
-                config.spectrograph,
-                cal_bundle,
-                calibration_models,
-                out_dir_abs,
-                cal_dir,
-                stage0_prim_args,
-                ff_list,
-                record_sources=True,
-            )
+                ff_bundle = _simulate_fiberflats_and_run_pipeline(
+                    config,
+                    config.spectrograph,
+                    cal_bundle,
+                    calibration_models,
+                    out_dir_abs,
+                    cal_dir,
+                    stage0_prim_args,
+                    ff_list,
+                    record_sources=True,
+                )
 
     # Additional spectrographs (e.g. RSPEC alongside a BSPEC science run): simulate fiber
     # flats and run the fiber flat pipeline purely to produce trace-position previews and
@@ -338,7 +445,7 @@ def materialize_stage1_calibrations(
                     record_sources=False,
                 )
 
-    if wavesol_model is None and config.materialize_stage1_trace:
+    if wavesol_model is None and config.materialize_stage1_trace and not stage1_uses_sim_hdf_trace(config):
         ramp_mjd = e2e_gaia.resolve_e2e_mjd_start(config.mjd_start)
         wavesol_model = create_wavelength_solution_model_from_sim(
             config.spectrograph,
@@ -380,10 +487,10 @@ def run_e2e_calibrations(config: E2EConfig) -> E2ECalibrationsResult:
         connect_remote=config.connect_remote,
         sync_caldb_first=config.sync_caldb_first,
         download_missing_koa=config.download_missing_koa,
-        auto_resolve_stage1_masters=not stage1_uses_fiberflat_pipeline(config),
+        auto_resolve_stage1_masters=not stage1_trace_materialized_from_sim(config),
         skip_koa_cal_types=(
             list(e2e_calibrations.STAGE1_TRACE_KEYS)
-            if stage1_uses_fiberflat_pipeline(config)
+            if stage1_trace_materialized_from_sim(config)
             else None
         ),
     )
@@ -455,7 +562,13 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
             fiberflat_bundle=cal_res.fiberflat_bundle,
             gaia_target=None,
             calibration_sources=cal_res.sources,
+            infinite_snr_rv_evaluation=None,
         )
+
+    if config.infinite_snr_rv_validation:
+        from .e2e_infinite_snr_rv import apply_infinite_snr_rv_e2e_config
+
+        config = apply_infinite_snr_rv_e2e_config(config)
 
     out_dir_abs = e2e_support.ensure_output_directory(config.output_dir)
     os.makedirs(out_dir_abs, exist_ok=True)
@@ -530,10 +643,10 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         connect_remote=config.connect_remote,
         sync_caldb_first=config.sync_caldb_first,
         download_missing_koa=config.download_missing_koa,
-        auto_resolve_stage1_masters=not stage1_uses_fiberflat_pipeline(config),
+        auto_resolve_stage1_masters=not stage1_trace_materialized_from_sim(config),
         skip_koa_cal_types=(
             list(e2e_calibrations.STAGE1_TRACE_KEYS)
-            if stage1_uses_fiberflat_pipeline(config)
+            if stage1_trace_materialized_from_sim(config)
             else None
         ),
     )
@@ -581,6 +694,16 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         cal_bundle.sources.setdefault(k, "simulated")
 
     stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
+    stage1_prim_args = None
+    stage2_prim_args = None
+    if config.infinite_snr_rv_validation:
+        from .e2e_infinite_snr_rv import (
+            merge_infinite_snr_stage1_prim_args,
+            merge_infinite_snr_stage2_prim_args,
+        )
+
+        stage1_prim_args = merge_infinite_snr_stage1_prim_args(None)
+        stage2_prim_args = merge_infinite_snr_stage2_prim_args(None)
     logger.info("E2E: Stage 0 (ramp → rate/slope).")
     stage0_model = run_stage0_simulation(
         ramp_model,
@@ -607,6 +730,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
                     stage0_model,
                     ff_bundle["trace_pos"],
                     ff_bundle["trace_prof"],
+                    prim_args=stage1_prim_args,
                     wavesol_model=wavesol_model,
                     output_dir=out_dir_abs,
                     max_cores=config.max_cores,
@@ -616,12 +740,22 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
 
     if config.run_stage2 and stage1_model is not None and ff_bundle is not None:
         logger.info("E2E: Stage 2.")
+        _rv_center_m_s: float | None = None
+        if gaia_target is not None and np.isfinite(float(injected_rv_km_s)):
+            _rv_center_m_s = float(injected_rv_km_s) * 1000.0
+            logger.info(
+                "E2E: stellar RV hybrid grid center ccf_input_velocity=%.3f m/s (%.4f km/s)",
+                _rv_center_m_s,
+                float(injected_rv_km_s),
+            )
         stage2_model = e2e_support.run_stage2_simulation(
             stage1_model,
             fiberflat_model=ff_bundle["fiberflat"],
+            prim_args=stage2_prim_args,
             output_dir=out_dir_abs,
             max_cores=config.max_cores,
             stellar_rv_mask_path=config.stellar_rv_mask_path,
+            stellar_rv_ccf_input_velocity_m_s=_rv_center_m_s,
         )
     elif config.run_stage2:
         logger.warning("E2E: run_stage2 is True but Stage 1 or fiberflat bundle missing; skipping.")
@@ -638,6 +772,23 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         gaia_target=gaia_target,
         fibers=config.fibers,
     )
+
+    infinite_snr_rv_evaluation = None
+    if config.infinite_snr_rv_validation:
+        from .e2e_infinite_snr_rv import (
+            assert_infinite_snr_rv_recovery,
+            evaluate_infinite_snr_rv_recovery,
+            log_infinite_snr_rv_evaluation,
+        )
+
+        infinite_snr_rv_evaluation = evaluate_infinite_snr_rv_recovery(
+            stage2_model,
+            injected_rv_km_s=injected_rv_km_s,
+            fibers=config.fibers,
+        )
+        log_infinite_snr_rv_evaluation(infinite_snr_rv_evaluation)
+        if config.infinite_snr_rv_assert:
+            assert_infinite_snr_rv_recovery(infinite_snr_rv_evaluation)
 
     if config.make_preview_html:
         try:
@@ -669,4 +820,5 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         fiberflat_bundle=ff_bundle,
         gaia_target=gaia_target,
         calibration_sources=dict(cal_bundle.sources),
+        infinite_snr_rv_evaluation=infinite_snr_rv_evaluation,
     )

@@ -21,6 +21,9 @@ def test_effective_stage1_trace_source_explicit():
     assert effective_stage1_trace_source(cfg) == STAGE1_TRACE_SOURCE_KOA
     assert not stage1_uses_fiberflat_pipeline(cfg)
 
+    cfg_sim = E2EConfig(output_dir=".", stage1_trace_source="sim_hdf")
+    assert effective_stage1_trace_source(cfg_sim) == "sim_hdf"
+
 
 def test_effective_stage1_trace_source_legacy_alias():
     cfg = E2EConfig(output_dir=".", derive_stage1_trace_from_sim=False)

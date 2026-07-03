@@ -73,6 +73,7 @@ import io
 import json
 import logging
 import math
+import multiprocessing as mp
 import os
 import tempfile
 import webbrowser
@@ -87,7 +88,7 @@ from astropy import units as u
 from ....datamodels.dqflags import DQ_FLAGS
 from ....utils.line_mask_utils import restrict_mask_to_chunk, stellar_rv_ccf_mask_lines
 from ....utils.physical_constants import C_M_S
-from ..stellar_rv_primitive import (
+from ..rv_combine_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
 )
@@ -112,6 +113,84 @@ from ...utils.ccf_utils import (
 from .ccf_spectrum_overlay_debug_html import build_ccf_spectrum_overlay_debug_html
 
 logger = logging.getLogger(__name__)
+
+# Kaleido/Chrome PNG export can hang on large line-mask CCF figures (many Plotly traces).
+_DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES = 200
+_DEFAULT_KALEIDO_PNG_TIMEOUT_S = 90.0
+
+
+def _preview_kaleido_png_max_ccf_traces() -> int:
+    raw = os.environ.get("HISPEC_DRP_PREVIEW_PNG_MAX_CCF_TRACES")
+    if raw is None or str(raw).strip() == "":
+        return _DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES
+
+
+def _preview_kaleido_png_timeout_s() -> float:
+    raw = os.environ.get("HISPEC_DRP_PREVIEW_PNG_TIMEOUT_S")
+    if raw is None or str(raw).strip() == "":
+        return _DEFAULT_KALEIDO_PNG_TIMEOUT_S
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return _DEFAULT_KALEIDO_PNG_TIMEOUT_S
+
+
+def _kaleido_render_png_worker(fig_json: str, scale: float) -> bytes:
+    """Render one Plotly figure to PNG in an isolated process (for timeout/kill)."""
+    fig = pio.from_json(fig_json)
+    try:
+        return fig.to_image(format="png", engine="kaleido", scale=scale)
+    except Exception:
+        import kaleido
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+            kaleido.write_fig_sync(fig, path=tmp_path, opts={"scale": scale})
+            return Path(tmp_path).read_bytes()
+        finally:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
+
+
+def _figure_to_png_bytes_with_timeout(
+    fig: go.Figure,
+    *,
+    scale: float,
+    timeout_s: float,
+) -> bytes | None:
+    """Return PNG bytes or ``None`` if Kaleido exceeds ``timeout_s`` (process is terminated)."""
+    fig_json = fig.to_json()
+    ctx = mp.get_context("spawn")
+    pool = ctx.Pool(1)
+    try:
+        async_result = pool.apply_async(
+            _kaleido_render_png_worker,
+            (fig_json, float(scale)),
+        )
+        return async_result.get(timeout=float(timeout_s))
+    except (TimeoutError, mp.context.TimeoutError):
+        logger.warning(
+            "Stellar RV preview: Kaleido PNG export timed out after %.0f s; skipping PNG",
+            timeout_s,
+        )
+        pool.terminate()
+        pool.join()
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Stellar RV preview: Kaleido PNG export failed: %s",
+            exc,
+        )
+        return None
+    finally:
+        pool.close()
+
 
 # Inner HTML for ``ccf_spectrum_overlay_unified.html.in`` help paragraph (trusted markup only).
 _MASK_OVERLAY_SPECTRUM_HELP_HTML = (
@@ -1185,6 +1264,8 @@ def _preview_should_write_png(primitive) -> bool:
     """
     if not getattr(primitive, "save_preview", False):
         return False
+    if not getattr(primitive, "preview_write_png", True):
+        return False
     if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
         return False
     return True
@@ -2109,6 +2190,7 @@ def _preview_gaussian_cache_and_slot_legends(
             sid = id(sl)
             if sid not in fit_slot_cache:
                 gaussian = sl.get("gaussian_fit")
+                bisector = sl.get("bisector_fit")
                 if gaussian and isinstance(gaussian, dict) and gaussian.get("params"):
                     params = gaussian.get("params") or {}
                     diag = gaussian.get("diagnostics") or {}
@@ -2119,6 +2201,13 @@ def _preview_gaussian_cache_and_slot_legends(
                         if rv_fit is not None and np.isfinite(float(rv_fit))
                         else float(params.get("v0", np.nan))
                     )
+                    if isinstance(bisector, dict):
+                        rv_bi = bisector.get("rv")
+                        err_bi = bisector.get("rv_err")
+                        if rv_bi is not None and np.isfinite(float(rv_bi)):
+                            rv_final = float(rv_bi)
+                        if err_bi is not None and np.isfinite(float(err_bi)) and float(err_bi) > 0:
+                            rv_err = float(err_bi)
                     fit_slot_cache[sid] = (params, diag, rv_err, rv_final)
                 else:
                     _ce = sl.get("ccf_err")
@@ -2355,26 +2444,37 @@ def _preview_export_combined_html(
         logger.info("Stellar RV preview: writing HTML path=%s", output_path_html)
         Path(output_path_html).write_text(combined_html, encoding="utf-8")
         logger.info("Stellar RV preview: HTML write complete")
-        if _preview_should_write_png(primitive):
+        n_ccf_traces = len(fig_ccf.data)
+        max_ccf_traces = _preview_kaleido_png_max_ccf_traces()
+        if _preview_should_write_png(primitive) and n_ccf_traces > max_ccf_traces:
+            logger.info(
+                "Stellar RV preview: skipping Kaleido PNG "
+                "(ccf traces=%d > HISPEC_DRP_PREVIEW_PNG_MAX_CCF_TRACES=%d; HTML-only)",
+                n_ccf_traces,
+                max_ccf_traces,
+            )
+        elif _preview_should_write_png(primitive):
+            scale = float(getattr(primitive, "preview_png_scale", 2.0))
+            scale = max(0.25, min(scale, 8.0))
+            timeout_s = _preview_kaleido_png_timeout_s()
+            logger.info(
+                "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f "
+                "timeout=%.0fs ccf_traces=%d",
+                output_path_png,
+                scale,
+                timeout_s,
+                n_ccf_traces,
+            )
             try:
-                import kaleido
+                from PIL import Image
 
-                scale = float(getattr(primitive, "preview_png_scale", 2.0))
-                scale = max(0.25, min(scale, 8.0))
-                logger.info(
-                    "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f",
-                    output_path_png,
-                    scale,
+                br = _figure_to_png_bytes_with_timeout(
+                    fig_rv, scale=scale, timeout_s=timeout_s
                 )
-                try:
-                    from PIL import Image
-
-                    br = fig_rv.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
-                    bc = fig_ccf.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
+                bc = _figure_to_png_bytes_with_timeout(
+                    fig_ccf, scale=scale, timeout_s=timeout_s
+                )
+                if br is not None and bc is not None:
                     im_rv = Image.open(io.BytesIO(br)).convert("RGBA")
                     im_ccf = Image.open(io.BytesIO(bc)).convert("RGBA")
                     w = max(im_rv.width, im_ccf.width)
@@ -2384,18 +2484,21 @@ def _preview_export_combined_html(
                     stacked.paste(im_ccf, (0, im_rv.height))
                     stacked.convert("RGB").save(output_path_png)
                     wrote_png = True
-                except Exception:
-                    kaleido.write_fig_sync(
-                        fig_ccf, path=output_path_png, opts={"scale": scale}
+                    logger.info("Stellar RV preview: PNG write complete")
+                else:
+                    logger.info(
+                        "Stellar RV preview: PNG skipped (Kaleido timed out or failed; HTML written)"
                     )
-                    wrote_png = True
-                logger.info("Stellar RV preview: PNG write complete")
             except Exception as e:
-                logger.debug(
-                    "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
+                logger.warning(
+                    "Stellar RV preview: could not write preview PNG "
+                    "(kaleido/Chrome/PIL may be missing): %s",
+                    e,
                 )
         else:
-            if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
+            if not getattr(primitive, "preview_write_png", True):
+                skip_reason = "preview_write_png=False (HTML-only preview)"
+            elif _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
                 skip_reason = "HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS (HTML-only preview)"
             else:
                 skip_reason = "disabled"

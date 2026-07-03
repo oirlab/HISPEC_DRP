@@ -1181,6 +1181,13 @@ class CCFBisectorConfig:
         errors as independent measurements.
     min_cuts : int
         Minimum successful bisector cuts required for a valid RV.
+    min_peak_contrast_sigma : float
+        Minimum peak amplitude (above baseline) in units of robust wing noise (MAD of
+        ``y - baseline``). Weak peaks inflate ``rv_err`` so alias fits are down-weighted.
+    rv_err_min_vstep_fraction : float
+        On **uniform** coarse velocity grids (minimum spacing :math:`\\ge` 10 m/s and
+        max/min spacing ratio :math:`\\lesssim 1.01`), floor ``rv_err`` to this fraction
+        of the grid step. Hybrid grids with a fine leg are unchanged.
     """
 
     rv_percentile_lo: float = 10.0
@@ -1195,6 +1202,8 @@ class CCFBisectorConfig:
     rv_err_bootstrap_samples: int = 0
     rv_err_bootstrap_seed: int | None = None
     min_cuts: int = 5
+    min_peak_contrast_sigma: float = 5.0
+    rv_err_min_vstep_fraction: float = 0.15
 
 
 # Lighter LevMar / σ-clip budget for :func:`finalize_ccf_preview_dict` only (Plotly metadata).
@@ -2709,6 +2718,28 @@ def fit_ccf_rv_bisector(
     core_pct = float(cfg.rv_err_core_percentile)
     core_cut = min(cuts, key=lambda c: abs(c["percentile"] - core_pct))
     rv_err = float(core_cut["v_mid_err_m_s"])
+
+    cut_spread = float(
+        math.sqrt(max(float(np.average((v_arr - rv) ** 2, weights=w_arr / w_sum)), 0.0))
+    )
+
+    d_pos = np.diff(v_m_s)
+    d_pos = d_pos[np.isfinite(d_pos) & (d_pos > 0)]
+    uniform_coarse = False
+    if d_pos.size > 0:
+        d_min = float(np.min(d_pos))
+        d_max = float(np.max(d_pos))
+        uniform_coarse = d_max / max(d_min, 1e-30) <= 1.01 and d_min >= 40.0
+        if uniform_coarse:
+            rv_err = max(rv_err, cut_spread, float(cfg.rv_err_min_vstep_fraction) * d_min)
+
+    wing_noise = float(mad_std(y_rel, ignore_nan=True))
+    if not math.isfinite(wing_noise) or wing_noise <= 0.0:
+        wing_noise = float(np.nanstd(y_rel)) if y.size > 1 else peak_amp
+    min_contrast = float(cfg.min_peak_contrast_sigma)
+    if min_contrast > 0.0 and peak_amp < min_contrast * max(wing_noise, 1e-30):
+        rv_err = max(rv_err, v_step * max(min_contrast, 1.0))
+
     rv_err = max(rv_err, _ccf_rv_err_numeric_floor(v_step))
     boot_sig = float("nan")
     if has_ccf_err and int(cfg.rv_err_bootstrap_samples) > 0:
@@ -2771,6 +2802,9 @@ def fit_ccf_rv_bisector(
         "bis_top_mean_m_s": v_top,
         "bis_bottom_mean_m_s": v_bot,
         "method": "ccf_bisector_weighted_percentile",
+        "cut_midpoint_spread_m_s": cut_spread,
+        "wing_noise_mad": wing_noise,
+        "peak_contrast_sigma": float(peak_amp / max(wing_noise, 1e-30)),
     }
     if return_diagnostics:
         return rv, rv_err, diag
@@ -3580,6 +3614,41 @@ def fit_ccf_rv(
 # =============================================================================
 
 
+def _refine_ccf_rv_bisector_after_gaussian_fit(
+    v_grid_m_s: np.ndarray,
+    ccf: np.ndarray,
+    vstep: float,
+    *,
+    ccf_err: np.ndarray | None = None,
+    config: CCFBisectorConfig | None = None,
+) -> tuple[float | None, float | None, dict | None]:
+    """
+    Bisector RV after :func:`fit_ccf_rv` (NEID-style weighted percentile cuts).
+
+    Returns ``(None, None, diag)`` when bisector fitting fails; ``diag`` may still
+    carry ``ok=False`` and cut metadata for previews.
+    """
+    v_step_eff = (
+        float(vstep)
+        if math.isfinite(vstep) and vstep > 0
+        else effective_ccf_v_step_for_fit(v_grid_m_s)
+    )
+    rv_b, err_b, diag = fit_ccf_rv_bisector(
+        v_grid_m_s,
+        ccf,
+        v_step_eff,
+        ccf_err=ccf_err,
+        config=config,
+        return_diagnostics=True,
+    )
+    if not isinstance(diag, dict) or not diag.get("ok") or not math.isfinite(float(rv_b)):
+        return None, None, diag if isinstance(diag, dict) else None
+    err_out: float | None = None
+    if err_b is not None and math.isfinite(float(err_b)) and float(err_b) > 0.0:
+        err_out = float(err_b)
+    return float(rv_b), err_out, diag
+
+
 def _ccf_rv_from_ccf(
     v_grid: np.ndarray,
     ccf: np.ndarray,
@@ -3589,8 +3658,13 @@ def _ccf_rv_from_ccf(
     *,
     min_good_pixels: int = 10,
     ccf_parabolic_vertex_n_samples: int | None = None,
+    ccf_bisector_config: CCFBisectorConfig | None = None,
 ) -> tuple[float, float]:
-    """Gaussian fit to CCF; optional mask-style LSTSQ parabolic refine; else grid peak / HWHM."""
+    """Gaussian fit to CCF; bisector refine for final RV; else grid peak / HWHM.
+
+    ``ccf_parabolic_vertex_n_samples`` is retained for API compatibility but no longer
+    selects the final RV (bisector is used instead when the Gaussian fit succeeds).
+    """
     ccf = np.asarray(ccf, dtype=np.float64)
     n_vel = len(ccf)
     if n_good < int(min_good_pixels) or n_vel < 3 or not np.any(np.isfinite(ccf)):
@@ -3617,32 +3691,19 @@ def _ccf_rv_from_ccf(
         vel_span_m_s_per_pixel=vsp,
         return_params=True,
     )
-    if ccf_parabolic_vertex_n_samples is not None and np.isfinite(rv_fit):
-        try:
-            n_par = _require_ccf_parabolic_vertex_n_samples(
-                int(ccf_parabolic_vertex_n_samples)
-            )
-        except ValueError:
-            n_par = None
-        if n_par is not None:
-            rv_ls, err_ls, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_line_mask(
-                v_grid,
-                -ccf,
-                float(v_step),
-                ccf_err=None,
-                params=params if isinstance(params, dict) else None,
-                ccf_parabolic_vertex_n_samples=int(n_par),
-                n_good=n_good,
-            )
-            if rv_ls is not None and math.isfinite(float(rv_ls)):
-                err_out = float(err_fit) if np.isfinite(err_fit) else float("nan")
-                if (
-                    err_ls is not None
-                    and math.isfinite(float(err_ls))
-                    and float(err_ls) > 0.0
-                ):
-                    err_out = float(err_ls)
-                return float(rv_ls), float(err_out)
+    if np.isfinite(rv_fit):
+        rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
+            v_grid,
+            ccf,
+            float(v_step),
+            ccf_err=None,
+            config=ccf_bisector_config,
+        )
+        if rv_bi is not None and math.isfinite(float(rv_bi)):
+            err_out = float(err_fit) if np.isfinite(err_fit) else float("nan")
+            if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0.0:
+                err_out = float(err_bi)
+            return float(rv_bi), float(err_out)
 
     if np.isfinite(rv_fit) and np.isfinite(err_fit) and err_fit > 0.0:
         return float(rv_fit), float(err_fit)
@@ -4712,11 +4773,14 @@ def _fit_ccf_preview_slot_worker(
     ccf_parabolic_vertex_n_samples: int = 11,
     line_mask_line_window_by_line: bool | None = None,
     line_mask_gaussian_seed_mean_m_s: float | None = None,
+    ccf_bisector_config: CCFBisectorConfig | None = None,
 ) -> tuple[dict, dict | None]:
     """
-    One slot: :func:`fit_ccf_rv` with :data:`CCF_PREVIEW_SLOT_FIT_CONFIG` and optional
-    mask-line LSTSQ vertex + Gaussian-smooth fallback (same order as
-    :func:`run_ccf_line_mask_for_fiber`). Thread-safe (no shared mutable state).
+    One slot: :func:`fit_ccf_rv` with :data:`CCF_PREVIEW_SLOT_FIT_CONFIG`, then bisector
+    RV for pipeline/preview metadata (:func:`_refine_ccf_rv_bisector_after_gaussian_fit`).
+    Thread-safe (no shared mutable state).
+
+    ``ccf_parabolic_vertex_n_samples`` is ignored (retained for call-site compatibility).
     """
     wl = sl.get("wl_lo", np.nan)
     if not np.isfinite(wl):
@@ -4738,34 +4802,32 @@ def _fit_ccf_preview_slot_worker(
         line_mask_line_window_by_line=line_mask_line_window_by_line,
         gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
     )
-    refine_meta: dict | None = None
-    if bool(diag.get("fit_ok")) and np.isfinite(rv) and np.isfinite(rv_err) and float(rv_err) > 0:
-        ng = max(1, int(sl.get("n_good", 1)))
-        if ccf_line_mask_stored_negated:
-            rv_ref, err_ref, rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_line_mask(
-                v_slot,
-                y_slot,
-                vs,
-                ccf_err=ccf_err_arg,
-                params=params if isinstance(params, dict) else None,
-                ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
-                n_good=ng,
-            )
-        else:
-            rv_ref, err_ref, rmeta = _refine_ccf_rv_gaussian_smooth_after_gaussian_fit_ccf_line_mask(
-                v_slot,
-                y_slot,
-                vs,
-                ccf_err=ccf_err_arg,
-                params=params if isinstance(params, dict) else None,
-            )
-        refine_meta = rmeta if isinstance(rmeta, dict) else None
-        if rv_ref is not None and math.isfinite(float(rv_ref)):
-            rv = float(rv_ref)
-            if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0:
-                rv_err = float(err_ref)
-    gaussian_fit = {"rv": rv, "rv_err": rv_err, "params": params, "diagnostics": diag}
-    return gaussian_fit, refine_meta
+    gaussian_fit = {
+        "rv": rv,
+        "rv_err": rv_err,
+        "params": params,
+        "diagnostics": diag,
+    }
+    bisector_fit: dict | None = None
+    if bool(diag.get("fit_ok")) and np.isfinite(rv):
+        rv_bi, err_bi, bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
+            v_slot,
+            y_slot,
+            vs,
+            ccf_err=ccf_err_arg,
+            config=ccf_bisector_config,
+        )
+        if rv_bi is not None and math.isfinite(float(rv_bi)):
+            bisector_fit = {
+                "rv": float(rv_bi),
+                "rv_err": (
+                    float(err_bi)
+                    if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0
+                    else float("nan")
+                ),
+                "diagnostics": bmeta if isinstance(bmeta, dict) else {},
+            }
+    return gaussian_fit, bisector_fit
 
 
 def finalize_ccf_preview_dict(
@@ -4870,12 +4932,12 @@ def finalize_ccf_preview_dict(
     else:
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             results = list(ex.map(_run_slot, slots))
-    for sl, (gaussian_fit, refine_meta) in zip(slots, results):
+    for sl, (gaussian_fit, bisector_fit) in zip(slots, results):
         sl["gaussian_fit"] = gaussian_fit
-        if refine_meta is not None and bool(refine_meta.get("ok")):
-            sl["line_mask_refine_rmeta"] = refine_meta
+        if bisector_fit is not None:
+            sl["bisector_fit"] = bisector_fit
     logger.info(
-        "CCF preview: finalize_ccf_preview_dict Gaussian fits done n_slots=%d",
+        "CCF preview: finalize_ccf_preview_dict Gaussian + bisector fits done n_slots=%d",
         len(slots),
     )
     out: dict = {
@@ -5407,8 +5469,8 @@ def masked_ccf_rv(
     min_good_pixels : int, optional
         Minimum good pixels required before building the CCF and fitting.
     ccf_parabolic_vertex_n_samples : int or None, optional
-        When set (odd, :math:`\\ge 3`), run mask-style LSTSQ parabolic refinement after the
-        Gaussian fit (see :func:`_ccf_rv_from_ccf`). ``None`` keeps Gaussian-only RVs.
+        Deprecated; ignored for the returned RV. After the Gaussian fit, final RV and
+        :math:`\\sigma_{\\rm RV}` come from :func:`fit_ccf_rv_bisector` when that step succeeds.
     return_ccf : bool, optional
         If ``True``, also return ``v_grid`` and the 1-D CCF array on that grid.
     diagnostics : bool, optional
@@ -7498,13 +7560,9 @@ def rv_per_chunks_line_mask(
             if sig_h is not None and math.isfinite(float(sig_h)) and float(sig_h) > 0.0:
                 rv_err_rows[i] = float(sig_h)
 
-    # Prefer Gaussian + mask-line parabolic refine (same stack as order-mean RV when
-    # ``n_chunks_order == 1`` and CCF preview slots) so ``ccf_parabolic_vertex_n_samples``
-    # controls the LSTSQ window; keep Numba RV/σ when the fitter path does not succeed.
-    # On narrow line-window CCFs the LM Gaussian ``v0`` can sit on a spurious extremum; pass
-    # a copy of ``params`` into refine with ``v0`` set to the Numba RV so the LSTSQ window is
-    # centered on the same peak the chunk pipeline already trusts (width/amplitude still
-    # from the Gaussian fit for the smooth fallback inside refine).
+    # Prefer Gaussian + bisector refine (same stack as order-mean RV when
+    # ``n_chunks_order == 1`` and CCF preview slots). Keep Numba RV/σ when the fitter
+    # path does not succeed.
     line_window_fit_ccf = bool(window_line_by_line)
     v_seed = (
         float(line_mask_line_chunk_v_center_m_s)
@@ -7556,22 +7614,16 @@ def rv_per_chunks_line_mask(
             and float(err_g) > 0.0
         ):
             continue
-        par_for_refine = dict(par_g) if isinstance(par_g, dict) else None
-        if par_for_refine is not None:
-            par_for_refine["v0"] = float(rv_nb)
-        rv_ref, err_ref, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_line_mask(
+        rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
             vg_cc,
             y_stored,
             v_step_floor,
             ccf_err=e_row,
-            params=par_for_refine,
-            ccf_parabolic_vertex_n_samples=int(n_parabolic_norm),
-            n_good=int(n_good_arr[i]),
         )
-        if rv_ref is not None and math.isfinite(float(rv_ref)):
-            rv_rows[i] = float(rv_ref)
-            if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0.0:
-                rv_err_rows[i] = float(err_ref)
+        if rv_bi is not None and math.isfinite(float(rv_bi)):
+            rv_rows[i] = float(rv_bi)
+            if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0.0:
+                rv_err_rows[i] = float(err_bi)
 
     for i in range(n_chunk_valid):
         rv = float(rv_rows[i])
@@ -8284,6 +8336,85 @@ def run_ccf_line_mask_for_fiber(
     rvccf_rows_accum: list[np.ndarray] = []
     rvccf_n_good_accum: list[int] = []
 
+    # Fiber-level auto-hybrid scout (multi-order): estimate CCF peak on the first valid
+    # echelle row, then reuse the merged velocity grid for every order on this fiber.
+    if bool(mask_auto_hybrid_scout) and not hybrid and fiber_merged_v_grid is None:
+        for _oi_sc, _ord_sc in order_tasks:
+            _w_sc = np.asarray(wave[_oi_sc], dtype=np.float64)
+            _s_sc = np.asarray(spec[_oi_sc], dtype=np.float64)
+            _e_sc = np.asarray(
+                err[_oi_sc] if getattr(err, "ndim", 0) >= 2 else err, dtype=np.float64
+            )
+            _d_sc = np.asarray(
+                bad[_oi_sc] if getattr(bad, "ndim", 0) >= 2 else bad, dtype=bool
+            )
+            _wmin, _wmax = float(np.nanmin(_w_sc)), float(np.nanmax(_w_sc))
+            if not np.isfinite(_wmin) or not np.isfinite(_wmax) or _wmax <= _wmin:
+                continue
+            _span = float(_wmax - _wmin)
+            _win_sc = max(float(window_size_um), _span * (1.0 + 1e-12))
+            _kw_sc = {
+                "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
+                "min_good_pixels": int(min_good_pixels),
+                "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
+                **kw_rv_line_chunking,
+            }
+            try:
+                _scout = rv_per_chunks_line_mask(
+                    _w_sc,
+                    _s_sc,
+                    _e_sc,
+                    _d_sc,
+                    mask_lines,
+                    window_size_um=_win_sc,
+                    v_min_m_s=v_min_use,
+                    v_max_m_s=v_max_use,
+                    v_step_m_s=v_step_m_s,
+                    zb=zb,
+                    max_cores=max_cores,
+                    return_ccf=True,
+                    **_kw_sc,
+                )
+            except Exception:
+                continue
+            (
+                _rvs_sc,
+                _errs_sc,
+                _centers_sc,
+                v_grid_sc,
+                ccf_2d_sc,
+                _wl_lo_sc,
+                _wl_hi_sc,
+                _ng_sc,
+                _std_sc,
+                _ccf_preview_sc,
+            ) = _scout
+            if int(_rvs_sc.size) <= 0:
+                continue
+            vg_sc = np.asarray(v_grid_sc, dtype=np.float64)
+            m_dt = _nanmean_axis0_ignore_empty_columns(
+                np.asarray(ccf_2d_sc, dtype=np.float64)
+            )
+            v_c = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg_sc, m_dt)
+            if math.isfinite(v_c):
+                fiber_merged_v_grid = build_hybrid_merged_velocity_grid(
+                    float(v_min_use),
+                    float(v_max_use),
+                    float(v_step_m_s),
+                    float(v_c),
+                    float(ccf_hybrid_half_width_m_s),
+                    float(ccf_hybrid_step_m_s),
+                )
+                logger.info(
+                    "CCF line_mask: auto-hybrid scout (fiber-level, order=%s) center=%.2f m/s "
+                    "n_vel=%d fiber=%s",
+                    _ord_sc,
+                    float(v_c),
+                    int(fiber_merged_v_grid.size),
+                    fiber,
+                )
+            break
+
     # One inverse-variance weight per statistically independent RV estimate (see loop body).
     fiber_agg_rvs: list[float] = []
     fiber_agg_errs: list[float] = []
@@ -8305,8 +8436,12 @@ def run_ccf_line_mask_for_fiber(
         order_chunk_errs: list[float] = []
         order_chunk_wl: list[float] = []
         order_chunk_ng: list[int] = []
-        v_auto_grid: np.ndarray | None = None
-        order_auto_hybrid_merged = False
+        v_auto_grid: np.ndarray | None = (
+            np.asarray(fiber_merged_v_grid, dtype=np.float64)
+            if fiber_merged_v_grid is not None and not hybrid
+            else None
+        )
+        order_auto_hybrid_merged = fiber_merged_v_grid is not None and not hybrid
 
         kw_rv = {
             "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
@@ -8314,13 +8449,14 @@ def run_ccf_line_mask_for_fiber(
             "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
             **kw_rv_line_chunking,
         }
-        # Single-order auto-hybrid: full-order CCF (one chunk spanning the echelle row) for scout.
+        # Legacy single-order auto-hybrid (when fiber-level scout did not run).
         span_um = float(w_max - w_min)
         window_um_scout = max(float(window_size_um), span_um * (1.0 + 1e-12))
         if (
             bool(mask_auto_hybrid_scout)
             and single_order_line_mask
             and not hybrid
+            and v_auto_grid is None
         ):
             scout = rv_per_chunks_line_mask(
                 w,
@@ -8548,19 +8684,16 @@ def run_ccf_line_mask_for_fiber(
                 ):
                     rv_gf = float(rv_g)
                     err_gf = float(err_g)
-                    rv_ref, err_ref, _rmeta = _refine_ccf_rv_after_gaussian_fit_ccf_line_mask(
+                    rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
                         v_fit,
                         ccf_mean_order,
                         vstep_fit,
                         ccf_err=ccf_err_mean_order,
-                        params=_par_g if isinstance(_par_g, dict) else None,
-                        ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
-                        n_good=int(n_good_fit),
                     )
-                    if rv_ref is not None and math.isfinite(float(rv_ref)):
-                        rv_gf = float(rv_ref)
-                        if err_ref is not None and math.isfinite(float(err_ref)) and float(err_ref) > 0:
-                            err_gf = float(err_ref)
+                    if rv_bi is not None and math.isfinite(float(rv_bi)):
+                        rv_gf = float(rv_bi)
+                        if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0:
+                            err_gf = float(err_bi)
                     order_chunk_rvs = [rv_gf] * n_chunks_order
                     order_chunk_errs = [err_gf] * n_chunks_order
                     order_used_gaussian_mean = True

@@ -93,8 +93,9 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                                                                 fiberflat_model.traces[int(fiber)]['wave'], 
                                                                 order_vec, do_orders)
                 else:
-                    blaze_array /= np.nanmax(blaze_array, axis=1)[:, np.newaxis]
-                    blaze_std_array /= np.nanmax(blaze_array, axis=1)[:, np.newaxis]
+                    blaze_norm = np.nanmax(blaze_array, axis=1)[:, np.newaxis]
+                    blaze_array /= blaze_norm
+                    blaze_std_array /= blaze_norm
 
                 # apply blaze correction to science spectrum using blaze array, and propagate errors
                 apply_blaze_array(output_model, blaze_array, blaze_std_array,

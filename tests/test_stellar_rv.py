@@ -1162,6 +1162,9 @@ def _serialize_line_mask_ccf_preview_debug(
                     ),
                 },
                 "gaussian_fit": _jsonify_mask_ccf_debug(gaussian) if gaussian is not None else None,
+                "bisector_fit": _jsonify_mask_ccf_debug(sl.get("bisector_fit"))
+                if sl.get("bisector_fit") is not None
+                else None,
             }
             slots_out.append(slot_meta)
         fibers_meta[fib_s] = {

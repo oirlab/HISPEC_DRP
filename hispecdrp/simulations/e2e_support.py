@@ -203,8 +203,15 @@ def apply_e2e_save_and_preview_flags(
             flags["save_result"] = True
         if "save_preview" in cls.ARGUMENTS:
             flags["save_preview"] = True
-        if name == "stellar_rv" and "save_overlay_debug" in cls.ARGUMENTS:
-            flags["save_overlay_debug"] = True
+        if name == "stellar_rv":
+            existing = out.get(name, {})
+            if "save_overlay_debug" in cls.ARGUMENTS and "save_overlay_debug" not in existing:
+                flags["save_overlay_debug"] = True
+            # HTML preview only: Kaleido PNG of multi-fiber line-mask CCF figures (hundreds of
+            # traces) can hang or run for many minutes in headless Chrome. Always override the
+            # primitive default (True) even when get_default_stage*_prim_args already copied it.
+            if "preview_write_png" in cls.ARGUMENTS:
+                flags["preview_write_png"] = False
         if flags:
             out.setdefault(name, {}).update(flags)
     return out
@@ -351,6 +358,7 @@ def run_stage2_simulation(
     output_dir: str | None = None,
     max_cores: int | None = None,
     stellar_rv_mask_path: str | None = None,
+    stellar_rv_ccf_input_velocity_m_s: float | None = None,
 ) -> datamodels.DataModel:
     """Run Stage 2 (blaze + barycenter correction + stellar RV) on the Stage 1 product."""
     if prim_args is None:
@@ -362,6 +370,12 @@ def run_stage2_simulation(
 
     if stellar_rv_mask_path is not None and "stellar_rv" in prim_args:
         prim_args["stellar_rv"]["mask_path"] = stellar_rv_mask_path
+    if (
+        stellar_rv_ccf_input_velocity_m_s is not None
+        and np.isfinite(float(stellar_rv_ccf_input_velocity_m_s))
+        and "stellar_rv" in prim_args
+    ):
+        prim_args["stellar_rv"]["ccf_input_velocity"] = float(stellar_rv_ccf_input_velocity_m_s)
 
     prim_args = apply_e2e_save_and_preview_flags(prim_args, E2E_STAGE2_PRIMITIVES)
 

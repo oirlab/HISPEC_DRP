@@ -42,6 +42,36 @@ def test_blaze_correction():
     assert not flagged[:, edge:-edge].any()
 
 
+def test_blaze_correction_error_propagation_after_normalize():
+    """Normalized blaze and blaze uncertainty must share the same per-order scale factor."""
+    n_orders, n_pix = 39, 4096
+    science_model = datamodels.L1Model()
+    fiberflat_model = datamodels.FiberflatModel()
+    for fib in range(1, 4):
+        spec = np.full((n_orders, n_pix), 300.0)
+        err = np.full((n_orders, n_pix), 4.0)
+        flat = np.linspace(500.0, 3000.0, n_pix)
+        flat = np.broadcast_to(flat, (n_orders, n_pix)).copy()
+        flat_err = np.full((n_orders, n_pix), 40.0)
+        setattr(science_model, f"SPEC_UNCAL_FIB{fib}", spec)
+        setattr(science_model, f"SPEC_UNCAL_ERR_FIB{fib}", err)
+        setattr(science_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fib}", np.zeros((n_orders, n_pix)))
+        setattr(science_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fib}", np.zeros((n_orders, n_pix)))
+        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))
+        setattr(fiberflat_model, f"SPEC_FIB{fib}", flat)
+        setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", flat_err)
+        setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))
+
+    prim = BlazeCorrectionPrimitive()
+    out = prim.apply(science_model, fiberflat=fiberflat_model)
+    corr_err = getattr(out, "SPEC_ERR_FIB1")
+    corr_spec = getattr(out, "SPEC_FIB1")
+    ok = np.isfinite(corr_spec) & np.isfinite(corr_err) & (corr_spec > 0) & (corr_err > 0)
+    snr = corr_spec[ok] / corr_err[ok]
+    assert np.nanmedian(snr) > 10.0
+    assert np.nanmedian(corr_err[ok]) < 0.5 * np.nanmedian(spec[ok])
+
+
 def test_blaze_correction_gappy_fiberflat():
     """NaN holes from failed trace extraction must not break blaze spline fitting."""
     from hispecdrp.primitives.blaze_correction.blaze_correction_primitive import (
