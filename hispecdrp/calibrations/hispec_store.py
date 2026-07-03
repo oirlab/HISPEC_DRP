@@ -3,7 +3,7 @@ import glob
 from koa_middleware import CalibrationStore, CalibrationSelector
 import os
 from .. import datamodels
-from koa_middleware.utils import is_valid_uuid
+from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid
 
 from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
@@ -303,15 +303,23 @@ class HISPECCalibrationStore(CalibrationStore):
 
     def _finalize_cal_record(
         self,
-        cal : CalibrationModel,
         cal_record: dict,
-        local_filepath: str
+        local_filepath: str,
     ) -> dict:
         """
         Finalize a calibration record after the file has been saved to disk.
-        Computes and adds the MD5 checksum.
+
+        Adds filename/MD5 via the base store, then fills KOA identifiers that are
+        set on the saved file during :meth:`~datamodels.CalibrationModel.generate_filename`
+        but are not yet present on the pre-save metadata record.
         """
-        super()._finalize_cal_record(cal, cal_record, local_filepath)
-        cal_record['koa_id'] = cal.meta.koa_id
-        cal_record['koa_filepath'] = cal.meta.koa_filepath
+        cal_record = super()._finalize_cal_record(cal_record, local_filepath)
+        if cal_record.get("koa_id") is None:
+            cal_record["koa_id"] = cal_record.get("filename")
+        if cal_record.get("koa_filepath") is None and cal_record.get("koa_id") is not None:
+            cal_record["koa_filepath"] = generate_koa_filehandle(
+                cal_record.get("instrument_name"),
+                cal_record.get("datetime_obs"),
+                cal_record["koa_id"],
+            )
         return cal_record

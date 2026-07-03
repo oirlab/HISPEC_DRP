@@ -208,7 +208,7 @@ def berv_m_s_to_ccf_zb(berv_m_s: float) -> float:
     """
     Convert ``BARYCORR`` ``BERV`` (m/s) to the CCF barycentric factor :math:`z_b`.
 
-    Matches :func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_observed_wavelength_um`
+    Matches :func:`~hispecdrp.primitives.utils.ccf.ccf_rv_content.doppler_shift_from_barycenter`
     where ``zb1 = 1 + z_b`` and trial velocity enters as ``v / c``.
     """
     return float(berv_m_s) / C_M_S

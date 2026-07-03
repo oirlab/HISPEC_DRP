@@ -36,7 +36,7 @@ for tophat-style segment masks. Wavelengths in these generated files are **vacuu
 nanometers (see mask JSON and module docstrings).
 
 The **mask-shifted CCF** algorithm is discussed relative to SPIROU / KPF-style workflows
-in :mod:`hispecdrp.primitives.utils.ccf_utils` and the references there.
+in :mod:`hispecdrp.primitives.utils.ccf.ccf_utils` and the references there.
 
 ### Segment widths (tophat / empirical SPIROU masks)
 

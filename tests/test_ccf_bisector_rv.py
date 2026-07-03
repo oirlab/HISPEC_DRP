@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from hispecdrp.primitives.utils.ccf_utils import (
+from hispecdrp.primitives.utils.ccf.ccf_utils import (
     CCFBisectorConfig,
     effective_ccf_v_step_for_fit,
     fit_ccf_rv,

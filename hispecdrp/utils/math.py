@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 
 __all__ = [
     'delta_wave_to_delta_vel', 'delta_vel_to_delta_wave', 'delta_pix_to_delta_wave',
-    'polyval1d', 'solve_chebyshev2d',
+    'polyval1d', 'solve_chebyshev2d', 'nanmedian_axis0_ignore_empty_columns',
 ]
 
 def delta_wave_to_delta_vel(delta_wave : np.ndarray | float, wave : np.ndarray | float) -> np.ndarray | float:
@@ -486,6 +486,30 @@ def median_filter_2d(data, dq, window_size : tuple[int, int]):
                 out[iy, ix] = _calc_median_insertion_sort(temp, m)
     return out
 
+
+def nanmedian_axis0_ignore_empty_columns(arr: np.ndarray) -> np.ndarray:
+    """
+    Column-wise median of finite values (axis 0). Columns with no finite entries are NaN.
+
+    ``np.nanmedian(..., axis=0)`` emits ``RuntimeWarning: All-NaN slice`` when entire
+    columns are NaN; this matches ``nanmedian`` for mixed finite/NaN columns but avoids
+    that warning.
+    """
+    a = np.asarray(arr, dtype=np.float64)
+    if a.ndim != 2:
+        raise ValueError("nanmedian_axis0_ignore_empty_columns: expected a 2-D array")
+    n_row, n_col = a.shape
+    if n_col == 0:
+        return np.array([], dtype=np.float64)
+    if n_row == 0:
+        return np.full(n_col, np.nan, dtype=np.float64)
+    fin = np.isfinite(a)
+    cnt = np.sum(fin, axis=0)
+    out = np.full(n_col, np.nan, dtype=np.float64)
+    for j in range(n_col):
+        if cnt[j] > 0:
+            out[j] = float(np.median(a[fin[:, j], j]))
+    return out
 
 
 def get_err_from_posterior(x, posterior):

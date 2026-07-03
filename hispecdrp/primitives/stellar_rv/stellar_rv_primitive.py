@@ -25,7 +25,7 @@ from .rv_combine_utils import (
 )
 
 from ...utils.parallelization_utils import resolve_numba_threads
-from ..utils.ccf_utils import (
+from ..utils.ccf.ccf_utils import (
     assemble_rvccf_fib_table,
     build_hybrid_merged_velocity_grid,
     ccf_order_n_chunks_for_span,
@@ -101,11 +101,11 @@ class StellarRVPrimitive(BasePrimitive):
 
     * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
       two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
-      :mod:`~hispecdrp.primitives.utils.ccf_utils`).
+      :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
       Packaged defaults and citations: ``hispecdrp/data/masks/README.md``.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
-      (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
+      (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
 
     Parameters
     ----------
@@ -153,14 +153,14 @@ class StellarRVPrimitive(BasePrimitive):
     mask_ccf_pixel_interp_order : int
         **Default:** ``3``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
         for sampling flux and the per-pixel gate onto Doppler-shifted mask-line wavelengths in
-        :func:`~hispecdrp.primitives.utils.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
         to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Orders **greater than 1** are not
         equivalent to the historical linear scheme: polynomial overshoot between pixels can bias
         mask CCF shapes and aggregate RVs compared to ``order=1``; use for experiments only unless
         you revalidate tolerances on your science cases.
     mask_auto_hybrid_scout : bool
         **Default:** ``True``. **Mask algorithm only.** Passed to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber`. When ``True``,
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber`. When ``True``,
         **only** if ``ccf_input_velocity`` is unset **and** a single echelle order is processed,
         a scout full-order CCF finds a coarse peak and builds a hybrid velocity grid. Multi-order
         runs skip scouting so every order shares one ``v`` axis. ``False`` uses the broad grid from
@@ -183,20 +183,20 @@ class StellarRVPrimitive(BasePrimitive):
         ``max(5000, 10 × v_window_fine)`` m/s.
     window_line_by_line : bool
         **Default:** ``False``. **Line-mask algorithm only** (``ccf_line_mask``). When ``False``, chunk
-        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`.
+        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
         When ``True``, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
         at ``ccf_input_velocity``, which must be finite — hybrid fine-leg center). Spectral pixels
         per chunk use the intersection of that Voronoi interval with a symmetric ``window_size_um``
-        band; see :func:`~hispecdrp.primitives.utils.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
+        band; see :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
     v_min_coarse : float or None
         **Default:** ``None``. **Coarse** CCF search lower bound (m/s): the uniform broad leg before
-        any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf_utils._V_MIN` via
-        :func:`~hispecdrp.primitives.utils.ccf_utils.resolve_ccf_broad_grid_m_s`.
+        any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf.ccf_utils._V_MIN` via
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.resolve_ccf_broad_grid_m_s`.
     v_max_coarse : float or None
         **Default:** ``None``. **Coarse** CCF search upper bound (m/s). ``None`` → ``_V_MAX``.
     v_step_coarse : float or None
         **Default:** ``None``. Uniform spacing (m/s) of the **coarse** velocity grid. ``None`` →
-        :data:`~hispecdrp.primitives.utils.ccf_utils._V_STEP` (typically 50 m/s). Finer values
+        :data:`~hispecdrp.primitives.utils.ccf.ccf_utils._V_STEP` (typically 50 m/s). Finer values
         increase ``N_v`` and runtime.
     ccf_input_velocity : float or None
         **Default:** ``None``. If set (m/s), CCFs use a **merged** grid: the coarse
@@ -212,15 +212,15 @@ class StellarRVPrimitive(BasePrimitive):
         **10 cm s\\ :sup:`−1`** per step.
     ccf_parabolic_vertex_n_samples : int or None
         **Deprecated (ignored for final RV).** Final chunk RVs use bisector refinement after
-        :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`. Retained for backward-compatible
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`. Retained for backward-compatible
         constructor kwargs only.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` /
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber` /
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
         it applies the same multiplicative shift in :math:`\\ln\\lambda` template evaluation as in
-        :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_chunk_ccf_numba`. Used as a fallback when
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba`. Used as a fallback when
         ``ccf_zb_from_barycorr`` is False or ``BARYCORR_FIB#`` is absent.
     ccf_zb_from_barycorr : bool
         **Default:** ``True``. When True and ``BARYCORR_FIB#`` is present on the input L2 model,
@@ -229,10 +229,10 @@ class StellarRVPrimitive(BasePrimitive):
     ccf_min_good_pixels : int
         **Default:** ``9``. **Both algorithms:** minimum unmasked finite spectral pixels per
         **wavelength chunk** (chunking from ``window_size_um`` via
-        :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or from
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`, or from
         ``window_line_by_line`` Voronoi bins) required to form
         a CCF and fit an RV. For ``ccf_line_mask`` this is ``min_good_pixels`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`; for ``ccf_stellar_template``
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`; for ``ccf_stellar_template``
         it gates the Numba per-chunk CCF and the Python per-chunk fit. Overlay debug HTML uses the
         same threshold for chunk inclusion.
     output_model : str
@@ -242,7 +242,7 @@ class StellarRVPrimitive(BasePrimitive):
     max_cores : int or None
         **Default:** ``None``. Upper bound on parallel **Numba** threads: template path uses it for
         echelle-order parallelism; mask path passes it to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` / chunk loops.
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber` / chunk loops.
         ``None`` lets :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads` pick a
         host-appropriate count; ``1`` forces single-threaded, reproducible runs.
     debug_ccf : bool
@@ -1074,7 +1074,7 @@ class StellarRVPrimitive(BasePrimitive):
             ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` (after defaults). Used for
             non-hybrid debug paths and logging. When ``ccf_hybrid_center_m_s`` is set, the Numba
             driver merges this leg with a dense window via
-            :func:`~hispecdrp.primitives.utils.ccf_utils.build_hybrid_merged_velocity_grid`.
+            :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_hybrid_merged_velocity_grid`.
         ccf_hybrid_center_m_s, ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s
             When ``ccf_hybrid_center_m_s`` is not ``None``, merge coarse + **fine** sampling
             (``ccf_hybrid_*`` correspond to ``ccf_input_velocity``, ``v_window_fine``, ``v_step_fine``;

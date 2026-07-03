@@ -16,9 +16,9 @@ There are **three** preview surfaces:
    (:mod:`~hispecdrp.primitives.stellar_rv.previews.ccf_spectrum_overlay_debug_html` + embedded
    ``ccf_spectrum_overlay_unified.html.in``) with an ``overlay_kind`` switch. **Mask** mode
    (``ccf_line_mask``): per-**chunk** spectrum (equal-µm bins from ``window_size_um`` /
-   :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or for
+   :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`, or for
    ``window_line_by_line`` the symmetric ``window_size_um`` band about each predicted observed
-   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_window_spectrum_band_um`)
+   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.mask_line_window_spectrum_band_um`)
    with shifted mask
    segments and the **pipeline** mask CCF per chunk (same Numba grid as RVCCF; the overlay restores
    the **raw** weighted mask statistic when ``LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`` is true in
@@ -42,8 +42,8 @@ There are **three** preview surfaces:
   ``n_dense = 2 * mask_ccf_pixel_interp_order * N_specpoints`` (clamped to ``[24, 8192]``),
   where ``N_specpoints`` is the number of points in the plotted blue spectrum trace.
 
-Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
-mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
+Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`;
+mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils` (mask loaders).
 
 **Entry points.** :func:`create_stellar_rv_preview` builds the standard multi-panel HTML;
 :func:`maybe_write_ccf_overlay_debug_html` dispatches from the primitive’s algorithm and overlay
@@ -59,7 +59,7 @@ Notes
 -----
 Plotly layout code is **HISPEC DRP–original**. For mask file format and upstream
 line lists, see ``hispecdrp/data/masks/README.md`` and spirou-ccf/KPF references
-in :mod:`~hispecdrp.primitives.utils.ccf_utils`.
+in :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`.
 
 References
 ----------
@@ -92,7 +92,7 @@ from ..rv_combine_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
 )
-from ...utils.ccf_utils import (
+from ...utils.ccf.ccf_utils import (
     CCFFitConfig,
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
@@ -349,7 +349,7 @@ def _poly_interp_sorted_1d_numpy(
 ) -> float:
     """
     Lagrange interpolation on sorted ``x`` (ascending); matches Numba
-    :func:`~hispecdrp.primitives.utils.ccf_utils._poly_interp_sorted_1d`.
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._poly_interp_sorted_1d`.
     """
     n = int(x.size)
     if n <= 0:
@@ -683,7 +683,7 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     """
     Build the five line-mask refine overlay traces from ``rmeta`` (no second parabolic solve).
 
-    Used when :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict` already
+    Used when :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict` already
     ran refinement and stored ``line_mask_refine_rmeta`` on the slot.
     """
     trace_indices: list[int] = []
@@ -897,12 +897,12 @@ def _line_mask_refine_ccf_add_plotly_traces(
     ylim_hi: float,
 ) -> list[int]:
     """
-    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
+    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
     curves on the CCF panel (smoothed CCF ±1σ, local parabola, refined RV line). Refinement uses
     the default pipeline behaviour: scan ``smooth_sigma_scale`` to minimize
     ``|RV_refined − v_0|`` versus the Gaussian fit center (unless disabled in that function).
 
-    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict`,
+    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict`,
     that result is reused so Plotly does not repeat the parabolic refinement.
 
     Always appends **five** traces (real overlays or empty placeholders) so dropdown indices stay aligned.
@@ -1376,14 +1376,14 @@ def collect_mask_overlay_payload_for_primitive(
     """
     Build per-**chunk** spectrum + mask payload for mask-overlay debug HTML (``ccf_line_mask``).
 
-    Chunk wavelength bins match :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`
+    Chunk wavelength bins match :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`
     and ``window_size_um`` on the primitive. Pixel gates follow ``rv_per_chunks_line_mask`` (finite
     flux/error, not ``DO_NOT_USE``); chunks with fewer than ``ccf_min_good_pixels`` included pixels
     are omitted.
 
     Each row still uses key ``order`` for the echelle order number plus ``chunk_index`` /
     ``chunk_n`` for the segment on that order. Segments on an echelle row are ordered **descending**
-    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`.
+    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`.
     Payload rows include ``voronoi_lo_um`` / ``voronoi_hi_um`` (line-window Voronoi chunk bounds),
     ``spectrum_band_lo_um`` / ``spectrum_band_hi_um`` (symmetric ``window_size_um`` band used for
     pixels, slightly padded), ``window_edge_lo_um`` / ``window_edge_hi_um`` (±½``window_size_um`` at
@@ -1645,7 +1645,7 @@ def collect_mask_overlay_payload_for_primitive(
             continue
         # Slots / RVCCF use the stored convention (often negated so parabolic/Gaussian fits target a
         # maximum). The mask-overlay CCF panel should match the raw weighted mask statistic from
-        # :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` (absorption-like).
+        # :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask` (absorption-like).
         if bool(LINE_MASK_CCF_STORED_NEGATED_FROM_RAW):
             ccf_row = -ccf_row
         ce = sl.get("ccf_err")
@@ -1832,7 +1832,7 @@ def collect_template_overlay_payload_for_primitive(
     """
     Build per-**chunk** spectrum + cropped rest-frame template for template-overlay debug HTML.
 
-    Chunking matches ``window_size_um`` / :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`
+    Chunking matches ``window_size_um`` / :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`
     and the same ``DO_NOT_USE`` + finite flux/error gate as mask CCF, with a minimum of
     ``ccf_min_good_pixels`` pixels per chunk.
 

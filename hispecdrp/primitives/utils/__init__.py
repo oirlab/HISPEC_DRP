@@ -1,7 +1,7 @@
 """
 Stellar radial-velocity and cross-correlation helpers.
 
-Most symbols come from ``ccf_utils``; robust chunk-RV combination helpers live in
+Most symbols come from :mod:`hispecdrp.primitives.utils.ccf`; robust chunk-RV combination helpers live in
 ``hispecdrp.primitives.stellar_rv.rv_combine_utils`` and are re-exported here for a
 stable ``hispecdrp.primitives.utils`` surface.
 
@@ -42,7 +42,7 @@ function states otherwise.
 ``line_mask_parabolic_vertex_rv_err_levmar_m_s``, ``line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s``
     Parabolic-vertex σ: LevMar ``Polynomial1D`` (+ optional ``ccf_err`` weights) and homoscedastic LSTSQ fallback.
 
-See :mod:`hispecdrp.primitives.utils.ccf_utils` for full docstrings and references.
+See :mod:`hispecdrp.primitives.utils.ccf` for full docstrings and references.
 """
 
 from hispecdrp.utils.line_mask_utils import (
@@ -56,7 +56,7 @@ from hispecdrp.utils.line_mask_utils import (
     stellar_rv_ccf_mask_lines,
 )
 
-from .ccf_utils import (
+from .ccf import (
     CCFBisectorConfig,
     CCFFitConfig,
     build_ccf_preview_dict,

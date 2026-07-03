@@ -73,7 +73,7 @@ BSPEC stack and mask file, but chunks the spectrum in the observed frame at each
 (non-overlapping Voronoi intervals around lines shifted by ``ccf_input_velocity`` = injected RV).
 It sets ``window_size_um`` = :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM` (symmetric spectral band about each
 predicted observed mask line, see
-:func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_window_spectrum_band_um`), coarse CCF limits
+:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.mask_line_window_spectrum_band_um`), coarse CCF limits
 ``ccf_input_velocity`` ± :data:`_BTSETTL_LINE_WINDOW_N1_V_COARSE_HALF_SPAN_KM_S` km/s, and ``v_step_coarse`` =
 :data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE` m/s. The primitive sets ``v_step_fine`` to the same value so the
 hybrid merge does not add a finer velocity leg — the CCF ``v`` grid is **uniform** at the coarse step
@@ -146,8 +146,8 @@ params). Prints ``HISPEC_DRP_BSPEC_BTSETTL_MASK_CCF_SERIALIZE=`` with the JSON p
 **Post-process CCF JSON (optional)** — ``examples/line_mask_ccf_postprocess_uncertainty.py`` re-runs the high-pass
 σ estimate and ``fit_ccf_rv`` on serialized debug files (e.g. different Savitzky–Golay settings or archived runs). Line-mask
 order-mean ``ccf_err`` in the pipeline is already produced by
-:func:`~hispecdrp.primitives.utils.ccf_utils.estimate_ccf_uncertainty_highpass_residual` inside
-:func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber`. Prints ``HISPEC_DRP_MASK_CCF_POSTPROCESS_JSON=``::
+:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.estimate_ccf_uncertainty_highpass_residual` inside
+:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber`. Prints ``HISPEC_DRP_MASK_CCF_POSTPROCESS_JSON=``::
 
   PYTHONPATH=. python examples/line_mask_ccf_postprocess_uncertainty.py /path/to/lte049_line_mask_ccf_rv_debug.json
 
@@ -175,7 +175,7 @@ from hispecdrp.utils.parallelization_utils import resolve_numba_threads
 from hispecdrp.primitives.stellar_rv.stellar_rv_primitive import (
     combine_rv_estimates_median_mad_weighted,
 )
-from hispecdrp.primitives.utils.ccf_utils import (
+from hispecdrp.primitives.utils.ccf.ccf_utils import (
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     _V_MAX,
     _V_MIN,
@@ -331,7 +331,7 @@ def _mask_ccf_pixel_interp_order_from_env() -> int:
         v = int(raw)
     except ValueError:
         return 3
-    from hispecdrp.primitives.utils.ccf_utils import MAX_MASK_CCF_PIXEL_INTERP_ORDER
+    from hispecdrp.primitives.utils.ccf.ccf_utils import MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
     return max(1, min(v, MAX_MASK_CCF_PIXEL_INTERP_ORDER))
 
@@ -1297,7 +1297,7 @@ def _run_lte049_k2all_line_mask_previews(
     v_step_c = float(v_step_coarse) if v_step_coarse is not None else 50.0
 
     # Line-window tests require ``ccf_input_velocity`` (hybrid center). Match ``v_step_fine`` to
-    # ``v_step_c`` so :func:`~hispecdrp.primitives.utils.ccf_utils.build_hybrid_merged_velocity_grid`
+    # ``v_step_c`` so :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_hybrid_merged_velocity_grid`
     # does not add a finer Δv leg — uniform coarse spacing only.
     v_line_uniform_step_kw: dict = {}
     if window_line_by_line:
@@ -2351,7 +2351,7 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     ``|bias| < max(50, 3 * RV_ERR)`` m/s on ``rvccfavg_fib1`` (``RV_ERR`` from the same row;
     many narrow line-window chunks bias the order-mean CCF more than one wide chunk per order).
     Also asserts per-order chunk counts vs
-    :func:`~hispecdrp.primitives.utils.ccf_utils.line_mask_n_chunks_for_order_line_by_line`, and that
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_n_chunks_for_order_line_by_line`, and that
     adjacent chunk wavelength bounds do not overlap.
 
     The recovery report (``-s``) lists **all** ``RVCCF`` chunk measurements (``CHUNK_ID``, order,
