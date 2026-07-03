@@ -92,6 +92,10 @@ from ..rv_combine_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
 )
+from ...utils.ccf.ccf_parabolic import (
+    ensure_line_mask_lstsq_preview_plot_metadata,
+    refine_ccf_rv_coarse_grid_parabolic,
+)
 from ...utils.ccf.ccf_utils import (
     CCFFitConfig,
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
@@ -102,10 +106,8 @@ from ...utils.ccf.ccf_utils import (
     ccf_order_n_chunks_for_span,
     clip_gaussian_plot_velocity_range_m_s,
     effective_ccf_v_step_for_fit,
-    ensure_line_mask_lstsq_preview_plot_metadata,
     fit_ccf_rv,
     mask_line_window_spectrum_band_um,
-    refine_ccf_rv_coarse_grid_parabolic,
     resolve_ccf_broad_grid_m_s,
     STELLAR_RV_LINE_MASK_ALGORITHMS,
 )

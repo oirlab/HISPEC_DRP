@@ -363,7 +363,7 @@ def find_trace_positions(
     trace_widths = np.full((num_traces, ny), np.nan)
     trace_flux = np.full((num_traces, ny), np.nan)
 
-    pixel_arr = np.arange(ny)
+    pixel_arr = np.arange(nx)
 
     # Replace NaN / non-finite pixels (e.g. dq-flagged) with zero before walking: a single
     # flagged pixel inside the centroid window makes the windowed flux non-finite, which
@@ -375,7 +375,9 @@ def find_trace_positions(
     for i in range(num_traces):
         trace_centroids[i, :], trace_widths[i, :], trace_flux[i, :] = walk_trace_up_down(
             pixel_arr,
-            data_for_walk, y0,
+            data_for_walk,
+            dq,
+            y0,
             peaks0[i],
             disp_range,
             window_size_half,
@@ -425,11 +427,14 @@ def walk_trace_up_down(
         pixels,
         data,
         dq,
-        disp0, xdisp0,
+        int(disp0),
+        float(xdisp0),
         disp_range,
         window_size_half,
         max_step,
-        trace_centroids, trace_widths, trace_flux
+        trace_centroids,
+        trace_widths,
+        trace_flux,
     )
     return trace_centroids, trace_widths, trace_flux
 
@@ -437,22 +442,26 @@ def walk_trace_up_down(
 
 @njit(nogil=True, cache=True)
 def _walk_trace_up_down(
-    pixels : np.ndarray,
-    data : np.ndarray,
-    y0 : int, xc0 : float,
-    disp_range : tuple,
-    window_size_half : float,
-    max_step : float,
-    trace_centroids : np.ndarray,
-    trace_widths : np.ndarray,
-    trace_flux : np.ndarray,
+    pixels: np.ndarray,
+    data: np.ndarray,
+    dq: np.ndarray,
+    y0: int,
+    xc0: float,
+    disp_range: tuple,
+    window_size_half: float,
+    max_step: float,
+    trace_centroids: np.ndarray,
+    trace_widths: np.ndarray,
+    trace_flux: np.ndarray,
 ):
 
     # Central slice
     c, w, f = _compute_centroid_and_width(
-        pixels, data[y0, :],
+        pixels,
+        data[y0, :],
+        dq[y0, :],
         xc0,
-        window_size_half
+        window_size_half,
     )
     trace_centroids[y0], trace_widths[y0], trace_flux[y0] = c, w, f
     anchor0 = c if np.isfinite(c) else xc0
@@ -463,9 +472,11 @@ def _walk_trace_up_down(
     anchor = anchor0
     for y in range(y0 - 1, disp_range[0] - 1, -1):
         c, w, f = _compute_centroid_and_width(
-            pixels, data[y, :],
+            pixels,
+            data[y, :],
+            dq[y, :],
             anchor,
-            window_size_half
+            window_size_half,
         )
         trace_flux[y] = f
         if np.isfinite(c) and abs(c - anchor) <= max_step:
@@ -478,9 +489,11 @@ def _walk_trace_up_down(
     anchor = anchor0
     for y in range(y0 + 1, disp_range[1] + 1):
         c, w, f = _compute_centroid_and_width(
-            pixels, data[y, :],
+            pixels,
+            data[y, :],
+            dq[y, :],
             anchor,
-            window_size_half
+            window_size_half,
         )
         trace_flux[y] = f
         if np.isfinite(c) and abs(c - anchor) <= max_step:
@@ -511,21 +524,21 @@ def _compute_centroid_and_width(
         Summed flux inside the window (0.0 when the window is out of bounds / empty).
     """
 
-    if not np.isfinite(xc):
+    if not np.isfinite(center_loc):
         return np.nan, np.nan, 0.0
 
-    xi = int(np.round(xc - window_size_half))
-    xf = int(np.round(xc + window_size_half + 1))
+    xi = int(np.round(center_loc - window_size_half))
+    xf = int(np.round(center_loc + window_size_half + 1))
     if xi < 0 or xf > trace_slice.size - 1:
         return np.nan, np.nan, 0.0
 
-    slice_x = pixels[xi:xf+1]
-    slice_y = trace_slice[xi:xf+1]
-    slice_dq = trace_dq[xi:xf+1]
+    slice_x = pixels[xi : xf + 1]
+    slice_y = trace_slice[xi : xf + 1]
+    slice_dq = trace_dq[xi : xf + 1]
 
     n_good = np.sum(slice_dq == 0)
     if n_good < slice_dq.size:
-        return np.nan, np.nan
+        return np.nan, np.nan, 0.0
 
     total_flux = np.sum(slice_y)
 

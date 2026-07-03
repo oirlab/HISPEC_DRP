@@ -25,6 +25,11 @@ from .rv_combine_utils import (
 )
 
 from ...utils.parallelization_utils import resolve_numba_threads
+from ..utils.ccf.ccf_common import (
+    V_MAX_DEFAULT_M_S,
+    V_MIN_DEFAULT_M_S,
+    V_STEP_DEFAULT_M_S,
+)
 from ..utils.ccf.ccf_utils import (
     assemble_rvccf_fib_table,
     build_hybrid_merged_velocity_grid,
@@ -35,9 +40,6 @@ from ..utils.ccf.ccf_utils import (
     resolve_ccf_broad_grid_m_s,
     run_ccf_line_mask_for_fiber,
     STELLAR_RV_LINE_MASK_ALGORITHMS,
-    _V_MAX,
-    _V_MIN,
-    _V_STEP,
     build_ccf_preview_dict,
     flat_chunk_echelle_orders,
     masked_ccf_rv,
@@ -190,13 +192,13 @@ class StellarRVPrimitive(BasePrimitive):
         band; see :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
     v_min_coarse : float or None
         **Default:** ``None``. **Coarse** CCF search lower bound (m/s): the uniform broad leg before
-        any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf.ccf_utils._V_MIN` via
+        any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf.ccf_common.V_MIN_DEFAULT_M_S` via
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.resolve_ccf_broad_grid_m_s`.
     v_max_coarse : float or None
-        **Default:** ``None``. **Coarse** CCF search upper bound (m/s). ``None`` → ``_V_MAX``.
+        **Default:** ``None``. **Coarse** CCF search upper bound (m/s). ``None`` → ``V_MAX_DEFAULT_M_S``.
     v_step_coarse : float or None
         **Default:** ``None``. Uniform spacing (m/s) of the **coarse** velocity grid. ``None`` →
-        :data:`~hispecdrp.primitives.utils.ccf.ccf_utils._V_STEP` (typically 50 m/s). Finer values
+        :data:`~hispecdrp.primitives.utils.ccf.ccf_common.V_STEP_DEFAULT_M_S` (typically 50 m/s). Finer values
         increase ``N_v`` and runtime.
     ccf_input_velocity : float or None
         **Default:** ``None``. If set (m/s), CCFs use a **merged** grid: the coarse
@@ -288,9 +290,9 @@ class StellarRVPrimitive(BasePrimitive):
         "chunk_rv_prior_half_width_m_s": None,
         "window_line_by_line": False,  # ccf_line_mask only; False -> wavelength window_size_um chunks
         # --- CCF velocity grid & shared CCF analysis (both algorithms) ---
-        "v_min_coarse": None,  # m/s; None -> ccf_utils._V_MIN
-        "v_max_coarse": None,  # m/s; None -> _V_MAX
-        "v_step_coarse": None,  # m/s; None -> ccf_utils._V_STEP (default 50 m/s)
+        "v_min_coarse": None,  # m/s; None -> ccf_common.V_MIN_DEFAULT_M_S
+        "v_max_coarse": None,  # m/s; None -> V_MAX_DEFAULT_M_S
+        "v_step_coarse": None,  # m/s; None -> ccf_common.V_STEP_DEFAULT_M_S (default 50 m/s)
         "ccf_input_velocity": None,  # m/s; hybrid fine-leg center when set
         "v_window_fine": 300.0,  # m/s; ± half-width around ccf_input_velocity
         "v_step_fine": 0.1,  # m/s; fine hybrid step (10 cm/s)
@@ -1037,9 +1039,9 @@ class StellarRVPrimitive(BasePrimitive):
         mode: str,
         max_cores: int | None = None,
         want_preview: bool = False,
-        v_min_m_s: float = _V_MIN,
-        v_max_m_s: float = _V_MAX,
-        v_step_m_s: float = _V_STEP,
+        v_min_m_s: float = V_MIN_DEFAULT_M_S,
+        v_max_m_s: float = V_MAX_DEFAULT_M_S,
+        v_step_m_s: float = V_STEP_DEFAULT_M_S,
         ccf_hybrid_center_m_s: float | None = None,
         ccf_hybrid_half_width_m_s: float = 300.0,
         ccf_hybrid_step_m_s: float = 0.1,

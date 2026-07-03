@@ -8,6 +8,8 @@ import numpy as np
 from hispecdrp.utils.physical_constants import C_M_S
 from ....utils.parallelization_utils import njit
 
+from .ccf_common import _velocity_grid_from_window
+
 __all__ = [
     "TOPHAT_MASK_CCF_SEGMENT_SAMPLES",
     "compute_ccf_tophat",
@@ -16,17 +18,6 @@ __all__ = [
 # Legacy chunk-parallel mask CCF in :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`
 # approximates finite segments by uniform point samples; retained until that path uses binning.
 TOPHAT_MASK_CCF_SEGMENT_SAMPLES = 8
-
-
-def _velocity_grid_from_window(
-    vel_window: float,
-    vel_step: float,
-    vsys: float = 0.0,
-) -> np.ndarray:
-    """Uniform RV trial grid spanning ``vel_window`` (m/s) centered on ``vsys``."""
-    v_min = -float(vel_window) / 2.0 + float(vsys)
-    v_max = float(vel_window) / 2.0 + float(vsys)
-    return np.arange(v_min, v_max + float(vel_step) * 0.5, float(vel_step), dtype=np.float64)
 
 
 @njit(cache=True, nogil=True)
@@ -94,15 +85,6 @@ def _bin_tophat(
 
 
 @njit(cache=True, nogil=True)
-def _effective_zb(zb: float) -> float:
-    zb_eff = zb
-    zb1 = 1.0 + zb_eff
-    if not np.isfinite(zb1) or zb1 == 0.0:
-        zb_eff = 0.0
-    return zb_eff
-
-
-@njit(cache=True, nogil=True)
 def _compute_ccf_tophat(
     wave: np.ndarray,
     spec: np.ndarray,
@@ -129,11 +111,10 @@ def _compute_ccf_tophat(
     tophat_weights = np.zeros(n_pix, dtype=np.float64)
     half_width_frac = 0.5 * tophat_width_m_s / C_M_S
     pixel_lo, pixel_hi = _pixel_edges_from_wavelength_numba(wave)
-    zb_eff = _effective_zb(zb)
 
     for idx_vel in range(n_vels):
         vel = vel_grid[idx_vel]
-        sh = (1.0 + vel / C_M_S) / (1.0 + zb_eff)
+        sh = (1.0 + vel / C_M_S) / (1.0 + zb)
         ccf = 0.0
         ccf_var = 0.0
         w_total = 0.0

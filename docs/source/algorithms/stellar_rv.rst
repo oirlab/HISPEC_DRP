@@ -213,7 +213,7 @@ Additional notes (primitive behavior and details)
 -------------------------------------------------
 
 - **Default coarse CCF step**: when ``v_step_coarse`` is unset, the default coarse step is
-  **50 m/s** (``ccf_utils._V_STEP``). Very long velocity grids may be subsampled inside
+  **50 m/s** (``ccf_common.V_STEP_DEFAULT_M_S``). Very long velocity grids may be subsampled inside
   :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` to keep fitting robust and fast.
 
 - **Overlay debug HTML chunking and gating**: the mask/template overlay debug pages list wavelength

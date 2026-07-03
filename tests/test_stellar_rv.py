@@ -175,10 +175,9 @@ from hispecdrp.utils.parallelization_utils import resolve_numba_threads
 from hispecdrp.primitives.stellar_rv.stellar_rv_primitive import (
     combine_rv_estimates_median_mad_weighted,
 )
+from hispecdrp.primitives.utils.ccf.ccf_common import V_MAX_DEFAULT_M_S, V_MIN_DEFAULT_M_S
 from hispecdrp.primitives.utils.ccf.ccf_utils import (
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
-    _V_MAX,
-    _V_MIN,
     _require_ccf_parabolic_vertex_n_samples,
     build_line_mask_chunk_wavelength_intervals_line_by_line,
     ccf_order_n_chunks_for_span,
@@ -299,7 +298,7 @@ def _lte049_btsettl_paired_mask_path_tophat() -> str:
 # Fewer pixels per echelle row cuts CCF cost ~linearly; 2048 still satisfies ≥20 px/chunk with narrow windows.
 _TEST_ECHELLE_N_PIX = 2048
 # Uniform broad CCF grid step (m/s) for template-CCF Numba path and mask-CCF benchmarks in this file.
-# Match `ccf_utils._V_STEP` (50 m/s) — no hybrid grid; broad scan only.
+# Match ccf_common.V_STEP_DEFAULT_M_S (50 m/s) — no hybrid grid; broad scan only.
 _TEST_TEMPLATE_CCF_V_STEP_M_S = 50.0
 
 
@@ -1714,7 +1713,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
     :func:`process_orders_rvs_numba_parallel`
     with ``max_cores=6`` (clamped
     to Numba’s allowed thread count on the host, e.g. 2 on small CI runners) and
-    ``ccf_v_step`` = :data:`_TEST_TEMPLATE_CCF_V_STEP_M_S` (50 m/s; same as ``ccf_utils._V_STEP``).
+    ``ccf_v_step`` = :data:`_TEST_TEMPLATE_CCF_V_STEP_M_S` (50 m/s; same as ``ccf_common.V_STEP_DEFAULT_M_S``).
     Phase-B Gaussian fits run serially in Python.
 
     By default only **one** BSPEC echelle order is used (**139**, via ``HISPEC_DRP_BSPEC_BTSETTL_ORDER``
@@ -2000,8 +1999,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
                 d_bad,
                 mask_lines,
                 window_size_um=bench_window_um,
-                v_min_m_s=_V_MIN,
-                v_max_m_s=_V_MAX,
+                v_min_m_s=V_MIN_DEFAULT_M_S,
+                v_max_m_s=V_MAX_DEFAULT_M_S,
                 v_step_m_s=v_step,
                 max_cores=req_cores,
                 return_ccf=False,
@@ -2243,8 +2242,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
                 d_bad,
                 mask_lines,
                 window_size_um=bench_window_um,
-                v_min_m_s=_V_MIN,
-                v_max_m_s=_V_MAX,
+                v_min_m_s=V_MIN_DEFAULT_M_S,
+                v_max_m_s=V_MAX_DEFAULT_M_S,
                 v_step_m_s=v_step,
                 max_cores=req_cores,
                 return_ccf=False,
@@ -3101,18 +3100,28 @@ def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
             )
         )
 
+    # ``prange`` only matters with multiple chunks; micro-benchmarks are noisy on shared hosts.
+    # Require that requesting more threads does not regress wall time catastrophically (not a strict
+    # speed-up: overhead can make max_cores=6 similar to or slightly slower than 1).
     t1 = bench_times[1]
     n_chunk_b = int(bench_chunks.get(1, 0))
     _gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-    _tpl_cap = t1 * (1.35 if _gha else 1.08)
+    _tpl_cap = t1 * (1.45 if _gha else 1.12)
     if eff_threads[6] > 1 and n_chunk_b > 1:
         t6 = bench_times[6]
-        # Small benchmarks often show no speed-up (overhead, cache); forbid large regressions.
-        assert t6 <= _tpl_cap, (
-            "Expected template CCF parallel path not much slower than serial: "
-            f"t1={t1:.3f}s, t6={t6:.3f}s (eff={eff_threads[6]}), "
-            f"n_chunks={n_chunk_b}, cap={_tpl_cap:.3f}s"
-        )
+        if not _btsettl_parallel_line_mask_relax_assertions():
+            assert t6 <= _tpl_cap, (
+                "Expected template CCF parallel path not dramatically slower than serial: "
+                f"t1={t1:.3f}s, t6={t6:.3f}s (eff={eff_threads[6]}), "
+                f"n_chunks={n_chunk_b}, cap={_tpl_cap:.3f}s"
+            )
+        elif t6 > _tpl_cap:
+            print(
+                "[HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS] Skipping template chunk-benchmark wall check: "
+                f"t1={t1:.3f}s, t6={t6:.3f}s (eff={eff_threads[6]}), "
+                f"n_chunks={n_chunk_b}, cap={_tpl_cap:.3f}s",
+                flush=True,
+            )
     else:
         if eff_threads[6] <= 1:
             print(

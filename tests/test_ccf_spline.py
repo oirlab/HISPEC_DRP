@@ -1,10 +1,10 @@
 """Tests for cubic-spline mask CCF utilities."""
 import numpy as np
 
-from hispecdrp.primitives.utils.ccf.ccf_spline import (
-    compute_ccf_spline,
+from hispecdrp.primitives.utils.ccf.ccf_spline import compute_ccf_spline
+from hispecdrp.primitives.utils.ccf.cubic_spline import (
     cubic_spline_build,
-    cubic_spline_eval_scalar,
+    cubic_spline_eval_scalar_arrays,
 )
 from hispecdrp.utils.physical_constants import C_M_S
 
@@ -14,7 +14,7 @@ def test_cubic_spline_reproduces_linear_function():
     y = 2.5 * x + 1.0
     xk, a, b, c, d = cubic_spline_build(x, y)
     for xq in np.linspace(x[0], x[-1], 37):
-        got = cubic_spline_eval_scalar(xk, a, b, c, d, float(xq))
+        got = cubic_spline_eval_scalar_arrays(xk, a, b, c, d, float(xq))
         assert abs(got - (2.5 * xq + 1.0)) < 1e-10
 
 
