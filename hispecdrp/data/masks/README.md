@@ -16,7 +16,7 @@ For each template stem, that script writes:
 | File pattern | Role |
 |--------------|------|
 | `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight (see :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`). |
-| `<template_stem>.kpf.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
+| `<template_stem>.tophat.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
 
 Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
 :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
@@ -32,20 +32,20 @@ template-derived delta mask — basename
 Numeric layouts follow SPIROU / OPERA conventions as implemented in
 :meth:`hispecdrp.utils.line_mask_utils.MaskLines.load` (``.mas`` files): **two** columns
 (center λ, weight) for delta-style masks; **three** columns (start λ, end λ, weight)
-for kpf-style segment masks. Wavelengths in these generated files are **vacuum**
+for tophat-style segment masks. Wavelengths in these generated files are **vacuum**
 nanometers (see mask JSON and module docstrings).
 
 The **mask-shifted CCF** algorithm is discussed relative to SPIROU / KPF-style workflows
-in :mod:`hispecdrp.primitives.utils.ccf_utils` and the references there.
+in :mod:`hispecdrp.primitives.utils.ccf.ccf_utils` and the references there.
 
-### Segment widths (kpf / empirical SPIROU masks)
+### Segment widths (tophat / empirical SPIROU masks)
 
 For each line, ``width_nm = λ_end − λ_start`` and ``mean_nm = (λ_start + λ_end)/2``.
 On typical SPIROU segment lists, **width in nm increases roughly linearly with mean
-wavelength** (approximately constant Δln λ). The template-derived **kpf** files here
+wavelength** (approximately constant Δln λ). The template-derived **tophat** files here
 use the packaged linear calibration explicitly. Regenerate the diagnostic scatter figure
 with ``python hispecdrp/data/masks/plot_mask_widths.py`` (writes
-``mask_width_vs_wavelength.png`` from ``*.kpf.mas`` only).
+``mask_width_vs_wavelength.png`` from ``*.tophat.mas`` only).
 
 ---
 

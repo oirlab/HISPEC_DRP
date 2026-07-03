@@ -15,6 +15,7 @@ from hispecdrp.utils.line_mask_utils import (
     DEFAULT_WIDTH_CALIBRATION_K2_ALL,
     LINE_MASK_META_PREFIX,
     MASK_STYLE_DELTA,
+    MASK_STYLE_TOPHAT,
     MaskLines,
     _cluster_max_depth,
     _continuum_normalized_d2_flux_dlam2_at_um,
@@ -34,23 +35,31 @@ from hispecdrp.utils.line_mask_utils import (
 )
 
 
-def _lte049_kpf_mas_for_width_calibration() -> str | None:
+def _lte049_tophat_mas_for_width_calibration() -> str | None:
     """lte049 segment mask used to match :data:`DEFAULT_WIDTH_CALIBRATION_K2_ALL`; optional."""
-    p = package_data_masks_dir() / "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.kpf.mas"
-    return str(p) if p.is_file() else None
+    d = package_data_masks_dir()
+    for name in (
+        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.tophat.mas",
+        "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.kpf.mas",
+    ):
+        p = d / name
+        if p.is_file():
+            return str(p)
+    return None
 
 
-def _first_bundled_kpf_mas() -> str | None:
-    """Any ``*.kpf.mas`` under ``package_data_masks_dir()`` (geometry tests)."""
-    found = sorted(package_data_masks_dir().glob("*.kpf.mas"))
+def _first_bundled_tophat_mas() -> str | None:
+    """Any ``*.tophat.mas`` (or legacy ``*.kpf.mas``) under ``package_data_masks_dir()``."""
+    d = package_data_masks_dir()
+    found = sorted(d.glob("*.tophat.mas")) + sorted(d.glob("*.kpf.mas"))
     return str(found[0]) if found else None
 
 
 def test_fit_half_width_k2_all_matches_default_constant():
-    mas = _lte049_kpf_mas_for_width_calibration()
+    mas = _lte049_tophat_mas_for_width_calibration()
     if mas is None:
         pytest.skip(
-            "lte049 kpf mask not in data/masks (optional; generate with regenerate_template_masks.py)"
+            "lte049 tophat mask not in data/masks (optional; generate with regenerate_template_masks.py)"
         )
     slope, icept = fit_half_width_linear_from_mas(mas)
     assert np.isclose(slope, DEFAULT_WIDTH_CALIBRATION_K2_ALL[0], rtol=1e-6)
@@ -142,12 +151,14 @@ def test_continuum_normalized_d2_matches_parabolic_curvature():
     assert np.isclose(got[0], 2.0 * k, rtol=0.02)
 
 
-def test_masklines_kpf_geometry_from_bundled_template_kpf():
-    mas = _first_bundled_kpf_mas()
+def test_masklines_tophat_geometry_from_bundled_template_tophat():
+    mas = _first_bundled_tophat_mas()
     if mas is None:
-        pytest.skip("no *.kpf.mas in data/masks (optional; generate with regenerate_template_masks.py)")
+        pytest.skip(
+            "no *.tophat.mas in data/masks (optional; generate with regenerate_template_masks.py)"
+        )
     m = MaskLines.load(mas)
-    assert m.mask_style == "kpf"
+    assert m.mask_style == MASK_STYLE_TOPHAT
     assert m.line_center.unit.is_equivalent(u.um)
     assert np.all(m.line_width.value > 0)
     assert np.allclose(
@@ -192,18 +203,32 @@ def test_masklines_load_two_column_mas(tmp_path):
     assert np.allclose(m.weight, [2.5, 3.0])
 
 
-def test_masklines_load_mask_style_kpf_requires_three_columns(tmp_path):
+def test_masklines_load_mask_style_tophat_requires_three_columns(tmp_path):
     meta_line = LINE_MASK_META_PREFIX + json.dumps(
-        {"schema_version": 1, "mask_style": "kpf"}, separators=(",", ":")
+        {"schema_version": 1, "mask_style": "tophat"}, separators=(",", ":")
     )
-    p = tmp_path / "bad_kpf.mas"
+    p = tmp_path / "bad_tophat.mas"
     p.write_text(
         f"{meta_line}\n"
         "  1500.0  0.25\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="mask_style='kpf'"):
+    with pytest.raises(ValueError, match="mask_style='tophat'"):
         MaskLines.load(str(p))
+
+
+def test_masklines_load_legacy_mask_style_kpf_normalizes_to_tophat(tmp_path):
+    meta_line = LINE_MASK_META_PREFIX + json.dumps(
+        {"schema_version": 1, "mask_style": "kpf"}, separators=(",", ":")
+    )
+    p = tmp_path / "legacy_kpf.mas"
+    p.write_text(
+        f"{meta_line}\n"
+        "  1500.0  1500.1  0.25\n",
+        encoding="utf-8",
+    )
+    m = MaskLines.load(str(p))
+    assert m.mask_style == MASK_STYLE_TOPHAT
 
 
 def test_masklines_load_mask_style_delta_requires_two_columns(tmp_path):
@@ -288,17 +313,17 @@ def test_masklines_save_default_name_includes_mask_style(tmp_path):
     assert m2.line_lambda_um.size == 2
 
 
-def test_masklines_save_kpf_default_name_includes_mask_style(tmp_path):
-    m = MaskLines.from_kpf_segment_edges_um(
+def test_masklines_save_tophat_default_name_includes_mask_style(tmp_path):
+    m = MaskLines.from_tophat_segment_edges_um(
         np.array([1.0, 1.2]),
         np.array([1.01, 1.21]),
         np.array([1.0, 2.0]),
         metadata={"template_path": "/data/bar.h5"},
     )
     p = m.save(masks_directory=str(tmp_path))
-    assert Path(p).name == "bar.kpf.mas"
+    assert Path(p).name == "bar.tophat.mas"
     m2 = MaskLines.load(p)
-    assert m2.mask_style == "kpf"
+    assert m2.mask_style == MASK_STYLE_TOPHAT
     assert m2.line_lambda_um.size == 2
 
 

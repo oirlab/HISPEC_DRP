@@ -16,9 +16,9 @@ There are **three** preview surfaces:
    (:mod:`~hispecdrp.primitives.stellar_rv.previews.ccf_spectrum_overlay_debug_html` + embedded
    ``ccf_spectrum_overlay_unified.html.in``) with an ``overlay_kind`` switch. **Mask** mode
    (``ccf_line_mask``): per-**chunk** spectrum (equal-µm bins from ``window_size_um`` /
-   :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or for
+   :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`, or for
    ``window_line_by_line`` the symmetric ``window_size_um`` band about each predicted observed
-   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf_utils.mask_line_window_spectrum_band_um`)
+   mask line at ``ccf_input_velocity`` / :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.mask_line_window_spectrum_band_um`)
    with shifted mask
    segments and the **pipeline** mask CCF per chunk (same Numba grid as RVCCF; the overlay restores
    the **raw** weighted mask statistic when ``LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`` is true in
@@ -42,8 +42,8 @@ There are **three** preview surfaces:
   ``n_dense = 2 * mask_ccf_pixel_interp_order * N_specpoints`` (clamped to ``[24, 8192]``),
   where ``N_specpoints`` is the number of points in the plotted blue spectrum trace.
 
-Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`;
-mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf_utils` (mask loaders).
+Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`;
+mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils` (mask loaders).
 
 **Entry points.** :func:`create_stellar_rv_preview` builds the standard multi-panel HTML;
 :func:`maybe_write_ccf_overlay_debug_html` dispatches from the primitive’s algorithm and overlay
@@ -59,7 +59,7 @@ Notes
 -----
 Plotly layout code is **HISPEC DRP–original**. For mask file format and upstream
 line lists, see ``hispecdrp/data/masks/README.md`` and spirou-ccf/KPF references
-in :mod:`~hispecdrp.primitives.utils.ccf_utils`.
+in :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`.
 
 References
 ----------
@@ -73,6 +73,7 @@ import io
 import json
 import logging
 import math
+import multiprocessing as mp
 import os
 import tempfile
 import webbrowser
@@ -87,12 +88,12 @@ from astropy import units as u
 from ....datamodels.dqflags import DQ_FLAGS
 from ....utils.line_mask_utils import restrict_mask_to_chunk, stellar_rv_ccf_mask_lines
 from ....utils.physical_constants import C_M_S
-from ..stellar_rv_primitive import (
+from ..rv_combine_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
 )
-from ...utils.ccf_utils import (
-    CCFFitKpfConfig,
+from ...utils.ccf.ccf_utils import (
+    CCFFitConfig,
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
     _gaussian_ccf_model,
@@ -112,6 +113,84 @@ from ...utils.ccf_utils import (
 from .ccf_spectrum_overlay_debug_html import build_ccf_spectrum_overlay_debug_html
 
 logger = logging.getLogger(__name__)
+
+# Kaleido/Chrome PNG export can hang on large line-mask CCF figures (many Plotly traces).
+_DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES = 200
+_DEFAULT_KALEIDO_PNG_TIMEOUT_S = 90.0
+
+
+def _preview_kaleido_png_max_ccf_traces() -> int:
+    raw = os.environ.get("HISPEC_DRP_PREVIEW_PNG_MAX_CCF_TRACES")
+    if raw is None or str(raw).strip() == "":
+        return _DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_KALEIDO_PNG_MAX_CCF_TRACES
+
+
+def _preview_kaleido_png_timeout_s() -> float:
+    raw = os.environ.get("HISPEC_DRP_PREVIEW_PNG_TIMEOUT_S")
+    if raw is None or str(raw).strip() == "":
+        return _DEFAULT_KALEIDO_PNG_TIMEOUT_S
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return _DEFAULT_KALEIDO_PNG_TIMEOUT_S
+
+
+def _kaleido_render_png_worker(fig_json: str, scale: float) -> bytes:
+    """Render one Plotly figure to PNG in an isolated process (for timeout/kill)."""
+    fig = pio.from_json(fig_json)
+    try:
+        return fig.to_image(format="png", engine="kaleido", scale=scale)
+    except Exception:
+        import kaleido
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+            kaleido.write_fig_sync(fig, path=tmp_path, opts={"scale": scale})
+            return Path(tmp_path).read_bytes()
+        finally:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
+
+
+def _figure_to_png_bytes_with_timeout(
+    fig: go.Figure,
+    *,
+    scale: float,
+    timeout_s: float,
+) -> bytes | None:
+    """Return PNG bytes or ``None`` if Kaleido exceeds ``timeout_s`` (process is terminated)."""
+    fig_json = fig.to_json()
+    ctx = mp.get_context("spawn")
+    pool = ctx.Pool(1)
+    try:
+        async_result = pool.apply_async(
+            _kaleido_render_png_worker,
+            (fig_json, float(scale)),
+        )
+        return async_result.get(timeout=float(timeout_s))
+    except (TimeoutError, mp.context.TimeoutError):
+        logger.warning(
+            "Stellar RV preview: Kaleido PNG export timed out after %.0f s; skipping PNG",
+            timeout_s,
+        )
+        pool.terminate()
+        pool.join()
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Stellar RV preview: Kaleido PNG export failed: %s",
+            exc,
+        )
+        return None
+    finally:
+        pool.close()
+
 
 # Inner HTML for ``ccf_spectrum_overlay_unified.html.in`` help paragraph (trusted markup only).
 _MASK_OVERLAY_SPECTRUM_HELP_HTML = (
@@ -270,7 +349,7 @@ def _poly_interp_sorted_1d_numpy(
 ) -> float:
     """
     Lagrange interpolation on sorted ``x`` (ascending); matches Numba
-    :func:`~hispecdrp.primitives.utils.ccf_utils._poly_interp_sorted_1d`.
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._poly_interp_sorted_1d`.
     """
     n = int(x.size)
     if n <= 0:
@@ -604,7 +683,7 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     """
     Build the five line-mask refine overlay traces from ``rmeta`` (no second parabolic solve).
 
-    Used when :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict` already
+    Used when :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict` already
     ran refinement and stored ``line_mask_refine_rmeta`` on the slot.
     """
     trace_indices: list[int] = []
@@ -818,12 +897,12 @@ def _line_mask_refine_ccf_add_plotly_traces(
     ylim_hi: float,
 ) -> list[int]:
     """
-    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
+    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
     curves on the CCF panel (smoothed CCF ±1σ, local parabola, refined RV line). Refinement uses
     the default pipeline behaviour: scan ``smooth_sigma_scale`` to minimize
     ``|RV_refined − v_0|`` versus the Gaussian fit center (unless disabled in that function).
 
-    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict`,
+    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict`,
     that result is reused so Plotly does not repeat the parabolic refinement.
 
     Always appends **five** traces (real overlays or empty placeholders) so dropdown indices stay aligned.
@@ -839,8 +918,8 @@ def _line_mask_refine_ccf_add_plotly_traces(
         trace_indices.append(len(fig.data) - 1)
 
     cached = sl.get("line_mask_refine_rmeta")
-    kpf = sl.get("kpf_fit")
-    rv_slot = kpf.get("rv") if isinstance(kpf, dict) else None
+    gaussian = sl.get("gaussian_fit")
+    rv_slot = gaussian.get("rv") if isinstance(gaussian, dict) else None
     if (
         isinstance(cached, dict)
         and cached.get("ok")
@@ -885,7 +964,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
             ccf_err=_ce_arr,
             gaussian_sigma_m_s=sig_opt,
             mask_method="stellar",
-            config=CCFFitKpfConfig(),
+            config=CCFFitConfig(),
         )
         if not rmeta.get("ok"):
             for _ in range(5):
@@ -904,7 +983,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
         )
 
     except Exception as e:
-        logger.debug("mask-kpf preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
+        logger.debug("mask-line preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
         while len(trace_indices) < 5:
             _placeholder()
         return trace_indices
@@ -1152,8 +1231,8 @@ def _rvcc_hover_order_segment_line(
 def _preview_abbrev_ccf_uncertainty(diag: dict) -> str:
     """Short legend text for how RV uncertainty was estimated (fit_ok only)."""
     wtd = bool(diag.get("used_ccf_pointwise_error"))
-    if diag.get("used_kpf_ccf_error"):
-        s = "min(KPF, LevMar)" if diag.get("used_covariance_for_error") else "KPF ccf_error_calc"
+    if diag.get("used_gradient_ccf_error"):
+        s = "min(gradient, LevMar)" if diag.get("used_covariance_for_error") else "gradient ccf_error_calc"
     elif diag.get("used_covariance_for_error"):
         s = "LevMar cov. (mean)"
     elif diag.get("used_sigma_fallback"):
@@ -1184,6 +1263,8 @@ def _preview_should_write_png(primitive) -> bool:
     the environment disables them as above.
     """
     if not getattr(primitive, "save_preview", False):
+        return False
+    if not getattr(primitive, "preview_write_png", True):
         return False
     if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
         return False
@@ -1295,14 +1376,14 @@ def collect_mask_overlay_payload_for_primitive(
     """
     Build per-**chunk** spectrum + mask payload for mask-overlay debug HTML (``ccf_line_mask``).
 
-    Chunk wavelength bins match :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`
+    Chunk wavelength bins match :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`
     and ``window_size_um`` on the primitive. Pixel gates follow ``rv_per_chunks_line_mask`` (finite
     flux/error, not ``DO_NOT_USE``); chunks with fewer than ``ccf_min_good_pixels`` included pixels
     are omitted.
 
     Each row still uses key ``order`` for the echelle order number plus ``chunk_index`` /
     ``chunk_n`` for the segment on that order. Segments on an echelle row are ordered **descending**
-    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`.
+    in chunk-center wavelength (red → blue), matching :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`.
     Payload rows include ``voronoi_lo_um`` / ``voronoi_hi_um`` (line-window Voronoi chunk bounds),
     ``spectrum_band_lo_um`` / ``spectrum_band_hi_um`` (symmetric ``window_size_um`` band used for
     pixels, slightly padded), ``window_edge_lo_um`` / ``window_edge_hi_um`` (±½``window_size_um`` at
@@ -1488,7 +1569,7 @@ def collect_mask_overlay_payload_for_primitive(
                 ),
             )
             if mask_o.line_lambda_um.size > 0:
-                # Use full segment widths when present (KPF-style finite edges). For delta masks,
+                # Use full segment widths when present (tophat finite edges). For delta masks,
                 # left/right edges coincide with the center and the overlay expands them only by minDx.
                 mstart = np.asarray(mask_o.line_left_edge.to_value(u.um), dtype=np.float64)
                 mend = np.asarray(mask_o.line_right_edge.to_value(u.um), dtype=np.float64)
@@ -1564,7 +1645,7 @@ def collect_mask_overlay_payload_for_primitive(
             continue
         # Slots / RVCCF use the stored convention (often negated so parabolic/Gaussian fits target a
         # maximum). The mask-overlay CCF panel should match the raw weighted mask statistic from
-        # :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` (absorption-like).
+        # :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask` (absorption-like).
         if bool(LINE_MASK_CCF_STORED_NEGATED_FROM_RAW):
             ccf_row = -ccf_row
         ce = sl.get("ccf_err")
@@ -1751,7 +1832,7 @@ def collect_template_overlay_payload_for_primitive(
     """
     Build per-**chunk** spectrum + cropped rest-frame template for template-overlay debug HTML.
 
-    Chunking matches ``window_size_um`` / :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`
+    Chunking matches ``window_size_um`` / :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`
     and the same ``DO_NOT_USE`` + finite flux/error gate as mask CCF, with a minimum of
     ``ccf_min_good_pixels`` pixels per chunk.
 
@@ -2108,17 +2189,25 @@ def _preview_gaussian_cache_and_slot_legends(
         for sl in slots:
             sid = id(sl)
             if sid not in fit_slot_cache:
-                kpf = sl.get("kpf_fit")
-                if kpf and isinstance(kpf, dict) and kpf.get("params"):
-                    params = kpf.get("params") or {}
-                    diag = kpf.get("diagnostics") or {}
-                    rv_err = float(kpf.get("rv_err", np.nan))
-                    rv_fit = kpf.get("rv")
+                gaussian = sl.get("gaussian_fit")
+                bisector = sl.get("bisector_fit")
+                if gaussian and isinstance(gaussian, dict) and gaussian.get("params"):
+                    params = gaussian.get("params") or {}
+                    diag = gaussian.get("diagnostics") or {}
+                    rv_err = float(gaussian.get("rv_err", np.nan))
+                    rv_fit = gaussian.get("rv")
                     rv_final = (
                         float(rv_fit)
                         if rv_fit is not None and np.isfinite(float(rv_fit))
                         else float(params.get("v0", np.nan))
                     )
+                    if isinstance(bisector, dict):
+                        rv_bi = bisector.get("rv")
+                        err_bi = bisector.get("rv_err")
+                        if rv_bi is not None and np.isfinite(float(rv_bi)):
+                            rv_final = float(rv_bi)
+                        if err_bi is not None and np.isfinite(float(err_bi)) and float(err_bi) > 0:
+                            rv_err = float(err_bi)
                     fit_slot_cache[sid] = (params, diag, rv_err, rv_final)
                 else:
                     _ce = sl.get("ccf_err")
@@ -2355,26 +2444,37 @@ def _preview_export_combined_html(
         logger.info("Stellar RV preview: writing HTML path=%s", output_path_html)
         Path(output_path_html).write_text(combined_html, encoding="utf-8")
         logger.info("Stellar RV preview: HTML write complete")
-        if _preview_should_write_png(primitive):
+        n_ccf_traces = len(fig_ccf.data)
+        max_ccf_traces = _preview_kaleido_png_max_ccf_traces()
+        if _preview_should_write_png(primitive) and n_ccf_traces > max_ccf_traces:
+            logger.info(
+                "Stellar RV preview: skipping Kaleido PNG "
+                "(ccf traces=%d > HISPEC_DRP_PREVIEW_PNG_MAX_CCF_TRACES=%d; HTML-only)",
+                n_ccf_traces,
+                max_ccf_traces,
+            )
+        elif _preview_should_write_png(primitive):
+            scale = float(getattr(primitive, "preview_png_scale", 2.0))
+            scale = max(0.25, min(scale, 8.0))
+            timeout_s = _preview_kaleido_png_timeout_s()
+            logger.info(
+                "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f "
+                "timeout=%.0fs ccf_traces=%d",
+                output_path_png,
+                scale,
+                timeout_s,
+                n_ccf_traces,
+            )
             try:
-                import kaleido
+                from PIL import Image
 
-                scale = float(getattr(primitive, "preview_png_scale", 2.0))
-                scale = max(0.25, min(scale, 8.0))
-                logger.info(
-                    "Stellar RV preview: writing PNG via Kaleido path=%s scale=%.2f",
-                    output_path_png,
-                    scale,
+                br = _figure_to_png_bytes_with_timeout(
+                    fig_rv, scale=scale, timeout_s=timeout_s
                 )
-                try:
-                    from PIL import Image
-
-                    br = fig_rv.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
-                    bc = fig_ccf.to_image(
-                        format="png", engine="kaleido", scale=scale
-                    )
+                bc = _figure_to_png_bytes_with_timeout(
+                    fig_ccf, scale=scale, timeout_s=timeout_s
+                )
+                if br is not None and bc is not None:
                     im_rv = Image.open(io.BytesIO(br)).convert("RGBA")
                     im_ccf = Image.open(io.BytesIO(bc)).convert("RGBA")
                     w = max(im_rv.width, im_ccf.width)
@@ -2384,18 +2484,21 @@ def _preview_export_combined_html(
                     stacked.paste(im_ccf, (0, im_rv.height))
                     stacked.convert("RGB").save(output_path_png)
                     wrote_png = True
-                except Exception:
-                    kaleido.write_fig_sync(
-                        fig_ccf, path=output_path_png, opts={"scale": scale}
+                    logger.info("Stellar RV preview: PNG write complete")
+                else:
+                    logger.info(
+                        "Stellar RV preview: PNG skipped (Kaleido timed out or failed; HTML written)"
                     )
-                    wrote_png = True
-                logger.info("Stellar RV preview: PNG write complete")
             except Exception as e:
-                logger.debug(
-                    "Could not write preview PNG (kaleido/Chrome may be missing): %s", e
+                logger.warning(
+                    "Stellar RV preview: could not write preview PNG "
+                    "(kaleido/Chrome/PIL may be missing): %s",
+                    e,
                 )
         else:
-            if _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
+            if not getattr(primitive, "preview_write_png", True):
+                skip_reason = "preview_write_png=False (HTML-only preview)"
+            elif _env_flag("HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS"):
                 skip_reason = "HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS (HTML-only preview)"
             else:
                 skip_reason = "disabled"

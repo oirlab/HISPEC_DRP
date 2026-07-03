@@ -212,7 +212,7 @@ def create_wavelength_solution_model_from_sim(
 
 
 def create_simulated_calibration_models(
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     gain: float = 1.0,
     bias_dn: float | None = None,
@@ -233,7 +233,8 @@ def create_simulated_calibration_models(
     Parameters
     ----------
     shape : tuple of int, optional
-        (ny, nx) detector dimensions. Default is (4096, 4096).
+        (ny, nx) detector dimensions. Default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     gain : float, optional
         Detector gain in e-/ADU. Default is 1.0.
     bias_dn : float or None, optional
@@ -262,7 +263,7 @@ def create_simulated_calibration_models(
         ``bias``, ``dark``, ``rn``. Each value is the corresponding
         calibration data model instance.
     """
-    ny, nx = shape
+    ny, nx = shape if shape is not None else e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE
     rng = np.random.default_rng(seed)
 
     if bias_dn is None:
@@ -398,6 +399,23 @@ def simulate_ramp_from_rate_map(
     bias_model = calibration_models["bias"]
     dark_model = calibration_models["dark"]
     rn_model = calibration_models["rn"]
+
+    rate_shape = tuple(np.asarray(rate_map, dtype=np.float64).shape)
+    for key, model in (
+        ("gain", gain_model),
+        ("detflat", detflat_model),
+        ("bias", bias_model),
+        ("dark", dark_model),
+        ("rn", rn_model),
+    ):
+        cal_shape = e2e_support.calibration_model_detector_shape(model)
+        if cal_shape != rate_shape:
+            raise ValueError(
+                f"Calibration '{key}' shape {cal_shape} does not match rate_map shape "
+                f"{rate_shape}. Regenerate simulated calibrations at the correct detector "
+                f"size ({e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE}) or delete stale "
+                f"sim_*.fits files under the output cals directory."
+            )
 
     gain_map = gain_model.gain if hasattr(gain_model, "gain") else gain_model["GAIN"]
     detflat_map = detflat_model.flat if hasattr(detflat_model, "flat") else detflat_model["FLAT"]
@@ -776,7 +794,7 @@ def run_stage0_simulation(
 
 def create_ramp_and_calibrations(
     rate_map: np.ndarray | None = None,
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
@@ -817,9 +835,11 @@ def create_ramp_and_calibrations(
     ----------
     rate_map : np.ndarray or None, optional
         2D rate map in e-/s/pixel. If None, a default is created via SimulateRateMap.
-    shape : tuple of int, optional
+    shape : tuple of int or None, optional
         (ny, nx) for dummy calibrations when ``calibration_models`` is None and
-        ``use_master_calibrations`` is False. Default is (4096, 4096).
+        ``use_master_calibrations`` is False and ``rate_map`` is unavailable.
+        Normally inferred from ``rate_map``; default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) to place spectra on when building the
         default rate map. Only 1, 2, 3 are supported by SimulateRateMap; others
@@ -971,8 +991,11 @@ def create_ramp_and_calibrations(
             cal_models: dict[str, datamodels.CalibrationModel] = {}
             for k in keys:
                 fp = e2e_support.dummy_cal_path(output_dir, k)
-                if os.path.isfile(fp):
-                    cal_models[k] = datamodels.open(fp)
+                cached = e2e_support.open_cached_stage0_calibration(
+                    fp, eff_shape, key=k
+                )
+                if cached is not None:
+                    cal_models[k] = cached
             missing = [k for k in keys if k not in cal_models]
             if missing:
                 logger.debug(
@@ -1009,7 +1032,7 @@ def create_ramp_and_calibrations(
 
 def simulate_up_the_ramp(
     rate_map: np.ndarray | None = None,
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
@@ -1050,10 +1073,11 @@ def simulate_up_the_ramp(
     rate_map : np.ndarray or None, optional
         2D rate map in e-/s/pixel. If None, a default rate map is created
         via SimulateRateMap. Default is None.
-    shape : tuple of int, optional
+    shape : tuple of int or None, optional
         (ny, nx) for creating dummy calibration models when
         ``calibration_models`` is None and ``use_master_calibrations`` is False.
-        Default is (4096, 4096).
+        Normally inferred from ``rate_map``; default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) for default rate map. Passed to
         :func:`create_ramp_and_calibrations`. If None, default is [1].
@@ -1203,13 +1227,11 @@ def prepare_fiberflat_models(fiberflat_filepaths: list[str]) -> list[datamodels.
 _DEFAULT_FIBERFLAT_DISP_RANGE = {"BSPEC": (300, 4000), "RSPEC": (400, 4000)}
 # BSPEC order 110 sits near cross-disp pixel ~105; (135, …) clips it and yields 38/39 traces.
 _DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
-# Per-fiber peak-finding thresholds for simulated BSPEC fiberflats (blaze dynamic range varies by fiber).
-_DEFAULT_FIBERFLAT_PROMINENCE_BSPEC: dict[str, float] = {
-    # Tuned for single-frame fiberflats at flat_scale=2e-14, flat_temperature_k=1000.
-    "1": 0.0015,
-    "2": 0.006,
-    "3": 0.0033,
-}
+# Default peak-finding threshold (fraction of the brightest order) for simulated fiberflats.
+# Robust order detection (NaN interpolation + order-spacing-based peak separation in
+# ``find_trace_positions``) makes a single value reliable across the blaze dynamic range of
+# both BSPEC and RSPEC, so a per-fiber tuned map is no longer required.
+_DEFAULT_FIBERFLAT_PROMINENCE = 0.02
 
 
 def get_fiberflat_prim_args(
@@ -1244,10 +1266,7 @@ def get_fiberflat_prim_args(
     if xdisp_range is None:
         xdisp_range = _DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050))
     if prominence_factor is None:
-        if spectrograph == "BSPEC":
-            prominence_factor = dict(_DEFAULT_FIBERFLAT_PROMINENCE_BSPEC)
-        else:
-            prominence_factor = 0.02
+        prominence_factor = _DEFAULT_FIBERFLAT_PROMINENCE
     return {
         "trace_pos": {
             "deg_pos": deg_pos,

@@ -861,18 +861,16 @@ def main():
                     except Exception as snr_err:
                         logger.exception("SNR reporting failed for %s: %s", method, snr_err)
 
-                # Stage 2: blaze correction (same fiber flat) + cross correlation (same spectral template as rate map)
+                # Stage 2: blaze correction (same fiber flat) + stellar RV (template CCF)
                 if spec_model is not None and spectrum_path is not None and os.path.isfile(spectrum_path):
                     try:
                         stage2_prim_args = {
                             "blaze_corr": {"do_fibers": fibers_str},
-                            "cross_corr": {
+                            "stellar_rv": {
+                                "algorithm": "ccf_stellar_template",
                                 "template_path": spectrum_path,
                                 "do_fibers": fibers_str,
-                                "continuum_normalize_spec": True,
-                                "continuum_normalize_template": True,
-                                "continuum_lowpass_window": 51,
-                                "continuum_poly_order": 3,
+                                "save_preview": False,
                             },
                         }
                         stage2_pipe = Stage2Pipeline(prim_args=stage2_prim_args)
@@ -880,7 +878,7 @@ def main():
                         l2_model = stage2_pipe.apply(spec_model, output_dir=datadir)
                         _ensure_script_logging()
                         config.apply([ROOT_LOGGER])
-                        logger.info("Stage 2 complete (blaze + cross correlation); L2 output: %s", getattr(l2_model, "meta", None) and getattr(l2_model.meta, "filename", None) or "in memory")
+                        logger.info("Stage 2 complete (blaze + stellar RV); L2 output: %s", getattr(l2_model, "meta", None) and getattr(l2_model.meta, "filename", None) or "in memory")
                         rvccf_plot_path = _plot_rvccf_chunks(l2_model, args.radial_velocity, datadir)
                         if rvccf_plot_path:
                             logger.info("Wrote RVCCF diagnostic: %s", rvccf_plot_path)
@@ -890,7 +888,7 @@ def main():
                     except Exception as stage2_err:
                         logger.warning("Stage 2 failed: %s", stage2_err, exc_info=True)
                 elif spec_model is not None and (spectrum_path is None or not os.path.isfile(spectrum_path)):
-                    logger.info("Skipping Stage 2: no spectral template file for cross correlation (use --spectrum with a valid path to enable Stage 2).")
+                    logger.info("Skipping Stage 2: no spectral template file for stellar RV (use --spectrum with a valid path to enable Stage 2).")
     except Exception as e:
         logger.exception("Pipeline step failed: %s", e)
         raise

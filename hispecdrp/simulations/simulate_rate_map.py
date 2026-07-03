@@ -610,7 +610,7 @@ def bilinear_weights_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -630,7 +630,7 @@ def bilinear_weights_rate_map(
         Nested structure containing wavelength trace and PSF stamps for orders. 
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector (ny, nx) pixel size, default = (4096, 4096).
+        Detector (ny, nx) pixel size, default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns (affects oversampling), default = 10.
 
@@ -770,7 +770,7 @@ def psf_prf_convolution_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -791,7 +791,7 @@ def psf_prf_convolution_rate_map(
         Nested dictionary containing trace coordinates and PSF stamps.
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector pixels (ny, nx). Default = (4096, 4096).
+        Detector pixels (ny, nx). Default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns, used to determine oversampling.
     apply_blaze : bool, optional

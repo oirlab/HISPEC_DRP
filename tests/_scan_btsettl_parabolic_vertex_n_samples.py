@@ -6,7 +6,7 @@ Run from repo root::
 
   python tests/_scan_btsettl_parabolic_vertex_n_samples.py
 
-Requires BT-Settl template + lte049 mask (same as test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel).
+Requires BT-Settl template + lte049 mask (same as test_fit_ccf_tophat_style_btsettl_bspec_all_chunks_parallel).
 """
 from __future__ import annotations
 

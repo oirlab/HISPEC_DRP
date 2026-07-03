@@ -149,13 +149,25 @@ def _extract_optimal_numba(
     orders_are_vertical : bool = True,
 ):
 
+    n_cross = input_data.shape[1] if orders_are_vertical else input_data.shape[0]
+
     # Loop over spectral bins
     for x in range(pix_range[0], pix_range[1] + 1):
 
         #if x == 2000:
         #    breakpoint()
 
-        window_inds, W = get_extraction_window(trace_positions[x], extraction_aperture)
+        window_inds, W = get_extraction_window(
+            trace_positions[x], extraction_aperture, n_cross
+        )
+        if len(window_inds) == 0 or np.sum(W) <= 0.0:
+            spec_output[x] = np.nan
+            err_output[x] = np.nan
+            var_rnoise_output[x] = np.nan
+            var_poisson_output[x] = np.nan
+            dq_output[x] = DO_NOT_USE
+            mid_time_output[x] = np.nan
+            continue
 
         # Slices for this spectral bin
         if orders_are_vertical:

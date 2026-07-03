@@ -23,7 +23,7 @@ def pytest_addoption(parser):
         default=None,
         metavar="UM",
         help=(
-            "BSPEC BT-Settl test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel: set "
+            "BSPEC BT-Settl test_fit_ccf_tophat_style_btsettl_bspec_all_chunks_parallel: set "
             "window_size_um in micron (sets HISPEC_DRP_BSPEC_BTSETTL_WINDOW_UM). Default 0.3 "
             "when unset."
         ),
@@ -33,7 +33,7 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help=(
-            "BSPEC BT-Settl test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel: skip strict "
+            "BSPEC BT-Settl test_fit_ccf_tophat_style_btsettl_bspec_all_chunks_parallel: skip strict "
             "template-CCF recovery, RVCCFAVG, and chunk-benchmark timing asserts "
             "(sets HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS=1). Use with non-default "
             "--bspec-window-um or when you need previews despite loose RV agreement."

@@ -353,6 +353,29 @@ def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
     return results
 
 
+def _linear_pm_epoch_shift(
+    ra: float,
+    dec: float,
+    pmra: float,
+    pmdec: float,
+    dt_yr: float,
+) -> tuple[float, float]:
+    """
+    First-order proper-motion shift when parallax/distance are unknown.
+
+    Uses Gaia ``pmRA`` / ``pmDE`` (mas/yr, ``pm_ra_cosdec`` convention). Accurate to
+    sub-milliarcsecond over typical Gaia–input epoch baselines; avoids ERFA ``pmsafe``
+    warnings from propagating proper motion without a well-defined distance.
+    """
+    cos_dec = math.cos(math.radians(dec))
+    if cos_dec == 0.0:
+        cos_dec = 1e-30
+    mas_to_deg = 1.0 / (3600.0 * 1000.0)
+    d_ra = (float(pmra) * dt_yr * mas_to_deg) / cos_dec
+    d_dec = float(pmdec) * dt_yr * mas_to_deg
+    return ra + d_ra, dec + d_dec
+
+
 def _convert_epoch_gaia(
     ra: float,
     dec: float,
@@ -401,20 +424,35 @@ def _convert_epoch_gaia(
         epoch_in = _GAIA_EPOCHS[release.upper()]
         epoch_out = epoch
 
+    dt_yr = float(epoch_out) - float(epoch_in)
+    if dt_yr == 0.0:
+        return ra, dec
+
+    has_dist = px is not None and np.isfinite(px) and float(px) > 0.0
+    has_pm = (
+        pmra is not None
+        and pmdec is not None
+        and (abs(float(pmra)) > 0.0 or abs(float(pmdec)) > 0.0)
+    )
+    has_rv = rvsys is not None and np.isfinite(rvsys) and float(rvsys) != 0.0
+
+    if not has_dist:
+        if has_pm:
+            return _linear_pm_epoch_shift(
+                ra, dec, float(pmra), float(pmdec), dt_yr
+            )
+        return ra, dec
+
     t_in = Time(epoch_in, format="jyear")
     t_out = Time(epoch_out, format="jyear")
 
-    kwargs = {}
-
-    if pmra is not None and pmdec is not None:
-        kwargs["pm_ra_cosdec"] = pmra * u.mas / u.yr
-        kwargs["pm_dec"] = pmdec * u.mas / u.yr
-
-    if px is not None:
-        kwargs["distance"] = (px * u.mas).to(u.parsec, u.parallax())
-
-    if rvsys is not None:
-        kwargs["radial_velocity"] = rvsys * u.km / u.s
+    kwargs: dict = {}
+    if has_pm:
+        kwargs["pm_ra_cosdec"] = float(pmra) * u.mas / u.yr
+        kwargs["pm_dec"] = float(pmdec) * u.mas / u.yr
+    kwargs["distance"] = (float(px) * u.mas).to(u.parsec, u.parallax())
+    if has_rv:
+        kwargs["radial_velocity"] = float(rvsys) * u.km / u.s
 
     c = SkyCoord(
         ra=ra * u.deg,
