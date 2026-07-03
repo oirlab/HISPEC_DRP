@@ -1097,9 +1097,8 @@ class DataModel:
     def instrument_name(self) -> str:
         return self.config.instrument_name
     
-    @classmethod
-    def has_extension(cls, extname: str) -> bool:
-        return extname.upper() in cls.EXTENSIONS
+    def has_extension(self, extname: str) -> bool:
+        return extname.upper() in self.EXTENSIONS
 
     def has_extension_value(self, extname: str) -> bool:
         """NOTE: Utility of this method TBD"""
