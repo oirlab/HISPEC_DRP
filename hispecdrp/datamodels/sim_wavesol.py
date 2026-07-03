@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_specdq_extensions, create_wave_extensions
 
 __all__ = ['SimulatedWavesolModel']
@@ -12,7 +13,7 @@ def _create_simwavesol_extensions(num_fibers: int):
     return ext
 
 
-class SimulatedWavesolModel(CalibrationModel):
+class SimulatedWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The simulated wavelength solution.
 

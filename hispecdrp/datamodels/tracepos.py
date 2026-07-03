@@ -1,5 +1,5 @@
-from hispecdrp.datamodels.traceprof import _create_traceprof_extensions
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 
 from astropy.io import fits
 import numpy as np
@@ -29,7 +29,7 @@ def _create_tracepos_extensions(num_fibers: int):
     return ext
 
 
-class TracePosModel(CalibrationModel):
+class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The trace positions are determined from the fiber flat data. They are stored as polynomial coeffs and evaluated positions for each order/fiber.
 

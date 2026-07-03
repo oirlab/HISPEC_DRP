@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_trans_extensions
 
 __all__ = ['FiberflatModel']
@@ -15,7 +16,7 @@ def _create_fiberflat_extensions(num_fibers: int):
     return ext
 
 
-class FiberflatModel(CalibrationModel):
+class FiberflatModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The fiber flat model contains the relative transmission of each fiber as a function of wavelength.
 

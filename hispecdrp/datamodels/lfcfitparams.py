@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_lfcfitparam_extensions
 
 __all__ = ['LFCFitParamsModel']
@@ -14,7 +15,7 @@ def _create_lfcfitparams_extensions(num_fibers: int):
     return ext
 
 
-class LFCFitParamsModel(CalibrationModel):
+class LFCFitParamsModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     Contains the best fit Gaussian parameters for each LFC mode.
 

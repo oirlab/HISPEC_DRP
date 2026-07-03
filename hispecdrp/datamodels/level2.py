@@ -1,6 +1,6 @@
 
 from .base_model import DataModel
-
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_drift_extensions, create_etalonfitparam_extensions
 
 __all__ = ['L2Model']
@@ -25,7 +25,7 @@ def _create_l2_extensions(num_fibers : int):
         ext.update(create_etalonfitparam_extensions(fiber=fiber))
     return ext
 
-class L2Model(DataModel):
+class L2Model(FiberAttributeProxyMixin, DataModel):
     """
     HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements. Data products from BSPEC and RSPEC are still kept separate.
 

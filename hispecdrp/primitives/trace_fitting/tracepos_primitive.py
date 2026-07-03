@@ -328,6 +328,10 @@ def find_trace_positions(
     if max_step is None:
         max_step = float(window_size_half)
 
+    # Fix negative values in data
+    data = data.copy()
+    data[data < 0] = 0
+
     # Find peaks for center column
     y0 = ny // 2
     ki, kf = max(0, y0 - 3), min(ny, y0 + 3)
@@ -407,8 +411,9 @@ def find_trace_positions(
 def walk_trace_up_down(
     pixels : np.ndarray,
     data : np.ndarray,
-    y0 : float,
-    xc0 : float,
+    dq : np.ndarray,
+    disp0 : float,
+    xdisp0 : float,
     disp_range : tuple,
     window_size_half : float,
     max_step : float,
@@ -419,7 +424,8 @@ def walk_trace_up_down(
     _walk_trace_up_down(
         pixels,
         data,
-        y0, xc0,
+        dq,
+        disp0, xdisp0,
         disp_range,
         window_size_half,
         max_step,
@@ -428,7 +434,8 @@ def walk_trace_up_down(
     return trace_centroids, trace_widths, trace_flux
 
 
-@njit(nogil=True, parallel=False, cache=True)
+
+@njit(nogil=True, cache=True)
 def _walk_trace_up_down(
     pixels : np.ndarray,
     data : np.ndarray,
@@ -483,11 +490,12 @@ def _walk_trace_up_down(
             trace_centroids[y], trace_widths[y] = np.nan, np.nan
 
 
-@njit(nogil=True, parallel=False, cache=True)
+@njit(nogil=True, cache=True)
 def _compute_centroid_and_width(
     pixels : np.ndarray,
     trace_slice : np.ndarray,
-    xc : float,
+    trace_dq : np.ndarray,
+    center_loc : float,
     window_size_half : float,
 ):
     """
@@ -513,6 +521,12 @@ def _compute_centroid_and_width(
 
     slice_x = pixels[xi:xf+1]
     slice_y = trace_slice[xi:xf+1]
+    slice_dq = trace_dq[xi:xf+1]
+
+    n_good = np.sum(slice_dq == 0)
+    if n_good < slice_dq.size:
+        return np.nan, np.nan
+
     total_flux = np.sum(slice_y)
 
     if total_flux > 0:

@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 
 from astropy.io import fits
 import numpy as np
@@ -20,7 +21,7 @@ def _create_traceprof_extensions(num_fibers: int):
     return ext
 
 
-class TraceProfModel(CalibrationModel):
+class TraceProfModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The trace profiles are determined from the fiber flat data. They are currently stored as-is with no modifications. The spectral extraction algorithm uses these weights appropriately in optimal extraction.
 
