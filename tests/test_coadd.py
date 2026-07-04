@@ -1,4 +1,4 @@
-from hispecdrp import CoaddFramesPrimitive
+from hispecdrp.primitives import CoaddFramesPrimitive, CoaddSpectraPrimitive
 from hispecdrp import datamodels
 import numpy as np
 
@@ -55,3 +55,46 @@ def test_coadd_frames(tmp_path, datadir):
     # Check 1 sigma statistics
     confidence_level = np.sum(rel_residuals < 1) / np.size(rel_residuals)
     assert abs(confidence_level - 0.683) < 0.1
+
+
+def test_coadd_spectra(tmp_path, datadir):
+
+    np.random.seed(1)
+
+    # Create input models
+    input_models = []
+    n_spec = 10
+    rate = 1.0
+    sigma_rnoise = 0.1
+    sigma_poisson = 0.1
+    sigma = np.sqrt(sigma_rnoise**2 + sigma_poisson**2)
+    do_fibers = [1, 2, 3]
+    model0 = datamodels.L2Model()
+    num_orders = len(model0.make_order_vec())
+    shape = (num_orders, 512)
+    data_true = np.full(shape, rate, dtype=np.float32)
+
+    for f in range(n_spec):
+        model = datamodels.L2Model()
+        for fiber in do_fibers:
+            model.spec[fiber] = np.random.normal(loc=data_true, scale=sigma).astype(np.float32)
+            bad = model.spec[fiber] < 0
+            model.spec[fiber][bad] = data_true[bad]
+            model.spec_var_rnoise[fiber] = np.full(shape, sigma_rnoise**2, dtype=np.float32)
+            model.spec_var_poisson[fiber] = np.full(shape, sigma_poisson**2, dtype=np.float32)
+            model.spec_err[fiber] = np.sqrt(model.spec_var_rnoise[fiber] + model.spec_var_poisson[fiber])
+            model.spec_dq[fiber] = np.zeros(shape, dtype=np.uint32)
+            model.mid_time[fiber] = np.ones(shape, dtype=np.float64)
+            model.generate_filename()
+        input_models.append(model)
+
+    # Setup and call the coadd primitive
+    prim = CoaddSpectraPrimitive()
+    model_coadded = prim.apply(input_models)
+    for fiber in do_fibers:
+        rel_residuals = np.abs(model_coadded.spec[fiber] - data_true) / model_coadded.spec_err[fiber]
+        assert np.sum(rel_residuals > 5) == 0
+
+        # Check 1 sigma statistics
+        confidence_level = np.sum(rel_residuals < 1) / rel_residuals.size
+        assert abs(confidence_level - 0.683) < 0.1
