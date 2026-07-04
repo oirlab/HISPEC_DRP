@@ -4,9 +4,10 @@ from ...datamodels import DataModel
 from ... import datamodels
 import numpy as np
 from numba import njit, prange
-from ...utils.math import bitwise_or_reduce_uint32, biweight_location, biweight_midvariance
-import logging
+from ...utils.math import bitwise_or_reduce_uint32
+from .coadd_utils import sigma_clip_frames
 
+import logging
 logger = logging.getLogger(__name__)
 
 __all__ = ['CoaddFramesPrimitive','coadd_frames']
@@ -40,8 +41,8 @@ class CoaddFramesPrimitive(BasePrimitive):
         Method for calculating the output data values. Currently, only
         ``'wmean'`` (weighted mean) is implemented.
     err_calc : str, optional
-        Method for calculating the output error and variance. Currently,
-        only ``'wse'`` (weighted standard error) is implemented.
+        ``'wse'`` (weighted standard error, default) or ``'wstddev'``
+        (weighted standard deviation).
 
     Returns
     -------
@@ -104,6 +105,7 @@ class CoaddFramesPrimitive(BasePrimitive):
 
         return dict(output=outputs)
 
+
 def coadd_frames(
     input : list[str | 'DataModel'],
     do_sigma_clip : bool = False,
@@ -112,10 +114,10 @@ def coadd_frames(
     min_keep : int | float = 3,
     mean_calc : str = 'wmean',
     err_calc : str = 'wse',
+    attrs : dict[str, str] | None = None,
     primitive : BasePrimitive | None = None,
 ):
-    # A single input frame is already coadded; running the weighted coadd path
-    # would NaN-out DQ-flagged pixels and break downstream trace finding.
+    # If only one model provided, just return it as is.
     if len(input) == 1:
         only = input[0]
         return datamodels.open(only) if isinstance(only, str) else only
@@ -124,7 +126,8 @@ def coadd_frames(
     input_models = [datamodels.open(f) for f in input]
 
     # Get the attr names for data, err, etc.
-    attrs = _get_data_attrs(input_models[0])
+    if attrs is None:
+        attrs = _get_frame_data_attrs(input_models[0])
     
     # Create cubes
     input_frames = _make_frame_batch(input_models, attrs)
@@ -153,45 +156,7 @@ def coadd_frames(
     return model_out
 
 
-def _make_frame_batch(
-    input : list[str | 'DataModel'],
-    attrs : tuple[str, ...],
-    copy : bool = False
-) -> dict[str, np.ndarray]:
-    """
-    Create cubes from a list of input frames for each attr (rate, err, etc.).
-
-    Parameters
-    ----------
-    input : list[str | datamodels.DataModel]
-        List of input frames to combine.
-    attrs : tuple[str, ...]
-        List of attributes to extract from the input frames.
-    copy : bool, optional
-        If True, copy the data from the input frames.
-
-    Returns
-    -------
-    output : dict[str, np.ndarray]
-        Dictionary of cubes with shape (Nframes, Ny, Nx).
-    """
-    out = {}
-    n_frames = len(input)
-    for i in range(n_frames):
-        model = datamodels.open(input[i])
-        ny, nx = getattr(model, attrs[0]).shape
-        for attr in attrs:
-            arr = getattr(model, attr)
-            if i == 0:
-                out[attr] = np.zeros((n_frames, ny, nx), dtype=arr.dtype)
-            if copy and isinstance(input[i], datamodels.DataModel):
-                out[attr][i, :, :] = arr.copy()
-            else:
-                out[attr][i, :, :] = arr
-    return out
-
-
-def _get_data_attrs(input_model : datamodels.DataModel) -> dict[str, str]:
+def _get_frame_data_attrs(input_model : datamodels.DataModel) -> dict[str, str]:
     attrs = {}
     
     # Main data attribute
@@ -291,14 +256,10 @@ def _coadd_frames(
     # Shape
     n_frames, ny, nx = data_cube.shape
 
-    # Mask
+    # Mask for sigma clipping
     mask = np.isfinite(data_cube)
     if 'mask' in input_frames:
         mask &= input_frames['mask'].astype(bool)
-
-    if 'dq' in input_frames:
-        dq_frames = input_frames['dq']
-        mask &= dq_frames == 0
 
     # Weights from error
     if 'err' in input_frames:
@@ -311,44 +272,55 @@ def _coadd_frames(
     weights[~mask] = 0
 
     # Sigma clipping if requested
-    if do_sigma_clip and n_frames > 3:
-        if min_keep < 1:
-            min_keep = int(np.ceil(min_keep * n_frames))
-        min_keep = int(min_keep)
-        sigma_clip_frames(
-            data_cube, mask,
-            sigma_thresh_low=sigma_thresh_low,
-            sigma_thresh_high=sigma_thresh_high,
-            min_keep=min_keep,
-        )
+    if do_sigma_clip:
+        if n_frames > 3:
+            if min_keep < 1:
+                min_keep = int(np.ceil(min_keep * n_frames))
+            min_keep = int(min_keep)
+            sigma_clip_frames(
+                data_cube, mask,
+                sigma_thresh_low=sigma_thresh_low,
+                sigma_thresh_high=sigma_thresh_high,
+                min_keep=min_keep,
+            )
 
-        bad = ~mask
-        weights[bad] = 0
-        dq_cube[bad] |= DO_NOT_USE
+            bad = ~mask
+            weights[bad] = 0
+            dq_cube[bad] |= DO_NOT_USE
+        else:
+            logger.warning("Not enough frames for sigma clipping; skipping.")
 
-    # Create output arrays
+    # Create output arrays for data, err, and dq
     data_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     err_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     dq_out = np.zeros((ny, nx), dtype=dq_cube.dtype)
-
+    
+    # Init output variance arrays if inputs are provided
     var_poisson_cube = input_frames.get('var_poisson')
-    var_rnoise_cube = input_frames.get('var_rnoise')
-
     if var_poisson_cube is not None:
         var_poisson_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     else:
         var_poisson_out = None
+
+    var_rnoise_cube = input_frames.get('var_rnoise')
     if var_rnoise_cube is not None:
         var_rnoise_out = np.full((ny, nx), np.nan, dtype=data_cube.dtype)
     else:
         var_rnoise_out = None
 
+    # Init output mid time array if input is provided
     mid_time_cube = input_frames.get('mid_time')
-    
     if mid_time_cube is not None:
         mid_times_out = np.full((ny, nx), np.nan, dtype=mid_time_cube.dtype)
     else:
         mid_times_out = None
+
+    if err_calc == 'wse':
+        err_calc_flag = 0
+    elif err_calc == 'wstddev':
+        err_calc_flag = 1
+    else:
+        raise ValueError(f"err_calc must be 'wse' or 'wstddev', got {err_calc!r}")
 
     _coadd_frames_numba(
         data_cube=data_cube,
@@ -361,6 +333,7 @@ def _coadd_frames(
         var_poisson_out=var_poisson_out, var_rnoise_out=var_rnoise_out,
         dq_out=dq_out,
         mid_times_out=mid_times_out,
+        err_calc=err_calc_flag,
     )
 
     return dict(
@@ -370,6 +343,7 @@ def _coadd_frames(
         dq=dq_out,
         mid_time=mid_times_out
     )
+
 
 @njit(nogil=True, parallel=False, cache=True)
 def _coadd_frames_numba(
@@ -385,6 +359,7 @@ def _coadd_frames_numba(
     var_rnoise_out : np.ndarray | None = None,
     dq_out : np.ndarray | None = None,
     mid_times_out : np.ndarray | None = None,
+    err_calc : int = 0,  # 0=wse, 1=wstddev
 ):
     n_frames, ny, nx = data_cube.shape
     for i in prange(ny):
@@ -430,7 +405,13 @@ def _coadd_frames_numba(
                 data_out[i, j] = np.sum(w * data_cube[good, i, j]) / np.sum(w)
 
                 if err_out is not None:
-                    err_out[i, j] = 1 / np.sqrt(np.sum(w))
+                    if err_calc == 0:  # wse
+                        err_out[i, j] = 1 / np.sqrt(np.sum(w))
+                    else:              # wstddev
+                        sum_w = np.sum(w)
+                        wmean = data_out[i, j]
+                        wvar = np.sum(w * (data_cube[good, i, j] - wmean) ** 2) / sum_w
+                        err_out[i, j] = np.sqrt(wvar)
                 
                 if var_poisson_out is not None:
                     var_poisson_out[i, j] = 1 / np.sum(1 / var_poisson_cube[good, i, j])
@@ -440,244 +421,3 @@ def _coadd_frames_numba(
                     dq_out[i, j] = bitwise_or_reduce_uint32(dq_cube[good, i, j])
                 if mid_times_out is not None:
                     mid_times_out[i, j] = np.mean(mid_time_cube[good, i, j])
-
-@njit(nogil=True, parallel=True, cache=True)
-def sigma_clip_frames(
-    data_cube : np.ndarray,
-    mask_cube : np.ndarray,
-    sigma_thresh_low : float | None = None,
-    sigma_thresh_high : float | None = None,
-    min_keep : int = 3,
-):
-    n_frames, ny, nx = data_cube.shape
-    for i in prange(ny):
-        for j in range(nx):
-            sigma_clip(
-                data_cube[:, i, j],
-                mask_cube[:, i, j],
-                sigma_thresh_low=sigma_thresh_low,
-                sigma_thresh_high=sigma_thresh_high,
-                min_keep=min_keep,
-            )
-
-
-@njit(nogil=True)
-def sigma_clip(
-    x: np.ndarray,
-    mask: np.ndarray,
-    sigma_thresh_low: float | None = None,
-    sigma_thresh_high: float | None = None,
-    maxiters: int = 50,
-    min_keep: int = 3,
-) -> tuple[np.ndarray, float, float, int]:
-    """
-    Perform sigma clipping on an input array.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Input array of data values to sigma clip.
-    mask : np.ndarray
-        Boolean array of the same shape as x where True indicates "good" and False indicates "bad".
-    sigma_thresh_low : float | None, optional
-        Low sigma threshold for sigma clipping. If None, no low sigma clipping is performed.
-    sigma_thresh_high : float | None, optional
-        High sigma threshold for sigma clipping. If None, no high sigma clipping is performed.
-    maxiters : int, optional
-        Maximum number of iterations for sigma clipping. Default is 50.
-    min_keep : int, optional
-        Minimum number of good values to keep after sigma clipping. Default is 3.
-
-    Returns
-    -------
-    tuple[np.ndarray, float, float, int]
-        Tuple of (mask_out, center, stddev, n_iters) where:
-            - mask_out : boolean array of the same shape as input mask with outliers masked as False.
-            - center : float, the biweight location of the input data.
-            - stddev : float, the biweight midvariance (standard deviation) of the input data.
-            - n_iters : int, number of iterations performed.
-    """
-
-    center = np.nan
-    stddev = np.nan
-
-    min_batch_size = 3
-
-    for i in range(maxiters):
-        x_masked = x[mask]  # select only unmasked values
-        if len(x_masked) <= min_batch_size:
-            break
-
-        center = biweight_location(x_masked)
-        var = biweight_midvariance(x_masked, M=center)
-        stddev = np.sqrt(var)
-
-        n_good = np.sum(mask)
-        _mask_outliers(
-            x, center, stddev, mask,
-            sigma_thresh_low=sigma_thresh_low,
-            sigma_thresh_high=sigma_thresh_high,
-            min_keep=min_keep,
-        )
-        n_good_new = np.sum(mask)
-        if n_good_new == n_good:
-            break
-
-    # Total number of iterations used
-    iters_out = i + 1
-
-    return mask, center, stddev, iters_out
-
-
-# @njit(nogil=True)
-# def _mask_outliers(
-#     x : np.ndarray,
-#     center : float, stddev : float,
-#     mask : np.ndarray,
-#     sigma_thresh_low : float | None = None,
-#     sigma_thresh_high : float | None = None,
-#     min_keep : int = 3,
-# ) -> np.ndarray:
-#     """
-#     Mask outliers in a dataset based on specified thresholds.
-    
-#     Parameters
-#     ----------
-#     x : np.ndarray
-#         1D array of data values.
-#     center : float
-#         Central location (e.g. mean or median) of the data.
-#     stddev : float
-#         Standard deviation of the data.
-#     mask : np.ndarray
-#         1D data mask where 0 is bad, 1 is good.
-#     sigma_thresh_low : float | None, optional
-#         Low sigma threshold for outlier rejection. If None, no low sigma clipping is performed.
-#     sigma_thresh_high : float | None, optional
-#         High sigma threshold for outlier rejection. If None, no high sigma clipping is performed.
-#     min_keep : int, optional
-#         Minimum number of good values to keep after clipping. Default is 3.
-
-#     Returns
-#     -------
-#     mask_out : np.ndarray
-#         Mask is updated in-place and returned.
-#     """
-    
-#     do_low = sigma_thresh_low is not None
-#     do_high = sigma_thresh_high is not None
-#     if do_low:
-#         low_thresh = -sigma_thresh_low * stddev
-#     if do_high:
-#         high_thresh = sigma_thresh_high * stddev
-
-#     for i in np.ndindex(x.shape):
-#         res = x[i] - center
-#         if not mask[i]:
-#             continue
-#         if do_low and res < low_thresh:
-#             mask[i] = False
-#         elif do_high and res > high_thresh:
-#             mask[i] = False
-#     return mask
-
-
-@njit(nogil=True)
-def _mask_outliers(
-    x: np.ndarray,
-    center: float,
-    stddev: float,
-    mask: np.ndarray,
-    sigma_thresh_low: float | None = None,
-    sigma_thresh_high: float | None = None,
-    min_keep: int = 3,
-) -> np.ndarray:
-    """
-    Mask outliers in a dataset based on sigma thresholds, respecting a
-    minimum number of good values to retain.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        1D array of data values.
-    center : float
-        Central location (e.g. mean or median) of the data.
-    stddev : float
-        Standard deviation of the data.
-    mask : np.ndarray
-        1D data mask where False is bad, True is good. Updated in-place.
-    sigma_thresh_low : float | None, optional
-        Low sigma threshold for outlier rejection. If None, no low-side
-        clipping is performed.
-    sigma_thresh_high : float | None, optional
-        High sigma threshold for outlier rejection. If None, no high-side
-        clipping is performed.
-    min_keep : int, optional
-        Minimum number of unmasked values to retain after clipping.
-        Candidates are ranked from most to least extreme; the least extreme
-        are preserved when the clip budget would otherwise be exceeded.
-        Default is 3.
-
-    Returns
-    -------
-    mask : np.ndarray
-        Mask updated in-place and returned.
-    """
-    do_low  = sigma_thresh_low  is not None
-    do_high = sigma_thresh_high is not None
-
-    if do_low:
-        low_thresh  = -sigma_thresh_low  * stddev
-    if do_high:
-        high_thresh =  sigma_thresh_high * stddev
-
-    # --- Pass 1: count good values and collect clipping candidates -------
-    # Each candidate records its absolute residual and flat index so we can
-    # rank by extremeness and honour min_keep.
-    n_good = 0
-    cand_resid = np.empty(x.size, dtype=np.float64)
-    cand_idx   = np.empty(x.size, dtype=np.int64)
-    n_cand = 0
-
-    flat = 0
-    for i in np.ndindex(x.shape):
-        if mask[i]:
-            n_good += 1
-            res = x[i] - center
-            if (do_low and res < low_thresh) or (do_high and res > high_thresh):
-                cand_resid[n_cand] = abs(res)
-                cand_idx[n_cand]   = flat
-                n_cand += 1
-        flat += 1
-
-    if n_cand == 0:
-        return mask
-
-    # --- Determine how many we can actually clip -------------------------
-    max_clip = n_good - min_keep
-    if max_clip <= 0:
-        return mask  # Already at or below min_keep; clip nothing.
-
-    n_clip = min(n_cand, max_clip)
-
-    # --- Pass 2: apply the mask ------------------------------------------
-    if n_clip == n_cand:
-        # Clip all candidates — no ranking needed.
-        for k in range(n_cand):
-            mask.flat[cand_idx[k]] = False
-    else:
-        # Keep the (n_cand - n_clip) least extreme candidates.
-        # np.partition places the n_clip-th largest at index [n_cand - n_clip]
-        # with everything to its right being >= that value.
-        resids = cand_resid[:n_cand].copy()
-        clip_threshold = np.partition(resids, n_cand - n_clip)[n_cand - n_clip]
-
-        clipped = 0
-        for k in range(n_cand):
-            if clipped >= n_clip:
-                break
-            if cand_resid[k] >= clip_threshold:
-                mask.flat[cand_idx[k]] = False
-                clipped += 1
-
-    return mask
