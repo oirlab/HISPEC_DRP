@@ -188,9 +188,9 @@ def _get_spec_data_attrs(input_model : datamodels.DataModel, fiber : str | int |
         attrs['var_rnoise'] = f'spec_var_rnoise_fib{fiber}'
     else:
         attrs['data'] = f'spec_uncal_fib{fiber}'
-        attrs['err'] = f'spec_err_uncal_fib{fiber}'
-        attrs['var_poisson'] = f'spec_var_poisson_uncal_fib{fiber}'
-        attrs['var_rnoise'] = f'spec_var_rnoise_uncal_fib{fiber}'
+        attrs['err'] = f'spec_uncal_err_fib{fiber}'
+        attrs['var_poisson'] = f'spec_uncal_var_poisson_fib{fiber}'
+        attrs['var_rnoise'] = f'spec_uncal_var_rnoise_fib{fiber}'
 
     # DQ
     attrs['dq'] = f'spec_dq_fib{fiber}'
