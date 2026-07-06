@@ -5697,15 +5697,9 @@ def run_ccf_line_mask_for_fiber(
 
     Reads ``SPEC_FIB*``, ``SPEC_ERR_FIB*``, ``SPEC_DQ_FIB*``, ``WAVE_FIB*`` from
     ``input_model``, resolves mask lines via :func:`~hispecdrp.utils.line_mask_utils.stellar_rv_ccf_mask_lines`, and processes
-    each requested echelle order with :func:`rv_per_chunks_line_mask`. When an echelle
-    row has **only one** line-mask wavelength chunk, all chunk rows in ``RVCCF`` (one row)
-    use the Gaussian + parabolic path on the **order-mean** mask CCF (nanmean over chunk CCF
-    rows on the velocity grid), same as before. When an order has **multiple** chunks
-    (e.g. ``window_line_by_line`` Voronoi bins), **per-chunk** Numba RVs and
-    uncertainties are kept on each ``RVCCF`` row. Fiber-level RV aggregation (median/MAD
-    outlier rejection + inverse-variance mean) is performed by the stellar RV primitive
-    (see :mod:`hispecdrp.primitives.stellar_rv.rv_combine_utils`) so that ``ccf_utils`` remains
-    a dependency of stellar RV code and does not import from it.
+    each requested echelle order with :func:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline.rv_per_chunks_line_mask_spline`.
+    Per-chunk CCFs use :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
+    metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
 
     Parameters
     ----------
@@ -5789,12 +5783,17 @@ def run_ccf_line_mask_for_fiber(
 
     logger.info(
         "CCF line_mask: starting fiber=%s n_do_orders=%d window_um=%.4f want_preview=%s "
-        "debug_ccf=%s",
+        "debug_ccf=%s (spline mask CCF + calc_ccf_metrics)",
         fiber,
         len(do_orders),
         window_size_um,
         want_preview,
         debug_ccf,
+    )
+    from .ccf_line_mask_spline import (
+        finalize_ccf_preview_dict_spline,
+        fit_line_mask_order_mean_rv_spline,
+        rv_per_chunks_line_mask_spline,
     )
     if not np.isfinite(window_size_um) or float(window_size_um) <= 0:
         raise ValueError("window_size_um must be finite and > 0 for ccf_line_mask")
@@ -5930,9 +5929,7 @@ def run_ccf_line_mask_for_fiber(
     all_wavelengths: list[float] = []
     all_orders: list[int] = []
 
-    # Per-chunk RVs and RVCCF table CCF rows use ``ccf_2d`` from :func:`rv_per_chunks_line_mask`.
-    # Order-mean Gaussian + parabolic refine applies only for **one** chunk per echelle row;
-    # otherwise per-chunk Numba RVs are kept and preview still stacks chunk CCF rows per order.
+    # Per-chunk RVs and RVCCF table CCF rows use ``ccf_2d`` from spline mask CCF.
     want_preview_effective = bool(want_preview)
 
     order_slots: list[dict] = []
@@ -5960,13 +5957,11 @@ def run_ccf_line_mask_for_fiber(
             _span = float(_wmax - _wmin)
             _win_sc = max(float(window_size_um), _span * (1.0 + 1e-12))
             _kw_sc = {
-                "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
                 "min_good_pixels": int(min_good_pixels),
-                "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
                 **kw_rv_line_chunking,
             }
             try:
-                _scout = rv_per_chunks_line_mask(
+                _scout = rv_per_chunks_line_mask_spline(
                     _w_sc,
                     _s_sc,
                     _e_sc,
@@ -5977,7 +5972,6 @@ def run_ccf_line_mask_for_fiber(
                     v_max_m_s=v_max_use,
                     v_step_m_s=v_step_m_s,
                     zb=zb,
-                    max_cores=max_cores,
                     return_ccf=True,
                     **_kw_sc,
                 )
@@ -6050,11 +6044,15 @@ def run_ccf_line_mask_for_fiber(
         order_auto_hybrid_merged = fiber_merged_v_grid is not None and not hybrid
 
         kw_rv = {
-            "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
             "min_good_pixels": int(min_good_pixels),
-            "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
             **kw_rv_line_chunking,
         }
+        if hybrid and ccf_hybrid_center_m_s is not None and math.isfinite(float(ccf_hybrid_center_m_s)):
+            kw_rv["gaussian_seed_mean_m_s"] = float(ccf_hybrid_center_m_s)
+            kw_rv["metrics_fit_half_width_m_s"] = max(
+                2.5 * float(ccf_hybrid_half_width_m_s),
+                600.0,
+            )
         # Legacy single-order auto-hybrid (when fiber-level scout did not run).
         span_um = float(w_max - w_min)
         window_um_scout = max(float(window_size_um), span_um * (1.0 + 1e-12))
@@ -6064,7 +6062,7 @@ def run_ccf_line_mask_for_fiber(
             and not hybrid
             and v_auto_grid is None
         ):
-            scout = rv_per_chunks_line_mask(
+            scout = rv_per_chunks_line_mask_spline(
                 w,
                 s,
                 e,
@@ -6075,7 +6073,6 @@ def run_ccf_line_mask_for_fiber(
                 v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
-                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6133,7 +6130,7 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
-            ) = rv_per_chunks_line_mask(
+            ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
                 e,
@@ -6145,7 +6142,6 @@ def run_ccf_line_mask_for_fiber(
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_grid,
                 zb=zb,
-                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6161,7 +6157,7 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
-            ) = rv_per_chunks_line_mask(
+            ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
                 e,
@@ -6173,7 +6169,6 @@ def run_ccf_line_mask_for_fiber(
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_auto_grid,
                 zb=zb,
-                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6189,7 +6184,7 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
-            ) = rv_per_chunks_line_mask(
+            ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
                 e,
@@ -6200,7 +6195,6 @@ def run_ccf_line_mask_for_fiber(
                 v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
-                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6250,59 +6244,38 @@ def run_ccf_line_mask_for_fiber(
                 ccf_err_mean_order = None
 
             v_fit = np.asarray(order_v_grid, dtype=np.float64)
-            vstep_fit = (
-                float(effective_ccf_v_step_for_fit(v_fit))
-                if (hybrid or order_auto_hybrid_merged)
-                else float(v_step_m_s)
-            )
-            wl_c = 0.5 * (w_min + w_max)
-            vsp = dv_per_pixel_m_s(float(wl_c))
-            n_good_fit = max(int(np.nansum(order_chunk_ng)), 1)
-            # Duplicate the order-mean Gaussian RV onto every chunk row only when this echelle
-            # row has a **single** line-mask chunk. Multiple chunks per order (e.g. line-window
-            # Voronoi bins) keep per-chunk Numba RVs so RVCCF / outlier / RVCCFAVG aggregate over
-            # all chunks; Plotly preview uses one CCF slot per chunk (see ``want_preview`` block).
+            # Duplicate the order-mean RV onto every chunk row only when this echelle
+            # row has a **single** line-mask chunk.
             if n_chunks_order == 1:
-                _gauss_seed = (
-                    float(ccf_hybrid_center_m_s)
-                    if hybrid
-                    and ccf_hybrid_center_m_s is not None
-                    and math.isfinite(float(ccf_hybrid_center_m_s))
-                    else None
-                )
-                rv_g, err_g, _par_g, diag_g = fit_ccf_rv(
+                ccf_err_fit: np.ndarray | None = None
+                if (
+                    _ccf_std_2d is not None
+                    and np.asarray(_ccf_std_2d).shape[0] == 1
+                    and np.any(np.isfinite(_ccf_std_2d[0]))
+                ):
+                    ccf_err_fit = np.asarray(_ccf_std_2d[0], dtype=np.float64)
+                elif ccf_err_mean_order is not None:
+                    ccf_err_fit = ccf_err_mean_order
+                rv_gf, err_gf, order_used_gaussian_mean = fit_line_mask_order_mean_rv_spline(
                     v_fit,
                     ccf_mean_order,
-                    vstep_fit,
-                    n_good=n_good_fit,
-                    return_params=True,
-                    vel_span_m_s_per_pixel=vsp if np.isfinite(vsp) else None,
-                    ccf_err=ccf_err_mean_order,
-                    ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
-                    line_mask_line_window_by_line=bool(window_line_by_line),
-                    gaussian_seed_mean_m_s=_gauss_seed,
+                    ccf_err_fit,
+                    gaussian_seed_mean_m_s=(
+                        float(ccf_hybrid_center_m_s)
+                        if hybrid
+                        and ccf_hybrid_center_m_s is not None
+                        and math.isfinite(float(ccf_hybrid_center_m_s))
+                        else None
+                    ),
+                    metrics_fit_half_width_m_s=(
+                        max(2.5 * float(ccf_hybrid_half_width_m_s), 600.0)
+                        if hybrid
+                        else None
+                    ),
                 )
-                if (
-                    bool(diag_g.get("fit_ok"))
-                    and np.isfinite(rv_g)
-                    and np.isfinite(err_g)
-                    and float(err_g) > 0.0
-                ):
-                    rv_gf = float(rv_g)
-                    err_gf = float(err_g)
-                    rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
-                        v_fit,
-                        ccf_mean_order,
-                        vstep_fit,
-                        ccf_err=ccf_err_mean_order,
-                    )
-                    if rv_bi is not None and math.isfinite(float(rv_bi)):
-                        rv_gf = float(rv_bi)
-                        if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0:
-                            err_gf = float(err_bi)
+                if order_used_gaussian_mean:
                     order_chunk_rvs = [rv_gf] * n_chunks_order
                     order_chunk_errs = [err_gf] * n_chunks_order
-                    order_used_gaussian_mean = True
 
         if order_used_gaussian_mean:
             fiber_agg_rvs.append(float(order_chunk_rvs[0]))
@@ -6448,14 +6421,7 @@ def run_ccf_line_mask_for_fiber(
             fiber,
             len(order_slots),
         )
-        _preview_gauss_seed = (
-            float(ccf_hybrid_center_m_s)
-            if hybrid
-            and ccf_hybrid_center_m_s is not None
-            and math.isfinite(float(ccf_hybrid_center_m_s))
-            else None
-        )
-        preview_detail = finalize_ccf_preview_dict(
+        preview_detail = finalize_ccf_preview_dict_spline(
             order_slots,
             all_ccf_rows,
             preview_v_grid,
@@ -6463,10 +6429,18 @@ def run_ccf_line_mask_for_fiber(
             pv_max,
             pv_step,
             all_ccf_err_rows if len(all_ccf_err_rows) == len(order_slots) else None,
-            ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
-            line_mask_line_window_by_line=bool(window_line_by_line),
-            line_mask_gaussian_seed_mean_m_s=_preview_gauss_seed,
+            gaussian_seed_mean_m_s=(
+                float(ccf_hybrid_center_m_s)
+                if hybrid
+                and ccf_hybrid_center_m_s is not None
+                and math.isfinite(float(ccf_hybrid_center_m_s))
+                else None
+            ),
+            metrics_fit_half_width_m_s=(
+                max(2.5 * float(ccf_hybrid_half_width_m_s), 600.0)
+                if hybrid
+                else None
+            ),
         )
 
     logger.info(
