@@ -103,8 +103,9 @@ class StellarRVPrimitive(BasePrimitive):
 
     * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
       two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
-      :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
-      Packaged defaults and citations: ``hispecdrp/data/masks/README.md``.
+      :mod:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline`). Per-chunk CCFs use
+      :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
+      metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).

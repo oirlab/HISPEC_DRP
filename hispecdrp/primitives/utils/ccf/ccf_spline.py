@@ -149,11 +149,12 @@ def compute_ccf_spline(
     spec_dq: np.ndarray,
     line_centers: np.ndarray,
     line_weights: np.ndarray,
-    vel_window: float,
-    vel_step: float,
+    vel_window: float | None = None,
+    vel_step: float | None = None,
     zb: float = 0.0,
     vsys: float = 0.0,
     use_variance: bool = True,
+    vel_grid: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Cross-correlation of a spectrum with delta-function mask lines via cubic spline sampling.
@@ -171,18 +172,26 @@ def compute_ccf_spline(
     line_centers = np.asarray(line_centers, dtype=np.float64).ravel()
     line_weights = np.asarray(line_weights, dtype=np.float64).ravel()
 
+    if vel_grid is not None:
+        vel_grid_out = np.asarray(vel_grid, dtype=np.float64).ravel()
+    elif vel_window is not None and vel_step is not None:
+        vel_grid_out = _velocity_grid_from_window(vel_window, vel_step, vsys)
+    else:
+        raise ValueError(
+            "compute_ccf_spline: provide vel_grid or both vel_window and vel_step"
+        )
+
     good = spec_dq == 0
     if int(np.count_nonzero(good)) < 2:
-        vel_grid = _velocity_grid_from_window(vel_window, vel_step, vsys)
-        n_vels = vel_grid.size
+        n_vels = vel_grid_out.size
         return (
-            vel_grid,
+            vel_grid_out,
             np.full(n_vels, np.nan, dtype=np.float64),
             np.full(n_vels, np.nan, dtype=np.float64),
         )
 
     xk, a, b, c, d = cubic_spline_build(wave[good], spec[good])
-    vel_grid = _velocity_grid_from_window(vel_window, vel_step, vsys)
+    vel_grid = vel_grid_out
     n_vels = vel_grid.size
     ccf_out = np.full(n_vels, np.nan, dtype=np.float64)
     ccf_err_out = np.full(n_vels, np.nan, dtype=np.float64)

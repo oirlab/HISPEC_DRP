@@ -169,7 +169,10 @@ def _calc_rverr_from_ccf(
 
     # Correction factor for oversampling
     delta_vel = vel_grid[1] - vel_grid[0]
-    nsp = max(pix_size / delta_vel, 1.0)
+    if pix_size is not None and np.isfinite(float(pix_size)) and float(pix_size) > 0.0:
+        nsp = max(float(pix_size) / delta_vel, 1.0)
+    else:
+        nsp = 1.0
 
     # Restrict to the window around rv0
     fwhm_factor_half = fwhm_factor / 2.0

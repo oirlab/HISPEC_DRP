@@ -11,6 +11,7 @@ Package layout (implementation modules under :mod:`hispecdrp.primitives.utils.cc
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_bisector` — Queloz BIS + NEID weighted-percentile bisector RV
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_parabolic` — parabolic-vertex / coarse-grid CCF RV refinement
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_fitting` — Gaussian line metrics on a CCF (:class:`CCFMetrics`)
+* :mod:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline` — stellar line-mask CCF via spline + :func:`calc_ccf_metrics`
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils` — template/mask CCF orchestration, Gaussian CCF fit, previews
 
 See :mod:`hispecdrp.primitives.utils` for the stable re-export surface.
