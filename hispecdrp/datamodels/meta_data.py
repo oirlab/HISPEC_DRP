@@ -52,7 +52,13 @@ class MetaModel(MutableMapping):
         self.set_default_values()
 
     def __getitem__(self, key):
-        if key in self._schema['properties']:
+        schema = self.__dict__.get('_schema')
+        if schema is None:
+            raise KeyError(
+                f"Cannot access '{key}': MetaModel instance has no schema "
+                "(not yet initialized)."
+            )
+        if key in schema['properties']:
             return self._data.get(key)
         else:
             raise KeyError(f"Property '{key}' not found in metadata schema.")
@@ -65,6 +71,13 @@ class MetaModel(MutableMapping):
         self._data[key] = value
 
     def __getattr__(self, name):
+        # Never recurse into __getitem__ for dunder probes (pickle/copy/etc.
+        # commonly do getattr(obj, '__whatever__', None) on freshly __new__'d,
+        # not-yet-__init__'d instances) or before _schema itself exists.
+        if name.startswith('__') and name.endswith('__'):
+            raise AttributeError(name)
+        if '_schema' not in self.__dict__:
+            raise AttributeError(name)
         try:
             return self[name]
         except KeyError as e:
@@ -331,6 +344,12 @@ class MetaModel(MutableMapping):
 
     def __len__(self):
         return len(self._data)
+
+    def __getstate__(self):
+        return self.__dict__.copy()
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
     
     @property
     def fields(self) -> list[str]:
