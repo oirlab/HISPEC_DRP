@@ -92,7 +92,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
                     logger.info(f'No etalon lines found for {order=}, {fiber=}. Skipping.')
                     continue
 
-                drifts = calculate_etalon_drifts_pix(lcs, lcs_err, lcs_ref, lcs_ref_err)
+                drifts = calculate_drifts_from_line_centers(lcs, lcs_err, lcs_ref, lcs_ref_err)
                 n_lines = len(drifts)
 
                 for i in range(n_lines):

@@ -69,7 +69,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
             spec = getattr(input_model, f'spec_fib{fiber}')
             spec_err = getattr(input_model, f'spec_err_fib{fiber}')
             spec_dq = getattr(input_model, f'spec_dq_fib{fiber}')
-            xarr = np.arange(wave.shape[1])
+            pixarr = np.arange(wave.shape[1])
             for order in do_orders:
 
                 # Relative order index
@@ -79,12 +79,12 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                 ki, kf = good[0], good[-1]
                 min_line_spacing = _get_etalon_spacing_pixels(self.fsr_estimate, wave[oi, ki:kf+1])
                 min_line_spacing = int(np.nanmin(min_line_spacing))
-                lines = find_emission_lines(spec[oi, :], spec_dq[oi, :], min_line_spacing=min_line_spacing)
+                lines, _ = find_emission_lines(spec[oi, :], spec_dq[oi, :], min_line_spacing=min_line_spacing)
 
                 # Lorentzian fit to lines
                 _fit_results = fit_lines_gauss(
-                    spec[oi, :], spec_err[oi, :], spec_dq[oi, :],
-                    lines=lines,
+                    pixarr, spec[oi, :], spec_err[oi, :], spec_dq[oi, :],
+                    line_centers=lines,
                     fwhm_bounds=self.fwhm_bounds, mu_bounds=self.mu_bounds,
                     max_fit_window=self.max_fit_window,
                     absorption=False,
@@ -106,7 +106,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                         'FWHM_PIX' : _fit_results[i].fwhm,
                         'FWHM_ERR_PIX' : _fit_results[i].fwhm_err,
                     }
-                    r['WAVE'] = np.interp(r['MU_PIX'], xarr, wave[oi, :], left=np.nan, right=np.nan)
+                    r['WAVE'] = np.interp(r['MU_PIX'], pixarr, wave[oi, :], left=np.nan, right=np.nan)
                     r['FWHM_WAVE'] = delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :])
                     r['FWHM_ERR_WAVE'] = delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :])
                     r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
