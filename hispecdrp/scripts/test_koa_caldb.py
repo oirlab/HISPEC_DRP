@@ -26,8 +26,14 @@ Usage (from the repository root, ``hispec`` conda env)::
 
     python -m hispecdrp.scripts.test_koa_caldb
     python -m hispecdrp.scripts.test_koa_caldb --output-dir test_data/koa_caldb_test --no-remote
-    python -m hispecdrp.scripts.test_koa_caldb --download-all-missing
+    python -m hispecdrp.scripts.test_koa_caldb --skip-bulk-download
+    python -m hispecdrp.scripts.test_koa_caldb --redo-download
     python -m hispecdrp.scripts.test_koa_caldb --mjd-start 61210 --dry-run
+
+By default, after syncing KOA metadata the script downloads every calibration
+listed in the local DB but missing from the cache. Use ``--redo-download`` to
+delete cached FITS and re-fetch them. Use ``--skip-bulk-download`` to only
+download files when they are selected for the dummy L0 products.
 
 Products land under ``test_data/koa_caldb_test/`` by default (dummy L0 FITS,
 ``cals/KOA_CALIBRATION_CACHE/``, and ``cals/koa_caldb_test_report.json``).
@@ -206,6 +212,7 @@ def sync_caldb_from_scratch(
     *,
     connect_remote: bool,
     download_all_missing: bool,
+    redo_download: bool = False,
     dry_run: bool,
 ) -> None:
     """Sync KOA metadata into the local DB; optionally download every missing file."""
@@ -251,22 +258,42 @@ def sync_caldb_from_scratch(
     else:
         logger.info("Local KOA cache has no FITS files yet; skipping cache indexing.")
 
-    if not download_all_missing:
+    if not download_all_missing and not redo_download:
         return
 
     try:
-        missing = store.get_missing_local_files() or []
+        if redo_download:
+            records = list(store.local_db.rows_where()) if store.local_db else []
+            removed = 0
+            for rec in records:
+                local_path = store._get_local_filepath(rec)
+                if local_path and os.path.isfile(local_path):
+                    os.remove(local_path)
+                    removed += 1
+            logger.info(
+                "Redo download: removed %d cached file(s); re-downloading %d record(s).",
+                removed,
+                len(records),
+            )
+            to_download = records
+        else:
+            to_download = store.get_missing_local_files() or []
     except Exception as e:
-        logger.warning("Could not list missing KOA files: %s", e)
+        logger.warning("Could not list KOA files for download: %s", e)
         return
-    logger.info("Downloading %d missing KOA calibration file(s).", len(missing))
-    for i, rec in enumerate(missing, 1):
+
+    if not to_download:
+        logger.info("No KOA calibration files to download.")
+        return
+
+    logger.info("Downloading %d KOA calibration file(s).", len(to_download))
+    for i, rec in enumerate(to_download, 1):
         filename = rec.get("filename", "?")
         try:
             local_path, _ = store.get_calibration(cal=rec)
-            logger.info("[%d/%d] Downloaded: %s -> %s", i, len(missing), filename, local_path)
+            logger.info("[%d/%d] Downloaded: %s -> %s", i, len(to_download), filename, local_path)
         except Exception as e:
-            logger.warning("[%d/%d] Failed to download %s: %s", i, len(missing), filename, e)
+            logger.warning("[%d/%d] Failed to download %s: %s", i, len(to_download), filename, e)
 
 
 def associate_calibrations(
@@ -308,17 +335,27 @@ def associate_calibrations(
                 filepath or rec.get("filename"),
             )
         except Exception as e:
-            # Selectors raise when no candidates match; treat as missing, not fatal.
             msg = str(e)
             lower = msg.lower()
-            if "no such column" in lower:
+            # No candidate in DB (or koa_middleware NoneType bug before our store guard).
+            if (
+                "no matching calibration" in lower
+                or "not subscriptable" in lower
+                or "no candidate" in lower
+                or ("candidate" in lower and "no" in lower)
+            ):
+                status = "missing"
+                if "not subscriptable" in lower:
+                    msg = (
+                        "No matching calibration in local caldb "
+                        f"(selector={type(selector).__name__})"
+                    )
+            elif "no such column" in lower:
                 msg = (
                     f"{msg} (local caldb schema incomplete — sync from remote KOA "
                     "or register calibrations into this cache first)"
                 )
                 status = "error"
-            elif "candidate" in lower or "no " in lower:
-                status = "missing"
             else:
                 status = "error"
             results.append(
@@ -355,7 +392,8 @@ def run(
     instrument_era: str = DEFAULT_INSTRUMENT_ERA,
     mjd_start: float = DEFAULT_MJD_START,
     connect_remote: bool = True,
-    download_all_missing: bool = False,
+    download_all_missing: bool = True,
+    redo_download: bool = False,
     dry_run: bool = False,
     instrument_name: str | None = None,
     force_cache_under_output: bool = True,
@@ -373,9 +411,10 @@ def run(
     connect_remote
         If True, sync metadata from remote KOA when credentials are available.
     download_all_missing
-        If True, download every calibration listed in the local DB but missing
-        from the cache (heavy). Otherwise only files selected for the dummies
-        are downloaded on demand.
+        If True (default), after syncing metadata download every calibration
+        listed in the local DB but missing from the cache.
+    redo_download
+        If True, delete cached FITS for local-DB records and re-download them.
     dry_run
         If True, create dummy files and list intended associations without
         contacting KOA or selecting calibrations.
@@ -425,6 +464,7 @@ def run(
                 store,
                 connect_remote=connect_remote,
                 download_all_missing=download_all_missing,
+                redo_download=redo_download,
                 dry_run=False,
             )
             for spec, path in dummy_paths.items():
@@ -452,11 +492,14 @@ def run(
             "mjd_start": mjd_start,
             "connect_remote": connect_remote,
             "download_all_missing": download_all_missing,
+            "redo_download": redo_download,
             "dry_run": dry_run,
             "cal_roles": [k for k, _ in _CAL_ROLES],
             "note": (
                 "Master fiberflat covers fibers 1-3; per-fiber FIBERFLAT rate maps "
-                "are not caldb products."
+                "are not caldb products. Roles with status 'missing' were not present "
+                "in the KOA caldb for that spectrograph (e.g. ref_etalon / lfc_wavesol "
+                "are often unavailable)."
             ),
         },
     )
@@ -513,11 +556,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not connect to remote KOA; use only the local cache/DB.",
     )
     parser.add_argument(
-        "--download-all-missing",
+        "--skip-bulk-download",
         action="store_true",
         help=(
-            "After syncing metadata, download every calibration missing from the "
-            "cache (not only those selected for the dummy files)."
+            "Do not bulk-download all calibrations missing from the cache after "
+            "sync (default is to download them). Association still downloads "
+            "selected files on demand."
+        ),
+    )
+    parser.add_argument(
+        "--redo-download",
+        action="store_true",
+        help=(
+            "Delete cached FITS for every local-DB calibration record and "
+            "re-download them (implies bulk download)."
         ),
     )
     parser.add_argument(
@@ -540,7 +592,8 @@ def main(argv: list[str] | None = None) -> int:
         instrument_era=args.instrument_era,
         mjd_start=args.mjd_start,
         connect_remote=not args.no_remote,
-        download_all_missing=args.download_all_missing,
+        download_all_missing=not args.skip_bulk_download,
+        redo_download=args.redo_download,
         dry_run=args.dry_run,
         instrument_name=args.instrument_name,
         force_cache_under_output=not args.use_existing_cache,

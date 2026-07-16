@@ -101,7 +101,27 @@ class HISPECCalibrationStore(CalibrationStore):
             else:
                 raise ValueError(f"Input string is not a valid file path: {input}")
 
-        return super().select_and_get_calibration(input, selector)
+        # koa_middleware logs result['filename'] without checking for None when
+        # select_best finds no candidates. Guard here and raise a clear error.
+        logger.info(
+            "Selecting calibration for input=%s using %s",
+            input.get("filename") if hasattr(input, "get") else None,
+            selector,
+        )
+        result = selector.select(input, self.local_db)
+        if result is None:
+            raise ValueError(
+                f"No matching calibration found for selector {type(selector).__name__} "
+                f"(instrument_era={input.get('instrument_era')!r}, "
+                f"spectrograph={input.get('spectrograph')!r}, "
+                f"mjd_start={input.get('mjd_start')!r})."
+            )
+        logger.info(
+            "Selected calibration filename=%s ID=%s",
+            result.get("filename"),
+            result.get("id"),
+        )
+        return self.get_calibration(result)
 
     def save_calibration_file(self, cal: CalibrationModel, cal_record : dict | None = None) -> str:
         """
