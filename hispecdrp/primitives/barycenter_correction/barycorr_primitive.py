@@ -58,8 +58,11 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
 
         # Solar RVs?
         if self.solar is None:
-            solar = any(k in input_model.meta.target_name.lower() for k in ("sun", "solar"))
-            
+            target_name = getattr(input_model.meta, "target_name", None) or ""
+            solar = any(k in str(target_name).lower() for k in ("sun", "solar"))
+        else:
+            solar = bool(self.solar)
+
         if solar:
             logger.info("Calculating SOLAR barycenter corrections...")
         else:

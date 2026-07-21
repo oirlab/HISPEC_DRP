@@ -57,6 +57,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
 
         input_model = datamodels.open(self.input)
         ref_model, _ = self.get_calibration(input_model, 'ref_etalon')
+        ref_model = datamodels.open(ref_model)
         output_model = self.get_output_model(input_model)
 
         # Get fibers and orders

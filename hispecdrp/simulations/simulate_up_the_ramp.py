@@ -126,6 +126,7 @@ __all__ = [
     "get_spectrum_path",
     "load_btsettl_spectrum",
     "create_ramp_and_calibrations",
+    "create_ramp_from_spectrum",
     "create_dummy_fiberflat_rate_files",
     "get_expected_ramp_path",
     "get_expected_rate_map_path",
@@ -143,6 +144,7 @@ __all__ = [
     "get_default_stage1_prim_args",
     "get_default_stage2_prim_args",
     "create_wavelength_solution_model_from_sim",
+    "register_sim_lfc_wavesol",
     "prepare_fiberflat_models",
     "get_fiberflat_prim_args",
 ]
@@ -209,6 +211,57 @@ def create_wavelength_solution_model_from_sim(
                 np.zeros(wave_arr.shape, dtype=np.uint32),
             )
     return wavesol_model
+
+
+def register_sim_lfc_wavesol(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+    connect_remote: bool = False,
+    origin: str = "LOCAL",
+    new_version: bool = False,
+) -> tuple[str, dict]:
+    """
+    Build an HDF-based wavelength solution as ``LFCWavesolModel`` and register it in the local caldb.
+
+    The model uses ``cal_type='lfc_wavesol'``, so the default
+    :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector` used by
+    Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides. This
+    mirrors real-data processing where an LFC wavesol is already in the caldb.
+
+    Parameters
+    ----------
+    spectrograph : str
+        ``'BSPEC'`` or ``'RSPEC'``.
+    meta : dict or None, optional
+        Metadata merged into the wavesol (should include ``instrument_era`` and
+        ``mjd_start`` matching the science ramp / L0 for selector matching).
+    connect_remote : bool, optional
+        Open a remote KOA connection when registering. Default False (local cache only).
+    origin : str, optional
+        Registration origin label. Default ``'LOCAL'``.
+    new_version : bool, optional
+        Passed to :meth:`~hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.register_calibration`.
+        Default False (reuse an existing version family when present).
+
+    Returns
+    -------
+    tuple of (str, dict)
+        Local filepath and caldb record from registration.
+    """
+    from ..calibrations import HISPECCalibrationStore
+
+    wavesol_model = create_wavelength_solution_model_from_sim(spectrograph, meta=meta)
+    with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
+        local_path, cal_record = store.register_calibration(
+            wavesol_model, origin=origin, new_version=new_version
+        )
+    logger.info(
+        "Registered simulated LFC wavesol in caldb (spectrograph=%s): %s",
+        spectrograph,
+        local_path,
+    )
+    return local_path, cal_record
 
 
 def create_simulated_calibration_models(
@@ -1028,6 +1081,115 @@ def create_ramp_and_calibrations(
     if overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
     return ramp_model, calibration_models, np.asarray(rate_map, dtype=np.float64)
+
+
+def create_ramp_from_spectrum(
+    output_dir: str,
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | None = None,
+    template_filename: str | None = None,
+    mag_ab: float | None = 10.0,
+    filter_band: str | None = "J",
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
+    radial_velocity_km_s: float = 0.0,
+    use_master_calibrations: bool = True,
+    connect_remote: bool = False,
+    sync_caldb_first: bool = False,
+    n_reads: int = 10,
+    overwrite_ramp: bool = True,
+    register_wavesol: bool = True,
+    **kwargs,
+) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
+    """
+    Build a native rate map from a 1D spectrum and return a simulated ``RampModel``.
+
+    Convenience wrapper around :func:`create_ramp_and_calibrations` for the common
+    notebook / user path: stamp fibers with a BT-Settl (or custom) spectrum via
+    :class:`~hispecdrp.simulations.simulate_rate_map.SimulateRateMap`, then simulate
+    an up-the-ramp readout using master calibrations from ``KOA_CALIBRATION_CACHE``
+    (when ``use_master_calibrations`` is True).
+
+    When ``register_wavesol`` is True (default), also builds an HDF-based
+    ``LFCWavesolModel`` and registers it in the local caldb as ``lfc_wavesol`` so
+    Stage 1 can use the default wavelength-solution selector (same as real data).
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory for the rate map and raw ramp products.
+    spectrograph : str, optional
+        ``'BSPEC'`` or ``'RSPEC'``. Default ``'BSPEC'``.
+    fibers : list of int or None, optional
+        Fiber numbers to illuminate (1–3). Default ``[1, 2, 3]``.
+    template_filename : str or None, optional
+        BT-Settl HDF5 filename under the package templates directory. Ignored when
+        ``spectrum_wavelengths`` and ``spectrum_flux`` are provided. Default is the
+        E2E default template when neither a custom spectrum nor this name is given.
+    mag_ab, filter_band : optional
+        Normalize the BT-Settl template to this AB magnitude in a 2MASS band
+        (``'J'``, ``'H'``, or ``'K'``). Both must be set or both ``None``.
+    spectrum_wavelengths, spectrum_flux : optional
+        Custom 1D spectrum (with units). When both are set, the template is not loaded.
+    radial_velocity_km_s : float, optional
+        Doppler shift applied before rate-map generation. Default 0.
+    use_master_calibrations : bool, optional
+        Fetch Stage-0 masters from the KOA local caldb. Default True.
+    connect_remote, sync_caldb_first : bool, optional
+        Remote KOA options for master-cal lookup. Defaults False (use local cache).
+    n_reads : int, optional
+        Number of UTR reads. Default 10.
+    overwrite_ramp : bool, optional
+        Overwrite an existing ramp FITS under ``output_dir``. Default True.
+    register_wavesol : bool, optional
+        Register a simulated ``lfc_wavesol`` into ``KOA_CALIBRATION_CACHE`` for
+        default Stage 1 selection. Default True.
+    **kwargs
+        Forwarded to :func:`create_ramp_and_calibrations`.
+
+    Returns
+    -------
+    tuple
+        ``(ramp_model, calibration_models, rate_map)``.
+    """
+    if fibers is None:
+        fibers = [1, 2, 3]
+    ramp_model, calibration_models, rate_map = create_ramp_and_calibrations(
+        rate_map=None,
+        output_dir=output_dir,
+        spectrograph=spectrograph,
+        fibers=fibers,
+        spectrum_wavelengths=spectrum_wavelengths,
+        spectrum_flux=spectrum_flux,
+        radial_velocity_km_s=radial_velocity_km_s,
+        template_filename=template_filename,
+        template_mag_ab=mag_ab,
+        template_2mass_band=filter_band,
+        use_master_calibrations=use_master_calibrations,
+        connect_remote=connect_remote,
+        sync_caldb_first=sync_caldb_first,
+        n_reads=n_reads,
+        overwrite_ramp=overwrite_ramp,
+        **kwargs,
+    )
+    if register_wavesol:
+        wavesol_meta: dict = {"spectrograph": spectrograph.upper()}
+        ramp_meta = getattr(ramp_model, "meta", None)
+        if ramp_meta is not None:
+            for key in ("instrument_name", "instrument_era", "mjd_start"):
+                val = getattr(ramp_meta, key, None)
+                if val is None and hasattr(ramp_meta, "get"):
+                    val = ramp_meta.get(key)
+                if val is not None:
+                    wavesol_meta[key] = val
+        wavesol_meta.setdefault("instrument_era", kwargs.get("instrument_era", "0.0.1"))
+        register_sim_lfc_wavesol(
+            spectrograph,
+            meta=wavesol_meta,
+            connect_remote=False,
+        )
+    return ramp_model, calibration_models, rate_map
 
 
 def simulate_up_the_ramp(

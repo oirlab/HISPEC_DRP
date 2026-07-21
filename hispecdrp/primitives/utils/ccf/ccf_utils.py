@@ -55,6 +55,7 @@ from .ccf_bisector import (
 )
 from .ccf_parabolic import (
     CCFParabolicConfig,
+    _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s,
     _line_mask_parabolic_vertex_lstsq_npt_numba,
     _refine_ccf_rv_after_gaussian_fit_ccf_line_mask,
     _refine_ccf_rv_parabolic_after_gaussian_fit,
