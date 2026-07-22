@@ -178,6 +178,7 @@ def _compute_ccf_spline(
         num = 0.0
         denom = 0.0
         var_acc = 0.0
+        n_present = 0
 
         for idx_line in range(n_lines):
             if freeze_line_set and active[idx_line] == 0:
@@ -221,22 +222,29 @@ def _compute_ccf_spline(
                 w = line_weight
                 num += flux_spl * w
                 var_acc += (w * w) * var
+                n_present += 1
                 if not freeze_line_set:
                     denom += w
             else:
                 w = line_weight
                 num += flux_spl * w
+                n_present += 1
                 if not freeze_line_set:
                     denom += w
 
         if freeze_line_set:
             denom = denom_fixed
 
-        if denom > 0.0:
+        # No in-spectrum contributors: do not emit CCF=0 / σ=0 (breaks weighted fits
+        # on single-line windows when the frozen line leaves the chunk).
+        if denom > 0.0 and n_present > 0:
             ccf_val = num / denom
             ccf_out[idx_vel] = ccf_val
             if use_variance:
-                ccf_err_out[idx_vel] = math.sqrt(var_acc) / denom
+                if var_acc > 0.0:
+                    ccf_err_out[idx_vel] = math.sqrt(var_acc) / denom
+                else:
+                    ccf_err_out[idx_vel] = np.nan
             else:
                 ccf_err_out[idx_vel] = (
                     math.sqrt(ccf_val) if ccf_val > 0.0 else np.nan
