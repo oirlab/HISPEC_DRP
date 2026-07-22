@@ -429,9 +429,10 @@ class CCFBisectorConfig:
         ``y - baseline``). Weak peaks scale ``rv_err`` up by
         ``min_peak_contrast_sigma / (peak/MAD)`` so alias fits are down-weighted.
     rv_err_min_vstep_fraction : float
-        Optional absolute floor as this fraction of the minimum positive velocity
-        spacing. Default ``0`` (disabled): sub-pixel bisector precision should not
-        be forced to a large fraction of a coarse grid step.
+        Floor ``rv_err`` to this fraction of the minimum positive velocity spacing.
+        Keeps noiseless / discretization-only formal σ from collapsing far below the
+        grid scale (which breaks coverage checks like residual ≤ 3×RV_ERR). Default
+        ``0.15`` → 7.5 m/s on a 50 m/s grid.
     """
 
     rv_percentile_lo: float = 10.0
@@ -447,7 +448,9 @@ class CCFBisectorConfig:
     rv_err_bootstrap_seed: int | None = None
     min_cuts: int = 5
     min_peak_contrast_sigma: float = 5.0
-    rv_err_min_vstep_fraction: float = 0.0
+    rv_err_min_vstep_fraction: float = 0.15
+
+
 def _ccf_bisector_wing_crossing_m_s(
     v_m_s: np.ndarray,
     y_peak_up: np.ndarray,
@@ -865,11 +868,15 @@ def fit_ccf_rv_bisector(
     wing_noise = float(mad_std(y_rel, ignore_nan=True))
     if not math.isfinite(wing_noise) or wing_noise <= 0.0:
         wing_noise = float(np.nanstd(y_rel)) if y.size > 1 else peak_amp
-    peak_contrast_sigma = float(peak_amp / max(wing_noise, 1e-30))
+    # Relative noise floor: an absolute 1e-30 destroys contrast when the CCF is an
+    # unnormalized covariance of ~1e-17 fluxes (peak ~1e-34), then weak-peak
+    # scaling inflates ``rv_err`` by many orders of magnitude.
+    wing_floor = max(abs(float(peak_amp)) * 1e-30, float(np.finfo(np.float64).tiny))
+    peak_contrast_sigma = float(peak_amp / max(wing_noise, wing_floor))
     min_contrast = float(cfg.min_peak_contrast_sigma)
     if min_contrast > 0.0 and peak_contrast_sigma < min_contrast:
         # Scale formal σ (do not floor to a multiple of the velocity grid step).
-        rv_err *= float(min_contrast / max(peak_contrast_sigma, 1e-30))
+        rv_err *= float(min_contrast / max(peak_contrast_sigma, 1e-300))
 
     rv_err = max(rv_err, _ccf_rv_err_numeric_floor(v_step))
     boot_sig = float("nan")

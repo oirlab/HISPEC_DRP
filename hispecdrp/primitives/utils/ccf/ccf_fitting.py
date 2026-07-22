@@ -5,7 +5,11 @@ import math
 import numpy as np
 from hispecdrp.primitives.line_fitting.fit_lines import SIGMA_TO_FWHM, fit_line_gauss
 
-from .ccf_bisector import calc_bisector_inverse_slope, fit_ccf_rv_bisector
+from .ccf_bisector import (
+    CCFBisectorConfig,
+    calc_bisector_inverse_slope,
+    fit_ccf_rv_bisector,
+)
 from .ccf_common import effective_ccf_v_step_for_fit
 
 __all__ = ["CCFMetrics", "calc_ccf_metrics"]
@@ -401,6 +405,17 @@ def calc_ccf_metrics(
                 bis_rv_err = cut_err
             elif math.isfinite(fisher_err):
                 bis_rv_err = fisher_err
+            # Re-apply the bisector velocity-grid floor after combining with Fisher:
+            # geomean can undershoot that floor and break residual ≤ 3×RV_ERR coverage.
+            vstep_floor_frac = float(CCFBisectorConfig().rv_err_min_vstep_fraction)
+            if (
+                bis_rv_err is not None
+                and math.isfinite(float(bis_rv_err))
+                and vstep_floor_frac > 0.0
+                and math.isfinite(v_step)
+                and float(v_step) > 0.0
+            ):
+                bis_rv_err = max(float(bis_rv_err), vstep_floor_frac * float(v_step))
         elif (
             bisector is not None
             and np.size(bisector) > 0
