@@ -45,6 +45,58 @@ def _interp_var_linear(wave: np.ndarray, var: np.ndarray, xq: float) -> float:
 
 
 @njit(cache=True, nogil=True)
+def _line_lands_in_spectrum(
+    line_center: float,
+    line_weight: float,
+    vel: float,
+    zb: float,
+    wave: np.ndarray,
+    spec_var: np.ndarray,
+    wave_lo: float,
+    wave_hi: float,
+    spline_lo: float,
+    spline_hi: float,
+    spec_spline_cache_xk: np.ndarray,
+    spec_spline_cache_a: np.ndarray,
+    spec_spline_cache_b: np.ndarray,
+    spec_spline_cache_c: np.ndarray,
+    spec_spline_cache_d: np.ndarray,
+    use_variance: bool,
+) -> bool:
+    """True if the line is a valid CCF contributor at ``vel``."""
+    if not np.isfinite(line_center) or line_center <= 0.0:
+        return False
+    if not np.isfinite(line_weight) or line_weight <= 0.0:
+        return False
+
+    line_center_shifted = _doppler_shift_scalar(line_center, vel, zb)
+    if (
+        line_center_shifted < wave_lo
+        or line_center_shifted > wave_hi
+        or line_center_shifted < spline_lo
+        or line_center_shifted > spline_hi
+    ):
+        return False
+
+    flux_spl = cubic_spline_eval_scalar_arrays(
+        spec_spline_cache_xk,
+        spec_spline_cache_a,
+        spec_spline_cache_b,
+        spec_spline_cache_c,
+        spec_spline_cache_d,
+        line_center_shifted,
+    )
+    if not np.isfinite(flux_spl):
+        return False
+
+    if use_variance:
+        var = _interp_var_linear(wave, spec_var, line_center_shifted)
+        if not (var > 0.0) or not np.isfinite(var):
+            return False
+    return True
+
+
+@njit(cache=True, nogil=True)
 def _compute_ccf_spline(
     wave: np.ndarray,
     spec: np.ndarray,
@@ -59,6 +111,8 @@ def _compute_ccf_spline(
     vel_grid: np.ndarray,
     zb: float,
     use_variance: bool,
+    line_set_velocity: float,
+    freeze_line_set: bool,
     ccf_out: np.ndarray,
     ccf_err_out: np.ndarray,
 ) -> None:
@@ -67,6 +121,16 @@ def _compute_ccf_spline(
 
     Each mask line is a delta function sampled on the spectrum via not-a-knot cubic
     spline interpolation at the Doppler-shifted line center.
+
+    When ``freeze_line_set`` is True, the contributing line set is frozen at
+    ``line_set_velocity`` and the normalizer :math:`W=\\sum_j w_j` over that set is
+    fixed for the whole velocity grid. Members of the set that fall outside the
+    spectrum at another trial velocity contribute :math:`F=0` (and no variance).
+
+    When ``freeze_line_set`` is False, membership and :math:`\\sum w` are recomputed
+    at each trial velocity (used for broad scout searches without an input RV).
+
+    Catalog ``w_j`` only — not :math:`w/\\sigma^2`.
     """
     n_pix = wave.shape[0]
     n_vels = vel_grid.shape[0]
@@ -78,6 +142,36 @@ def _compute_ccf_spline(
     spline_lo = spec_spline_cache_xk[0]
     spline_hi = spec_spline_cache_xk[spec_spline_cache_xk.shape[0] - 1]
 
+    active = np.zeros(n_lines, dtype=np.uint8)
+    denom_fixed = 0.0
+    if freeze_line_set:
+        for idx_line in range(n_lines):
+            if _line_lands_in_spectrum(
+                line_centers[idx_line],
+                line_weights[idx_line],
+                line_set_velocity,
+                zb,
+                wave,
+                spec_var,
+                wave_lo,
+                wave_hi,
+                spline_lo,
+                spline_hi,
+                spec_spline_cache_xk,
+                spec_spline_cache_a,
+                spec_spline_cache_b,
+                spec_spline_cache_c,
+                spec_spline_cache_d,
+                use_variance,
+            ):
+                active[idx_line] = 1
+                denom_fixed += line_weights[idx_line]
+        if not (denom_fixed > 0.0):
+            for idx_vel in range(n_vels):
+                ccf_out[idx_vel] = np.nan
+                ccf_err_out[idx_vel] = np.nan
+            return
+
     for idx_vel in range(n_vels):
         vel = vel_grid[idx_vel]
 
@@ -86,13 +180,17 @@ def _compute_ccf_spline(
         var_acc = 0.0
 
         for idx_line in range(n_lines):
+            if freeze_line_set and active[idx_line] == 0:
+                continue
+
             line_center = line_centers[idx_line]
             line_weight = line_weights[idx_line]
 
-            if not np.isfinite(line_center) or line_center <= 0.0:
-                continue
-            if not np.isfinite(line_weight) or line_weight <= 0.0:
-                continue
+            if not freeze_line_set:
+                if not np.isfinite(line_center) or line_center <= 0.0:
+                    continue
+                if not np.isfinite(line_weight) or line_weight <= 0.0:
+                    continue
 
             line_center_shifted = _doppler_shift_scalar(line_center, vel, zb)
 
@@ -102,6 +200,7 @@ def _compute_ccf_spline(
                 or line_center_shifted < spline_lo
                 or line_center_shifted > spline_hi
             ):
+                # Frozen set: out-of-spectrum lines contribute F=0 (W unchanged).
                 continue
 
             flux_spl = cubic_spline_eval_scalar_arrays(
@@ -119,14 +218,19 @@ def _compute_ccf_spline(
                 var = _interp_var_linear(wave, spec_var, line_center_shifted)
                 if not (var > 0.0) or not np.isfinite(var):
                     continue
-                w = line_weight / var
+                w = line_weight
                 num += flux_spl * w
-                denom += w
                 var_acc += (w * w) * var
+                if not freeze_line_set:
+                    denom += w
             else:
                 w = line_weight
                 num += flux_spl * w
-                denom += w
+                if not freeze_line_set:
+                    denom += w
+
+        if freeze_line_set:
+            denom = denom_fixed
 
         if denom > 0.0:
             ccf_val = num / denom
@@ -155,6 +259,7 @@ def compute_ccf_spline(
     vsys: float = 0.0,
     use_variance: bool = True,
     vel_grid: np.ndarray | None = None,
+    line_set_velocity: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Cross-correlation of a spectrum with delta-function mask lines via cubic spline sampling.
@@ -163,7 +268,19 @@ def compute_ccf_spline(
     velocity ``v`` the line center is Doppler-mapped as
     :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` and the spectrum
     flux is read by **not-a-knot cubic spline** interpolation on good pixels (``dq=0``).
-    The CCF at each velocity is a weighted mean over contributing lines.
+
+    When ``line_set_velocity`` is finite (the input / prior RV; use ``0`` when the
+    caller wants rest-frame membership), the contributing line set is frozen there
+    and :math:`W=\\sum_j w_j` over that set is fixed for the whole velocity grid.
+    Members of the set that fall outside at another trial ``v`` contribute
+    :math:`F=0` rather than being dropped from ``W``. When ``line_set_velocity`` is
+    ``None``, membership and ``W`` are recomputed at each trial velocity (needed for
+    broad scout searches before a prior RV exists).
+
+    The CCF is :math:`\\sum_j w_j F_j\\,/\\,W` (catalog weights; not inverse-variance
+    reweighted), with
+    :math:`\\sigma_{\\mathrm{CCF}}=\\sqrt{\\sum_j w_j^2\\sigma_j^2}/W` when
+    ``use_variance`` is True.
     """
     wave = np.asarray(wave, dtype=np.float64).ravel()
     spec = np.asarray(spec, dtype=np.float64).ravel()
@@ -180,6 +297,11 @@ def compute_ccf_spline(
         raise ValueError(
             "compute_ccf_spline: provide vel_grid or both vel_window and vel_step"
         )
+
+    freeze_line_set = (
+        line_set_velocity is not None and np.isfinite(float(line_set_velocity))
+    )
+    v_line_set = float(line_set_velocity) if freeze_line_set else 0.0
 
     good = spec_dq == 0
     if int(np.count_nonzero(good)) < 2:
@@ -210,6 +332,8 @@ def compute_ccf_spline(
         vel_grid,
         float(zb),
         use_variance,
+        v_line_set,
+        freeze_line_set,
         ccf_out,
         ccf_err_out,
     )

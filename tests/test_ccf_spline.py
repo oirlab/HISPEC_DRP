@@ -87,3 +87,63 @@ def test_compute_ccf_spline_shifts_with_injected_velocity():
     )
     peak_v = float(vel_grid[int(np.nanargmax(ccf))])
     assert abs(peak_v + vel_inj) < 800.0
+
+
+def test_compute_ccf_spline_fixed_line_set_normalizer():
+    """Line set frozen at line_set_velocity; W does not jump when a line leaves."""
+    wave = np.linspace(1.0, 1.01, 300, dtype=np.float64)
+    # Continuum + two absorption lines near opposite ends of the order.
+    lam_a, lam_b = 1.0015, 1.0085
+    spec = np.ones_like(wave)
+    spec -= 0.4 * np.exp(-0.5 * ((wave - lam_a) / 0.00008) ** 2)
+    spec -= 0.4 * np.exp(-0.5 * ((wave - lam_b) / 0.00008) ** 2)
+    spec_err = np.full_like(wave, 0.01)
+    spec_dq = np.zeros(wave.shape[0], dtype=np.int32)
+    centers = np.array([lam_a, lam_b], dtype=np.float64)
+    weights = np.array([1.0, 2.0], dtype=np.float64)
+
+    # At RV=0 both lines land; choose a velocity where the redder line leaves.
+    v_leave = C_M_S * (wave[-1] / lam_b - 1.0) + 500.0
+    vel_grid = np.array([0.0, v_leave], dtype=np.float64)
+
+    _, ccf0, err0 = compute_ccf_spline(
+        wave,
+        spec,
+        spec_err,
+        spec_dq,
+        centers,
+        weights,
+        vel_grid=vel_grid,
+        line_set_velocity=0.0,
+        use_variance=True,
+    )
+    assert np.all(np.isfinite(ccf0))
+    assert np.all(np.isfinite(err0))
+    # At v_leave the redder fixed-set line is out → F=0 for that term, but W is
+    # still 1+2, so the CCF must differ from a renormalized single-line mean.
+    _, ccf_one, _ = compute_ccf_spline(
+        wave,
+        spec,
+        spec_err,
+        spec_dq,
+        np.array([lam_a], dtype=np.float64),
+        np.array([1.0], dtype=np.float64),
+        vel_grid=np.array([v_leave], dtype=np.float64),
+        line_set_velocity=0.0,
+        use_variance=True,
+    )
+    assert abs(float(ccf0[1]) - float(ccf_one[0])) > 1e-6
+
+    # No freeze (scout mode): renormalized single-line mean matches.
+    _, ccf_dyn, _ = compute_ccf_spline(
+        wave,
+        spec,
+        spec_err,
+        spec_dq,
+        centers,
+        weights,
+        vel_grid=np.array([v_leave], dtype=np.float64),
+        line_set_velocity=None,
+        use_variance=True,
+    )
+    assert abs(float(ccf_dyn[0]) - float(ccf_one[0])) < 1e-10

@@ -42,6 +42,17 @@ logger = logging.getLogger(__name__)
 # mask-line prominence peak seed (coarse uniform grids alias without this step).
 _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S = 20_000.0
 
+# Bisector vs Gaussian acceptance: require |bis − gauss| ≤ max(frac×FWHM, abs floor).
+# The previous gate (max(3×FWHM, 5 km/s)) was far too loose for blend-asymmetric cores.
+_BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION = 0.25
+_BISECTOR_VS_GAUSS_MAX_ABS_M_S = 500.0
+
+# When Gaussian and/or bisector disagree with the discrete/parabolic CCF peak by more
+# than max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
+# Keep this near ~1–2 grid steps so ~100 m/s wing-biased fits on a 50 m/s grid are caught.
+_FIT_VS_PEAK_DISAGREE_N_VSTEP = 1.5
+_FIT_VS_PEAK_DISAGREE_MIN_M_S = 50.0
+
 
 def _line_mask_spline_peak_index(v_grid: np.ndarray, ccf_raw: np.ndarray) -> int:
     """Prominence-based peak index on ``-ccf_raw`` (mask-line convention)."""
@@ -201,18 +212,88 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
     return gaussian_fit, bisector_fit
 
 
-def _pipeline_rv_from_metrics(metrics: CCFMetrics) -> tuple[float, float]:
-    """Chunk RV: prefer absolute bisector refine (``bis_rv``) when near the Gaussian."""
+def _line_mask_ccf_peak_rv_m_s(
+    vel_grid: np.ndarray,
+    ccf_raw: np.ndarray,
+    *,
+    anchor_m_s: float | None = None,
+    half_width_m_s: float | None = None,
+) -> float:
+    """
+    Sub-pixel CCF peak RV (m/s) on the mask-line stored (peak-up) convention.
+
+    When ``anchor_m_s`` / ``half_width_m_s`` are set, the peak is taken only inside
+    that local window so a broad scout grid cannot latch onto a distant alias.
+    """
+    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
+    raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
+    if vg.size < 3 or raw.size != vg.size:
+        return float("nan")
+    stored = -raw if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else raw
+    if (
+        anchor_m_s is not None
+        and math.isfinite(float(anchor_m_s))
+        and half_width_m_s is not None
+        and math.isfinite(float(half_width_m_s))
+        and float(half_width_m_s) > 0.0
+    ):
+        hw = float(half_width_m_s)
+        anc = float(anchor_m_s)
+        m = (vg >= anc - hw) & (vg <= anc + hw) & np.isfinite(vg) & np.isfinite(stored)
+        if int(np.count_nonzero(m)) >= 3:
+            vg = vg[m]
+            stored = stored[m]
+        else:
+            return float("nan")
+    return float(_ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored))
+
+
+def _velocity_grid_step_m_s(vel_grid: np.ndarray) -> float:
+    """Median positive spacing of a velocity grid (m/s), or NaN if unavailable."""
+    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
+    if vg.size < 2:
+        return float("nan")
+    ok = np.isfinite(vg)
+    if int(np.count_nonzero(ok)) < 2:
+        return float("nan")
+    d = np.diff(np.sort(vg[ok]))
+    d = d[np.isfinite(d) & (d > 0.0)]
+    if d.size == 0:
+        return float("nan")
+    return float(np.median(d))
+
+
+def _pipeline_rv_from_metrics(
+    metrics: CCFMetrics,
+    *,
+    vel_grid: np.ndarray | None = None,
+    ccf_raw: np.ndarray | None = None,
+) -> tuple[float, float]:
+    """
+    Chunk RV from :class:`CCFMetrics`, with asymmetric-core guards.
+
+    1. Prefer absolute bisector refine (``bis_rv``) only when it lies within a **tight**
+       gate of the Gaussian (``max(0.25×FWHM, 500 m/s)``).
+    2. If a CCF velocity grid is provided and the Gaussian and/or bisector disagree with
+       the **local** discrete/parabolic peak (anchored on the Gaussian, half-width
+       ``max(FWHM, 5×Δv, 1 km/s)``) by more than ``max(1.5×Δv, 50 m/s)``, fall back to
+       that peak RV. The local window avoids broad-grid alias peaks.
+    """
     rv = float(metrics.rv)
     err = float(metrics.rv_err)
+    gauss_rv = rv
+    bis_rv: float | None = None
     if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):
         bis_rv = float(metrics.bis_rv)
         bis_err = metrics.bis_rv_err
-        if (
-            metrics.fwhm > 0.0
-            and np.isfinite(metrics.fwhm)
-            and abs(bis_rv - rv) <= max(3.0 * float(metrics.fwhm), 5000.0)
-        ):
+        fwhm = float(metrics.fwhm) if metrics.fwhm is not None else float("nan")
+        bis_gate = max(
+            _BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION * fwhm
+            if np.isfinite(fwhm) and fwhm > 0.0
+            else 0.0,
+            _BISECTOR_VS_GAUSS_MAX_ABS_M_S,
+        )
+        if abs(bis_rv - gauss_rv) <= bis_gate:
             rv = bis_rv
             if (
                 bis_err is not None
@@ -220,6 +301,43 @@ def _pipeline_rv_from_metrics(metrics: CCFMetrics) -> tuple[float, float]:
                 and float(bis_err) > 0.0
             ):
                 err = float(bis_err)
+
+    if (
+        vel_grid is not None
+        and ccf_raw is not None
+        and math.isfinite(gauss_rv)
+    ):
+        v_step = _velocity_grid_step_m_s(vel_grid)
+        fwhm = float(metrics.fwhm) if metrics.fwhm is not None else float("nan")
+        peak_hw = 1000.0
+        if np.isfinite(fwhm) and fwhm > 0.0:
+            peak_hw = max(peak_hw, float(fwhm))
+        if math.isfinite(v_step) and v_step > 0.0:
+            peak_hw = max(peak_hw, 5.0 * float(v_step))
+        peak_rv = _line_mask_ccf_peak_rv_m_s(
+            vel_grid,
+            ccf_raw,
+            anchor_m_s=gauss_rv,
+            half_width_m_s=peak_hw,
+        )
+        if math.isfinite(peak_rv):
+            disagree_thresh = _FIT_VS_PEAK_DISAGREE_MIN_M_S
+            if math.isfinite(v_step) and v_step > 0.0:
+                disagree_thresh = max(
+                    disagree_thresh,
+                    _FIT_VS_PEAK_DISAGREE_N_VSTEP * float(v_step),
+                )
+            disagree = abs(gauss_rv - peak_rv) > disagree_thresh
+            if bis_rv is not None and math.isfinite(bis_rv):
+                disagree = disagree or (abs(bis_rv - peak_rv) > disagree_thresh)
+            if disagree:
+                rv = float(peak_rv)
+                if not (math.isfinite(err) and err > 0.0):
+                    err = (
+                        0.15 * float(v_step)
+                        if math.isfinite(v_step) and v_step > 0.0
+                        else 1.0
+                    )
     return rv, err
 
 
@@ -266,7 +384,16 @@ def fit_line_mask_order_mean_rv_spline(
         gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
         metrics_fit_half_width_m_s=metrics_fit_half_width_m_s,
     )
-    rv, err = _pipeline_rv_from_metrics(metrics)
+    raw = (
+        -np.asarray(ccf_mean_stored, dtype=np.float64).ravel()
+        if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW
+        else np.asarray(ccf_mean_stored, dtype=np.float64).ravel()
+    )
+    rv, err = _pipeline_rv_from_metrics(
+        metrics,
+        vel_grid=vel_grid,
+        ccf_raw=raw,
+    )
     ok = (
         np.isfinite(rv)
         and np.isfinite(err)
@@ -395,6 +522,7 @@ def rv_per_chunks_line_mask_spline(
     line_mask_line_chunk_v_center_m_s: float | None = None,
     gaussian_seed_mean_m_s: float | None = None,
     metrics_fit_half_width_m_s: float | None = None,
+    line_set_velocity_m_s: float | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -412,6 +540,12 @@ def rv_per_chunks_line_mask_spline(
 
     Chunking matches :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`.
     Stored CCF rows follow :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`.
+
+    The spline CCF freezes its line set at ``line_set_velocity_m_s`` when finite;
+    otherwise at ``gaussian_seed_mean_m_s``, then ``line_mask_line_chunk_v_center_m_s``.
+    If none of those are set (broad scout with no input RV), membership is recomputed
+    at each trial velocity — freezing at rest with :math:`F=0` for missing lines
+    creates false CCF minima on wide grids.
     """
     w = np.asarray(wave_um, dtype=np.float64).ravel()
     s = np.asarray(spec, dtype=np.float64).ravel()
@@ -426,6 +560,19 @@ def rv_per_chunks_line_mask_spline(
         ccf_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         std_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out)
+
+    if line_set_velocity_m_s is not None and math.isfinite(float(line_set_velocity_m_s)):
+        v_line_set: float | None = float(line_set_velocity_m_s)
+    elif gaussian_seed_mean_m_s is not None and math.isfinite(
+        float(gaussian_seed_mean_m_s)
+    ):
+        v_line_set = float(gaussian_seed_mean_m_s)
+    elif line_mask_line_chunk_v_center_m_s is not None and math.isfinite(
+        float(line_mask_line_chunk_v_center_m_s)
+    ):
+        v_line_set = float(line_mask_line_chunk_v_center_m_s)
+    else:
+        v_line_set = None
 
     vr_lo = float(v_min_m_s)
     vr_hi = float(v_max_m_s)
@@ -569,6 +716,7 @@ def rv_per_chunks_line_mask_spline(
             vel_grid=v_grid,
             zb=float(zb),
             use_variance=True,
+            line_set_velocity=v_line_set,
         )
         if not np.any(np.isfinite(ccf_raw)):
             continue
@@ -590,7 +738,11 @@ def rv_per_chunks_line_mask_spline(
                 )
             ),
         )
-        rv, rv_err = _pipeline_rv_from_metrics(metrics)
+        rv, rv_err = _pipeline_rv_from_metrics(
+            metrics,
+            vel_grid=vel_grid,
+            ccf_raw=ccf_raw,
+        )
         if not (np.isfinite(rv) and np.isfinite(rv_err) and float(rv_err) > 0.0):
             continue
 
