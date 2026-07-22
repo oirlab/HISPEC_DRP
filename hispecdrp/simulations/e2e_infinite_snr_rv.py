@@ -38,10 +38,10 @@ __all__ = [
 HIGH_PRECISION_STELLAR_RV_ARGS: dict[str, Any] = {
     "algorithm": "ccf_line_mask",
     "mask_ccf_pixel_interp_order": 1,
-    "mask_auto_hybrid_scout": False,
+    "mask_auto_center_scout": False,
     "window_line_by_line": True,
-    "v_step_fine": 0.01,
-    "v_window_fine": 500.0,
+    "v_half_window": 500.0,
+    "v_step_coarse": 0.01,
     "chunk_rv_prior_half_width_m_s": 3000.0,
     "outlier_sigma": 4.0,
     "preview_write_png": False,

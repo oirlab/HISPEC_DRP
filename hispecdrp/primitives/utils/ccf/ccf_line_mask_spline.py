@@ -32,6 +32,7 @@ from .ccf_utils import (
 __all__ = [
     "finalize_ccf_preview_dict_spline",
     "fit_line_mask_order_mean_rv_spline",
+    "line_mask_scout_center_m_s",
     "rv_per_chunks_line_mask_spline",
 ]
 
@@ -59,6 +60,50 @@ def _line_mask_spline_peak_index(v_grid: np.ndarray, ccf_raw: np.ndarray) -> int
     return int(_line_mask_peak_index_integral_and_prominence(ys, n, w_prom, w_int))
 
 
+def line_mask_scout_center_m_s(
+    scout_rvs: np.ndarray,
+    v_grid: np.ndarray,
+    ccf_stored_mean: np.ndarray,
+) -> float:
+    """
+    Velocity center from a coarse scout pass on spline mask CCFs.
+
+    Prefer the RV already measured by :func:`rv_per_chunks_line_mask_spline` on the
+    scout pass (prominence seed + :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`).
+    That estimate is typically within a coarse-grid step of the true peak.
+
+    Do **not** use a global argmax on the mean stored CCF: with
+    :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`
+    the stored series is often entirely negative and the true alignment is a *minimum*
+    of the stored values, so argmax-style scouts can land hundreds of km/s away from the
+    real peak.
+
+    Falls back to the same prominence peak used by :func:`_fit_spline_mask_ccf_metrics`,
+    then to a sub-pixel extremum on the stored CCF if needed.
+    """
+    rvs = np.asarray(scout_rvs, dtype=np.float64).ravel()
+    ok = np.isfinite(rvs)
+    if np.any(ok):
+        return float(np.nanmedian(rvs[ok]))
+
+    vg = np.asarray(v_grid, dtype=np.float64).ravel()
+    stored = np.asarray(ccf_stored_mean, dtype=np.float64).ravel()
+    if vg.size < 3 or stored.size != vg.size:
+        return float("nan")
+
+    raw = -stored if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else stored
+    i_peak = _line_mask_spline_peak_index(vg, raw)
+    if 0 <= i_peak < int(vg.size) and math.isfinite(float(vg[i_peak])):
+        return float(vg[i_peak])
+
+    v_sub = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored)
+    if math.isfinite(float(v_sub)):
+        return float(v_sub)
+    if np.any(np.isfinite(stored)):
+        return float(vg[int(np.nanargmax(stored))])
+    return float("nan")
+
+
 def _fit_spline_mask_ccf_metrics(
     vel_grid: np.ndarray,
     ccf_raw: np.ndarray,
@@ -70,8 +115,11 @@ def _fit_spline_mask_ccf_metrics(
     """
     Fit :class:`CCFMetrics` on a spline mask CCF with mask-line peak seeding.
 
-    Uses a local velocity window around the prominence peak (or ``gaussian_seed_mean_m_s`` when
-    set) so coarse-grid alias minima do not dominate the Gaussian fit.
+    Uses a local velocity window around the prominence peak so coarse-grid alias
+    minima do not dominate the Gaussian fit. An optional ``gaussian_seed_mean_m_s``
+    (scout RV) is forwarded as ``mu_guess`` for the Gaussian/bisector only;
+    it must **not** recenter the metrics window — a scout-centered cut can
+    undersample the blue wing relative to the prominence window.
     """
     vg = np.asarray(vel_grid, dtype=np.float64).ravel()
     raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
@@ -83,24 +131,14 @@ def _fit_spline_mask_ccf_metrics(
     if ce is not None and ce.size != raw.size:
         ce = None
     stored = -raw if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else raw.copy()
-    if (
-        gaussian_seed_mean_m_s is not None
-        and math.isfinite(float(gaussian_seed_mean_m_s))
-    ):
-        v_center = float(gaussian_seed_mean_m_s)
+    i_peak = _line_mask_spline_peak_index(vg, raw)
+    if i_peak < 0 or i_peak >= vg.size:
+        v_sub = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored)
+        v_center = float(v_sub) if math.isfinite(float(v_sub)) else float(vg[int(np.nanargmax(stored))])
     else:
-        i_peak = _line_mask_spline_peak_index(vg, raw)
-        if i_peak < 0 or i_peak >= vg.size:
-            v_sub = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored)
-            v_center = float(v_sub) if math.isfinite(float(v_sub)) else float(vg[int(np.nanargmax(stored))])
-        else:
-            v_center = float(vg[i_peak])
+        v_center = float(vg[i_peak])
     if fit_half_width_m_s is None or not math.isfinite(float(fit_half_width_m_s)) or float(fit_half_width_m_s) <= 0.0:
-        hw = (
-            _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S
-            if gaussian_seed_mean_m_s is None
-            else max(2.5 * 300.0, 600.0)
-        )
+        hw = _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S
     else:
         hw = float(fit_half_width_m_s)
     in_win = (vg >= v_center - hw) & (vg <= v_center + hw)
@@ -113,6 +151,13 @@ def _fit_spline_mask_ccf_metrics(
         pix_size=None,
         absorption=not LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
         calc_bis=True,
+        # Forward scout center only as a fit seed, not as the window center.
+        mu_guess=(
+            float(gaussian_seed_mean_m_s)
+            if gaussian_seed_mean_m_s is not None
+            and math.isfinite(float(gaussian_seed_mean_m_s))
+            else None
+        ),
     )
 
 
@@ -157,7 +202,7 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
 
 
 def _pipeline_rv_from_metrics(metrics: CCFMetrics) -> tuple[float, float]:
-    """Chunk RV: Gaussian center; bisector when finite and near the Gaussian."""
+    """Chunk RV: prefer absolute bisector refine (``bis_rv``) when near the Gaussian."""
     rv = float(metrics.rv)
     err = float(metrics.rv_err)
     if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):

@@ -37,7 +37,7 @@ def test_combine_stellar_rv_median_fallback_when_iv_mean_biased():
 
 
 def test_combine_stellar_rv_prior_gate_recovers_fiber2_like_bimodal_aliases():
-    """Alias peaks within ±120 km/s must not dominate when a hybrid prior is known."""
+    """Alias peaks within ±120 km/s must not dominate when a CCF center prior is known."""
     true_ms = 34420.0
     good = np.array([34322.0, 34116.9, 36168.2, 34952.3, 33076.7])
     bad_aliases = np.array(

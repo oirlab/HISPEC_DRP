@@ -1,17 +1,29 @@
 from dataclasses import dataclass
 
+import math
+
 import numpy as np
-from hispecdrp.primitives.line_fitting.fit_lines import SIGMA_TO_FWHM, fit_line_gauss, GaussianLineFitResult
+from hispecdrp.primitives.line_fitting.fit_lines import SIGMA_TO_FWHM, fit_line_gauss
 
-from .ccf_bisector import calc_bisector_inverse_slope
+from .ccf_bisector import calc_bisector_inverse_slope, fit_ccf_rv_bisector
+from .ccf_common import effective_ccf_v_step_for_fit
 
-__all__ = ["calc_ccf_metrics"]
+__all__ = ["CCFMetrics", "calc_ccf_metrics"]
+
 
 @dataclass
 class CCFMetrics:
     """
-    Dataclass to hold the results of a CCF fit.
+    Results of a CCF Gaussian fit plus bisector analysis.
+
+    ``rv`` / ``rv_err`` come from the Gaussian line fit (peak location, width, and
+    amplitude). ``bis_rv`` / ``bis_rv_err`` are the **absolute** bisector radial
+    velocity from NEID-style weighted percentile cuts — the refined RV after the
+    Gaussian. ``bis_shallow`` / ``bis_core`` (and ``bisector`` / ``bis_levels``) come
+    from the Queloz et al. (2001) bisector-inverse-slope construction; the BIS slope
+    itself is ``bis_shallow - bis_core`` when both are finite.
     """
+
     contrast: float
     contrast_err: float
     rv: float
@@ -20,16 +32,16 @@ class CCFMetrics:
     fwhm_err: float
     offset: float
     offset_err: float
-    bis_rv: float
-    bis_rv_err: float
-    bis_shallow : float | None = None
-    bis_shallow_err : float | None = None
-    bis_core : float | None = None
-    bis_core_err : float | None = None
+    bis_rv: float | None
+    bis_rv_err: float | None
+    bis_shallow: float | None = None
+    bis_shallow_err: float | None = None
+    bis_core: float | None = None
+    bis_core_err: float | None = None
     bis_levels: np.ndarray | None = None
     bisector: np.ndarray | None = None
-    bis_quant_shallow : tuple[float, float] | None = None
-    bis_quant_core : tuple[float, float] | None = None
+    bis_quant_shallow: tuple[float, float] | None = None
+    bis_quant_core: tuple[float, float] | None = None
 
     @property
     def sigma(self) -> float:
@@ -69,7 +81,7 @@ def _calc_rverr_from_ccf(
     rv0: float | None = None,
     fwhm: float | None = None,
     fwhm_factor: float = 0.85,
-    pix_size : float | None = None,
+    pix_size: float | None = None,
 ) -> float:
     """
     Estimate the 1-sigma uncertainty on a CCF-derived radial velocity
@@ -206,19 +218,29 @@ def _calc_rverr_from_ccf(
 
 
 def calc_ccf_metrics(
-    vel_grid : np.ndarray,
-    ccf : np.ndarray,
-    ccf_err : np.ndarray | None = None,
-    pix_size : float | None = None,
-    absorption : bool = False,
-    calc_bis : bool = True,
-    n_levels_bis : int = 100,
-    bis_quant_shallow : tuple[float, float] | None = (0.10, 0.40),
-    bis_quant_core : tuple[float, float] | None = (0.55, 0.90),
-    override_rv_err_fisher : bool = True,
-) -> GaussianLineFitResult:
+    vel_grid: np.ndarray,
+    ccf: np.ndarray,
+    ccf_err: np.ndarray | None = None,
+    pix_size: float | None = None,
+    absorption: bool = False,
+    calc_bis: bool = True,
+    n_levels_bis: int = 100,
+    bis_quant_shallow: tuple[float, float] | None = (0.10, 0.40),
+    bis_quant_core: tuple[float, float] | None = (0.55, 0.90),
+    override_rv_err_fisher: bool = True,
+    mu_guess: float | None = None,
+) -> CCFMetrics:
     """
-    Fit a Gaussian plus flat background to a CCF.
+    Fit a Gaussian to a CCF and (by default) run full bisector analysis.
+
+    Always computes the Gaussian peak (``rv``, ``fwhm``, ``contrast``, ``offset``) so
+    the CCF width and amplitude are available. When ``calc_bis`` is True, also:
+
+    1. Queloz BIS construction → ``bis_shallow`` / ``bis_core`` / ``bisector`` /
+       ``bis_levels`` (activity / asymmetry diagnostics; BIS slope =
+       ``bis_shallow - bis_core``).
+    2. NEID-style weighted-percentile bisector RV → ``bis_rv`` / ``bis_rv_err``, the
+       **refined absolute RV** after the Gaussian (not the BIS slope).
 
     Parameters
     ----------
@@ -233,9 +255,10 @@ def calc_ccf_metrics(
     pix_size : float, optional
         Size of a pixel in the velocity grid (m/s) to account for oversampling the CCF.
     calc_bis : bool, optional
-        Whether to calculate the bisector inverse slope. Default True.
+        Whether to run Queloz BIS diagnostics and the absolute bisector RV refine.
+        Default True.
     n_levels_bis : int, optional
-        Number of levels to use for the bisector calculation. Default 100.
+        Number of levels to use for the Queloz bisector curve. Default 100.
     bis_quant_shallow : tuple[float, float], optional
         Lower/upper depth fractions (0-1, measured from the continuum) bounding
         the shallow (near-continuum) region used for ``v_shallow``.
@@ -245,22 +268,29 @@ def calc_ccf_metrics(
         the core (near-core) region used for ``v_core``.
         Defaults to (0.55, 0.90).
     override_rv_err_fisher : bool, optional
-        Whether to override the RV error from the Gaussian fit with the Fisher information estimate. Default True.
+        Whether to override the RV error from the Gaussian fit with the Fisher
+        information estimate. Default True.
+    mu_guess : float or None, optional
+        Velocity seed (m/s) for the Gaussian fit. When omitted, uses the discrete
+        argmax/argmin of ``ccf``. Pass the scout / prominence center on multi-line
+        mask CCFs so a secondary extremum in a wide window does not steal the seed.
 
     Returns
     -------
-    result : GaussianLineFitResult
-        Dataclass containing the fitted parameters and their uncertainties.
-        Bisector inverse slope results are included if `calc_bis` is True.
+    result : CCFMetrics
+        Fully populated Gaussian + bisector metrics when ``calc_bis`` is True.
     """
 
-    # Index of the peak (emission line) or trough (abosrption line) in the CCF
-    idx_mu = np.argmax(ccf) if not absorption else np.argmin(ccf)
-    mu_guess = vel_grid[idx_mu]
+    # Index of the peak (emission line) or trough (absorption line) in the CCF
+    if mu_guess is not None and math.isfinite(float(mu_guess)):
+        mu_guess_v = float(mu_guess)
+    else:
+        idx_mu = np.argmax(ccf) if not absorption else np.argmin(ccf)
+        mu_guess_v = float(vel_grid[idx_mu])
 
-    # Default CCF error
+    # Default CCF error (use |ccf|: stored mask CCFs are often entirely negative)
     if ccf_err is None:
-        ccf_err = np.sqrt(np.maximum(ccf, 1e-30))
+        ccf_err = np.sqrt(np.maximum(np.abs(ccf), 1e-30))
 
     # Oversample correction (naive)
     if pix_size is not None:
@@ -272,8 +302,10 @@ def calc_ccf_metrics(
 
     # Fit CCF with gaussian
     fit_result = fit_line_gauss(
-        vel_grid, ccf, ccf_err_eff,
-        mu_guess=mu_guess,
+        vel_grid,
+        ccf,
+        ccf_err_eff,
+        mu_guess=mu_guess_v,
         background_poly_deg=0,
         absorption=absorption,
     )
@@ -281,38 +313,89 @@ def calc_ccf_metrics(
     # Override the RV error
     if override_rv_err_fisher:
         rv_err = _calc_rverr_from_ccf(
-            vel_grid, ccf, ccf_err,
+            vel_grid,
+            ccf,
+            ccf_err,
             rv0=fit_result.mu,
             fwhm=fit_result.fwhm,
-            pix_size=pix_size
+            pix_size=pix_size,
         )
     else:
         rv_err = fit_result.mu_err
 
+    bis_rv = None
+    bis_rv_err = None
+    bis_shallow = None
+    bis_shallow_err = None
+    bis_core = None
+    bis_core_err = None
+    bis_levels = None
+    bisector = None
+
     if calc_bis:
+        # Queloz BIS: first return is the *slope* (v_shallow - v_core), not absolute RV.
         (
-            bis_rv, bis_rv_err,
-            bis_shallow, bis_shallow_err,
-            bis_core, bis_core_err,
-            bis_levels, bisector
+            _bis_slope,
+            _bis_slope_err,
+            bis_shallow,
+            bis_shallow_err,
+            bis_core,
+            bis_core_err,
+            bis_levels,
+            bisector,
         ) = calc_bisector_inverse_slope(
             vel_grid,
-            ccf, ccf_err_eff,
+            ccf,
+            ccf_err_eff,
             n_levels=n_levels_bis,
             quant_shallow=bis_quant_shallow,
-            quant_core=bis_quant_core
+            quant_core=bis_quant_core,
         )
-    else:
-        bis_rv = None
-        bis_rv_err = None
-        bis_shallow = None
-        bis_shallow_err = None
-        bis_core = None
-        bis_core_err = None
-        bis_levels = None
-        bisector = None
+        # Absolute bisector RV (refined peak). Prefer the caller ``mu_guess`` when the
+        # Gaussian center has wandered far: on broad, shallow mask CCFs an emission
+        # Gaussian with a flat continuum often drifts by several km/s, and seeding
+        # the bisector there reintroduces injected→recovered tilt.
+        v_step = (
+            float(pix_size)
+            if pix_size is not None and math.isfinite(float(pix_size)) and float(pix_size) > 0.0
+            else float(effective_ccf_v_step_for_fit(vel_grid))
+        )
+        bis_seed = float(fit_result.mu)
+        if (
+            mu_guess is not None
+            and math.isfinite(float(mu_guess))
+            and math.isfinite(bis_seed)
+            and abs(bis_seed - mu_guess_v) > 2000.0
+        ):
+            bis_seed = mu_guess_v
+        rv_b, err_b = fit_ccf_rv_bisector(
+            vel_grid,
+            ccf,
+            v_step,
+            ccf_err=ccf_err_eff,
+            return_diagnostics=False,
+            gaussian_seed_mean_m_s=bis_seed,
+        )
+        if math.isfinite(float(rv_b)):
+            bis_rv = float(rv_b)
+            if err_b is not None and math.isfinite(float(err_b)) and float(err_b) > 0.0:
+                bis_rv_err = float(err_b)
+        elif (
+            bisector is not None
+            and np.size(bisector) > 0
+            and np.any(np.isfinite(bisector))
+        ):
+            # Fallback: mean Queloz bisector midpoint curve (absolute velocities).
+            bis_rv = float(np.nanmean(np.asarray(bisector, dtype=np.float64)))
+        elif (
+            bis_shallow is not None
+            and bis_core is not None
+            and math.isfinite(float(bis_shallow))
+            and math.isfinite(float(bis_core))
+        ):
+            bis_rv = 0.5 * (float(bis_shallow) + float(bis_core))
 
-    ccf_result = CCFMetrics(
+    return CCFMetrics(
         contrast=fit_result.amplitude,
         contrast_err=fit_result.amplitude_err,
         rv=fit_result.mu,
@@ -330,7 +413,5 @@ def calc_ccf_metrics(
         bis_levels=bis_levels,
         bisector=bisector,
         bis_quant_shallow=bis_quant_shallow,
-        bis_quant_core=bis_quant_core
+        bis_quant_core=bis_quant_core,
     )
-
-    return ccf_result

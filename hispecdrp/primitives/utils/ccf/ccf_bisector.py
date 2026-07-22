@@ -12,6 +12,7 @@ from scipy.interpolate import CubicSpline
 
 from .ccf_common import (
     _ccf_background_sigma_clipped_median,
+    _ccf_background_sigma_clipped_median_dv_weighted,
     _ccf_rv_err_numeric_floor,
     effective_ccf_v_step_for_fit,
 )
@@ -619,6 +620,7 @@ def fit_ccf_rv_bisector(
     ccf_err: np.ndarray | None = None,
     config: CCFBisectorConfig | None = None,
     return_diagnostics: bool = False,
+    gaussian_seed_mean_m_s: float | None = None,
 ) -> (
     tuple[float, float]
     | tuple[float, float, dict]
@@ -655,6 +657,12 @@ def fit_ccf_rv_bisector(
         Bisector percentile ranges and weighting.
     return_diagnostics : bool, optional
         If True, return ``(rv, rv_err, diag)`` with per-cut midpoints, BIS, etc.
+    gaussian_seed_mean_m_s : float or None, optional
+        When set (typically the Gaussian CCF fit center), the bisector peak index is
+        the sample nearest this velocity (with a small local refine). Do **not**
+        re-search ``argmax(|CCF − baseline|)`` over a multi-km/s window: a global
+        contrast search can lock onto a window edge when the core has near-zero
+        contrast relative to an unweighted continuum.
 
     Returns
     -------
@@ -682,19 +690,75 @@ def fit_ccf_rv_bisector(
             y_err = ye[ok][order]
             has_ccf_err = bool(np.any(np.isfinite(y_err) & (y_err > 0.0)))
 
-    baseline = _ccf_background_sigma_clipped_median(y)
+    baseline = _ccf_background_sigma_clipped_median_dv_weighted(v_m_s, y)
+    if not math.isfinite(baseline):
+        baseline = _ccf_background_sigma_clipped_median(y)
     if not math.isfinite(baseline):
         baseline = float(np.nanmedian(y))
     y_rel = y - baseline
-    i_peak = int(np.nanargmax(np.abs(y_rel)))
+    n = int(v_m_s.size)
+    v_step = float(v_step_m_s) if math.isfinite(v_step_m_s) and v_step_m_s > 0 else effective_ccf_v_step_for_fit(v_m_s)
+
+    if (
+        gaussian_seed_mean_m_s is not None
+        and math.isfinite(float(gaussian_seed_mean_m_s))
+        and n >= 3
+    ):
+        # Lock the bisector peak to the Gaussian / scout seed. A wide unweighted
+        # |y_rel| search can lock onto the window edge when the core has near-zero
+        # contrast.
+        v_seed = float(gaussian_seed_mean_m_s)
+        i_peak = int(np.argmin(np.abs(v_m_s - v_seed)))
+        i_peak = int(min(max(i_peak, 1), n - 2))
+        # Optional micro-refine within ±2 steps of the seed (not a wide half-window
+        # that reintroduces edge locking).
+        refine_half = max(2.0 * float(v_step), 100.0)
+        idx = np.arange(n, dtype=np.int64)
+        local = (
+            (v_m_s >= v_seed - refine_half)
+            & (v_m_s <= v_seed + refine_half)
+            & (idx > 0)
+            & (idx < n - 1)
+        )
+        if np.any(local):
+            loc = np.where(local)[0]
+            i_local = int(loc[int(np.nanargmax(np.abs(y_rel[local])))])
+            # Accept refine only if it stays near the seed (reject wing-edge spikes).
+            if abs(float(v_m_s[i_local]) - v_seed) <= refine_half:
+                i_peak = i_local
+    else:
+        i_peak = int(np.nanargmax(np.abs(y_rel)))
+        # Wing walks need an interior peak; fall back to nearest interior sample.
+        if i_peak <= 0 or i_peak >= n - 1:
+            if n >= 3:
+                interior = np.abs(y_rel[1 : n - 1])
+                if np.any(np.isfinite(interior)):
+                    i_peak = int(np.nanargmax(interior)) + 1
+                else:
+                    i_peak = n // 2
+            else:
+                out = (float("nan"), float("nan"), {"ok": False, "message": "peak at array edge"})
+                return out if return_diagnostics else (out[0], out[1])
+
     peak_amp = float(abs(y_rel[i_peak]))
+    # Prefer a wing continuum when the window is wide enough so a global
+    # (even Δv-weighted) median does not sit near the peak.
+    wing_min = max(20.0 * float(v_step), 2000.0)
+    wing = np.abs(v_m_s - float(v_m_s[i_peak])) >= wing_min
+    if int(np.count_nonzero(wing)) >= 5:
+        baseline_w = _ccf_background_sigma_clipped_median_dv_weighted(v_m_s[wing], y[wing])
+        if math.isfinite(baseline_w):
+            amp_w = float(abs(float(y[i_peak]) - float(baseline_w)))
+            if amp_w > peak_amp or peak_amp <= 0.0 or not math.isfinite(peak_amp):
+                baseline = float(baseline_w)
+                y_rel = y - baseline
+                peak_amp = amp_w
     if peak_amp <= 0.0 or not math.isfinite(peak_amp):
         out = (float("nan"), float("nan"), {"ok": False, "message": "zero peak amplitude"})
         return out if return_diagnostics else (out[0], out[1])
 
     sign = 1.0 if y_rel[i_peak] >= 0.0 else -1.0
     y_peak_up = sign * y_rel
-    v_step = float(v_step_m_s) if math.isfinite(v_step_m_s) and v_step_m_s > 0 else effective_ccf_v_step_for_fit(v_m_s)
 
     p_lo = float(cfg.rv_percentile_lo)
     p_hi = float(cfg.rv_percentile_hi)
@@ -858,9 +922,14 @@ def _refine_ccf_rv_bisector_after_gaussian_fit(
     *,
     ccf_err: np.ndarray | None = None,
     config: CCFBisectorConfig | None = None,
+    gaussian_seed_mean_m_s: float | None = None,
 ) -> tuple[float | None, float | None, dict | None]:
     """
     Bisector RV after :func:`fit_ccf_rv` (NEID-style weighted percentile cuts).
+
+    Pass ``gaussian_seed_mean_m_s`` (Gaussian CCF center) so the bisector peak is
+    taken near that velocity rather than a global ``argmax`` that can lock onto a
+    window edge.
 
     Returns ``(None, None, diag)`` when bisector fitting fails; ``diag`` may still
     carry ``ok=False`` and cut metadata for previews.
@@ -877,6 +946,7 @@ def _refine_ccf_rv_bisector_after_gaussian_fit(
         ccf_err=ccf_err,
         config=config,
         return_diagnostics=True,
+        gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
     )
     if not isinstance(diag, dict) or not diag.get("ok") or not math.isfinite(float(rv_b)):
         return None, None, diag if isinstance(diag, dict) else None

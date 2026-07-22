@@ -101,7 +101,7 @@ from ...utils.ccf.ccf_utils import (
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     MAX_MASK_CCF_PIXEL_INTERP_ORDER,
     _gaussian_ccf_model,
-    build_hybrid_merged_velocity_grid,
+    build_centered_uniform_velocity_grid,
     build_line_mask_chunk_wavelength_intervals_line_by_line,
     ccf_order_n_chunks_for_span,
     clip_gaussian_plot_velocity_range_m_s,
@@ -493,8 +493,8 @@ def _preview_ccf_velocity_range_m_s(primitive) -> tuple[float, float, float]:
     """Same velocity extent as the stellar RV CCF run for previews and overlays (m/s).
 
     Uses the primitive’s **coarse** grid (``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse``)
-    and, when ``ccf_input_velocity`` is set, the same **fine** hybrid window as the pipeline
-    (``v_window_fine``, ``v_step_fine``).
+    when no center is set. When ``ccf_input_velocity`` is set, uses the centered uniform
+    window (``v_half_window`` at ``v_step_coarse``).
     """
     bvm, bvx, bvs = resolve_ccf_broad_grid_m_s(
         getattr(primitive, "v_min_coarse", None),
@@ -504,13 +504,10 @@ def _preview_ccf_velocity_range_m_s(primitive) -> tuple[float, float, float]:
     vc = getattr(primitive, "ccf_input_velocity", None)
     if vc is None or not np.isfinite(float(vc)):
         return bvm, bvx, bvs
-    vg = build_hybrid_merged_velocity_grid(
-        bvm,
-        bvx,
-        bvs,
+    vg = build_centered_uniform_velocity_grid(
         float(vc),
-        float(getattr(primitive, "v_window_fine", 300.0)),
-        float(getattr(primitive, "v_step_fine", 0.1)),
+        float(getattr(primitive, "v_half_window", 20000.0)),
+        float(bvs),
     )
     return float(vg[0]), float(vg[-1]), float(effective_ccf_v_step_for_fit(vg))
 

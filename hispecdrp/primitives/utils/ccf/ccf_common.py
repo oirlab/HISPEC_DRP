@@ -10,6 +10,7 @@ __all__ = [
     "V_MIN_DEFAULT_M_S",
     "V_STEP_DEFAULT_M_S",
     "_ccf_background_sigma_clipped_median",
+    "_ccf_background_sigma_clipped_median_dv_weighted",
     "_ccf_rv_err_numeric_floor",
     "_make_velocity_grid",
     "_velocity_grid_from_window",
@@ -110,3 +111,94 @@ def _ccf_background_sigma_clipped_median(
         yy = yy[keep]
         med = float(np.median(yy))
     return med
+
+
+def _ccf_trapezoid_dv_weights_m_s(v_m_s: np.ndarray) -> np.ndarray:
+    """Trapezoid Δv weights (m/s) for a sorted velocity grid."""
+    v = np.asarray(v_m_s, dtype=np.float64).ravel()
+    n = int(v.size)
+    w = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return w
+    if n == 1:
+        w[0] = 1.0
+        return w
+    w[0] = max(float(v[1] - v[0]), 0.0)
+    w[-1] = max(float(v[-1] - v[-2]), 0.0)
+    if n > 2:
+        w[1:-1] = 0.5 * np.maximum(v[2:] - v[:-2], 0.0)
+    return w
+
+
+def _ccf_weighted_median(y: np.ndarray, weights: np.ndarray) -> float:
+    """Weighted median of ``y`` with non-negative ``weights``."""
+    yy = np.asarray(y, dtype=np.float64).ravel()
+    ww = np.asarray(weights, dtype=np.float64).ravel()
+    ok = np.isfinite(yy) & np.isfinite(ww) & (ww > 0.0)
+    if not np.any(ok):
+        return float("nan")
+    yy = yy[ok]
+    ww = ww[ok]
+    order = np.argsort(yy)
+    ys = yy[order]
+    cs = np.cumsum(ww[order])
+    mid = 0.5 * float(cs[-1])
+    return float(ys[int(np.searchsorted(cs, mid))])
+
+
+def _ccf_background_sigma_clipped_median_dv_weighted(
+    v_m_s: np.ndarray,
+    y: np.ndarray,
+    *,
+    n_sigma: float = 3.0,
+    max_iter: int = 8,
+    min_keep: int = 5,
+) -> float:
+    """
+    Continuum level with trapezoid-Δv weights.
+
+    Weighting by Δv restores a wing-dominated baseline on non-uniform grids and
+    matches uniform-grid behaviour when spacing is constant.
+    """
+    v = np.asarray(v_m_s, dtype=np.float64).ravel()
+    yy = np.asarray(y, dtype=np.float64).ravel()
+    if v.size != yy.size or v.size == 0:
+        return _ccf_background_sigma_clipped_median(yy)
+    order = np.argsort(v)
+    v = v[order]
+    yy = yy[order]
+    ok = np.isfinite(v) & np.isfinite(yy)
+    v = v[ok]
+    yy = yy[ok]
+    n = int(yy.size)
+    if n == 0:
+        return float("nan")
+    if n < 3:
+        return float(np.median(yy))
+    w = _ccf_trapezoid_dv_weights_m_s(v)
+    med = _ccf_weighted_median(yy, w)
+    if not math.isfinite(med):
+        return _ccf_background_sigma_clipped_median(yy)
+    for _ in range(max_iter):
+        resid = yy - med
+        # Weight-aware MAD: median of |resid| with same weights
+        mad = _ccf_weighted_median(np.abs(resid), w)
+        sig = 1.4826 * float(mad) if math.isfinite(mad) else float("nan")
+        if not math.isfinite(sig) or sig <= 0.0:
+            sig = float(np.std(yy))
+        if not math.isfinite(sig) or sig <= 0.0:
+            break
+        thr = float(n_sigma) * sig
+        keep = np.abs(resid) <= thr
+        n_kept = int(np.count_nonzero(keep))
+        if n_kept < max(min_keep, max(3, n // 4)):
+            break
+        if n_kept == n:
+            break
+        yy = yy[keep]
+        w = w[keep]
+        n = n_kept
+        med = _ccf_weighted_median(yy, w)
+        if not math.isfinite(med):
+            break
+    return float(med)

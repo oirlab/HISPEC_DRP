@@ -744,7 +744,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         if gaia_target is not None and np.isfinite(float(injected_rv_km_s)):
             _rv_center_m_s = float(injected_rv_km_s) * 1000.0
             logger.info(
-                "E2E: stellar RV hybrid grid center ccf_input_velocity=%.3f m/s (%.4f km/s)",
+                "E2E: stellar RV centered uniform grid ccf_input_velocity=%.3f m/s (%.4f km/s)",
                 _rv_center_m_s,
                 float(injected_rv_km_s),
             )

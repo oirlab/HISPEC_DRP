@@ -75,8 +75,8 @@ It sets ``window_size_um`` = :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM` (symmetri
 predicted observed mask line, see
 :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.mask_line_window_spectrum_band_um`), coarse CCF limits
 ``ccf_input_velocity`` ± :data:`_BTSETTL_LINE_WINDOW_N1_V_COARSE_HALF_SPAN_KM_S` km/s, and ``v_step_coarse`` =
-:data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE` m/s. The primitive sets ``v_step_fine`` to the same value so the
-hybrid merge does not add a finer velocity leg — the CCF ``v`` grid is **uniform** at the coarse step
+:data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE` m/s. The CCF ``v`` grid is **uniform** at that step
+around ``ccf_input_velocity`` (``v_half_window``).
 (line-window mode still requires ``ccf_input_velocity`` for chunking; see ``run_ccf_line_mask_for_fiber``).
 It uses ``ccf_parabolic_vertex_n_samples`` = :data:`_BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES` and
 ``mask_ccf_pixel_interp_order`` = :data:`_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER` (tests do not rely on
@@ -298,7 +298,7 @@ def _lte049_btsettl_paired_mask_path_tophat() -> str:
 # Fewer pixels per echelle row cuts CCF cost ~linearly; 2048 still satisfies ≥20 px/chunk with narrow windows.
 _TEST_ECHELLE_N_PIX = 2048
 # Uniform broad CCF grid step (m/s) for template-CCF Numba path and mask-CCF benchmarks in this file.
-# Match ccf_common.V_STEP_DEFAULT_M_S (50 m/s) — no hybrid grid; broad scan only.
+# Match ccf_common.V_STEP_DEFAULT_M_S (50 m/s) — uniform broad scan only.
 _TEST_TEMPLATE_CCF_V_STEP_M_S = 50.0
 
 
@@ -1295,13 +1295,12 @@ def _run_lte049_k2all_line_mask_previews(
         v_grid_kw["v_max_coarse"] = float(v_max_coarse)
     v_step_c = float(v_step_coarse) if v_step_coarse is not None else 50.0
 
-    # Line-window tests require ``ccf_input_velocity`` (hybrid center). Match ``v_step_fine`` to
-    # ``v_step_c`` so :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_hybrid_merged_velocity_grid`
-    # does not add a finer Δv leg — uniform coarse spacing only.
+    # Line-window tests require ``ccf_input_velocity`` (uniform grid center).
     v_line_uniform_step_kw: dict = {}
     if window_line_by_line:
-        v_line_uniform_step_kw = {"v_step_fine": float(v_step_c)}
-
+        v_line_uniform_step_kw = {
+            "v_half_window": max(20000.0, abs(float(v_step_c)) * 1000.0),
+        }
     if mask_path is None:
         mask_path = packaged_default_line_mask_path()
     if not os.path.isfile(mask_path):
@@ -1383,7 +1382,7 @@ def _run_lte049_k2all_line_mask_previews(
             do_orders=do_orders,
             window_size_um=w_um,
             v_step_coarse=v_step_c,
-            mask_auto_hybrid_scout=False,
+            mask_auto_center_scout=False,
             ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             mask_ccf_pixel_interp_order=_pio_preview,
             show_preview=False,
@@ -1409,7 +1408,7 @@ def _run_lte049_k2all_line_mask_previews(
             do_orders=do_orders,
             window_size_um=w_um,
             v_step_coarse=v_step_c,
-            mask_auto_hybrid_scout=False,
+            mask_auto_center_scout=False,
             ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             mask_ccf_pixel_interp_order=_pio_preview,
             show_preview=False,
@@ -1730,8 +1729,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
 
     Mask-line CCF uses :data:`LTE049_BTSETTL_MASK_MAS` (template-derived **delta** mask paired with the
     same lte049 spectrum), not a separate wide third-party catalog. Velocity sampling is the **coarse uniform** grid only (50 m/s via
-    ``v_step_coarse``); there is no merged hybrid grid (``ccf_input_velocity`` unset;
-    ``mask_auto_hybrid_scout=False`` in this test).
+    ``v_step_coarse``); there is no centered window override (``ccf_input_velocity`` unset;
+    ``mask_auto_center_scout=False`` in this test).
 
     Line-mask sub-pixel refinement uses :data:`_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES` (31)
     for ``ccf_parabolic_vertex_n_samples`` unless
@@ -1911,7 +1910,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         do_orders=orders,
         window_size_um=window_um_eff,
         v_step_coarse=50.0,
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         ccf_parabolic_vertex_n_samples=_btsettl_line_mask_parabolic_vertex_n_samples_for_test(),
         mask_ccf_pixel_interp_order=_mask_ccf_pixel_interp_order_from_env(),
         outlier_sigma=4.0,
@@ -2183,7 +2182,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
         do_fibers=["1"],
         do_orders=orders,
         window_size_um=window_um_eff,
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         outlier_sigma=4.0,
         max_cores=6,
         v_step_coarse=float(v_step),
@@ -2341,7 +2340,7 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     Uses :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM`, :data:`_BTSETTL_LINE_WINDOW_N1_V_COARSE_HALF_SPAN_KM_S`,
     :data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE`, :data:`_BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES`, and
     :data:`_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER` (MCMC-tuned in ``examples/mcmc_line_window_beta0_sigma.py``).
-    ``v_step_fine`` matches ``v_step_coarse`` so the merged velocity grid is **uniform** (no 0.1 m/s hybrid fine sampling).
+    The velocity grid is **uniform** at ``v_step_coarse`` in a centered ``v_half_window``.
 
     Asserts ``RVCCFAVG`` vs the injected RV: for ``mask_ccf_pixel_interp_order`` :math:`\\le 1`,
     require ``|bias| < 50`` m/s (the narrow :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM` mask weighting
@@ -2472,8 +2471,7 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         v_min_coarse=v_min_coarse_m_s,
         v_max_coarse=v_max_coarse_m_s,
         v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-        v_step_fine=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         ccf_parabolic_vertex_n_samples=int(
             _BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES
         ),
@@ -2793,8 +2791,7 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
             v_min_coarse=v_min_c,
             v_max_coarse=v_max_c,
             v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-            v_step_fine=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-            mask_auto_hybrid_scout=False,
+            mask_auto_center_scout=False,
             ccf_parabolic_vertex_n_samples=int(
                 _BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES
             ),
@@ -2860,6 +2857,168 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
         shutil.copy2(plot_path, ex_path)
         print(
             "HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_RV_SCAN_PLOT_EXAMPLES="
+            f"{ex_path}",
+            flush=True,
+        )
+
+    assert abs(b0) < 200.0, f"weighted offset β₀ (m/s) vs y=x unexpectedly large: {b0}"
+    assert rms_resid < 35.0, f"RMS(rec − inj − β₀) about y=x+β₀: {rms_resid:g} m/s"
+    assert mad_resid_m_s < 30.0, f"MAD(rec − inj − β₀): {mad_resid_m_s:g} m/s"
+
+
+@pytest.mark.slow
+def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
+    tmp_path, lte049_btsettl_session_cache,
+):
+    """
+    Eleven ``ccf_line_mask`` runs on a synthetic BSPEC L2 stack: injected Doppler RV stepped by
+    10 m/s from ``-110 km/s − 50 m/s`` to ``+50 m/s`` (same grid as the line-window scan).
+
+    Unlike :func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan`,
+    this uses **current** :class:`~hispecdrp.primitives.StellarRVPrimitive` defaults for the
+    revised CCF path (wavelength ``window_size_um`` chunks, auto-center velocity scout, parabolic
+    vertex ``n=31``, Lagrange order 3). Reads ``RVCCFAVG``, fits ``RV_rec ≈ RV_inj + β₀``, and
+    writes a Matplotlib PNG under ``tmp_path``.
+
+    Set ``HISPEC_DRP_BSPEC_BTSETTL_DEFAULT_RV_SCAN_PLOT_EXAMPLES=1`` to also copy the figure to
+    ``examples/output/``.
+    """
+    mas_lte049 = _lte049_btsettl_paired_mask_path()
+    if not os.path.isfile(mas_lte049):
+        pytest.skip(f"Mask file not found (required for this test): {mas_lte049}")
+    ref_rv_m_s = float(INPUT_RV_KM_S * 1000.0)
+    injected_m_s = ref_rv_m_s + np.arange(-50.0, 51.0, 10.0, dtype=np.float64)
+    assert injected_m_s.size == 11
+
+    w_rest = lte049_btsettl_session_cache["w_rest"]
+    flux_rest = lte049_btsettl_session_cache["flux_rest"]
+    assert len(w_rest) > 50
+    orders = _bspec_btsettl_ccf_line_mask_order_ids()
+    n_pix = _TEST_ECHELLE_N_PIX
+    n_orders = len(orders)
+    do_not_use = int(datamodels.DQ_FLAGS["DO_NOT_USE"])
+    do_not_use_u = np.uint32(do_not_use)
+
+    recovered = np.empty(injected_m_s.size, dtype=np.float64)
+    recovered_err = np.empty(injected_m_s.size, dtype=np.float64)
+
+    for k, inj_m_s in enumerate(injected_m_s):
+        inj_km_s = float(inj_m_s) / 1000.0
+        wave_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+        spec_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+        spec_err_2d = np.zeros((n_orders, n_pix), dtype=np.float64)
+        dq_2d = np.zeros((n_orders, n_pix), dtype=np.uint32)
+        for oi, order in enumerate(orders):
+            m = int(order)
+            wave_ord, _lam_c = _order_wavelength_grid(m, n_pix)
+            wave_2d[oi] = wave_ord
+            spec_2d[oi] = np.interp(
+                wave_ord / (1.0 + inj_km_s / C_KM_S),
+                w_rest,
+                flux_rest,
+            ).astype(np.float64)
+            spec_err_2d[oi] = _bspec_simulated_flux_err(spec_2d[oi])
+        for oi in range(n_orders):
+            spec_2d[oi, 0] = 0.0
+            spec_2d[oi, -1] = 0.0
+        bad_flux = ~np.isfinite(spec_2d) | (spec_2d <= 0.0)
+        dq_2d[bad_flux] |= do_not_use_u
+
+        order_start, order_end = int(min(orders)), int(max(orders))
+        rvccf_l2 = datamodels.L2Model(
+            meta={
+                "order_start": order_start,
+                "order_end": order_end,
+                "spectrograph": "BSPEC",
+                "instrument_name": "HISPEC",
+            }
+        )
+        rvccf_l2.meta.order_start = order_start
+        rvccf_l2.meta.order_end = order_end
+        rvccf_l2.spec_fib1 = spec_2d.astype(np.float32)
+        rvccf_l2.spec_err_fib1 = spec_err_2d.astype(np.float32)
+        rvccf_l2.wave_fib1 = wave_2d
+        rvccf_l2.spec_dq_fib1 = dq_2d
+
+        # Pipeline defaults for ccf_line_mask (omit window_line_by_line / n_samples /
+        # interp order / coarse grid overrides so ARGUMENTS defaults apply).
+        prim = StellarRVPrimitive(
+            algorithm="ccf_line_mask",
+            mask_path=mas_lte049,
+            do_fibers=["1"],
+            do_orders=orders,
+            outlier_sigma=4.0,
+            max_cores=6,
+            save_preview=False,
+            show_preview=False,
+            output_dir=str(tmp_path),
+            suffix=f"default_rv_scan_{k}",
+        )
+        out = prim.apply(rvccf_l2, do_orders=orders)
+        assert out is not None
+        avg_tbl = getattr(out, "rvccfavg_fib1", None)
+        assert avg_tbl is not None and len(avg_tbl) > 0
+        recovered[k] = float(avg_tbl["RV"][0])
+        recovered_err[k] = float(avg_tbl["RV_ERR"][0])
+        assert np.isfinite(recovered[k]) and np.isfinite(recovered_err[k])
+        assert recovered_err[k] > 0.0
+        print(
+            f"default RV scan [{k + 1}/11]: inj={inj_m_s:.3f} rec={recovered[k]:.3f} "
+            f"err={recovered_err[k]:.3f} bias={recovered[k] - inj_m_s:.3f} m/s",
+            flush=True,
+        )
+
+    b0, b0_sig, rms_resid, sqrt_red_chi, red_chi2 = _wls_intercept_unity_slope(
+        injected_m_s, recovered, recovered_err
+    )
+    rel = injected_m_s - ref_rv_m_s
+    resid = recovered - injected_m_s - b0
+    mad_resid_m_s = float(mad_std(resid, ignore_nan=True))
+    ar = np.abs(resid)
+    rr = np.abs(rel)
+    if rr.size > 2 and float(np.std(rr)) > 0 and float(np.std(ar)) > 0:
+        corr_abs_resid_vs_abs_dinj = float(np.corrcoef(rr, ar)[0, 1])
+    else:
+        corr_abs_resid_vs_abs_dinj = float("nan")
+    print(
+        "pipeline-default RV scan: Pearson(|residual|, |Δ injected RV|) = "
+        f"{corr_abs_resid_vs_abs_dinj:.4f} "
+        f"(Δ injected = RV_inj − {ref_rv_m_s:.1f} m/s; "
+        f"residual = RV_rec − RV_inj − β₀, slope fixed at 1)",
+        flush=True,
+    )
+    print(
+        f"pipeline-default RV scan: β₀={b0:.4f}±{b0_sig:.4f} m/s; "
+        f"RMS={rms_resid:.3f} MAD={mad_resid_m_s:.3f} m/s; "
+        f"√(χ²/dof)={sqrt_red_chi:.3f}; red.χ²={red_chi2:.3f}",
+        flush=True,
+    )
+
+    subtitle = (
+        f"WLS (slope=1): β₀={b0:.3f}±{b0_sig:.3f} m/s; "
+        f"RMS={rms_resid:.2f} MAD={mad_resid_m_s:.2f} m/s; √(χ²/dof)={sqrt_red_chi:.2f}; "
+        f"red.χ²={red_chi2:.2f}"
+    )
+    plot_path = os.path.join(
+        str(tmp_path), "lte049_pipeline_default_injected_rv_scan_rvccfavg.png"
+    )
+    _save_line_window_injected_rv_scan_plot(
+        injected_m_s,
+        recovered,
+        recovered_err,
+        b0,
+        plot_path,
+        subtitle=subtitle,
+    )
+    print(f"HISPEC_DRP_PIPELINE_DEFAULT_INJECTED_RV_SCAN_PLOT={plot_path}", flush=True)
+    if _truthy_env("HISPEC_DRP_BSPEC_BTSETTL_DEFAULT_RV_SCAN_PLOT_EXAMPLES"):
+        os.makedirs(_EXAMPLES_OUTPUT_DIR, exist_ok=True)
+        ex_path = os.path.join(
+            _EXAMPLES_OUTPUT_DIR, "lte049_pipeline_default_injected_rv_scan_rvccfavg.png"
+        )
+        shutil.copy2(plot_path, ex_path)
+        print(
+            "HISPEC_DRP_BSPEC_BTSETTL_DEFAULT_RV_SCAN_PLOT_EXAMPLES="
             f"{ex_path}",
             flush=True,
         )

@@ -128,21 +128,21 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    :meth:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask`
    resolves coarse velocity grid defaults (``v_min_coarse``, ``v_max_coarse``, ``v_step_coarse``),
-   optional hybrid/fine-grid configuration around ``ccf_input_velocity``, loads mask lines once,
-   then calls the fiber driver:
+   optional centered-window configuration around ``ccf_input_velocity`` (``v_half_window``),
+   loads mask lines once, then calls the fiber driver:
 
    - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber`
 
 #. **Velocity axis**
 
-   The fiber driver constructs either:
+   The fiber driver constructs a **uniform** velocity grid:
 
-   - a uniform coarse velocity grid, or
-   - a merged coarse+fine grid (hybrid) when ``ccf_input_velocity`` is set.
+   - ``[v_min_coarse, v_max_coarse]`` at ``v_step_coarse`` when no center is set, or
+   - ``ccf_input_velocity ± v_half_window`` at ``v_step_coarse`` when a center is set.
 
-   When enabled and applicable, an **auto-hybrid scout** (single echelle order, no user-provided
-   center, ``mask_auto_hybrid_scout=True``) runs one full-order pass to estimate the peak and set
-   the shared hybrid center for the fiber.
+   When enabled and applicable, an **auto-center scout** (``mask_auto_center_scout=True``,
+   no user-provided center) runs one pass on the broad uniform grid to estimate the peak,
+   then rebuilds a centered uniform window for the fiber.
 
 #. **Per-order chunking and mask CCF**
 
@@ -180,7 +180,7 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
 #. **Optional order-mean Gaussian override**
 
-   When enabled by the driver (hybrid or post-scout merged grid), an order-mean CCF is fit with a Gaussian:
+   When enabled by the driver (centered window or post-scout centered grid), an order-mean CCF is fit with a Gaussian:
 
    - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
 

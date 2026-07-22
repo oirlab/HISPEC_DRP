@@ -55,7 +55,6 @@ from .ccf_bisector import (
 )
 from .ccf_parabolic import (
     CCFParabolicConfig,
-    _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s,
     _line_mask_parabolic_vertex_lstsq_npt_numba,
     _refine_ccf_rv_after_gaussian_fit_ccf_line_mask,
     _refine_ccf_rv_parabolic_after_gaussian_fit,
@@ -168,12 +167,12 @@ def validate_line_mask_line_window_chunking_config(
     if ccf_input_velocity_m_s is None or not math.isfinite(float(ccf_input_velocity_m_s)):
         raise ValueError(
             "ccf_input_velocity must be set to a finite value (m/s) when "
-            "window_line_by_line is true (hybrid / fine grid center defines the "
-            "Doppler mapping used to place mask lines against the spectrum)."
+            "window_line_by_line is true (grid center defines the Doppler mapping "
+            "used to place mask lines against the spectrum)."
         )
 
 
-def line_mask_line_window_coarse_velocity_bounds_m_s(
+def line_mask_line_window_velocity_half_width_m_s(
     wave: np.ndarray,
     order_tasks: list[tuple[int, int]],
     mask_lines: MaskLines,
@@ -181,29 +180,25 @@ def line_mask_line_window_coarse_velocity_bounds_m_s(
     v_center_m_s: float,
     zb: float,
     min_good_pixels: int,
-    v_coarse_lo: float,
-    v_coarse_hi: float,
-    hybrid_half_width_m_s: float,
+    half_width_m_s: float,
     v_step_m_s: float,
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     """
-    Narrow the **broad** CCF velocity span for line-window line-mask.
+    Effective half-width (m/s) for a **uniform** centered CCF grid in line-window mode.
 
     Uses the largest chunk wavelength span (in velocity units
     :math:`\\Delta v \\approx c\\,\\Delta\\lambda/\\lambda`) over all echelle rows in
-    ``order_tasks``, together with ``v_center_m_s`` (``ccf_input_velocity``), to set a
-    symmetric interval inside ``[v_coarse_lo, v_coarse_hi]`` that still contains the
-    hybrid fine window (``v_center`` :math:`\\pm` ``hybrid_half_width_m_s``).
+    ``order_tasks``, together with ``v_center_m_s`` (``ccf_input_velocity``), to ensure
+    the centered window is at least as wide as the caller half-width and the chunk
+    Doppler span.
 
     Returns
     -------
-    v_min_eff, v_max_eff, dv_chunk_max_m_s : float
-        Effective broad bounds for :func:`build_hybrid_merged_velocity_grid` and the
-        maximum :math:`c\\,\\Delta\\lambda/\\lambda` among chunks (m/s).
+    half_width_eff_m_s, dv_chunk_max_m_s : float
+        Half-width for :func:`build_centered_uniform_velocity_grid` and the maximum
+        :math:`c\\,\\Delta\\lambda/\\lambda` among chunks (m/s).
     """
     v_c = float(v_center_m_s)
-    vb = float(v_coarse_lo)
-    vx = float(v_coarse_hi)
     dv_max = 0.0
     for oi, _order in order_tasks:
         w_row = np.asarray(wave[oi], dtype=np.float64).ravel()
@@ -221,13 +216,11 @@ def line_mask_line_window_coarse_velocity_bounds_m_s(
                 dv = C_M_S * d_lam / lam_m
                 if math.isfinite(dv):
                     dv_max = max(dv_max, float(dv))
-    half_w = float(hybrid_half_width_m_s)
+    half_w = float(half_width_m_s)
     pad = max(half_w, 2.0 * dv_max, 5.0 * abs(float(v_step_m_s)))
-    v_lo = max(vb, v_c - pad)
-    v_hi = min(vx, v_c + pad)
-    if not math.isfinite(v_lo) or not math.isfinite(v_hi) or v_hi <= v_lo:
-        return vb, vx, dv_max
-    return float(v_lo), float(v_hi), float(dv_max)
+    if not math.isfinite(pad) or pad <= 0.0:
+        pad = half_w if math.isfinite(half_w) and half_w > 0.0 else abs(float(v_step_m_s)) * 5.0
+    return float(pad), float(dv_max)
 
 
 def line_mask_chunk_restrict_velocity_range_m_s(
@@ -460,7 +453,7 @@ def line_mask_n_chunks_for_order_line_by_line(
 
 
 # =============================================================================
-# Broad velocity grid defaults, hybrid merge, and CCF error-propagation helpers
+# Broad / centered uniform velocity grids and CCF error-propagation helpers
 # =============================================================================
 
 
@@ -597,43 +590,33 @@ def _rv_err_slope_propagation_m_s(
     return float(est)
 
 
-def build_hybrid_merged_velocity_grid(
-    broad_min: float,
-    broad_max: float,
-    broad_step: float,
+def build_centered_uniform_velocity_grid(
     center_m_s: float,
     half_width_m_s: float,
-    refined_step_m_s: float,
+    step_m_s: float,
 ) -> np.ndarray:
     """
-    Single CCF velocity list: full ``[broad_min, broad_max]`` sampled at ``broad_step``,
-    plus extra samples on ``[center ± half_width_m_s]`` every ``refined_step_m_s``.
+    Uniform CCF velocity samples on ``[center − half_width, center + half_width]``.
 
-    Sorted unique values (rounded) so the merged grid spans the entire broad
-    range while increasing resolution around ``center_m_s``.
+    Spacing is constant (``step_m_s``) across the whole window.
     """
-    vb = float(broad_min)
-    vx = float(broad_max)
-    vsb = float(broad_step)
     vc = float(center_m_s)
     hw = float(half_width_m_s)
-    vsr = float(refined_step_m_s)
-    if not np.isfinite(vb) or not np.isfinite(vx) or vx <= vb:
-        raise ValueError("build_hybrid_merged_velocity_grid: invalid broad bounds")
-    if not np.isfinite(vsb) or vsb <= 0:
-        raise ValueError("build_hybrid_merged_velocity_grid: broad_step must be finite and > 0")
+    vs = float(step_m_s)
     if not np.isfinite(vc) or not np.isfinite(hw) or hw <= 0:
-        raise ValueError("build_hybrid_merged_velocity_grid: center and half-width must be finite, half-width > 0")
-    if not np.isfinite(vsr) or vsr <= 0:
-        raise ValueError("build_hybrid_merged_velocity_grid: refined_step must be finite and > 0")
-    r_lo = vc - hw
-    r_hi = vc + hw
-    if r_hi <= r_lo:
-        raise ValueError("build_hybrid_merged_velocity_grid: refined window is empty")
-    broad = np.arange(vb, vx + 0.5 * vsb, vsb, dtype=np.float64)
-    refined = np.arange(r_lo, r_hi + 0.5 * vsr, vsr, dtype=np.float64)
-    merged = np.unique(np.round(np.concatenate((broad, refined)), decimals=6))
-    return merged.astype(np.float64)
+        raise ValueError(
+            "build_centered_uniform_velocity_grid: center and half-width must be "
+            "finite and half-width > 0"
+        )
+    if not np.isfinite(vs) or vs <= 0:
+        raise ValueError(
+            "build_centered_uniform_velocity_grid: step must be finite and > 0"
+        )
+    v_lo = vc - hw
+    v_hi = vc + hw
+    if v_hi <= v_lo:
+        raise ValueError("build_centered_uniform_velocity_grid: window is empty")
+    return np.arange(v_lo, v_hi + 0.5 * vs, vs, dtype=np.float64)
 
 
 # =============================================================================
@@ -1016,7 +999,7 @@ def _line_mask_ccf_fit_free_baseline_requested(
     """
     True when :func:`fit_ccf_rv` should treat the CCF constant term as an LM parameter.
 
-    For line-mask **line-by-line** chunking (``window_line_by_line``), the hybrid/fine velocity
+    For line-mask **line-by-line** chunking (``window_line_by_line``), the velocity
     span is often only a few km s\\ :sup:`−1` wide, so a robust median baseline estimated from
     essentially the entire profile is a poor substitute for wings; fitting ``Const1D`` jointly
     with the Gaussian avoids that bias.
@@ -1026,7 +1009,7 @@ def _line_mask_ccf_fit_free_baseline_requested(
     amplitude collapses toward zero and the line is absorbed by the constant), which breaks
     Plotly Gaussian overlays. Pass half-width caps still apply when
     ``ccf_line_mask_stored_negated`` is true (see :func:`fit_ccf_rv`), so fixed sigma-clipped
-    baselines remain local to the hybrid grid.
+    baselines remain local to the fit window.
     """
     if fit_ccf_baseline_free is not None:
         return bool(fit_ccf_baseline_free)
@@ -1289,13 +1272,13 @@ def fit_ccf_rv(
     default the constant baseline is **fixed** to :func:`_ccf_background_sigma_clipped_median`
     of the CCF samples in each fit window (not a free LM parameter). When
     ``fit_ccf_baseline_free=True``, or when ``line_mask_line_window_by_line`` is true (narrow
-    line-mask line-by-line hybrid grids) **and** ``ccf_line_mask_stored_negated`` is not true, the
+    line-mask line-by-line grids) **and** ``ccf_line_mask_stored_negated`` is not true, the
     baseline is a **free**
     :class:`~astropy.modeling.models.Const1D` term fit jointly with the Gaussian, and pass
     half-widths are capped to a fraction of the available velocity span so the fit is not
     dominated by an artificial “global median” baseline across the whole short profile.
     The same half-width caps apply when ``ccf_line_mask_stored_negated`` is true (mask-line CCF),
-    so fixed-baseline fits on short hybrid grids do not inherit multi-hundred-km pass windows.
+    so fixed-baseline fits on short grids do not inherit multi-hundred-km pass windows.
     One or two Levenberg–Marquardt passes each use a **wide** velocity
     window (see :class:`CCFFitConfig`) to stabilize the Gaussian **amplitude** and width.
     Within each window the fitter runs **unclipped** χ² passes on the full sample
@@ -1307,7 +1290,7 @@ def fit_ccf_rv(
     Parameters
     ----------
     v_grid_m_s : np.ndarray
-        Velocity samples (m s⁻¹), usually sorted (e.g. broad scan and/or hybrid merge).
+        Velocity samples (m s⁻¹), usually sorted (uniform broad or centered window).
     ccf : np.ndarray
         CCF values on the same grid.
     v_step_m_s : float
@@ -1357,8 +1340,8 @@ def fit_ccf_rv(
         :func:`_line_mask_ccf_fit_free_baseline_requested`).
     gaussian_seed_mean_m_s : float or None, optional
         When ``ccf_line_mask_stored_negated`` is true and this lies on the velocity grid, the
-        discrete peak seed uses **argmax(CCF)** restricted to samples within roughly the hybrid
-        core around this value (typically ``ccf_input_velocity``), instead of the global maximum
+        discrete peak seed uses **argmax(CCF)** restricted to samples within a local
+        window around this value (typically ``ccf_input_velocity``), instead of the global maximum
         on the full grid. That avoids spurious seeds on stacked mean CCFs and aligns pass-1 with
         the injected search center.
 
@@ -1498,8 +1481,8 @@ def fit_ccf_rv(
             and v_span > 0.0
         ):
             g0 = float(g_seed)
-            # Wide enough to cover the coarse hybrid leg around the injected RV, narrow enough
-            # to reject a higher spurious extremum on the opposite end of a ~10 km/s grid.
+            # Wide enough around the injected / scout RV, narrow enough to reject a higher
+            # spurious extremum on the opposite end of a short window.
             half_w = max(3500.0, 0.38 * v_span)
             msk = (vm >= g0 - half_w) & (vm <= g0 + half_w)
             if int(np.count_nonzero(msk)) >= int(cfg.min_points):
@@ -1519,8 +1502,7 @@ def fit_ccf_rv(
         )
         seed_ms = float(vm[imn if profile == "emission" else imx])
     rv_gk = seed_ms / 1000.0
-    # Use caller's effective finest step (hybrid grids are mostly coarse in |v|;
-    # recomputing mean spacing here biased gradient errors high).
+    # Use caller's effective step (recomputing mean spacing here biased gradient errors high).
     vstep_k = float(v_step_fit) / 1000.0
     vsp_k = (
         float(vel_span_m_s_per_pixel) / 1000.0
@@ -1529,7 +1511,7 @@ def fit_ccf_rv(
     )
 
     vk_span_km = float(np.nanmax(vk) - np.nanmin(vk)) if vk.size > 1 else 0.0
-    # Short hybrid / line-window grids: cap LM pass half-widths to a fraction of the actual
+    # Short / line-window grids: cap LM pass half-widths to a fraction of the actual
     # velocity span.  Otherwise default pass widths (~hundreds of km) flatten the CCF in the
     # fit window when ``ccf_line_mask_stored_negated`` uses a fixed baseline, or bias free-baseline
     # fits that relied on this cap alone.
@@ -2115,6 +2097,7 @@ def _ccf_rv_from_ccf(
             float(v_step),
             ccf_err=None,
             config=ccf_bisector_config,
+            gaussian_seed_mean_m_s=float(rv_fit),
         )
         if rv_bi is not None and math.isfinite(float(rv_bi)):
             err_out = float(err_fit) if np.isfinite(err_fit) else float("nan")
@@ -2654,7 +2637,7 @@ def _process_all_orders_rvs_numba_single_vgrid(
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 ):
-    """Non-uniform ``v_grid`` (e.g. merged hybrid): Numba CCF fill + per-chunk Gaussian RV."""
+    """Explicit ``v_grid`` (uniform centered or custom): Numba CCF fill + per-chunk Gaussian RV."""
     v_grid = np.asarray(v_grid, dtype=np.float64).ravel()
     n_vel = int(v_grid.shape[0])
     if n_vel < 2:
@@ -2674,7 +2657,7 @@ def _process_all_orders_rvs_numba_single_vgrid(
 
     nt = numba_threads if numba_threads is not None else 1
     logger.info(
-        "CCF (Numba): starting CCF matrix fill (merged v_grid) total_chunks=%d n_vel=%d "
+        "CCF (Numba): starting CCF matrix fill (explicit v_grid) total_chunks=%d n_vel=%d "
         "numba_threads=%d",
         total_chunks,
         n_vel,
@@ -2760,9 +2743,8 @@ def process_all_orders_rvs_numba(
     *,
     return_ccf: bool = False,
     numba_threads: int | None = None,
-    hybrid_center_m_s: float | None = None,
-    hybrid_half_width_m_s: float = 300.0,
-    hybrid_step_m_s: float = 0.1,
+    ccf_center_m_s: float | None = None,
+    ccf_half_window_m_s: float = 20000.0,
     min_good_pixels: int = 10,
     zb: float = 0.0,
     ccf_parabolic_vertex_n_samples: int | None = None,
@@ -2775,15 +2757,13 @@ def process_all_orders_rvs_numba(
 
     Workhorse behind :func:`process_orders_rvs_numba_parallel`.
 
-    When ``hybrid_center_m_s`` is ``None``, uses a single grid ``(v_min, v_max, v_step)``.
+    When ``ccf_center_m_s`` is ``None``, uses a single grid ``(v_min, v_max, v_step)``.
 
-    When ``hybrid_center_m_s`` is set, uses one merged velocity list spanning the broad
-    range ``v_min`` … ``v_max`` at ``v_step``, with additional samples on
-    ``center ± hybrid_half_width_m_s`` every ``hybrid_step_m_s`` (see
-    :func:`build_hybrid_merged_velocity_grid`). A single CCF is built on that grid and
-    per-chunk RVs are fit once. Optional CCF output uses the same merged ``v_grid``.
+    When ``ccf_center_m_s`` is set, uses a **uniform** centered window
+    ``center ± ccf_half_window_m_s`` sampled at ``v_step`` (see
+    :func:`build_centered_uniform_velocity_grid`).
     """
-    if hybrid_center_m_s is None:
+    if ccf_center_m_s is None:
         return _process_all_orders_rvs_numba_single_grid(
             wave_2d,
             spec_2d,
@@ -2806,35 +2786,24 @@ def process_all_orders_rvs_numba(
             ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
 
-    vc = float(hybrid_center_m_s)
-    hw = float(hybrid_half_width_m_s)
-    vsf = float(hybrid_step_m_s)
+    vc = float(ccf_center_m_s)
+    hw = float(ccf_half_window_m_s)
+    vs = float(v_step)
     if not np.isfinite(vc) or not np.isfinite(hw) or hw <= 0:
         raise ValueError(
-            "hybrid CCF: center and half-width must be finite and half-width > 0 (m/s)"
+            "centered CCF: center and half-width must be finite and half-width > 0 (m/s)"
         )
-    if not np.isfinite(vsf) or vsf <= 0:
-        raise ValueError("hybrid CCF: refined step must be finite and > 0 (m/s)")
+    if not np.isfinite(vs) or vs <= 0:
+        raise ValueError("centered CCF: step must be finite and > 0 (m/s)")
     if vc + hw <= vc - hw:
-        raise ValueError("hybrid CCF: refined velocity window is empty")
+        raise ValueError("centered CCF: velocity window is empty")
 
-    v_grid = build_hybrid_merged_velocity_grid(
-        float(v_min),
-        float(v_max),
-        float(v_step),
+    v_grid = build_centered_uniform_velocity_grid(vc, hw, vs)
+    logger.info(
+        "CCF (Numba): centered uniform grid — center=%g half_width=%g step=%g → n_vel=%d",
         vc,
         hw,
-        vsf,
-    )
-    logger.info(
-        "CCF (Numba): hybrid merged grid — broad [%g, %g] step %g; denser [%g, %g] "
-        "step %g → n_vel=%d",
-        v_min,
-        v_max,
-        v_step,
-        vc - hw,
-        vc + hw,
-        vsf,
+        vs,
         int(v_grid.shape[0]),
     )
     return _process_all_orders_rvs_numba_single_vgrid(
@@ -2915,9 +2884,8 @@ def process_orders_rvs_numba_parallel(
     ccf_v_min: float | None = None,
     ccf_v_max: float | None = None,
     ccf_v_step: float | None = None,
-    ccf_hybrid_center_m_s: float | None = None,
-    ccf_hybrid_half_width_m_s: float = 300.0,
-    ccf_hybrid_step_m_s: float = 0.1,
+    ccf_center_m_s: float | None = None,
+    ccf_half_window_m_s: float = 20000.0,
     min_good_pixels: int = 10,
     zb: float = 0.0,
     ccf_parabolic_vertex_n_samples: int | None = None,
@@ -2967,14 +2935,14 @@ def process_orders_rvs_numba_parallel(
         ``order_indices``, and per-chunk good-pixel counts for previews / RVCCF
         supplements (see implementation return tuple).
     ccf_v_min, ccf_v_max, ccf_v_step : float, optional
-        Single-grid CCF velocity range (m/s). Ignored when ``ccf_hybrid_center_m_s``
-        is set. Defaults are ``V_MIN_DEFAULT_M_S``, ``V_MAX_DEFAULT_M_S``, ``V_STEP_DEFAULT_M_S``.
-    ccf_hybrid_center_m_s : float or None, optional
-        When set, uses a single merged velocity grid (full ``_V_*`` range plus denser
-        sampling around ``center ± ccf_hybrid_half_width_m_s``); see
-        :func:`build_hybrid_merged_velocity_grid`.
-    ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float, optional
-        Refined half-width (m/s) and step (m/s); defaults match
+        Uniform CCF velocity range (m/s). When ``ccf_center_m_s`` is set, ``ccf_v_step``
+        is the sampling of the centered window (``ccf_v_min`` / ``ccf_v_max`` are unused).
+        Defaults are ``V_MIN_DEFAULT_M_S``, ``V_MAX_DEFAULT_M_S``, ``V_STEP_DEFAULT_M_S``.
+    ccf_center_m_s : float or None, optional
+        When set, uses a uniform window ``center ± ccf_half_window_m_s`` at ``ccf_v_step``;
+        see :func:`build_centered_uniform_velocity_grid`.
+    ccf_half_window_m_s : float, optional
+        Half-width (m/s) of the centered uniform window; default matches
         :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
     min_good_pixels : int, optional
         Minimum good spectral pixels per chunk for CCF evaluation and Gaussian / parabolic
@@ -3051,9 +3019,9 @@ def process_orders_rvs_numba_parallel(
     vm = float(V_MIN_DEFAULT_M_S if ccf_v_min is None else ccf_v_min)
     vx = float(V_MAX_DEFAULT_M_S if ccf_v_max is None else ccf_v_max)
     vs = float(V_STEP_DEFAULT_M_S if ccf_v_step is None else ccf_v_step)
-    hyc = ccf_hybrid_center_m_s
-    hybrid = hyc is not None and np.isfinite(float(hyc))
-    if not hybrid:
+    hyc = ccf_center_m_s
+    centered = hyc is not None and np.isfinite(float(hyc))
+    if not centered:
         if not np.isfinite(vm) or not np.isfinite(vx) or not np.isfinite(vs) or vs <= 0:
             raise ValueError(
                 "ccf_v_min, ccf_v_max must be finite and ccf_v_step must be finite and > 0"
@@ -3061,19 +3029,19 @@ def process_orders_rvs_numba_parallel(
         if vx <= vm:
             raise ValueError("ccf_v_max must be greater than ccf_v_min")
     total_chunks_layout = int(chunk_start[-1] + n_chunks_per_order[-1])
-    if hybrid:
+    if centered:
         logger.info(
-            "CCF: process_orders_rvs_numba_parallel HYBRID mode n_order_tasks=%d "
+            "CCF: process_orders_rvs_numba_parallel centered uniform grid n_order_tasks=%d "
             "total_chunks=%d window_um=%.4f return_ccf=%s numba_threads=%d "
-            "center=%.2f m/s half_width=%.2f refined_step=%.4f",
+            "center=%.2f m/s half_width=%.2f step=%.4f",
             len(order_tasks),
             total_chunks_layout,
             window_size_um,
             return_ccf,
             nthr,
             float(hyc),
-            float(ccf_hybrid_half_width_m_s),
-            float(ccf_hybrid_step_m_s),
+            float(ccf_half_window_m_s),
+            float(vs),
         )
     else:
         logger.info(
@@ -3091,11 +3059,10 @@ def process_orders_rvs_numba_parallel(
         )
     # Flattened (order, chunk) RV list; parallelized over orders inside Numba.
     with numba_thread_scope(max_cores):
-        if hybrid:
+        if centered:
             kw_h = dict(
-                hybrid_center_m_s=float(hyc),
-                hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
-                hybrid_step_m_s=float(ccf_hybrid_step_m_s),
+                ccf_center_m_s=float(hyc),
+                ccf_half_window_m_s=float(ccf_half_window_m_s),
             )
         else:
             kw_h = {}
@@ -3233,6 +3200,7 @@ def _fit_ccf_preview_slot_worker(
             vs,
             ccf_err=ccf_err_arg,
             config=ccf_bisector_config,
+            gaussian_seed_mean_m_s=float(rv),
         )
         if rv_bi is not None and math.isfinite(float(rv_bi)):
             bisector_fit = {
@@ -3284,7 +3252,7 @@ def finalize_ccf_preview_dict(
     line_mask_line_window_by_line : bool or None, optional
         Forwarded to :func:`fit_ccf_rv` (see :func:`_line_mask_ccf_fit_free_baseline_requested`).
     line_mask_gaussian_seed_mean_m_s : float or None, optional
-        When set (typically ``ccf_input_velocity`` / hybrid center), passed to :func:`fit_ccf_rv`
+        When set (typically ``ccf_input_velocity`` / grid center), passed to :func:`fit_ccf_rv`
         as ``gaussian_seed_mean_m_s`` for mask-line stored CCFs so the discrete peak seed is
         taken near the search center instead of a global maximum on a nearly flat curve.
     """
@@ -3875,7 +3843,7 @@ def masked_ccf_rv(
         Uniform CCF velocity range and step (m/s) when ``v_grid`` is not passed. Ignored
         if ``v_grid`` is given.
     v_grid : np.ndarray or None, optional
-        Explicit velocity samples (m/s), e.g. from :func:`build_hybrid_merged_velocity_grid`.
+        Explicit velocity samples (m/s), e.g. from :func:`build_centered_uniform_velocity_grid`.
         When passed, ``v_min`` / ``v_max`` / ``v_step`` are not used to build the grid.
     zb : float, optional
         Barycentric factor in the template :math:`\\ln\\lambda` shift (see
@@ -4060,9 +4028,8 @@ def process_one_order_rvs(
     ccf_v_min: float | None = None,
     ccf_v_max: float | None = None,
     ccf_v_step: float | None = None,
-    ccf_hybrid_center_m_s: float | None = None,
-    ccf_hybrid_half_width_m_s: float = 300.0,
-    ccf_hybrid_step_m_s: float = 0.1,
+    ccf_center_m_s: float | None = None,
+    ccf_half_window_m_s: float = 20000.0,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -4072,8 +4039,8 @@ def process_one_order_rvs(
 
     Serial-friendly (picklable) path used when not using the Numba multi-order
     driver.  Returns empty arrays if the template has fewer than 20 points in the
-    order wavelength range. When ``ccf_hybrid_center_m_s`` is set, delegates to
-    :func:`process_orders_rvs_numba_parallel` (broad + refined hybrid).
+    order wavelength range. When ``ccf_center_m_s`` is set, delegates to
+    :func:`process_orders_rvs_numba_parallel` (centered uniform window).
 
     Parameters
     ----------
@@ -4095,16 +4062,15 @@ def process_one_order_rvs(
         If True, also return ``v_grid`` and per-chunk CCF ``ccf_2d`` (uses
         ``ccf_v_min`` / ``ccf_v_max`` / ``ccf_v_step`` or defaults ``_V_*``).
     ccf_v_min, ccf_v_max, ccf_v_step : float or None, optional
-        Broad uniform velocity grid (m/s). When ``ccf_hybrid_center_m_s`` is set, these
-        define the coarse leg of the merged grid; otherwise they define the sole grid
-        for :func:`rv_per_chunks`. Defaults use module ``V_MIN_DEFAULT_M_S``, ``V_MAX_DEFAULT_M_S``, ``V_STEP_DEFAULT_M_S``.
-    ccf_hybrid_center_m_s : float or None, optional
+        Uniform velocity grid (m/s). When ``ccf_center_m_s`` is set, ``ccf_v_step``
+        samples the centered window; otherwise they define the sole grid for
+        :func:`rv_per_chunks`. Defaults use module ``V_MIN_DEFAULT_M_S``, ``V_MAX_DEFAULT_M_S``, ``V_STEP_DEFAULT_M_S``.
+    ccf_center_m_s : float or None, optional
         When **finite**, delegates to :func:`process_orders_rvs_numba_parallel` on this
-        single order with hybrid velocity sampling (broad scan plus dense window around
-        the center). When ``None``, uses the uniform grid only (via ``rv_per_chunks``).
-    ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float, optional
-        Half-width (m/s) and step (m/s) for the refined hybrid leg when
-        ``ccf_hybrid_center_m_s`` is set.
+        single order with a uniform window centered here. When ``None``, uses the
+        uniform broad grid only (via ``rv_per_chunks``).
+    ccf_half_window_m_s : float, optional
+        Half-width (m/s) of the centered uniform window when ``ccf_center_m_s`` is set.
 
     Returns
     -------
@@ -4158,7 +4124,7 @@ def process_one_order_rvs(
     vx = V_MAX_DEFAULT_M_S if ccf_v_max is None else ccf_v_max
     vs = V_STEP_DEFAULT_M_S if ccf_v_step is None else ccf_v_step
 
-    if ccf_hybrid_center_m_s is not None:
+    if ccf_center_m_s is not None:
         dq_1d = np.where(mask, np.uint32(do_not_use), np.uint32(0))
         wave_2d = w.reshape(1, -1)
         spec_2d = s.reshape(1, -1)
@@ -4179,9 +4145,8 @@ def process_one_order_rvs(
             ccf_v_min=vm,
             ccf_v_max=vx,
             ccf_v_step=vs,
-            ccf_hybrid_center_m_s=float(ccf_hybrid_center_m_s),
-            ccf_hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
-            ccf_hybrid_step_m_s=float(ccf_hybrid_step_m_s),
+            ccf_center_m_s=float(ccf_center_m_s),
+            ccf_half_window_m_s=float(ccf_half_window_m_s),
         )
         if return_ccf:
             arv, are, awl, accf, vg, ang, _nc, _cs, _oi = out
@@ -5147,7 +5112,7 @@ def rv_per_chunks_line_mask(
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
         Velocity search grid (m s⁻¹). Ignored when ``v_grid_m_s`` is provided.
     v_grid_m_s : np.ndarray or None, optional
-        Explicit velocity samples (m s⁻¹), e.g. from :func:`build_hybrid_merged_velocity_grid`.
+        Explicit velocity samples (m s⁻¹), e.g. from :func:`build_centered_uniform_velocity_grid`.
         When set, ``v_min_m_s`` / ``v_max_m_s`` / ``v_step_m_s`` are not used to build the grid,
         but together with ``v_grid_m_s`` they still define the velocity span used to restrict
         mask lines per chunk via :func:`~hispecdrp.utils.line_mask_utils.restrict_mask_to_chunk` (same coarse bounds passed in).
@@ -5592,6 +5557,7 @@ def rv_per_chunks_line_mask(
             y_stored,
             v_step_floor,
             ccf_err=e_row,
+            gaussian_seed_mean_m_s=float(rv_g),
         )
         if rv_bi is not None and math.isfinite(float(rv_bi)):
             rv_rows[i] = float(rv_bi)
@@ -5673,14 +5639,13 @@ def run_ccf_line_mask_for_fiber(
     v_min_m_s: float = V_MIN_DEFAULT_M_S,
     v_max_m_s: float = V_MAX_DEFAULT_M_S,
     v_step_m_s: float = V_STEP_DEFAULT_M_S,
-    ccf_hybrid_center_m_s: float | None = None,
-    ccf_hybrid_half_width_m_s: float = 300.0,
-    ccf_hybrid_step_m_s: float = 0.1,
+    ccf_center_m_s: float | None = None,
+    ccf_half_window_m_s: float = 20000.0,
     zb: float = 0.0,
     max_cores: int | None = None,
     want_preview: bool = False,
     debug_ccf: bool = False,
-    mask_auto_hybrid_scout: bool = True,
+    mask_auto_center_scout: bool = True,
     ccf_parabolic_vertex_n_samples: int = 11,
     min_good_pixels: int = 10,
     mask_ccf_pixel_interp_order: int = 3,
@@ -5721,13 +5686,14 @@ def run_ccf_line_mask_for_fiber(
         When **both** are set, build the mask in memory (rest wavelengths in µm, weights same
         length) and ignore ``mask_path`` for loading. See :func:`~hispecdrp.utils.line_mask_utils.stellar_rv_ccf_mask_lines`.
     v_min_m_s, v_max_m_s, v_step_m_s : float, optional
-        **Broad** uniform velocity search (m s⁻¹). When ``ccf_hybrid_center_m_s`` is set,
-        these define the coarse leg of a **merged** grid (see
-        :func:`build_hybrid_merged_velocity_grid`); when unset, they define the sole CCF grid.
-    ccf_hybrid_center_m_s, ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s : float or None
-        When ``ccf_hybrid_center_m_s`` is finite, CCF is evaluated once on the merged velocity
-        list (broad ``v_min_m_s`` … ``v_max_m_s`` at ``v_step_m_s`` plus dense samples around
-        the center). When ``None`` / not finite, only the broad grid is used.
+        **Broad** uniform velocity search (m s⁻¹). When ``ccf_center_m_s`` is set,
+        only ``v_step_m_s`` is used (as the sampling of the centered window);
+        when unset, they define the sole CCF grid.
+    ccf_center_m_s, ccf_half_window_m_s : float or None
+        When ``ccf_center_m_s`` is finite, CCF is evaluated on a uniform window
+        ``center ± ccf_half_window_m_s`` at ``v_step_m_s``
+        (:func:`build_centered_uniform_velocity_grid`). When ``None`` / not finite,
+        only the broad grid is used.
     zb : float, optional
         Barycentric factor for mask shift.
     max_cores : int or None, optional
@@ -5736,12 +5702,12 @@ def run_ccf_line_mask_for_fiber(
         If True, build order-averaged CCF data for Plotly preview.
     debug_ccf : bool, optional
         Extra logging per order.
-    mask_auto_hybrid_scout : bool, optional
-        When ``ccf_hybrid_center_m_s`` is unset and **exactly one** echelle order is processed,
+    mask_auto_center_scout : bool, optional
+        When ``ccf_center_m_s`` is unset and **exactly one** echelle order is processed,
         run a **full-order** coarse mask CCF (one chunk spanning the echelle row), take the
         sub-pixel peak on the order-mean CCF (same basis as the pipeline fit), build
-        :func:`build_hybrid_merged_velocity_grid` at that center, and evaluate all wavelength
-        sub-bins on the merged grid. Multi-order runs skip this so preview stacking keeps one
+        :func:`build_centered_uniform_velocity_grid` at that center, and evaluate all wavelength
+        sub-bins on that centered uniform grid. Multi-order runs skip this so preview stacking keeps one
         velocity axis.
     ccf_parabolic_vertex_n_samples : int, optional
         **Odd** integer :math:`\\ge 3` (raises if even). For the **order-mean** path, the LSTSQ
@@ -5756,7 +5722,7 @@ def run_ccf_line_mask_for_fiber(
         CCFs (``1`` = linear). Forwarded to :func:`rv_per_chunks_line_mask`.
     window_line_by_line : bool, optional
         When true, spectral chunks follow mask lines in the observed frame at
-        ``ccf_hybrid_center_m_s`` (requires hybrid mode / finite ``ccf_hybrid_center_m_s``).
+        ``ccf_center_m_s`` (requires centered mode / finite ``ccf_center_m_s``).
         Forwarded to :func:`rv_per_chunks_line_mask`.
 
     Returns
@@ -5794,20 +5760,21 @@ def run_ccf_line_mask_for_fiber(
     from .ccf_line_mask_spline import (
         finalize_ccf_preview_dict_spline,
         fit_line_mask_order_mean_rv_spline,
+        line_mask_scout_center_m_s,
         rv_per_chunks_line_mask_spline,
     )
     if not np.isfinite(window_size_um) or float(window_size_um) <= 0:
         raise ValueError("window_size_um must be finite and > 0 for ccf_line_mask")
-    hybrid = bool(
-        ccf_hybrid_center_m_s is not None
-        and np.isfinite(float(ccf_hybrid_center_m_s))
+    centered = bool(
+        ccf_center_m_s is not None
+        and np.isfinite(float(ccf_center_m_s))
     )
-    if hybrid:
+    if centered:
         logger.info(
-            "CCF line_mask: HYBRID mode center=%.2f half_width=%.2f refined_step=%.4f (m/s)",
-            float(ccf_hybrid_center_m_s),
-            float(ccf_hybrid_half_width_m_s),
-            float(ccf_hybrid_step_m_s),
+            "CCF line_mask: centered uniform grid center=%.2f half_width=%.2f step=%.4f (m/s)",
+            float(ccf_center_m_s),
+            float(ccf_half_window_m_s),
+            float(v_step_m_s),
         )
     else:
         logger.info(
@@ -5860,64 +5827,59 @@ def run_ccf_line_mask_for_fiber(
         len(order_tasks),
     )
     single_order_line_mask = len(order_tasks) == 1
-    fiber_merged_v_grid: np.ndarray | None = None
+    fiber_centered_v_grid: np.ndarray | None = None
 
     if window_line_by_line:
-        if not hybrid or ccf_hybrid_center_m_s is None:
+        if not centered or ccf_center_m_s is None:
             raise ValueError(
                 "run_ccf_line_mask_for_fiber: window_line_by_line requires finite "
-                "ccf_hybrid_center_m_s (set ccf_input_velocity on the primitive)."
+                "ccf_center_m_s (set ccf_input_velocity on the primitive)."
             )
         kw_rv_line_chunking: dict[str, float | bool] = {
             "window_line_by_line": True,
-            "line_mask_line_chunk_v_center_m_s": float(ccf_hybrid_center_m_s),
+            "line_mask_line_chunk_v_center_m_s": float(ccf_center_m_s),
         }
         logger.info(
             "CCF line_mask: line-by-line chunking v_center_m_s=%.2f",
-            float(ccf_hybrid_center_m_s),
+            float(ccf_center_m_s),
         )
     else:
         kw_rv_line_chunking = {}
 
     v_min_use = float(v_min_m_s)
     v_max_use = float(v_max_m_s)
-    if window_line_by_line and hybrid:
-        v_min_use, v_max_use, dv_chunk_max = line_mask_line_window_coarse_velocity_bounds_m_s(
+    half_window_use = float(ccf_half_window_m_s)
+    if window_line_by_line and centered:
+        half_window_use, dv_chunk_max = line_mask_line_window_velocity_half_width_m_s(
             wave,
             order_tasks,
             mask_lines,
-            v_center_m_s=float(ccf_hybrid_center_m_s),
+            v_center_m_s=float(ccf_center_m_s),
             zb=float(zb),
             min_good_pixels=int(min_good_pixels),
-            v_coarse_lo=float(v_min_m_s),
-            v_coarse_hi=float(v_max_m_s),
-            hybrid_half_width_m_s=float(ccf_hybrid_half_width_m_s),
+            half_width_m_s=float(ccf_half_window_m_s),
             v_step_m_s=float(v_step_m_s),
         )
         logger.info(
-            "CCF line_mask: line-window coarse V bounds tightened to [%.2f, %.2f] m/s "
-            "(from [%.2f, %.2f]; max c·Δλ/λ over chunks ≈ %.2f m/s)",
-            v_min_use,
-            v_max_use,
-            float(v_min_m_s),
-            float(v_max_m_s),
+            "CCF line_mask: line-window centered half_width=%.2f m/s "
+            "(request=%.2f; max c·Δλ/λ over chunks ≈ %.2f m/s)",
+            half_window_use,
+            float(ccf_half_window_m_s),
             float(dv_chunk_max),
         )
 
-    if hybrid:
-        _h_vc = float(ccf_hybrid_center_m_s)
-        _h_hw = float(ccf_hybrid_half_width_m_s)
-        _h_vsf = float(ccf_hybrid_step_m_s)
-        v_grid = build_hybrid_merged_velocity_grid(
-            v_min_use,
-            v_max_use,
-            float(v_step_m_s),
+    if centered:
+        _h_vc = float(ccf_center_m_s)
+        _h_hw = float(half_window_use)
+        v_grid = build_centered_uniform_velocity_grid(
             _h_vc,
             _h_hw,
-            _h_vsf,
+            float(v_step_m_s),
         )
+        v_min_use = float(v_grid[0])
+        v_max_use = float(v_grid[-1])
     else:
-        _h_vc = _h_hw = _h_vsf = float("nan")
+        _h_vc = _h_hw = float("nan")
         v_grid = np.arange(
             v_min_use,
             v_max_use + 0.5 * v_step_m_s,
@@ -5940,9 +5902,10 @@ def run_ccf_line_mask_for_fiber(
     rvccf_rows_accum: list[np.ndarray] = []
     rvccf_n_good_accum: list[int] = []
 
-    # Fiber-level auto-hybrid scout (multi-order): estimate CCF peak on the first valid
-    # echelle row, then reuse the merged velocity grid for every order on this fiber.
-    if bool(mask_auto_hybrid_scout) and not hybrid and fiber_merged_v_grid is None:
+    # Fiber-level auto-center scout (multi-order): estimate CCF peak on the first valid
+    # echelle row, then reuse the centered uniform velocity grid for every order on this fiber.
+    fiber_scout_center_m_s: float | None = None
+    if bool(mask_auto_center_scout) and not centered and fiber_centered_v_grid is None:
         for _oi_sc, _ord_sc in order_tasks:
             _w_sc = np.asarray(wave[_oi_sc], dtype=np.float64)
             _s_sc = np.asarray(spec[_oi_sc], dtype=np.float64)
@@ -5996,22 +5959,21 @@ def run_ccf_line_mask_for_fiber(
             m_dt = _nanmean_axis0_ignore_empty_columns(
                 np.asarray(ccf_2d_sc, dtype=np.float64)
             )
-            v_c = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg_sc, m_dt)
+            # Prefer scout chunk RVs (metrics peak), not argmax on stored CCF.
+            v_c = line_mask_scout_center_m_s(_rvs_sc, vg_sc, m_dt)
             if math.isfinite(v_c):
-                fiber_merged_v_grid = build_hybrid_merged_velocity_grid(
-                    float(v_min_use),
-                    float(v_max_use),
-                    float(v_step_m_s),
+                fiber_scout_center_m_s = float(v_c)
+                fiber_centered_v_grid = build_centered_uniform_velocity_grid(
                     float(v_c),
-                    float(ccf_hybrid_half_width_m_s),
-                    float(ccf_hybrid_step_m_s),
+                    float(ccf_half_window_m_s),
+                    float(v_step_m_s),
                 )
                 logger.info(
-                    "CCF line_mask: auto-hybrid scout (fiber-level, order=%s) center=%.2f m/s "
+                    "CCF line_mask: auto-center scout (fiber-level, order=%s) center=%.2f m/s "
                     "n_vel=%d fiber=%s",
                     _ord_sc,
                     float(v_c),
-                    int(fiber_merged_v_grid.size),
+                    int(fiber_centered_v_grid.size),
                     fiber,
                 )
             break
@@ -6038,29 +6000,32 @@ def run_ccf_line_mask_for_fiber(
         order_chunk_wl: list[float] = []
         order_chunk_ng: list[int] = []
         v_auto_grid: np.ndarray | None = (
-            np.asarray(fiber_merged_v_grid, dtype=np.float64)
-            if fiber_merged_v_grid is not None and not hybrid
+            np.asarray(fiber_centered_v_grid, dtype=np.float64)
+            if fiber_centered_v_grid is not None and not centered
             else None
         )
-        order_auto_hybrid_merged = fiber_merged_v_grid is not None and not hybrid
+        order_auto_centered = fiber_centered_v_grid is not None and not centered
 
         kw_rv = {
             "min_good_pixels": int(min_good_pixels),
             **kw_rv_line_chunking,
         }
-        if hybrid and ccf_hybrid_center_m_s is not None and math.isfinite(float(ccf_hybrid_center_m_s)):
-            kw_rv["gaussian_seed_mean_m_s"] = float(ccf_hybrid_center_m_s)
-            kw_rv["metrics_fit_half_width_m_s"] = max(
-                2.5 * float(ccf_hybrid_half_width_m_s),
-                600.0,
-            )
-        # Legacy single-order auto-hybrid (when fiber-level scout did not run).
+        if centered and ccf_center_m_s is not None and math.isfinite(float(ccf_center_m_s)):
+            kw_rv["gaussian_seed_mean_m_s"] = float(ccf_center_m_s)
+        elif (
+            order_auto_centered
+            and fiber_scout_center_m_s is not None
+            and math.isfinite(float(fiber_scout_center_m_s))
+        ):
+            # Seed the Gaussian/bisector at the scout center on the centered uniform grid.
+            kw_rv["gaussian_seed_mean_m_s"] = float(fiber_scout_center_m_s)
+        # Legacy single-order auto-center scout (when fiber-level scout did not run).
         span_um = float(w_max - w_min)
         window_um_scout = max(float(window_size_um), span_um * (1.0 + 1e-12))
         if (
-            bool(mask_auto_hybrid_scout)
+            bool(mask_auto_center_scout)
             and single_order_line_mask
-            and not hybrid
+            and not centered
             and v_auto_grid is None
         ):
             scout = rv_per_chunks_line_mask_spline(
@@ -6094,21 +6059,20 @@ def run_ccf_line_mask_for_fiber(
                 m_dt = _nanmean_axis0_ignore_empty_columns(
                     np.asarray(ccf_2d_sc, dtype=np.float64)
                 )
-                v_c = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg_sc, m_dt)
+                v_c = line_mask_scout_center_m_s(_rvs_sc, vg_sc, m_dt)
 
                 if math.isfinite(v_c):
-                    v_auto_grid = build_hybrid_merged_velocity_grid(
-                        float(v_min_use),
-                        float(v_max_use),
-                        float(v_step_m_s),
-                        float(v_c),
-                        float(ccf_hybrid_half_width_m_s),
-                        float(ccf_hybrid_step_m_s),
-                    )
-                    order_auto_hybrid_merged = True
-                    fiber_merged_v_grid = v_auto_grid
+                    fiber_scout_center_m_s = float(v_c)
+                    v_auto_grid = build_centered_uniform_velocity_grid(
+                    float(v_c),
+                    float(ccf_half_window_m_s),
+                    float(v_step_m_s),
+                )
+                    order_auto_centered = True
+                    fiber_centered_v_grid = v_auto_grid
+                    kw_rv["gaussian_seed_mean_m_s"] = float(v_c)
                     logger.info(
-                        "CCF line_mask: auto-hybrid scout (full-order mean CCF) center=%.2f m/s "
+                        "CCF line_mask: auto-center scout (full-order mean CCF) center=%.2f m/s "
                         "n_vel=%d fiber=%s order=%s window_um_scout=%.6f",
                         float(v_c),
                         int(v_auto_grid.size),
@@ -6119,7 +6083,7 @@ def run_ccf_line_mask_for_fiber(
                 else:
                     v_auto_grid = np.asarray(v_grid_sc, dtype=np.float64)
 
-        if hybrid:
+        if centered:
             (
                 rvs_o,
                 errs_o,
@@ -6262,18 +6226,19 @@ def run_ccf_line_mask_for_fiber(
                     ccf_mean_order,
                     ccf_err_fit,
                     gaussian_seed_mean_m_s=(
-                        float(ccf_hybrid_center_m_s)
-                        if hybrid
-                        and ccf_hybrid_center_m_s is not None
-                        and math.isfinite(float(ccf_hybrid_center_m_s))
-                        else None
+                        float(ccf_center_m_s)
+                        if centered
+                        and ccf_center_m_s is not None
+                        and math.isfinite(float(ccf_center_m_s))
+                        else (
+                            float(fiber_scout_center_m_s)
+                            if order_auto_centered
+                            and fiber_scout_center_m_s is not None
+                            and math.isfinite(float(fiber_scout_center_m_s))
+                            else None
+                        )
                     ),
-                    metrics_fit_half_width_m_s=(
-                        max(2.5 * float(ccf_hybrid_half_width_m_s), 600.0)
-                        if hybrid
-                        else None
-                    ),
-                )
+                                    )
                 if order_used_gaussian_mean:
                     order_chunk_rvs = [rv_gf] * n_chunks_order
                     order_chunk_errs = [err_gf] * n_chunks_order
@@ -6399,16 +6364,16 @@ def run_ccf_line_mask_for_fiber(
     # Fiber-level RV aggregation (median/MAD + IV mean) is performed by the stellar RV primitive
     # so that ccf_utils remains a dependency of stellar_rv (and does not import from it).
 
-    if hybrid:
+    if centered:
         pv_min = float(v_grid[0])
         pv_max = float(v_grid[-1])
         pv_step = float(effective_ccf_v_step_for_fit(v_grid))
         preview_v_grid = v_grid
-    elif fiber_merged_v_grid is not None:
-        pv_min = float(fiber_merged_v_grid[0])
-        pv_max = float(fiber_merged_v_grid[-1])
-        pv_step = float(effective_ccf_v_step_for_fit(fiber_merged_v_grid))
-        preview_v_grid = fiber_merged_v_grid
+    elif fiber_centered_v_grid is not None:
+        pv_min = float(fiber_centered_v_grid[0])
+        pv_max = float(fiber_centered_v_grid[-1])
+        pv_step = float(effective_ccf_v_step_for_fit(fiber_centered_v_grid))
+        preview_v_grid = fiber_centered_v_grid
     else:
         pv_min = float(v_min_use)
         pv_max = float(v_max_use)
@@ -6431,18 +6396,18 @@ def run_ccf_line_mask_for_fiber(
             pv_step,
             all_ccf_err_rows if len(all_ccf_err_rows) == len(order_slots) else None,
             gaussian_seed_mean_m_s=(
-                float(ccf_hybrid_center_m_s)
-                if hybrid
-                and ccf_hybrid_center_m_s is not None
-                and math.isfinite(float(ccf_hybrid_center_m_s))
-                else None
+                float(ccf_center_m_s)
+                if centered
+                and ccf_center_m_s is not None
+                and math.isfinite(float(ccf_center_m_s))
+                else (
+                    float(fiber_scout_center_m_s)
+                    if fiber_scout_center_m_s is not None
+                    and math.isfinite(float(fiber_scout_center_m_s))
+                    else None
+                )
             ),
-            metrics_fit_half_width_m_s=(
-                max(2.5 * float(ccf_hybrid_half_width_m_s), 600.0)
-                if hybrid
-                else None
-            ),
-        )
+                    )
 
     logger.info(
         "CCF line_mask: fiber=%s finished n_chunks=%d preview=%s",
