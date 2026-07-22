@@ -22,6 +22,7 @@ from .refpix import *
 from .barycenter_correction import *
 from .cross_correlation import *
 from .sky_subtraction import *
+from .telluric_correction import *
 
 # Registry of primitives
 _local_dict = locals()

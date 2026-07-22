@@ -385,7 +385,7 @@ class SkySubtractionPrimitive(BasePrimitive):
         )
 
         # File paths — use the first model as the naming anchor
-        base_path        = output_models[0].get_output_path(output_dir=self.output_dir, suffix=self.suffix)
+        base_path        = output_models[0]._generate_output_path(output_dir=self.output_dir, suffix=self.suffix)
         output_path_html = base_path.replace('.fits', '_preview.html')
         output_path_png  = base_path.replace('.fits', '_preview.png')
 
