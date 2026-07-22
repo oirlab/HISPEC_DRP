@@ -104,7 +104,7 @@ def _metrics_for_n(
         v_min_coarse=v_min,
         v_max_coarse=v_max,
         v_step_coarse=float(ts._BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         ccf_parabolic_vertex_n_samples=int(n_samples),
         mask_ccf_pixel_interp_order=ts._mask_ccf_pixel_interp_order_from_env(),
         outlier_sigma=4.0,
