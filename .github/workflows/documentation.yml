@@ -33,7 +33,7 @@ jobs:
           python setup.py build_ext --inplace
     - name: Install the package with docs dependencies
       run: |
-        pip install .[docs]
+        pip install ".[docs]"
     - name: Build the docs
       run: |
         cd docs

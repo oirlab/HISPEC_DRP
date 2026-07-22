@@ -338,6 +338,19 @@ class DataModel:
         else:
             filename = self.generate_filename(suffix=suffix)
             return os.path.join(os.getcwd(), filename)
+
+    def get_output_path(
+        self,
+        filename: str | None = None,
+        output_dir: str | None = None,
+        suffix: str | None = None,
+    ) -> str:
+        """Return the FITS path that :meth:`save` would write for ``output_dir`` / ``suffix``."""
+        return self._generate_output_path(
+            filename=filename,
+            output_dir=output_dir,
+            suffix=suffix,
+        )
     
     def to_hdulist(
         self,
@@ -1198,6 +1211,8 @@ class CalibrationModel(DataModel):
         )
 
         self.meta.filename = filename
+
+        _set_koa_meta(self)
 
         if self._filepath is not None:
             input_dir = os.path.dirname(os.path.abspath(self._filepath))

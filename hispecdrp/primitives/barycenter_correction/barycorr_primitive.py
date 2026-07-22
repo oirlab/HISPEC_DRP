@@ -1,5 +1,6 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
+from ...datamodels.dqflags import DQ_FLAGS
 import numpy as np
 from .barycenter_corr import calc_barycenter_corrections, calc_solar_barycenter_corrections
 from astropy.table import Table
@@ -8,6 +9,8 @@ from .barycenter_corr import get_barycorrpy_star_data
 
 import logging
 logger = logging.getLogger(__name__)
+
+DO_NOT_USE = DQ_FLAGS["DO_NOT_USE"]
 
 __all__ = [
     'BarycenterCorrectionPrimitive',
@@ -55,8 +58,11 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
 
         # Solar RVs?
         if self.solar is None:
-            solar = any(k in input_model.meta.target_name.lower() for k in ("sun", "solar"))
-            
+            target_name = getattr(input_model.meta, "target_name", None) or ""
+            solar = any(k in str(target_name).lower() for k in ("sun", "solar"))
+        else:
+            solar = bool(self.solar)
+
         if solar:
             logger.info("Calculating SOLAR barycenter corrections...")
         else:
@@ -83,17 +89,39 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
             mjd_utcs = getattr(input_model, f'mid_time_fib{fiber}', None)
             if mjd_utcs is None:
                 continue
-            
-            def is_valid_mjd(mjd: float) -> bool:
-                return 30_000 <= mjd <= 80_000
 
             spec_err = getattr(input_model, f'spec_err_fib{fiber}', None)
+            if spec_err is None:
+                spec_err = getattr(input_model, f'spec_uncal_err_fib{fiber}', None)
             dq_mask = getattr(input_model, f'spec_dq_fib{fiber}', None)
-            weights = 1 / spec_err**2
-            weights[dq_mask == 0] = 0.0
-            
-            # Exposure average MJD UTC for this fiber
-            mjd_mean = np.sum(weights * mjd_utcs) / np.sum(weights)
+
+            if spec_err is not None:
+                weights = np.zeros_like(spec_err, dtype=np.float64)
+                valid_err = np.isfinite(spec_err) & (spec_err > 0)
+                weights[valid_err] = 1.0 / spec_err[valid_err] ** 2
+                if dq_mask is not None:
+                    weights[(dq_mask & DO_NOT_USE) != 0] = 0.0
+                wsum = float(np.sum(weights))
+                if wsum > 0 and np.isfinite(wsum):
+                    mjd_mean = float(np.sum(weights * mjd_utcs) / wsum)
+                else:
+                    mjd_mean = float(np.nanmean(mjd_utcs))
+            else:
+                mjd_mean = float(np.nanmean(mjd_utcs))
+
+            if not np.isfinite(mjd_mean):
+                meta_mjd = getattr(input_model.meta, "mjd_mid", None)
+                if meta_mjd is None:
+                    meta_mjd = getattr(input_model.meta, "mjd_start", None)
+                if meta_mjd is not None and np.isfinite(meta_mjd):
+                    mjd_mean = float(meta_mjd)
+                else:
+                    logger.warning(
+                        "Skipping barycenter correction for fiber %s: "
+                        "no finite exposure mid-time.",
+                        fiber,
+                    )
+                    continue
 
             # Calculate corrections
             if solar:

@@ -91,9 +91,11 @@ class SpectralExtractionPrimitive(BasePrimitive):
             input_model = datamodels.open(_input)
             npix = input_model.shape[0] if input_model.meta.orders_are_vertical else input_model.shape[1]
 
-            # Get calibrations
+            # Get calibrations (get_calibration returns a filepath or model)
             tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
+            tracepos_model = datamodels.open(tracepos_model)
             traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
+            traceprof_model = datamodels.open(traceprof_model)
 
             # Init output model
             output_model = self.get_output_model(input_model)

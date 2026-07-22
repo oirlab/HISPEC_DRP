@@ -20,7 +20,6 @@ from .blaze_correction import *
 from .stellar_rv import *
 from .refpix import *
 from .barycenter_correction import *
-from .cross_correlation import *
 from .sky_subtraction import *
 from .telluric_correction import *
 

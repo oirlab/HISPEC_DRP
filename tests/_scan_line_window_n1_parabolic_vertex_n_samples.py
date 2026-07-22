@@ -1,6 +1,6 @@
 """
 Sweep ``ccf_parabolic_vertex_n_samples`` for the **line-window n_lines=1** lte049 BSPEC
-setup (same geometry as ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel``).
+setup (same geometry as ``test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel``).
 
 Reports per-chunk bias for ORDER=139 CHUNK_ID=0 (segment 1/24), RMS |bias| over all chunks,
 and RVCCFAVG bias vs injected RV.
@@ -104,7 +104,7 @@ def _metrics_for_n(
         v_min_coarse=v_min,
         v_max_coarse=v_max,
         v_step_coarse=float(ts._BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         ccf_parabolic_vertex_n_samples=int(n_samples),
         mask_ccf_pixel_interp_order=ts._mask_ccf_pixel_interp_order_from_env(),
         outlier_sigma=4.0,
@@ -135,7 +135,7 @@ def main() -> None:
     import tempfile
     import time
 
-    # Align with ``test_fit_ccf_kpf_style_btsettl_bspec_line_mask_line_window_n1_parallel`` when
+    # Align with ``test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel`` when
     # the shell leaves HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER unset (otherwise match env).
     os.environ.setdefault("HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER", "3")
 

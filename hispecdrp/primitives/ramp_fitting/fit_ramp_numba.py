@@ -1,7 +1,7 @@
 from numba import njit, prange
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
-from .utils import get_mid_delta_times_ramp, get_ramp_chunks, bitwise_or_reduce
+from .utils import get_mid_delta_times_ramp, get_ramp_chunks, bitwise_or_reduce, seconds_to_mjd_offset
 from ...utils.parallelization_utils import numba_thread_scope
 
 SATURATED_FLAG = DQ_FLAGS["SATURATED"]
@@ -150,7 +150,9 @@ def _fit_ramps_slope_pedestal(
             )
 
             slope_image[i, j], slope_err[i, j], var_rnoise[i, j], var_poisson[i, j], b[i, j], b_err[i, j] = out
-            mid_time[i, j] = start_times[i, j] + get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            mid_time[i, j] = start_times[i, j] + seconds_to_mjd_offset(
+                get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            )
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)
@@ -369,7 +371,9 @@ def _fit_ramps_mcds(
             )
 
             slope_image[i, j], slope_err[i, j], var_rnoise[i, j], var_poisson[i, j] = out
-            mid_time[i, j] = start_times[i, j] + get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            mid_time[i, j] = start_times[i, j] + seconds_to_mjd_offset(
+                get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            )
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)

@@ -3,7 +3,7 @@ import glob
 from koa_middleware import CalibrationStore, CalibrationSelector
 import os
 from .. import datamodels
-from koa_middleware.utils import is_valid_uuid
+from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid
 
 from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
@@ -101,7 +101,27 @@ class HISPECCalibrationStore(CalibrationStore):
             else:
                 raise ValueError(f"Input string is not a valid file path: {input}")
 
-        return super().select_and_get_calibration(input, selector)
+        # koa_middleware logs result['filename'] without checking for None when
+        # select_best finds no candidates. Guard here and raise a clear error.
+        logger.info(
+            "Selecting calibration for input=%s using %s",
+            input.get("filename") if hasattr(input, "get") else None,
+            selector,
+        )
+        result = selector.select(input, self.local_db)
+        if result is None:
+            raise ValueError(
+                f"No matching calibration found for selector {type(selector).__name__} "
+                f"(instrument_era={input.get('instrument_era')!r}, "
+                f"spectrograph={input.get('spectrograph')!r}, "
+                f"mjd_start={input.get('mjd_start')!r})."
+            )
+        logger.info(
+            "Selected calibration filename=%s ID=%s",
+            result.get("filename"),
+            result.get("id"),
+        )
+        return self.get_calibration(result)
 
     def save_calibration_file(self, cal: CalibrationModel, cal_record : dict | None = None) -> str:
         """
@@ -169,6 +189,49 @@ class HISPECCalibrationStore(CalibrationStore):
 
         # Return new new records
         return cal_records_added
+
+    def sync_records_from_remote(
+        self,
+        cals=None,
+        mode: str = "id",
+    ) -> list[dict]:
+        """
+        Synchronize the local DB with the remote KOA catalog.
+
+        ``cals`` is accepted for compatibility with callers that pass an explicit
+        remote query result; when omitted, records are discovered via
+        ``get_missing_records`` (same as ``koa_middleware``).
+        """
+        if cals is not None:
+            mode = str(mode).lower()
+            if mode == "id":
+                ids_local = {cal["id"] for cal in self.local_db.query()}
+                missing = [cal for cal in cals if cal["id"] not in ids_local]
+            elif mode == "last_updated":
+                last_updated_local = self.get_last_updated(source="local")
+                missing = [
+                    cal
+                    for cal in cals
+                    if last_updated_local is None
+                    or cal.get("last_updated", "") > last_updated_local
+                ]
+            else:
+                raise ValueError(
+                    f"Invalid mode {mode!r} for sync_records_from_remote()."
+                )
+            if missing:
+                logger.info(
+                    "Adding %d explicit remote record(s) to local DB (mode=%r).",
+                    len(missing),
+                    mode,
+                )
+                return self.local_db.add(missing)
+            logger.info(
+                "Local DB already contains explicit remote record(s) (mode=%r).",
+                mode,
+            )
+            return []
+        return super().sync_records_from_remote(mode=mode)
 
     def calibration_record_in_cache(
         self,
@@ -257,3 +320,39 @@ class HISPECCalibrationStore(CalibrationStore):
         new_local_filepath, new_record = self.register_calibration(model_out)
 
         return new_local_filepath, new_record
+
+    def _finalize_cal_record(
+        self,
+        cal,
+        cal_record: dict | str | None = None,
+        local_filepath: str | None = None,
+    ) -> dict:
+        """
+        Finalize a calibration record after the file has been saved to disk.
+
+        Adds filename/MD5 via the base store, then fills KOA identifiers that are
+        set on the saved file during :meth:`~datamodels.CalibrationModel.generate_filename`
+        but are not yet present on the pre-save metadata record.
+
+        Compatible with both koa_middleware call signatures:
+
+        * ``_finalize_cal_record(cal, cal_record, local_filepath)`` (current git)
+        * ``_finalize_cal_record(cal_record, local_filepath)`` (older releases)
+        """
+        if isinstance(cal_record, str):
+            # Older koa_middleware: (cal_record, local_filepath)
+            record = cal
+            path = cal_record
+            cal_record = super()._finalize_cal_record(record, path)
+        else:
+            cal_record = super()._finalize_cal_record(cal, cal_record, local_filepath)
+
+        if cal_record.get("koa_id") is None:
+            cal_record["koa_id"] = cal_record.get("filename")
+        if cal_record.get("koa_filepath") is None and cal_record.get("koa_id") is not None:
+            cal_record["koa_filepath"] = generate_koa_filehandle(
+                cal_record.get("instrument_name"),
+                cal_record.get("datetime_obs"),
+                cal_record["koa_id"],
+            )
+        return cal_record

@@ -1,6 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
 from hispecdrp.datamodels import hispec_config
-import warnings
 
 try:
     from pyechelle.simulator import Simulator
@@ -8,12 +7,10 @@ try:
     from pyechelle.sources import CSVSource
     from pyechelle.spectrograph import ZEMAX
 except ImportError:
-    import multiprocessing
-    if multiprocessing.current_process().name == "MainProcess":
-        warnings.warn(
-            "pyechelle package not found in imports in hispec.simulations.simulate_rate_map.py. "
-            "This is not a problem unless you need it. pyechelle simulations will simply not run."
-        )
+    Simulator = None  # type: ignore[misc, assignment]
+    Telescope = None
+    CSVSource = None
+    ZEMAX = None
 
 import logging
 import os
@@ -346,6 +343,13 @@ class SimulateRateMap:
         Temporary CSV files are created during this process to feed pyechelle custom spectra.
         A sinc^2 blaze efficiency is applied internally by pyechelle, it cannot be turned off."""
 
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed. Install the HISPEC fork "
+                "(see docs/source/installation.rst) or use "
+                "SimulateRateMap.create_native_rate_map instead."
+            )
+
         spectrograph = spectrograph.upper()
 
         if spectrograph not in ("BSPEC", "RSPEC"):
@@ -606,7 +610,7 @@ def bilinear_weights_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -626,7 +630,7 @@ def bilinear_weights_rate_map(
         Nested structure containing wavelength trace and PSF stamps for orders. 
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector (ny, nx) pixel size, default = (4096, 4096).
+        Detector (ny, nx) pixel size, default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns (affects oversampling), default = 10.
 
@@ -766,7 +770,7 @@ def psf_prf_convolution_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -787,7 +791,7 @@ def psf_prf_convolution_rate_map(
         Nested dictionary containing trace coordinates and PSF stamps.
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector pixels (ny, nx). Default = (4096, 4096).
+        Detector pixels (ny, nx). Default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns, used to determine oversampling.
     apply_blaze : bool, optional

@@ -16,15 +16,23 @@ from ...datamodels.dqflags import DQ_FLAGS
 from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
 
 from .rv_combine_utils import (
+    DEFAULT_CHUNK_RV_MAX_ABS_M_S,
+    DEFAULT_CHUNK_RV_PRIOR_HALF_WIDTH_M_S,
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
+    combine_stellar_rv_chunk_estimates,
     weighted_mean_rv,
 )
 
 from ...utils.parallelization_utils import resolve_numba_threads
-from ..utils.ccf_utils import (
+from ..utils.ccf.ccf_common import (
+    V_MAX_DEFAULT_M_S,
+    V_MIN_DEFAULT_M_S,
+    V_STEP_DEFAULT_M_S,
+)
+from ..utils.ccf.ccf_utils import (
     assemble_rvccf_fib_table,
-    build_hybrid_merged_velocity_grid,
+    build_centered_uniform_velocity_grid,
     ccf_order_n_chunks_for_span,
     validate_line_mask_line_window_chunking_config,
     build_rvccf_chunk_supplement,
@@ -32,15 +40,13 @@ from ..utils.ccf_utils import (
     resolve_ccf_broad_grid_m_s,
     run_ccf_line_mask_for_fiber,
     STELLAR_RV_LINE_MASK_ALGORITHMS,
-    _V_MAX,
-    _V_MIN,
-    _V_STEP,
     build_ccf_preview_dict,
     flat_chunk_echelle_orders,
     masked_ccf_rv,
     process_orders_rvs_numba_parallel,
 )
 from ...utils.spectral_templates_utils import resolve_stellar_template_to_log_micron
+from ..barycenter_correction.barycenter_corr import resolve_ccf_zb
 
 __all__ = [
     "StellarRVPrimitive",
@@ -48,6 +54,9 @@ __all__ = [
     "combine_rvs_median_mad",
     "weighted_mean_rv",
     "combine_rv_estimates_median_mad_weighted",
+    "combine_stellar_rv_chunk_estimates",
+    "DEFAULT_CHUNK_RV_MAX_ABS_M_S",
+    "DEFAULT_CHUNK_RV_PRIOR_HALF_WIDTH_M_S",
 ]
 
 logger = logging.getLogger(__name__)
@@ -94,11 +103,12 @@ class StellarRVPrimitive(BasePrimitive):
 
     * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
       two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
-      :mod:`~hispecdrp.primitives.utils.ccf_utils`).
-      Packaged defaults and citations: ``hispecdrp/data/masks/README.md``.
+      :mod:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline`). Per-chunk CCFs use
+      :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
+      metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
-      (:mod:`~hispecdrp.primitives.utils.ccf_utils`).
+      (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
 
     Parameters
     ----------
@@ -146,18 +156,16 @@ class StellarRVPrimitive(BasePrimitive):
     mask_ccf_pixel_interp_order : int
         **Default:** ``3``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
         for sampling flux and the per-pixel gate onto Doppler-shifted mask-line wavelengths in
-        :func:`~hispecdrp.primitives.utils.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
         to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Orders **greater than 1** are not
         equivalent to the historical linear scheme: polynomial overshoot between pixels can bias
         mask CCF shapes and aggregate RVs compared to ``order=1``; use for experiments only unless
         you revalidate tolerances on your science cases.
-    mask_auto_hybrid_scout : bool
-        **Default:** ``True``. **Mask algorithm only.** Passed to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber`. When ``True``,
-        **only** if ``ccf_input_velocity`` is unset **and** a single echelle order is processed,
-        a scout full-order CCF finds a coarse peak and builds a hybrid velocity grid. Multi-order
-        runs skip scouting so every order shares one ``v`` axis. ``False`` uses the broad grid from
-        ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` only.
+    mask_auto_center_scout : bool
+        **Default:** ``True``. **Mask algorithm only.** When ``True`` and ``ccf_input_velocity``
+        is unset, a scout CCF on the broad uniform grid finds a coarse peak, then the fiber
+        is reprocessed on a **centered uniform** window (``v_half_window`` at ``v_step_coarse``).
+        ``False`` uses only ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse``.
     window_size_um : float
         **Default:** ``0.3``. Approximate wavelength span (µm) of each **chunk** along an order:
         spectra are split into contiguous bins of roughly this width for per-chunk RVs (template
@@ -165,60 +173,62 @@ class StellarRVPrimitive(BasePrimitive):
     outlier_sigma : float
         **Default:** ``4.0``. Multiplier on the robust scatter (MAD) for rejecting outlier **chunk**
         RVs before the inverse-variance weighted mean (see
-        :func:`~hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_rvs_median_mad`).
+        :func:`~hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_stellar_rv_chunk_estimates`).
+    chunk_rv_max_abs_m_s : float
+        **Default:** ``120000.0`` (120 km s\\ :sup:`−1`). Per-chunk RVs with ``|RV|`` above this limit
+        are excluded before aggregation (coarse-grid CCF alias peaks). Set very large to disable.
+        Ignored when ``ccf_input_velocity`` is set (prior gate used instead).
+    chunk_rv_prior_half_width_m_s : float or None
+        **Default:** ``None``. When ``ccf_input_velocity`` is set, keep only chunks with
+        ``|RV − ccf_input_velocity| <= half_width`` before aggregation. ``None`` uses
+        ``max(2000, 0.5 × v_half_window)`` m/s.
     window_line_by_line : bool
         **Default:** ``False``. **Line-mask algorithm only** (``ccf_line_mask``). When ``False``, chunk
-        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`.
+        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
         When ``True``, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
-        at ``ccf_input_velocity``, which must be finite — hybrid fine-leg center). Spectral pixels
+        at ``ccf_input_velocity``, which must be finite — grid center). Spectral pixels
         per chunk use the intersection of that Voronoi interval with a symmetric ``window_size_um``
-        band; see :func:`~hispecdrp.primitives.utils.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
+        band; see :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`.
     v_min_coarse : float or None
-        **Default:** ``None``. **Coarse** CCF search lower bound (m/s): the uniform broad leg before
-        any hybrid merge. ``None`` → :data:`~hispecdrp.primitives.utils.ccf_utils._V_MIN` via
-        :func:`~hispecdrp.primitives.utils.ccf_utils.resolve_ccf_broad_grid_m_s`.
+        **Default:** ``None``. Broad uniform CCF lower bound (m/s) when no center is set (scout /
+        full-range search). ``None`` → :data:`~hispecdrp.primitives.utils.ccf.ccf_common.V_MIN_DEFAULT_M_S`.
     v_max_coarse : float or None
-        **Default:** ``None``. **Coarse** CCF search upper bound (m/s). ``None`` → ``_V_MAX``.
+        **Default:** ``None``. Broad uniform CCF upper bound (m/s). ``None`` → ``V_MAX_DEFAULT_M_S``.
     v_step_coarse : float or None
-        **Default:** ``None``. Uniform spacing (m/s) of the **coarse** velocity grid. ``None`` →
-        :data:`~hispecdrp.primitives.utils.ccf_utils._V_STEP` (typically 50 m/s). Finer values
-        increase ``N_v`` and runtime.
+        **Default:** ``None``. Uniform velocity sampling (m/s) for **both** the broad and centered
+        grids. ``None`` → :data:`~hispecdrp.primitives.utils.ccf.ccf_common.V_STEP_DEFAULT_M_S`
+        (typically 50 m/s). Use e.g. 25 m/s for denser uniform sampling.
     ccf_input_velocity : float or None
-        **Default:** ``None``. If set (m/s), CCFs use a **merged** grid: the coarse
-        ``v_min_coarse``…``v_max_coarse`` scan at ``v_step_coarse`` **plus** dense **fine** samples on
-        ``[ccf_input_velocity − v_window_fine, ccf_input_velocity + v_window_fine]``
-        at spacing ``v_step_fine``. Improves peak sampling and per-chunk ``RV_ERR`` near the
-        line core. If ``None``, only the uniform coarse grid is used.
-    v_window_fine : float
-        **Default:** ``300.0``. **Fine** leg: half-width (m/s) around ``ccf_input_velocity``
-        (i.e. ±this value in velocity) for the dense hybrid samples.
-    v_step_fine : float
-        **Default:** ``0.1``. **Fine** leg: spacing (m/s) on the dense hybrid samples —
-        **10 cm s\\ :sup:`−1`** per step.
+        **Default:** ``None``. If set (m/s), the CCF uses a **uniform** window centered here:
+        ``[ccf_input_velocity − v_half_window, ccf_input_velocity + v_half_window]`` at
+        ``v_step_coarse``. If ``None`` and ``mask_auto_center_scout`` is True, a scout pass
+        sets this center automatically.
+    v_half_window : float
+        **Default:** ``20000.0``. Half-width (m/s) of the centered uniform velocity window
+        (±this value around ``ccf_input_velocity`` or the auto-scout center).
     ccf_parabolic_vertex_n_samples : int or None
-        **Default:** ``31``. **Both algorithms:** **odd** integer :math:`\\ge 3` (even values raise
-        :class:`ValueError` in mask utilities). For ``ccf_line_mask``, window placement follows
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask` / the order-mean refine
-        path. For ``ccf_stellar_template`` (parallel Numba driver and ``debug_ccf`` ``masked_ccf_rv``),
-        each chunk’s Gaussian :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv` result can be
-        refined with the same LSTSQ parabolic vertex machinery as mask-line CCF (see
-        :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_rv_from_ccf`). Setting this to ``None``
-        disables the parabolic refinement step (Gaussian-only per chunk) for the template-CCF path.
+        **Deprecated (ignored for final RV).** Final chunk RVs use bisector refinement after
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`. Retained for backward-compatible
+        constructor kwargs only.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` /
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber` /
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
         it applies the same multiplicative shift in :math:`\\ln\\lambda` template evaluation as in
-        :func:`~hispecdrp.primitives.utils.ccf_utils._ccf_chunk_ccf_numba`. Use ``0.0`` when L2
-        wavelengths and the template/mask rest frame already match.
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba`. Used as a fallback when
+        ``ccf_zb_from_barycorr`` is False or ``BARYCORR_FIB#`` is absent.
+    ccf_zb_from_barycorr : bool
+        **Default:** ``True``. When True and ``BARYCORR_FIB#`` is present on the input L2 model,
+        ``BERV`` (m/s) is converted to :math:`z_b = \\mathrm{BERV}/c` and passed to the CCF for
+        each fiber. Set False to force the fixed ``ccf_zb`` value.
     ccf_min_good_pixels : int
         **Default:** ``9``. **Both algorithms:** minimum unmasked finite spectral pixels per
         **wavelength chunk** (chunking from ``window_size_um`` via
-        :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or from
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`, or from
         ``window_line_by_line`` Voronoi bins) required to form
         a CCF and fit an RV. For ``ccf_line_mask`` this is ``min_good_pixels`` in
-        :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`; for ``ccf_stellar_template``
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`; for ``ccf_stellar_template``
         it gates the Numba per-chunk CCF and the Python per-chunk fit. Overlay debug HTML uses the
         same threshold for chunk inclusion.
     output_model : str
@@ -228,15 +238,19 @@ class StellarRVPrimitive(BasePrimitive):
     max_cores : int or None
         **Default:** ``None``. Upper bound on parallel **Numba** threads: template path uses it for
         echelle-order parallelism; mask path passes it to
-        :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber` / chunk loops.
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber` / chunk loops.
         ``None`` lets :func:`~hispecdrp.utils.parallelization_utils.resolve_numba_threads` pick a
         host-appropriate count; ``1`` forces single-threaded, reproducible runs.
     debug_ccf : bool
         **Default:** ``False``. Extra logging and diagnostics. For ``ccf_stellar_template``, forces
         the slower non-Numba CCF path instead of the parallel driver.
+    preview_write_png : bool
+        **Default:** ``True``. When ``save_preview`` is True, also write a stacked Kaleido PNG
+        alongside the HTML preview. Set False for large line-mask runs (many CCF slots) where
+        PNG export can take minutes or hang in headless Chrome.
     preview_png_scale : float
-        **Default:** ``2.0``. Pixel scale multiplier for Kaleido PNG exports when ``save_preview`` is
-        True (see :mod:`~hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`).
+        **Default:** ``2.0``. Pixel scale multiplier for Kaleido PNG exports when ``save_preview`` and
+        ``preview_write_png`` are True (see :mod:`~hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`).
     show_overlay_debug : bool
         **Default:** ``False``. For ``ccf_line_mask``, open mask-overlay debug HTML in a browser; for
         ``ccf_stellar_template``, open template-overlay debug HTML. Meaning follows ``algorithm``.
@@ -262,26 +276,29 @@ class StellarRVPrimitive(BasePrimitive):
         "mask_wavelength": None,
         "mask_weight": None,
         "mask_ccf_pixel_interp_order": 3,
-        "mask_auto_hybrid_scout": True,
+        "mask_auto_center_scout": True,  # scout on broad grid, then centered uniform window
         # --- Shared chunking & chunk RV aggregation (both algorithms) ---
         "window_size_um": 0.3,
         "outlier_sigma": 4.0,
+        "chunk_rv_max_abs_m_s": DEFAULT_CHUNK_RV_MAX_ABS_M_S,
+        "chunk_rv_prior_half_width_m_s": None,
         "window_line_by_line": False,  # ccf_line_mask only; False -> wavelength window_size_um chunks
         # --- CCF velocity grid & shared CCF analysis (both algorithms) ---
-        "v_min_coarse": None,  # m/s; None -> ccf_utils._V_MIN
-        "v_max_coarse": None,  # m/s; None -> _V_MAX
-        "v_step_coarse": None,  # m/s; None -> ccf_utils._V_STEP (default 50 m/s)
-        "ccf_input_velocity": None,  # m/s; hybrid fine-leg center when set
-        "v_window_fine": 300.0,  # m/s; ± half-width around ccf_input_velocity
-        "v_step_fine": 0.1,  # m/s; fine hybrid step (10 cm/s)
+        "v_min_coarse": None,  # m/s; None -> ccf_common.V_MIN_DEFAULT_M_S
+        "v_max_coarse": None,  # m/s; None -> V_MAX_DEFAULT_M_S
+        "v_step_coarse": None,  # m/s; None -> ccf_common.V_STEP_DEFAULT_M_S (default 50 m/s)
+        "ccf_input_velocity": None,  # m/s; center of uniform velocity window when set
+        "v_half_window": 20000.0,  # m/s; ± half-width of centered uniform grid
         "ccf_parabolic_vertex_n_samples": 31,
         "ccf_zb": 0.0,
+        "ccf_zb_from_barycorr": True,
         "ccf_min_good_pixels": 9,
         # --- Output & compute ---
         "output_model": "L2Model",
         "max_cores": None,
         "debug_ccf": False,
         # --- Previews & overlay debug HTML ---
+        "preview_write_png": True,
         "preview_png_scale": 2.0,
         "show_overlay_debug": False,
         "save_overlay_debug": False,
@@ -360,6 +377,8 @@ class StellarRVPrimitive(BasePrimitive):
 
         # Per-fiber CCF preview slots (mean + per-order); filled when save/show preview.
         self._ccf_preview_by_fiber: dict = {}
+        # Per-fiber resolved CCF barycentric factor z_b (from BARYCORR or ccf_zb fallback).
+        self._ccf_zb_by_fiber: dict[str, float] = {}
         # Per-fiber payload for mask overlay debug HTML (ccf_line_mask only).
         self._mask_overlay_by_fiber: dict = {}
         # Per-fiber payload for template overlay debug HTML (ccf_stellar_template only).
@@ -445,6 +464,119 @@ class StellarRVPrimitive(BasePrimitive):
         if sg in ("BSPEC", "RSPEC"):
             return sg
         return "BSPEC"
+
+    def _fiber_ccf_zb(self, fiber: str | int) -> float:
+        """Resolved :math:`z_b` for one fiber (set in :meth:`_process_fiber`)."""
+        return self._ccf_zb_by_fiber.get(
+            str(fiber),
+            float(getattr(self, "ccf_zb", 0.0)),
+        )
+
+    def _resolve_chunk_rv_prior_half_width_m_s(self) -> float | None:
+        """Half-width (m/s) for prior-gated chunk aggregation when a CCF center is set."""
+        prior = getattr(self, "ccf_input_velocity", None)
+        if prior is None or not np.isfinite(float(prior)):
+            return None
+        half_w = getattr(self, "chunk_rv_prior_half_width_m_s", None)
+        if half_w is not None and np.isfinite(float(half_w)) and float(half_w) > 0:
+            return float(half_w)
+        v_half_window = float(getattr(self, "v_half_window", 20000.0))
+        return max(2000.0, 0.5 * v_half_window)
+
+    def _combine_chunk_rvs(
+        self,
+        all_rvs: np.ndarray,
+        all_rv_errs: np.ndarray,
+        *,
+        fiber: str,
+    ) -> tuple[np.ndarray, float, float]:
+        """
+        Robust per-fiber aggregate from chunk RV arrays (sanity gate + MAD + weighted mean).
+
+        Returns ``(inlier_mask, rv_mean_m_s, rv_std_m_s)``.
+        """
+        all_rvs = np.asarray(all_rvs, dtype=np.float64)
+        all_rv_errs = np.asarray(all_rv_errs, dtype=np.float64)
+        valid = np.isfinite(all_rvs) & np.isfinite(all_rv_errs)
+        if not np.any(valid):
+            logger.warning("No valid chunk RVs for fiber %s.", fiber)
+            return np.zeros(len(all_rvs), dtype=bool), np.nan, np.nan
+
+        max_abs = float(getattr(self, "chunk_rv_max_abs_m_s", DEFAULT_CHUNK_RV_MAX_ABS_M_S))
+        osig = float(getattr(self, "outlier_sigma", 4.0))
+        prior_m_s = getattr(self, "ccf_input_velocity", None)
+        prior_half_w = self._resolve_chunk_rv_prior_half_width_m_s()
+        use_prior = prior_m_s is not None and np.isfinite(float(prior_m_s)) and prior_half_w is not None
+        if use_prior:
+            logger.info(
+                "Stellar RV: combining chunk RVs fiber=%s n_valid=%d outlier_sigma=%.2f "
+                "prior=%.2f m/s prior_half_width=%.0f m/s",
+                fiber,
+                int(np.sum(valid & (all_rv_errs > 0))),
+                osig,
+                float(prior_m_s),
+                float(prior_half_w),
+            )
+        else:
+            logger.info(
+                "Stellar RV: combining chunk RVs fiber=%s n_valid=%d outlier_sigma=%.2f "
+                "chunk_rv_max_abs_m_s=%.0f",
+                fiber,
+                int(np.sum(valid & (all_rv_errs > 0))),
+                osig,
+                max_abs,
+            )
+        rv_mean, rv_std, inlier, _, _ = combine_stellar_rv_chunk_estimates(
+            all_rvs,
+            all_rv_errs,
+            osig,
+            chunk_rv_max_abs_m_s=max_abs,
+            chunk_rv_prior_m_s=float(prior_m_s) if use_prior else None,
+            chunk_rv_prior_half_width_m_s=float(prior_half_w) if use_prior else None,
+        )
+        if use_prior:
+            n_sane = int(
+                np.sum(
+                    valid
+                    & (all_rv_errs > 0)
+                    & (np.abs(all_rvs - float(prior_m_s)) <= float(prior_half_w))
+                )
+            )
+        else:
+            n_sane = int(np.sum(valid & (all_rv_errs > 0) & (np.abs(all_rvs) <= max_abs)))
+        logger.info(
+            "Stellar RV: aggregate RV fiber=%s rv_mean=%.2f m/s rv_std=%.2f m/s "
+            "n_inlier=%d n_sane=%d/%d",
+            fiber,
+            float(rv_mean) if np.isfinite(rv_mean) else float("nan"),
+            float(rv_std) if np.isfinite(rv_std) else float("nan"),
+            int(np.sum(inlier)),
+            n_sane,
+            len(all_rvs),
+        )
+        return inlier, float(rv_mean), float(rv_std)
+
+    @staticmethod
+    def resolve_ccf_zb_for_fiber(
+        primitive,
+        input_model,
+        fiber: str | int,
+    ) -> float:
+        """
+        Resolve CCF :math:`z_b` for previews and overlays.
+
+        Uses per-fiber values cached on ``primitive._ccf_zb_by_fiber`` when present;
+        otherwise applies the same BARYCORR logic as :meth:`_process_fiber`.
+        """
+        by_fiber = getattr(primitive, "_ccf_zb_by_fiber", None)
+        if by_fiber and str(fiber) in by_fiber:
+            return float(by_fiber[str(fiber)])
+        return resolve_ccf_zb(
+            input_model,
+            fiber,
+            ccf_zb=float(getattr(primitive, "ccf_zb", 0.0)),
+            from_barycorr=bool(getattr(primitive, "ccf_zb_from_barycorr", True)),
+        )
 
     def _run_algorithm_ccf_stellar_template(
         self,
@@ -552,13 +684,12 @@ class StellarRVPrimitive(BasePrimitive):
             v_min_m_s=vm,
             v_max_m_s=vx,
             v_step_m_s=vs,
-            ccf_hybrid_center_m_s=(
+            ccf_center_m_s=(
                 float(getattr(self, "ccf_input_velocity"))
                 if getattr(self, "ccf_input_velocity", None) is not None
                 else None
             ),
-            ccf_hybrid_half_width_m_s=float(getattr(self, "v_window_fine", 300.0)),
-            ccf_hybrid_step_m_s=float(getattr(self, "v_step_fine", 0.1)),
+            ccf_half_window_m_s=float(getattr(self, "v_half_window", 20000.0)),
         )
         if preview_detail is not None:
             self._ccf_preview_by_fiber[fiber] = preview_detail
@@ -570,29 +701,11 @@ class StellarRVPrimitive(BasePrimitive):
 
         valid = np.isfinite(all_rvs) & np.isfinite(all_rv_errs)
         if not np.any(valid):
-            logger.warning("No valid chunk RVs for fiber %s.", fiber)
             inlier = np.zeros(len(all_rvs), dtype=bool)
             rv_mean, rv_std = np.nan, np.nan
         else:
-            logger.info(
-                "Stellar RV: combining chunk RVs (median/MAD + weighted mean) fiber=%s "
-                "n_valid_chunks=%d outlier_sigma=%.2f",
-                fiber,
-                int(np.sum(valid)),
-                float(self.outlier_sigma),
-            )
-            inlier, _, _ = combine_rvs_median_mad(
-                all_rvs, all_rv_errs, self.outlier_sigma
-            )
-            rv_mean, rv_std = weighted_mean_rv(all_rvs, all_rv_errs, inlier)
-            logger.info(
-                "Stellar RV: aggregate RV fiber=%s rv_mean=%.2f m/s rv_std=%.2f m/s "
-                "n_inlier=%d/%d",
-                fiber,
-                float(rv_mean),
-                float(rv_std),
-                int(np.sum(inlier)),
-                len(inlier),
+            inlier, rv_mean, rv_std = self._combine_chunk_rvs(
+                all_rvs, all_rv_errs, fiber=fiber
             )
 
         if debug_ccf and len(all_wavelengths) > 0:
@@ -709,15 +822,14 @@ class StellarRVPrimitive(BasePrimitive):
             v_min_m_s=vm,
             v_max_m_s=vx,
             v_step_m_s=vs,
-            ccf_hybrid_center_m_s=(float(h_center) if h_center is not None else None),
-            ccf_hybrid_half_width_m_s=float(getattr(self, "v_window_fine", 300.0)),
-            ccf_hybrid_step_m_s=float(getattr(self, "v_step_fine", 0.1)),
-            zb=float(getattr(self, "ccf_zb", 0.0)),
+            ccf_center_m_s=(float(h_center) if h_center is not None else None),
+            ccf_half_window_m_s=float(getattr(self, "v_half_window", 20000.0)),
+            zb=self._fiber_ccf_zb(fiber),
             max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
             debug_ccf=bool(getattr(self, "debug_ccf", False)),
-            mask_auto_hybrid_scout=bool(
-                getattr(self, "mask_auto_hybrid_scout", True)
+            mask_auto_center_scout=bool(
+                getattr(self, "mask_auto_center_scout", True)
             ),
             ccf_parabolic_vertex_n_samples=int(
                 getattr(self, "ccf_parabolic_vertex_n_samples", 31)
@@ -736,15 +848,10 @@ class StellarRVPrimitive(BasePrimitive):
             inlier = np.zeros(len(all_rvs), dtype=bool)
             rv_mean, rv_std = np.nan, np.nan
         else:
-            inlier, _, _ = combine_rvs_median_mad(
+            inlier, rv_mean, rv_std = self._combine_chunk_rvs(
                 np.asarray(all_rvs, dtype=np.float64),
                 np.asarray(all_rv_errs, dtype=np.float64),
-                float(getattr(self, "outlier_sigma", 4.0)),
-            )
-            rv_mean, rv_std = weighted_mean_rv(
-                np.asarray(all_rvs, dtype=np.float64),
-                np.asarray(all_rv_errs, dtype=np.float64),
-                inlier,
+                fiber=fiber,
             )
         if preview_detail is not None:
             self._ccf_preview_by_fiber[fiber] = preview_detail
@@ -826,6 +933,28 @@ class StellarRVPrimitive(BasePrimitive):
         if _fiber_l2_bundle(input_model, fiber) is None:
             return
 
+        ccf_zb = resolve_ccf_zb(
+            input_model,
+            fiber,
+            ccf_zb=float(getattr(self, "ccf_zb", 0.0)),
+            from_barycorr=bool(getattr(self, "ccf_zb_from_barycorr", True)),
+        )
+        self._ccf_zb_by_fiber[str(fiber)] = ccf_zb
+        berv_m_s = getattr(input_model, f"barycorr_fib{fiber}", None)
+        if berv_m_s is not None and len(berv_m_s) > 0:
+            logger.info(
+                "Stellar RV: fiber=%s ccf_zb=%.9e from BARYCORR BERV=%.3f m/s",
+                fiber,
+                ccf_zb,
+                float(berv_m_s["BERV"][0]),
+            )
+        elif ccf_zb != 0.0:
+            logger.info(
+                "Stellar RV: fiber=%s ccf_zb=%.9e from primitive ccf_zb (no BARYCORR)",
+                fiber,
+                ccf_zb,
+            )
+
         algo_key = (getattr(self, "algorithm", None) or "ccf_line_mask").lower().strip()
         method_name = STELLAR_RV_ALGORITHMS.get(algo_key)
         if method_name is None:
@@ -901,12 +1030,11 @@ class StellarRVPrimitive(BasePrimitive):
         mode: str,
         max_cores: int | None = None,
         want_preview: bool = False,
-        v_min_m_s: float = _V_MIN,
-        v_max_m_s: float = _V_MAX,
-        v_step_m_s: float = _V_STEP,
-        ccf_hybrid_center_m_s: float | None = None,
-        ccf_hybrid_half_width_m_s: float = 300.0,
-        ccf_hybrid_step_m_s: float = 0.1,
+        v_min_m_s: float = V_MIN_DEFAULT_M_S,
+        v_max_m_s: float = V_MAX_DEFAULT_M_S,
+        v_step_m_s: float = V_STEP_DEFAULT_M_S,
+        ccf_center_m_s: float | None = None,
+        ccf_half_window_m_s: float = 20000.0,
     ) -> tuple[list, list, list, list, dict | None, astropy.table.Table | None]:
         """
         Single driver for per-order chunk RVs: ``mode`` is ``debug`` (Python
@@ -934,15 +1062,13 @@ class StellarRVPrimitive(BasePrimitive):
         want_preview : bool, optional
             Whether to build the mean + per-order CCF preview structure for Plotly.
         v_min_m_s, v_max_m_s, v_step_m_s : float, optional
-            **Coarse** CCF velocity axis (m/s): uniform broad leg from the primitive’s
-            ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` (after defaults). Used for
-            non-hybrid debug paths and logging. When ``ccf_hybrid_center_m_s`` is set, the Numba
-            driver merges this leg with a dense window via
-            :func:`~hispecdrp.primitives.utils.ccf_utils.build_hybrid_merged_velocity_grid`.
-        ccf_hybrid_center_m_s, ccf_hybrid_half_width_m_s, ccf_hybrid_step_m_s
-            When ``ccf_hybrid_center_m_s`` is not ``None``, merge coarse + **fine** sampling
-            (``ccf_hybrid_*`` correspond to ``ccf_input_velocity``, ``v_window_fine``, ``v_step_fine``;
-            see ``build_hybrid_merged_velocity_grid``).
+            Uniform CCF velocity axis (m/s): broad search from the primitive’s
+            ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` (after defaults).
+            When ``ccf_center_m_s`` is set, ``v_step_m_s`` samples the centered window.
+        ccf_center_m_s, ccf_half_window_m_s
+            When ``ccf_center_m_s`` is not ``None``, build a uniform window via
+            :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_centered_uniform_velocity_grid`
+            (``ccf_input_velocity``, ``v_half_window``, ``v_step_coarse`` on the primitive).
 
         Returns
         -------
@@ -1001,14 +1127,11 @@ class StellarRVPrimitive(BasePrimitive):
                     if np.sum(in_chunk) < 20:
                         continue
                     wl_center = 0.5 * (lam_lo + lam_hi)
-                    if ccf_hybrid_center_m_s is not None:
-                        v_merged = build_hybrid_merged_velocity_grid(
-                            float(v_min_m_s),
-                            float(v_max_m_s),
+                    if ccf_center_m_s is not None:
+                        v_merged = build_centered_uniform_velocity_grid(
+                            float(ccf_center_m_s),
+                            float(ccf_half_window_m_s),
                             float(v_step_m_s),
-                            float(ccf_hybrid_center_m_s),
-                            float(ccf_hybrid_half_width_m_s),
-                            float(ccf_hybrid_step_m_s),
                         )
                         rv, rv_err, v_grid_c, ccf_c = masked_ccf_rv(
                             w[in_chunk],
@@ -1018,7 +1141,7 @@ class StellarRVPrimitive(BasePrimitive):
                             t_ln,
                             t_flux,
                             v_grid=v_merged,
-                            zb=float(getattr(self, "ccf_zb", 0.0)),
+                            zb=self._fiber_ccf_zb(fiber),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
@@ -1038,7 +1161,7 @@ class StellarRVPrimitive(BasePrimitive):
                             v_min=v_min_m_s,
                             v_max=v_max_m_s,
                             v_step=v_step_m_s,
-                            zb=float(getattr(self, "ccf_zb", 0.0)),
+                            zb=self._fiber_ccf_zb(fiber),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
@@ -1070,14 +1193,11 @@ class StellarRVPrimitive(BasePrimitive):
                     dbg_chunk_rows.append(np.asarray(ccf_c, dtype=RVCCF_CCF_ELEM_DTYPE))
                     dbg_n_good.append(n_good)
             if dbg_chunk_rows:
-                if ccf_hybrid_center_m_s is not None:
-                    _vg_dbg = build_hybrid_merged_velocity_grid(
-                        float(v_min_m_s),
-                        float(v_max_m_s),
+                if ccf_center_m_s is not None:
+                    _vg_dbg = build_centered_uniform_velocity_grid(
+                        float(ccf_center_m_s),
+                        float(ccf_half_window_m_s),
                         float(v_step_m_s),
-                        float(ccf_hybrid_center_m_s),
-                        float(ccf_hybrid_half_width_m_s),
-                        float(ccf_hybrid_step_m_s),
                     )
                     _pv0 = float(_vg_dbg[0])
                     _pv1 = float(_vg_dbg[-1])
@@ -1099,14 +1219,11 @@ class StellarRVPrimitive(BasePrimitive):
                     "Stellar RV: building CCF preview dict (spectra_orders path) fiber=%s",
                     fiber,
                 )
-                if ccf_hybrid_center_m_s is not None:
-                    _vg_pr = build_hybrid_merged_velocity_grid(
-                        float(v_min_m_s),
-                        float(v_max_m_s),
+                if ccf_center_m_s is not None:
+                    _vg_pr = build_centered_uniform_velocity_grid(
+                        float(ccf_center_m_s),
+                        float(ccf_half_window_m_s),
                         float(v_step_m_s),
-                        float(ccf_hybrid_center_m_s),
-                        float(ccf_hybrid_half_width_m_s),
-                        float(ccf_hybrid_step_m_s),
                     )
                     _pmin, _pmax = float(_vg_pr[0]), float(_vg_pr[-1])
                     _pst = float(effective_ccf_v_step_for_fit(_vg_pr))
@@ -1182,17 +1299,17 @@ class StellarRVPrimitive(BasePrimitive):
             max_cores=max_cores,
             return_ccf=True,
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
-            zb=float(getattr(self, "ccf_zb", 0.0)),
+            zb=self._fiber_ccf_zb(fiber),
             ccf_parabolic_vertex_n_samples=getattr(
                 self, "ccf_parabolic_vertex_n_samples", 31
             ),
             **(
                 dict(
-                    ccf_hybrid_center_m_s=ccf_hybrid_center_m_s,
-                    ccf_hybrid_half_width_m_s=ccf_hybrid_half_width_m_s,
-                    ccf_hybrid_step_m_s=ccf_hybrid_step_m_s,
+                    ccf_center_m_s=ccf_center_m_s,
+                    ccf_half_window_m_s=ccf_half_window_m_s,
+                    ccf_v_step=v_step_m_s,
                 )
-                if ccf_hybrid_center_m_s is not None
+                if ccf_center_m_s is not None
                 else dict(
                     ccf_v_min=v_min_m_s,
                     ccf_v_max=v_max_m_s,

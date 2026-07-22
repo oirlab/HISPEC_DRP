@@ -116,7 +116,7 @@ def _get_stage2_prim_args(cals : dict, max_cores : int, do_orders : list[int], d
         prim_args[prim]['do_fibers'] = do_fibers
 
     prim_args['stellar_rv']['save_preview'] = save_rv_preview
-    prim_args['stellar_rv']['mask_auto_hybrid_scout'] = False
+    prim_args['stellar_rv']['mask_auto_center_scout'] = False
     prim_args['stellar_rv']['v_min_coarse'] = -20_000.0
     prim_args['stellar_rv']['v_max_coarse'] = 20_000.0
     prim_args['stellar_rv']['v_step_coarse'] = 50.0

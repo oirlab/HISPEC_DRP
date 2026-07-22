@@ -1,6 +1,5 @@
-from astropy.io import fits
 from .base_model import CalibrationModel
-
+from .mixins import FiberAttributeProxyMixin
 from .extensions import IMAGE_FLOAT32_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
 __all__ = ['GaussianLSFModel']
@@ -18,7 +17,7 @@ def _create_gausslsf_extensions(num_fibers : int):
     return ext
 
 
-class GaussianLSFModel(CalibrationModel):
+class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The effective line spread function (LSF) is modeled with a Gaussian where the width is described with a 2D polynomial (pixel, order, width).
 
