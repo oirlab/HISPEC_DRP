@@ -19,9 +19,12 @@ class CCFMetrics:
     ``rv`` / ``rv_err`` come from the Gaussian line fit (peak location, width, and
     amplitude). ``bis_rv`` / ``bis_rv_err`` are the **absolute** bisector radial
     velocity from NEID-style weighted percentile cuts — the refined RV after the
-    Gaussian. ``bis_shallow`` / ``bis_core`` (and ``bisector`` / ``bis_levels``) come
-    from the Queloz et al. (2001) bisector-inverse-slope construction; the BIS slope
-    itself is ``bis_shallow - bis_core`` when both are finite.
+    Gaussian. ``bis_rv`` is the performance-weighted mean of cut midpoints;
+    ``bis_rv_err`` combines that cut-weighted formal σ with the Fisher σ on the
+    same CCF (geometric mean when both are finite). ``bis_shallow`` / ``bis_core``
+    (and ``bisector`` / ``bis_levels``) come from the Queloz et al. (2001)
+    bisector-inverse-slope construction; the BIS slope itself is
+    ``bis_shallow - bis_core`` when both are finite.
     """
 
     contrast: float
@@ -378,8 +381,26 @@ def calc_ccf_metrics(
         )
         if math.isfinite(float(rv_b)):
             bis_rv = float(rv_b)
-            if err_b is not None and math.isfinite(float(err_b)) and float(err_b) > 0.0:
-                bis_rv_err = float(err_b)
+            cut_err = (
+                float(err_b)
+                if err_b is not None and math.isfinite(float(err_b)) and float(err_b) > 0.0
+                else float("nan")
+            )
+            fisher_err = (
+                float(rv_err)
+                if rv_err is not None and math.isfinite(float(rv_err)) and float(rv_err) > 0.0
+                else float("nan")
+            )
+            # Cut-weighted formal σ (numerator) can sit near ~0.3 Δv on coarse grids;
+            # Fisher on the same CCF can be optimistic when ``ccf_err`` is tiny. The
+            # geometric mean tracks injected→recovered scatter (~m/s) better than
+            # either extreme alone.
+            if math.isfinite(cut_err) and math.isfinite(fisher_err):
+                bis_rv_err = float(math.sqrt(cut_err * fisher_err))
+            elif math.isfinite(cut_err):
+                bis_rv_err = cut_err
+            elif math.isfinite(fisher_err):
+                bis_rv_err = fisher_err
         elif (
             bisector is not None
             and np.size(bisector) > 0

@@ -391,9 +391,19 @@ class CCFBisectorConfig:
 
     Follows the NEID-DRP bisector construction (percentile cuts through the CCF in
     velocity space; see NEID algorithms § CCF Bisector Calculation). Radial velocity
-    is a **weighted mean** of bisector midpoints :math:`(v_\\mathrm{left}+v_\\mathrm{right})/2`
-    at multiple depth percentiles; uncertainty combines per-cut errors in quadrature
-    via inverse-variance weights.
+    **and** its uncertainty are a **weighted mean** of bisector midpoints
+    :math:`(v_\\mathrm{left}+v_\\mathrm{right})/2` at multiple depth percentiles:
+    with per-cut midpoint uncertainties :math:`e_i` and weights :math:`w_i`,
+
+    .. math::
+
+        \\hat{v} = \\frac{\\sum_i w_i v_i}{\\sum_i w_i},\\qquad
+        \\sigma_{\\hat{v}} = \\frac{\\sum_i w_i e_i}{\\sum_i w_i}.
+
+    (The uncertainty is the weighted average of the cut uncertainties, not an
+    independent-measurement reduction of those errors.) Cut weights are the core
+    performance weight only; per-cut :math:`e_i` comes from CCF-error propagation
+    when informative, otherwise from the smooth-profile discretization estimate.
 
     Attributes
     ----------
@@ -410,18 +420,18 @@ class CCFBisectorConfig:
         Gaussian performance weight on percentile cuts, centered at 50% depth
         (emphasizes the CCF core). Set very large to approximate uniform weighting.
     rv_err_core_percentile : float
-        Depth percentile whose bisector midpoint uncertainty defines ``rv_err``.
-        Percentile cuts are correlated (same CCF); do not combine their formal
-        errors as independent measurements.
+        Depth percentile recorded in diagnostics as the representative “core” cut
+        (does **not** set ``rv_err``; retained for previews / BIS section labeling).
     min_cuts : int
         Minimum successful bisector cuts required for a valid RV.
     min_peak_contrast_sigma : float
         Minimum peak amplitude (above baseline) in units of robust wing noise (MAD of
-        ``y - baseline``). Weak peaks inflate ``rv_err`` so alias fits are down-weighted.
+        ``y - baseline``). Weak peaks scale ``rv_err`` up by
+        ``min_peak_contrast_sigma / (peak/MAD)`` so alias fits are down-weighted.
     rv_err_min_vstep_fraction : float
-        On **uniform** coarse velocity grids (minimum spacing :math:`\\ge` 10 m/s and
-        max/min spacing ratio :math:`\\lesssim 1.01`), floor ``rv_err`` to this fraction
-        of the grid step. Hybrid grids with a fine leg are unchanged.
+        Optional absolute floor as this fraction of the minimum positive velocity
+        spacing. Default ``0`` (disabled): sub-pixel bisector precision should not
+        be forced to a large fraction of a coarse grid step.
     """
 
     rv_percentile_lo: float = 10.0
@@ -437,7 +447,7 @@ class CCFBisectorConfig:
     rv_err_bootstrap_seed: int | None = None
     min_cuts: int = 5
     min_peak_contrast_sigma: float = 5.0
-    rv_err_min_vstep_fraction: float = 0.15
+    rv_err_min_vstep_fraction: float = 0.0
 def _ccf_bisector_wing_crossing_m_s(
     v_m_s: np.ndarray,
     y_peak_up: np.ndarray,
@@ -529,9 +539,11 @@ def _ccf_bisector_wing_velocity_uncertainty_m_s(
     Approximate 1σ uncertainty (m/s) on a bisector wing crossing.
 
     With per-bin ``y_err``, propagates noise through the linear interpolation that
-    locates the crossing. Without meaningful ``y_err``, uses the
-    :math:`\\mathcal{O}(\\Delta v^2)` discretization estimate for a smooth CCF rather
-    than a full grid-step floor (which over-estimates sub-pixel bisector precision).
+    locates the crossing when that formal σ is below the uniform-in-bracket prior
+    (:math:`\\Delta v/\\sqrt{12}`). When formal noise saturates that prior, returns
+    the :math:`\\mathcal{O}(\\Delta v^2)` discretization estimate for a smooth CCF
+    instead of locking σ to ~0.3 grid steps. Without meaningful ``y_err``, uses
+    discretization only.
     """
     n = len(v_m_s)
     i_lo = int(i_lo)
@@ -559,19 +571,30 @@ def _ccf_bisector_wing_velocity_uncertainty_m_s(
     if use_noise and abs(dy) < 0.02 * grad_floor * local_span:
         dy = math.copysign(0.02 * grad_floor * local_span, dy if dy != 0.0 else 1.0)
 
+    sig_disc = _ccf_bisector_discretization_sigma_m_s(v_m_s, y_peak_up, i_lo)
     if use_noise:
         # v* = v0 + (target - y0) * (v1 - v0) / (y1 - y0)
         dv_dy0 = -(v1 - v0) / dy
         dv_dy1 = (target - y0) * (v1 - v0) / (dy * dy)
-        sig_v = math.sqrt((dv_dy0 * s0) ** 2 + (dv_dy1 * s1) ** 2)
+        sig_noise = math.sqrt((dv_dy0 * s0) ** 2 + (dv_dy1 * s1) ** 2)
+        # Uniform-in-bracket prior σ = Δv/√12. When formal noise sits at or above
+        # that ceiling, bin spacing — not CCF S/N — dominates the linear
+        # interpolator; use the smooth-profile O(Δv²) discretization estimate so a
+        # coarse velocity grid is not stuck near ~0.3 Δv per wing.
+        bracket_prior = abs(dv) / math.sqrt(12.0)
+        if (
+            math.isfinite(bracket_prior)
+            and bracket_prior > 0.0
+            and math.isfinite(sig_noise)
+            and sig_noise >= 0.95 * bracket_prior
+            and math.isfinite(sig_disc)
+            and sig_disc > 0.0
+        ):
+            sig_v = float(sig_disc)
+        else:
+            sig_v = float(sig_noise)
     else:
-        sig_disc = _ccf_bisector_discretization_sigma_m_s(v_m_s, y_peak_up, i_lo)
-        sig_v = sig_disc if math.isfinite(sig_disc) and sig_disc > 0.0 else 0.0
-
-    # Sub-grid interpolation cannot beat the bracket width (uniform prior).
-    bracket_cap = abs(dv) / math.sqrt(12.0)
-    if math.isfinite(bracket_cap) and bracket_cap > 0.0:
-        sig_v = min(sig_v, bracket_cap)
+        sig_v = float(sig_disc) if math.isfinite(sig_disc) and sig_disc > 0.0 else 0.0
 
     if not math.isfinite(sig_v) or sig_v <= 0.0:
         sig_v = float(max(v_step_m_s, _ccf_rv_err_numeric_floor(v_step_m_s)))
@@ -630,17 +653,16 @@ def fit_ccf_rv_bisector(
 
     At each depth percentile between baseline and peak, finds the left and right
     wing velocities where the CCF crosses that flux level and takes their midpoint.
-    The RV estimate is a performance-weighted mean of midpoints over
-    ``config.rv_percentile_lo`` … ``config.rv_percentile_hi``, with Gaussian
-    weight emphasizing the CCF core (50% depth). **Uncertainty** is taken from
-    the bisector cut nearest ``config.rv_err_core_percentile`` (default 50%):
-    percentile cuts share the same noisy CCF and must not be combined as if
-    independent (which incorrectly floors ``rv_err`` near ``v_step/2`` on smooth,
-    noise-free profiles).
+    The RV estimate **and** its uncertainty are a performance-weighted mean of
+    midpoints over ``config.rv_percentile_lo`` … ``config.rv_percentile_hi``, with
+    Gaussian weight emphasizing the CCF core (50% depth). The reported σ is the
+    weighted average of per-cut midpoint uncertainties
+    (:math:`\\sum_i w_i e_i\\,/\\,\\sum_i w_i`), not an independent-cut
+    :math:`1/\\sqrt{N}` reduction.
 
     Also computes bisector inverse slope (BIS) following NEID-DRP: average midpoints
-    in the top (60–90%) minus bottom (10–40%) sections, with uncertainties combined
-    in quadrature.
+    in the top (60–90%) minus bottom (10–40%) sections, with the same weighted-mean
+    uncertainty on each section.
 
     Parameters
     ----------
@@ -788,10 +810,10 @@ def fit_ccf_rv_bisector(
             w_perf = 1.0
         else:
             w_perf = math.exp(-0.5 * ((pct_out - 50.0) / core_sig) ** 2)
-        if has_ccf_err:
-            w_cut = w_perf / max(v_mid_err * v_mid_err, 1e-30)
-        else:
-            w_cut = w_perf
+        # Performance weight only. Inverse-variance cut weights are inappropriate
+        # for strongly correlated percentile cuts and become unstable when a cut's
+        # formal e_i collapses to the discretization floor.
+        w_cut = w_perf
         cuts.append(
             {
                 "percentile": float(pct_out),
@@ -820,10 +842,14 @@ def fit_ccf_rv_bisector(
         return out if return_diagnostics else (out[0], out[1])
 
     rv = float(np.sum(w_arr * v_arr) / w_sum)
+    e_arr = np.array([c["v_mid_err_m_s"] for c in cuts], dtype=np.float64)
+    # Weighted mean of per-cut midpoint uncertainties. Cuts share one CCF, so do
+    # **not** apply an independent-measurement :math:`1/\\sqrt{N}` reduction
+    # (:math:`\\sqrt{\\sum (w e)^2}/\\sum w`); that understates σ by ~√N_eff.
+    rv_err = float(np.sum(w_arr * e_arr) / w_sum)
 
     core_pct = float(cfg.rv_err_core_percentile)
     core_cut = min(cuts, key=lambda c: abs(c["percentile"] - core_pct))
-    rv_err = float(core_cut["v_mid_err_m_s"])
 
     cut_spread = float(
         math.sqrt(max(float(np.average((v_arr - rv) ** 2, weights=w_arr / w_sum)), 0.0))
@@ -831,20 +857,19 @@ def fit_ccf_rv_bisector(
 
     d_pos = np.diff(v_m_s)
     d_pos = d_pos[np.isfinite(d_pos) & (d_pos > 0)]
-    uniform_coarse = False
-    if d_pos.size > 0:
-        d_min = float(np.min(d_pos))
-        d_max = float(np.max(d_pos))
-        uniform_coarse = d_max / max(d_min, 1e-30) <= 1.01 and d_min >= 40.0
-        if uniform_coarse:
-            rv_err = max(rv_err, cut_spread, float(cfg.rv_err_min_vstep_fraction) * d_min)
+    d_min = float(np.min(d_pos)) if d_pos.size > 0 else float(v_step)
+    vstep_floor_frac = float(cfg.rv_err_min_vstep_fraction)
+    if vstep_floor_frac > 0.0 and math.isfinite(d_min) and d_min > 0.0:
+        rv_err = max(rv_err, vstep_floor_frac * d_min)
 
     wing_noise = float(mad_std(y_rel, ignore_nan=True))
     if not math.isfinite(wing_noise) or wing_noise <= 0.0:
         wing_noise = float(np.nanstd(y_rel)) if y.size > 1 else peak_amp
+    peak_contrast_sigma = float(peak_amp / max(wing_noise, 1e-30))
     min_contrast = float(cfg.min_peak_contrast_sigma)
-    if min_contrast > 0.0 and peak_amp < min_contrast * max(wing_noise, 1e-30):
-        rv_err = max(rv_err, v_step * max(min_contrast, 1.0))
+    if min_contrast > 0.0 and peak_contrast_sigma < min_contrast:
+        # Scale formal σ (do not floor to a multiple of the velocity grid step).
+        rv_err *= float(min_contrast / max(peak_contrast_sigma, 1e-30))
 
     rv_err = max(rv_err, _ccf_rv_err_numeric_floor(v_step))
     boot_sig = float("nan")
@@ -869,22 +894,22 @@ def fit_ccf_rv_bisector(
             boot_sig = float(np.std(boot_rvs, ddof=1))
             rv_err = max(rv_err, boot_sig)
 
-    def _section_mean(lo: float, hi: float, rep_pct: float) -> tuple[float, float]:
+    def _section_mean(lo: float, hi: float) -> tuple[float, float]:
         sel = [c for c in cuts if lo <= c["percentile"] <= hi]
         if not sel:
             return float("nan"), float("nan")
         ww = np.array([c["weight"] for c in sel], dtype=np.float64)
         vv = np.array([c["v_mid_m_s"] for c in sel], dtype=np.float64)
+        ee = np.array([c["v_mid_err_m_s"] for c in sel], dtype=np.float64)
         wsum = float(np.sum(ww))
-        mean_v = float(np.sum(ww * vv) / wsum) if wsum > 0 else float(np.mean(vv))
-        rep = min(sel, key=lambda c: abs(c["percentile"] - rep_pct))
-        mean_e = float(rep["v_mid_err_m_s"])
+        if wsum <= 0.0:
+            return float("nan"), float("nan")
+        mean_v = float(np.sum(ww * vv) / wsum)
+        mean_e = float(np.sum(ww * ee) / wsum)
         return mean_v, mean_e
 
-    v_top, e_top = _section_mean(cfg.bis_top_lo, cfg.bis_top_hi, 0.5 * (cfg.bis_top_lo + cfg.bis_top_hi))
-    v_bot, e_bot = _section_mean(
-        cfg.bis_bottom_lo, cfg.bis_bottom_hi, 0.5 * (cfg.bis_bottom_lo + cfg.bis_bottom_hi)
-    )
+    v_top, e_top = _section_mean(cfg.bis_top_lo, cfg.bis_top_hi)
+    v_bot, e_bot = _section_mean(cfg.bis_bottom_lo, cfg.bis_bottom_hi)
     bis = float(v_top - v_bot) if math.isfinite(v_top) and math.isfinite(v_bot) else float("nan")
     bis_err = float(
         math.sqrt(e_top * e_top + e_bot * e_bot)
@@ -896,6 +921,7 @@ def fit_ccf_rv_bisector(
         "rv_err_m_s": rv_err,
         "rv_err_core_percentile": core_pct,
         "rv_err_core_cut_percentile": float(core_cut["percentile"]),
+        "rv_err_core_cut_m_s": float(core_cut["v_mid_err_m_s"]),
         "rv_err_bootstrap_sigma_m_s": boot_sig,
         "used_rv_err_bootstrap": math.isfinite(boot_sig) and boot_sig > 0.0,
         "baseline": float(baseline),
@@ -910,7 +936,7 @@ def fit_ccf_rv_bisector(
         "method": "ccf_bisector_weighted_percentile",
         "cut_midpoint_spread_m_s": cut_spread,
         "wing_noise_mad": wing_noise,
-        "peak_contrast_sigma": float(peak_amp / max(wing_noise, 1e-30)),
+        "peak_contrast_sigma": peak_contrast_sigma,
     }
     if return_diagnostics:
         return rv, rv_err, diag
