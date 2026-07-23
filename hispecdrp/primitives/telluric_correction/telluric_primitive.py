@@ -22,16 +22,22 @@ class TelluricCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or L2Model
+    input : str or L1Model/L2Model
         Input file path or data model to process. Currently, this is expected
         to be either a level 1 (uncalibrated) or level 2 (calibrated) data product.
     suffix : str or None, optional
-        Suffix to append to the output filename. Default is ``'skysub'``.
+        Suffix to append to the output filename. Default is ``'tell'``.
+    method : str, optional
+        Method to use for telluric correction. Currently, only ``'airmass_scaling'`` is implemented. Default is ``'airmass_scaling'``.
+    do_orders : list of int or None, optional
+        List of orders to process. If None, all orders will be processed. Default is None.
+    sci_fiber : int or None, optional
+        Science fiber number to use for telluric correction. If None, the science fiber will be determined from the input model's metadata. Default is None.
 
     Calibrations
     ------------
     lsf : GaussianLSFModel
-        - selector: :class:`~hispecdrp.calibrations.selectors.FiberFlatSelector`
+        - selector: :class:`~hispecdrp.calibrations.selectors.LSFSelector`
 
 
     Returns
@@ -44,7 +50,6 @@ class TelluricCorrectionPrimitive(BasePrimitive):
         'do_orders' : None,
         'method' : 'airmass_scaling',
         'sci_fiber' : None,
-        'pwv' : None,
     }
 
     CALIBRATIONS = {
