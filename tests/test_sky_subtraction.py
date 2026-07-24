@@ -1,7 +1,6 @@
 import numpy as np
-import astropy.units as u
 from hispecdrp import datamodels, SkySubtractionPrimitive
-from hispecdrp import simulations
+import hispecdrp.simulations as simulations
 import time
 import os
 
