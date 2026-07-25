@@ -28,6 +28,7 @@ __all__ = [
     "DEFAULT_WIDTH_CALIBRATION_K2_ALL",
     "MASK_LINE_HALF_WIDTH_SLOPE_NM_PER_NM",
     "MASK_STYLE_DELTA",
+    "MASK_STYLE_TOPHAT",
     "MASK_STYLE_KPF",
     "LINE_MASK_META_PREFIX",
     "MaskLineStyle",
@@ -43,6 +44,7 @@ __all__ = [
     "fit_half_width_linear_from_mas",
     "DEFAULT_PACKAGED_LINE_MASK_BASENAME",
     "packaged_default_line_mask_path",
+    "paired_line_mask_path_for_template",
     "pixel_edges_from_wavelength",
     "resolve_mask_path",
     "restrict_mask_to_chunk",
@@ -58,7 +60,17 @@ LINE_MASK_META_PREFIX = "# HISPEC_DRP_MASK_META "
 
 # Values for ``mask_style`` in :func:`read_mask_generation_meta` / written ``.mas`` JSON.
 MASK_STYLE_DELTA: str = "delta"
-MASK_STYLE_KPF: str = "kpf"
+MASK_STYLE_TOPHAT: str = "tophat"
+# Deprecated alias for :data:`MASK_STYLE_TOPHAT` (legacy on-disk value ``"kpf"``).
+MASK_STYLE_KPF: str = MASK_STYLE_TOPHAT
+
+
+def _normalize_mask_style(raw: str) -> str:
+    """Map legacy ``kpf`` mask_style labels to canonical ``tophat``."""
+    style = str(raw).strip().lower()
+    if style == "kpf":
+        return MASK_STYLE_TOPHAT
+    return style
 
 # Half-width (nm) vs line-center vacuum wavelength (nm): half_width ≈ slope * λ_nm + intercept.
 # Coefficients from a least-squares fit to bundled ``K2_all.mas`` (2797 segments); intercept
@@ -133,6 +145,32 @@ def packaged_default_line_mask_path() -> str:
     return str((package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME).resolve())
 
 
+def paired_line_mask_path_for_template(
+    template_filename: str,
+    *,
+    mask_style: str = MASK_STYLE_DELTA,
+    masks_directory: Path | str | None = None,
+) -> str:
+    """
+    Resolve the packaged line mask paired with a template basename or path.
+
+    For template ``lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5``, returns
+    ``.../lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas`` when ``mask_style`` is
+    ``delta``.
+    """
+    stem = Path(template_filename).stem
+    masks_dir = (
+        Path(masks_directory) if masks_directory is not None else package_data_masks_dir()
+    )
+    suffix = _normalize_mask_style(mask_style)
+    path = masks_dir / f"{stem}.{suffix}.mas"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Paired line mask not found for template {template_filename!r}: {path}"
+        )
+    return str(path.resolve())
+
+
 def resolve_mask_path(mask_path: str | None) -> str:
     """
     Resolve ``mask_path`` to an absolute filesystem path, or the packaged default when ``None``.
@@ -162,7 +200,7 @@ def masklines_wavelength_unit_meta(unit: u.UnitBase) -> dict[str, str]:
     }
 
 
-MaskLineStyle = Literal["delta", "kpf"]
+MaskLineStyle = Literal["delta", "tophat"]
 
 
 def _assert_mas_mask_style_matches_columns(
@@ -171,7 +209,8 @@ def _assert_mas_mask_style_matches_columns(
     """
     If ``.mas`` header JSON (``# HISPEC_DRP_MASK_META``) includes ``mask_style``, require
     that it matches the numeric layout: ``delta`` → 2 columns (vacuum nm, weight);
-    ``kpf`` → ≥3 columns (start_nm, end_nm, weight, …).
+    ``tophat`` → ≥3 columns (start_nm, end_nm, weight, …). Legacy ``mask_style='kpf'``
+    is treated as ``tophat``.
     """
     if not meta:
         return
@@ -183,7 +222,7 @@ def _assert_mas_mask_style_matches_columns(
             f"mask_style in mask metadata ({mask_file!r}) must be a string, "
             f"got {type(raw).__name__!r}"
         )
-    style = raw.strip().lower()
+    style = _normalize_mask_style(raw)
     if style in ("", "none", "null"):
         return
     if style == "delta":
@@ -193,22 +232,22 @@ def _assert_mas_mask_style_matches_columns(
                 f"{mask_file!r} has {ncols} numeric column(s); expected 2."
             )
         return
-    if style == "kpf":
+    if style == MASK_STYLE_TOPHAT:
         if ncols < 3:
             raise ValueError(
-                f"Mask metadata declares mask_style='kpf' (start_nm, end_nm, weight) but "
+                f"Mask metadata declares mask_style='tophat' (start_nm, end_nm, weight) but "
                 f"{mask_file!r} has {ncols} numeric column(s); expected ≥3."
             )
         return
     raise ValueError(
         f"Unknown mask_style {raw!r} in mask metadata for {mask_file!r} "
-        "(expected 'delta' or 'kpf')"
+        "(expected 'delta' or 'tophat')"
     )
 
 
 def _infer_wavelength_disk_to_um(values: np.ndarray) -> np.ndarray:
     """
-    Infer wavelength column scale for KPF-style two-column text: median of positive finite
+    Infer wavelength column scale for legacy two-column text masks: median of positive finite
     values → Å (>1e3) /1e4, nm (>10) /1e3, else assume µm. Not used for ``.mas`` (vacuum nm).
     """
     v = np.asarray(values, dtype=np.float64)
@@ -226,11 +265,11 @@ def _infer_wavelength_disk_to_um(values: np.ndarray) -> np.ndarray:
 @dataclass(eq=False)
 class MaskLines:
     """
-    Tabulated CCF line mask (**delta** zero-width lines or **kpf** finite segments).
+    Tabulated CCF line mask (**delta** zero-width lines or **tophat** finite segments).
 
     **delta** — two on-disk columns (vacuum line-center nm, weight): ``line_left_edge``,
     ``line_right_edge``, and ``line_center`` coincide; ``line_width`` is 0.
-    **kpf** — ≥3 columns (vacuum segment start nm, end nm, weight): ``line_center`` is the
+    **tophat** — ≥3 columns (vacuum segment start nm, end nm, weight): ``line_center`` is the
     segment midpoint; ``line_width = line_right_edge - line_left_edge``.
 
     Wavelengths are **vacuum**; internal arrays use **microns** (nm÷1000 on read/write
@@ -293,8 +332,10 @@ class MaskLines:
                 "MaskLines.line_width must equal line_right_edge - line_left_edge (µm)."
             )
 
-        if self.mask_style not in ("delta", "kpf"):
-            raise ValueError(f"Unknown mask_style {self.mask_style!r} (expected 'delta' or 'kpf').")
+        if self.mask_style not in ("delta", MASK_STYLE_TOPHAT):
+            raise ValueError(
+                f"Unknown mask_style {self.mask_style!r} (expected 'delta' or 'tophat')."
+            )
 
         self.metadata = dict(self.metadata or {})
 
@@ -335,9 +376,11 @@ class MaskLines:
         lo = np.minimum(start, end)
         hi = np.maximum(start, end)
         if "mask_style" not in md:
-            md["mask_style"] = "kpf"
+            md["mask_style"] = MASK_STYLE_TOPHAT
             md["mask_style_inferred_from_columns"] = True
-        return cls.from_kpf_segment_edges_um(lo, hi, weight, metadata=md)
+        else:
+            md["mask_style"] = _normalize_mask_style(str(md["mask_style"]))
+        return cls.from_tophat_segment_edges_um(lo, hi, weight, metadata=md)
 
     @classmethod
     def _from_two_column_path(cls, mask_file: str) -> MaskLines:
@@ -412,7 +455,7 @@ class MaskLines:
         )
 
     @classmethod
-    def from_kpf_segment_edges_um(
+    def from_tophat_segment_edges_um(
         cls,
         lo_um: np.ndarray,
         hi_um: np.ndarray,
@@ -420,7 +463,7 @@ class MaskLines:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> MaskLines:
-        """Build a **kpf** (finite-width) mask from rest segment bounds in µm."""
+        """Build a **tophat** (finite-width) mask from rest segment bounds in µm."""
         lo = np.asarray(lo_um, dtype=np.float64).ravel()
         hi = np.asarray(hi_um, dtype=np.float64).ravel()
         wt = np.asarray(weight, dtype=np.float64).ravel()
@@ -438,9 +481,9 @@ class MaskLines:
                 "line_width": masklines_wavelength_unit_meta(u.um),
             },
         )
-        md.setdefault("mask_style", "kpf")
+        md.setdefault("mask_style", MASK_STYLE_TOPHAT)
         return cls(
-            mask_style="kpf",
+            mask_style=MASK_STYLE_TOPHAT,
             line_center=center,
             line_left_edge=lo_q,
             line_right_edge=hi_q,
@@ -448,6 +491,18 @@ class MaskLines:
             weight=wt,
             metadata=md,
         )
+
+    @classmethod
+    def from_kpf_segment_edges_um(
+        cls,
+        lo_um: np.ndarray,
+        hi_um: np.ndarray,
+        weight: np.ndarray,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> MaskLines:
+        """Deprecated alias for :meth:`from_tophat_segment_edges_um`."""
+        return cls.from_tophat_segment_edges_um(lo_um, hi_um, weight, metadata=metadata)
 
     @classmethod
     def empty_like_style(
@@ -490,7 +545,7 @@ class MaskLines:
         """
         Write this mask to a ``.mas`` file.
 
-        **On-disk layout:** ``delta`` → vacuum line-center (nm), weight; ``kpf`` →
+        **On-disk layout:** ``delta`` → vacuum line-center (nm), weight; ``tophat`` →
         vacuum segment start (nm), end (nm), weight. One ``# HISPEC_DRP_MASK_META`` JSON
         line (:func:`read_mask_generation_meta`).
 

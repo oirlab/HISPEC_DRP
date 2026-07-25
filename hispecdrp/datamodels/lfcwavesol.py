@@ -1,4 +1,5 @@
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
 __all__ = ['LFCWavesolModel']
@@ -15,7 +16,7 @@ def _create_lfcwavesol_extensions(num_fibers: int):
     return ext
 
 
-class LFCWavesolModel(CalibrationModel):
+class LFCWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The LFC wavelength solution.
 

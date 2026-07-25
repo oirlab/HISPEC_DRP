@@ -18,7 +18,7 @@ For line-mask **file formats**, :class:`~hispecdrp.utils.line_mask_utils.MaskLin
 template-to-mask **generation**, see :doc:`line_mask`.
 
 For **shared CCF machinery** (template and mask-line paths, peak fitting, and deriving RV from a CCF
-curve in :mod:`~hispecdrp.primitives.utils.ccf_utils`), see :doc:`ccf`.
+curve in :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`), see :doc:`ccf`.
 
 
 Primitive overview and references
@@ -128,37 +128,37 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    :meth:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask`
    resolves coarse velocity grid defaults (``v_min_coarse``, ``v_max_coarse``, ``v_step_coarse``),
-   optional hybrid/fine-grid configuration around ``ccf_input_velocity``, loads mask lines once,
-   then calls the fiber driver:
+   optional centered-window configuration around ``ccf_input_velocity`` (``v_half_window``),
+   loads mask lines once, then calls the fiber driver:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.run_ccf_line_mask_for_fiber`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber`
 
 #. **Velocity axis**
 
-   The fiber driver constructs either:
+   The fiber driver constructs a **uniform** velocity grid:
 
-   - a uniform coarse velocity grid, or
-   - a merged coarse+fine grid (hybrid) when ``ccf_input_velocity`` is set.
+   - ``[v_min_coarse, v_max_coarse]`` at ``v_step_coarse`` when no center is set, or
+   - ``ccf_input_velocity ± v_half_window`` at ``v_step_coarse`` when a center is set.
 
-   When enabled and applicable, an **auto-hybrid scout** (single echelle order, no user-provided
-   center, ``mask_auto_hybrid_scout=True``) runs one full-order pass to estimate the peak and set
-   the shared hybrid center for the fiber.
+   When enabled and applicable, an **auto-center scout** (``mask_auto_center_scout=True``,
+   no user-provided center) runs one pass on the broad uniform grid to estimate the peak,
+   then rebuilds a centered uniform window for the fiber.
 
 #. **Per-order chunking and mask CCF**
 
    For each echelle order in ``do_orders``, the driver computes wavelength chunks:
 
-   - fixed-width chunks via :func:`~hispecdrp.primitives.utils.ccf_utils.ccf_order_n_chunks_for_span`, or
+   - fixed-width chunks via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`, or
    - line-by-line Voronoi chunks when ``window_line_by_line=True`` and ``ccf_input_velocity`` is finite
-     (see :func:`~hispecdrp.primitives.utils.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`).
+     (see :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line`).
 
    The per-order worker calls:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.rv_per_chunks_line_mask`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`
 
    which runs the Numba kernel over all chunks (parallel ``prange`` over chunk index when applicable):
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils._calc_mask_ccf_chunks_numba`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`
 
    producing per-chunk arrays ``CCF(v)`` and (when requested) ``ccf_err(v)``.
 
@@ -166,27 +166,27 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    Per-chunk RVs are initialized from a parabolic-vertex fit on the (stored-convention) CCF rows:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils._rv_from_ccf_line_mask_rows_numba`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._rv_from_ccf_line_mask_rows_numba`
 
    Per-chunk ``RV_ERR`` may be replaced by the LevMar-based parabolic vertex uncertainty estimator when
    ``ccf_err(v)`` is available; otherwise it falls back to a homoscedastic LSTSQ estimate:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.line_mask_parabolic_vertex_rv_err_levmar_m_s`
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_levmar_m_s`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s`
 
    **CCF sign convention:** stored CCF rows (RVCCF / preview slots) follow the negated convention
    so the absorption-like feature appears as a **peak** near the true RV (see
-   :data:`~hispecdrp.primitives.utils.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`).
+   :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`).
 
 #. **Optional order-mean Gaussian override**
 
-   When enabled by the driver (hybrid or post-scout merged grid), an order-mean CCF is fit with a Gaussian:
+   When enabled by the driver (centered window or post-scout centered grid), an order-mean CCF is fit with a Gaussian:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
 
    and then refined with the same mask-line parabolic machinery:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_line_mask`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_line_mask`
 
    On success, all chunks on that order can receive the same RV/σ (one fiber-aggregate estimate).
 
@@ -202,19 +202,19 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    When previews are requested, the driver builds preview slots and runs per-slot Gaussian/refine:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.finalize_ccf_preview_dict`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict`
 
    When requested for table outputs, the primitive may also build RVCCF supplement columns:
 
-   - :func:`~hispecdrp.primitives.utils.ccf_utils.build_rvccf_chunk_supplement`
+   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.build_rvccf_chunk_supplement`
 
 
 Additional notes (primitive behavior and details)
 -------------------------------------------------
 
 - **Default coarse CCF step**: when ``v_step_coarse`` is unset, the default coarse step is
-  **50 m/s** (``ccf_utils._V_STEP``). Very long velocity grids may be subsampled inside
-  :func:`~hispecdrp.primitives.utils.ccf_utils.fit_ccf_rv` to keep fitting robust and fast.
+  **50 m/s** (``ccf_common.V_STEP_DEFAULT_M_S``). Very long velocity grids may be subsampled inside
+  :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` to keep fitting robust and fast.
 
 - **Overlay debug HTML chunking and gating**: the mask/template overlay debug pages list wavelength
   chunks (matching ``window_size_um`` chunking, or line-by-line Voronoi bins when
@@ -279,7 +279,7 @@ Useful command-line / environment overrides used by these tests include:
 See also
 --------
 
-- :mod:`hispecdrp.primitives.utils.ccf_utils` — template CCF + mask-line CCF
+- :mod:`hispecdrp.primitives.utils.ccf.ccf_utils` — template CCF + mask-line CCF
 - :mod:`hispecdrp.utils.spectral_templates_utils`
 - :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview` — preview generation
 

@@ -1,242 +1,368 @@
+from __future__ import annotations
+from dataclasses import dataclass
 import numpy as np
-import scipy
-from numpy.lib.stride_tricks import sliding_window_view
-from scipy.signal import savgol_filter
+import scipy.optimize
 from numba import njit
-import warnings
+from hispecdrp.utils.math import polyval1d
 
 
-def fit_lines(
-    spec : np.ndarray, specerr : np.ndarray, dq : np.ndarray,
-    lines : np.ndarray,
-    fwhm_bounds : tuple = (1.5, 8), mu_bounds : tuple = (-1, 1),
-    max_fit_window : float | None = None,
-    profile_type : str = 'gaussian',
-) -> list[dict[str, float]]:
-    nx = len(spec)
-    n_lines = len(lines)
-    xarr = np.arange(nx)
-    ds = np.gradient(lines)
-    
+import logging
+logger = logging.getLogger(__name__)
+
+SIGMA_TO_FWHM = 2 * np.sqrt(2 * np.log(2))
+
+
+def fit_lines_gauss(
+    x : np.ndarray,
+    y : np.ndarray, y_err : np.ndarray, dq : np.ndarray,
+    line_centers : np.ndarray,
+    fwhm_bounds : tuple[float, float] | None = None,
+    mu_bounds : tuple[float, float] | None = None,
+    min_fit_window : int | None = None,
+    max_fit_window : int | None = None,
+    background_poly_deg : int = 0,
+    absorption : bool = False,
+) -> list[GaussianLineFitResult]:
+
+    nx = len(y)
+    n_lines = len(line_centers)
+    line_spacing = np.gradient(line_centers)
+
     fit_results = []
     for i in range(n_lines):
-        fit_window = (np.floor(-ds[i] / 2), np.ceil(ds[i] / 2))
-        fit_window = np.clip(fit_window, -max_fit_window / 2, max_fit_window / 2) if max_fit_window is not None else fit_window
-        ki = max(0, int(np.round(lines[i] + fit_window[0])))
-        kf = min(nx - 1, int(np.round(lines[i] + fit_window[1])))
-        x_fit = xarr[ki:kf+1].copy()
-        y_fit = spec[ki:kf+1].copy()
-        yerr_fit = specerr[ki:kf+1].copy()
-        fit_result = profile_background_fit(
-            x_fit, y_fit, yerr_fit,
+
+        # Half-window from spacing to neighbors, then clamp to [min, max] (full-window widths in px)
+        half = line_spacing[i] / 2
+        if min_fit_window is not None:
+            half = max(half, min_fit_window / 2)
+        if max_fit_window is not None:
+            half = min(half, max_fit_window / 2)
+        fit_window = np.array([-half, half])
+
+        # Only pass data in the fitting window
+        ki = max(0, int(np.round(line_centers[i] + fit_window[0])))
+        kf = min(nx - 1, int(np.round(line_centers[i] + fit_window[1])))
+        x_fit = x[ki:kf+1].copy()
+        y_fit = y[ki:kf+1].copy()
+        y_err_fit = y_err[ki:kf+1].copy() if y_err is not None else None
+        dq_fit = dq[ki:kf+1].copy() if dq is not None else None
+
+        # Fit the line
+        fit_result = fit_line_gauss(
+            x_fit, y_fit, y_err_fit, dq_fit,
             fwhm_bounds=fwhm_bounds,
             mu_bounds=mu_bounds,
-            mu_guess=lines[i], 
-            profile_type=profile_type
+            mu_guess=line_centers[i],
+            background_poly_deg=background_poly_deg,
+            absorption=absorption,
         )
+
+        # Append dict result to output list
         fit_results.append(fit_result)
 
     return fit_results
 
 
-def calculate_emission_spectrum_background(spec : np.ndarray, min_line_spacing : int = 12, n_lines : int = 10) -> np.ndarray:
-    filter_width = int(min_line_spacing / 3 * n_lines)
-    if filter_width % 2 == 0:
-        filter_width += 1  # Ensure filter width is odd
-    background = _nanmin_filter1d(spec, filter_width)
-    background = savgol_filter(background, filter_width, polyorder=1, mode='nearest')
-    return background
+@dataclass
+class GaussianLineFitResult:
+    amplitude: float
+    amplitude_err: float
+    mu: float
+    mu_err: float
+    fwhm: float
+    fwhm_err: float
+    background_coeffs: np.ndarray
+    background_coeffs_err: np.ndarray
+    redchi2: float
+    pcov : np.ndarray | None = None
 
+    @property
+    def popt(self) -> np.ndarray:
+        return np.concatenate(([self.amplitude, self.mu, self.fwhm], self.background_coeffs))
 
-def _nanmin_filter1d(data: np.ndarray, width: int) -> np.ndarray:
-    if width % 2 == 0:
-        width += 1  # ensure odd
-    pad = width // 2
-    padded = np.pad(data, pad_width=pad, mode='edge')
-    windows = sliding_window_view(padded, width)
-    return np.nanmin(windows, axis=1)
+    @property
+    def perr(self) -> np.ndarray:
+        return np.concatenate(([self.amplitude_err, self.mu_err, self.fwhm_err], self.background_coeffs_err))
 
-@njit(nogil=True)
-def _gaussian(x, amp, mu, fwhm):
-    """Gaussian profile parameterized by FWHM."""
-    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))  # Convert FWHM to sigma
-    return amp * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
-
-
-@njit(nogil=True)
-def _lorentzian(x, amp, mu, fwhm):
-    """Lorentzian profile parameterized by FWHM."""
-    gamma = fwhm / 2  # Half-width at half-maximum
-    return amp * gamma**2 / ((x - mu)**2 + gamma**2)
-
-
-@njit(nogil=True)
-def _profile_background(params, x, profile_func):
-    model_y = profile_func(x, params[0], params[1], params[2])
-    if len(params) > 3:
-        model_y = model_y + params[3]
-    return model_y
-    
-
-@njit(nogil=True)
-def _profile_background_chi2_residuals(params, data_x, data_y, data_yerr, profile_func):
-    """Calculate chi-squared residuals for profile + background model."""
-    model_y = _profile_background(params, data_x, profile_func)
-    wres = ((data_y - model_y) / data_yerr)
-    return wres
-
-
-def profile_background_fit(
-    x : np.ndarray, y : np.ndarray, yerr : np.ndarray, 
-    fwhm_bounds : tuple | None = None,
-    mu_guess : float | None = None,
-    mu_bounds : tuple | None = (-np.inf, np.inf),
-    profile_type : str = 'gaussian',
-) -> dict[str, float]:
-    """
-    Fit a profile (Gaussian or Lorentzian) plus background to data.
-    
-    Args:
-        x: Independent variable array
-        y: Dependent variable array  
-        yerr: Uncertainties on y
-        fwhm_bounds: Bounds on the FWHM parameter
-        mu_guess: Initial guess for line center
-        mu_bounds: Bounds on line center relative to mu_guess
-        profile_type: 'gaussian' or 'lorentzian'
-    
-    Returns:
-        Dictionary with fit parameters and uncertainties
-    """
-    
-    # Validate profile type
-    if profile_type not in ['gaussian', 'lorentzian']:
-        raise ValueError("profile_type must be 'gaussian' or 'lorentzian'")
-
-    if profile_type == 'gaussian':
-        profile_func = _gaussian
-    elif profile_type == 'lorentzian':
-        profile_func = _lorentzian
-
-    # Select good data points
-    good = np.where(np.isfinite(y) & np.isfinite(yerr))[0]
-    if len(good) < 3:
-        warnings.warn("Not enough good data points to perform fit.")
+    def to_row(self) -> dict:
         return {
-            'amplitude': np.nan,
-            'amplitude_err': np.nan,
-            'mu': np.nan,
-            'mu_err': np.nan,
-            'fwhm': np.nan,
-            'fwhm_err': np.nan,
-            'b' : np.nan,
-            'b_err': np.nan,
-            'redchi2': np.nan,
-            'profile_type': profile_type,
+            "amplitude": self.amplitude,
+            "amplitude_err": self.amplitude_err,
+            "mu": self.mu,
+            "mu_err": self.mu_err,
+            "fwhm": self.fwhm,
+            "fwhm_err": self.fwhm_err,
+            "background_coeffs": self.background_coeffs,
+            "background_coeffs_err": self.background_coeffs_err,
+            "redchi2": self.redchi2,
         }
-    
-    x = x[good]
-    y = y[good]
-    yerr = yerr[good]
-    
-    # Initial params
-    ymin = np.min(y)
-    yy = y - ymin
-    ymax = np.max(yy)
-    yy /= ymax
-    yyerr = yerr / ymax
-    
+
+
+def fit_line_gauss(
+    x : np.ndarray,
+    y : np.ndarray,
+    y_err : np.ndarray | None = None,
+    dq : np.ndarray | None = None,
+    fwhm_bounds : tuple[float, float] | None = None,
+    mu_guess : float | None = None,
+    mu_bounds : tuple[float, float] | None = None,
+    background_poly_deg : int = 0,
+    absorption : bool = False,
+) -> GaussianLineFitResult:
+    """
+    Fit a Gaussian profile to an absorption or emission line plus polynomial background to data.
+
+    For ``absorption=False`` the model is ``amplitude * gaussian + background``
+    (a peak above the continuum). For ``absorption=True`` the model is
+    ``background - amplitude * gaussian`` (a dip below the continuum). In both
+    cases ``amplitude >= 0`` is the line strength (depth for absorption); the
+    continuum is carried by the background polynomial.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        X-axis values (e.g., pixel positions, wavelengths, or a velocity grid).
+    y : np.ndarray
+        Flux values.
+    y_err : np.ndarray | None
+        Uncertainties on y.
+    dq : np.ndarray | None
+        Data quality mask for data.
+    fwhm_bounds : tuple | None
+        Bounds on the FWHM parameter.
+    mu_guess : float | None
+        Initial guess for line center.
+    mu_bounds : tuple | None
+        Bounds on line center relative to mu_guess.
+    background_poly_deg : int
+        Degree of the polynomial background model. For absorption a continuum
+        is required, so this must be >= 0 (degree 0 = flat continuum).
+    absorption : bool
+        Whether to fit an absorption line (True) or emission line (False).
+
+    Returns
+    -------
+    GaussianLineFitResult
+        Result of the Gaussian line fit. ``amplitude`` is always the
+        (positive) line strength; ``background_coeffs`` is the continuum.
+    """
+
+    if not absorption:
+        residuals_func = _gauss_emission_residuals
+        jac_func = _gauss_emission_jac
+    else:
+        residuals_func = _gauss_absorption_residuals
+        jac_func = _gauss_absorption_jac
+
+    if dq is None:
+        dq = (np.isfinite(y) & np.isfinite(y_err)) == 0
+    good = np.where(dq == 0)[0]
+
+    def _output_badfit():
+        return GaussianLineFitResult(
+            amplitude=np.nan,
+            amplitude_err=np.nan,
+            mu=np.nan,
+            mu_err=np.nan,
+            fwhm=np.nan,
+            fwhm_err=np.nan,
+            background_coeffs=np.full(background_poly_deg + 1, np.nan),
+            background_coeffs_err=np.full(background_poly_deg + 1, np.nan),
+            redchi2=np.nan
+        )
+
+    if len(good) < 3:
+        logger.warning("Not enough good data points to perform fit.")
+        return _output_badfit()
+
+    x_fit = x[good]
+    y_fit = y[good]
+    if y_err is not None:
+        y_err_fit = y_err[good]
+    else:
+        y_err_fit = np.ones_like(y_fit)
+
+    # Normalize. Emission: anchor peak to ~1 (subtract floor, divide by peak).
+    # Absorption: a continuum is present by definition; anchor the continuum to
+    # ~1 (divide by a robust continuum level) and let the dip go below 1. Do NOT
+    # subtract the floor for absorption -- the floor IS the line bottom.
+    if not absorption:
+        y_min = np.min(y_fit)
+        y_fit = y_fit - y_min
+        norm = np.nanmax(y_fit)
+    else:
+        y_min = 0.0
+        norm = np.nanpercentile(y_fit, 90)  # robust continuum estimate
+    y_fit = y_fit / norm if norm != 0 else y_fit
+    if y_err_fit is not None:
+        y_err_fit = y_err_fit / norm if norm != 0 else None
+
+    # Line-strength weights for the seeds: flux for emission, depth
+    # (continuum - flux) for absorption, since for a dip the flux is
+    # concentrated in the continuum rather than at the line.
+    if not absorption:
+        w_seed = np.clip(y_fit, 0, None)
+    else:
+        w_seed = np.clip(np.nanmax(y_fit) - y_fit, 0, None)
+
+    # Default mu guess
     if mu_guess is None:
-        mu_guess = np.average(x, weights=yy)
-    
+        mu_guess = np.average(x_fit, weights=w_seed)
+    if mu_bounds is None:
+        mu_bounds = (x_fit[-1] - x_fit[0]) * np.array([-0.1, 0.1])
+
     # Estimate initial FWHM from data
-    sigma_equiv = np.sqrt(np.average((x - mu_guess)**2, weights=yy))
-    fwhm0 = sigma_equiv * 2 * np.sqrt(2 * np.log(2))  # Convert sigma-equivalent to FWHM
-    
+    sigma_equiv = np.sqrt(np.average((x_fit - mu_guess)**2, weights=w_seed))
+    fwhm0 = sigma_equiv * SIGMA_TO_FWHM  # Convert sigma-equivalent to FWHM
     if fwhm_bounds is not None:
         if fwhm0 < fwhm_bounds[0] or fwhm0 > fwhm_bounds[1]:
             fwhm0 = np.mean(fwhm_bounds)
-    
-    b0 = 0.01
-    p0 = np.array([1.0, mu_guess, fwhm0, b0])
-    
-    # Set up bounds
+
+    # Default bounds
     if fwhm_bounds is None:
-        fwhm_bounds = (fwhm0 * 0.1, fwhm0 * 10)  # Default bounds
-    
-    bounds = (
-        np.array([0.5, mu_bounds[0] + mu_guess, fwhm_bounds[0], -0.2]),
-        np.array([1.5, mu_bounds[1] + mu_guess, fwhm_bounds[1], 0.2]),
-    )
-    n_dof = len(x) - len(p0)
-    
+        fwhm_bounds = (fwhm0 * 0.2, fwhm0 * 5)
+
+    # Init params: amp, mu, fwhm, b0, b1, b2.
+    # Continuum guess: emission ~0 floor (data already floored); absorption ~1
+    # (data divided by continuum). Seed b0 accordingly so the fit starts sane.
+    n_bkg_coeff = background_poly_deg + 1
+    bkg0 = [0.0] * n_bkg_coeff
+    amp0 = 1.0
+    if not absorption:
+        bkg0[0] = 1.0  # continuum ~1 after normalization
+        amp0 = np.clip(1.0 - np.nanmin(y_fit), 0.0, 1.5)  # depth guess
+    p0 = np.array([amp0, mu_guess, fwhm0] + bkg0)
+    lb = np.array([0.0, mu_bounds[0] + mu_guess, fwhm_bounds[0]] + [-np.inf] * n_bkg_coeff)
+    ub = np.array([1.5, mu_bounds[1] + mu_guess, fwhm_bounds[1]] + [np.inf] * n_bkg_coeff)
+    bounds = (lb, ub)
+
+    # Deg of freedom
+    n_dof = len(x_fit) - len(p0)
+
     # Fit
     try:
         result = scipy.optimize.least_squares(
-            _profile_background_chi2_residuals, 
+            residuals_func,
             p0,
-            args=(x, yy, yyerr, profile_func), 
+            jac=jac_func,
+            args=(x_fit, y_fit, y_err_fit),
             bounds=bounds,
-            ftol=1E-10, 
-            xtol=1E-10
+            x_scale='jac',
+            ftol=1e-8,
+            xtol=1e-8,
+            gtol=1e-8,
         )
     except Exception as e:
-        print(e)
-        
-        #breakpoint()
-        #import matplotlib.pyplot as plt
-        #plt.plot(x, yy, label='Data')
-    
+        logger.warning(f"Exception during fitting: {e}")
+        return _output_badfit()
+
     pbest = result.x
-    redchi2 = result.cost / n_dof
-    
+    redchi2 = 2 * result.cost / n_dof
+
     try:
-        cov = np.linalg.inv(result.jac.T @ result.jac) * np.sum(result.fun**2) / n_dof
+        cov = np.linalg.inv(result.jac.T @ result.jac)
         errors = np.sqrt(np.diag(cov))
     except np.linalg.LinAlgError:
-        pbest = np.full(len(p0), np.nan)
-        errors = np.full(len(p0), np.nan)
-        redchi2 = np.nan
+       logger.exception("Covariance matrix could not be computed. Fit may be degenerate.")
+       return _output_badfit()
 
-    # Collect output
-    out = {
-        'amplitude': pbest[0] * ymax,  # Scale back to original units
-        'amplitude_err': errors[0] * ymax,
-        'mu': pbest[1],
-        'mu_err': errors[1],
-        'fwhm': pbest[2],
-        'fwhm_err': errors[2],
-        'b' : pbest[3] * ymax + ymin,  # Scale back to original units
-        'b_err': errors[3] * ymax,
-        'redchi2': redchi2,
-        'profile_type': profile_type,
-    }
+    # Scale amplitude and background back to original units. Emission subtracted
+    # a floor then divided by norm; absorption only divided by norm. Restore the
+    # floor into the continuum constant term for emission only.
+    background_coeffs = pbest[3:] * norm
+    if not absorption:
+        background_coeffs = background_coeffs.copy()
+        background_coeffs[0] = background_coeffs[0] + y_min
+    out = GaussianLineFitResult(
+        amplitude=pbest[0] * norm,
+        amplitude_err=errors[0] * norm,
+        mu=pbest[1],
+        mu_err=errors[1],
+        fwhm=pbest[2],
+        fwhm_err=errors[2],
+        background_coeffs=background_coeffs,
+        background_coeffs_err=errors[3:] * norm,
+        redchi2=redchi2,
+        pcov=cov
+    )
 
     return out
 
 
-def find_initial_lines(spec, dq, min_line_spacing : float = 10) -> dict:
-    
-    # Estimate and remove background
-    background = calculate_emission_spectrum_background(spec, min_line_spacing=min_line_spacing, n_lines=2)
-    spec_nobkg = spec - background
+@njit(nogil=True)
+def _gaussian(x, amp, mu, fwhm):
+    sigma = fwhm / SIGMA_TO_FWHM  # Convert FWHM to sigma
+    return amp * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
 
-    # Find peaks
-    lines, _ = scipy.signal.find_peaks(spec_nobkg, distance=min_line_spacing - 2)
-    # NOTE: Keep plots here for debugging.
-    # import matplotlib.pyplot as plt
-    #plt.plot(spec); [plt.axvline(l, color='r', linestyle='--') for m in lines]
-    #plt.plot(spec); plt.plot(background, color='orange', label='Background'); plt.show()
 
-    # Refine lines based on centroid
-    w2 = 3
-    lines = lines[1:-1] # Ignore first and last lines, possibly noise
-    lines = lines.astype(np.float64)
-    for i in range(len(lines)):
-        ki = int(max(lines[i] - w2, 0))
-        kf = int(min(lines[i] + w2, len(spec) - 1))
-        good = np.where(dq[ki:kf+1] == 0)[0]
-        if len(good) > 0:
-            lines[i] = np.sum((good + ki) * spec[ki:kf+1][good]) / np.sum(spec[ki:kf+1][good])
+# --- Emission: model = amplitude * gaussian + background ---------------------
 
-    return lines
+@njit(nogil=True)
+def _gauss_emission_model(params, x):
+    model = _gaussian(x, params[0], params[1], params[2])
+    if len(params) > 3:
+        model = model + polyval1d(params[3:], x - np.mean(x))
+    return model
+
+
+@njit(nogil=True)
+def _gauss_emission_residuals(params, x, y, yerr):
+    model = _gauss_emission_model(params, x)
+    return (y - model) / yerr
+
+
+@njit(nogil=True)
+def _gauss_emission_jac(params, x, y, yerr):
+    amp, mu, fwhm = params[0], params[1], params[2]
+    n_poly = len(params) - 3
+    sigma = fwhm / SIGMA_TO_FWHM  # Convert FWHM to sigma
+    z = (x - mu) / sigma
+    g = np.exp(-0.5 * z**2)
+    J = np.empty((x.size, params.size))
+    J[:, 0] = -g / yerr                              # d/dA
+    J[:, 1] = -amp * g * z / sigma / yerr            # d/dmu
+    J[:, 2] = -amp * g * z**2 / fwhm / yerr          # d/dfwhm
+    # Polynomial background: polyval1d(x - mean(x), params[3:])
+    xc = x - np.mean(x)
+    p = np.ones(x.size)
+    for k in range(n_poly):
+        J[:, 3 + k] = -p / yerr                      # d/d(coeff_k)
+        p = p * xc
+    return J
+
+
+# --- Absorption: model = background - amplitude * gaussian --------------------
+
+@njit(nogil=True)
+def _gauss_absorption_model(params, x):
+    model = -1 * _gaussian(x, params[0], params[1], params[2])
+    if len(params) > 3:
+        model = model + polyval1d(params[3:], x - np.mean(x))
+    return model
+
+
+@njit(nogil=True)
+def _gauss_absorption_residuals(params, x, y, yerr):
+    model = _gauss_absorption_model(params, x)
+    return (y - model) / yerr
+
+
+@njit(nogil=True)
+def _gauss_absorption_jac(params, x, y, yerr):
+    amp, mu, fwhm = params[0], params[1], params[2]
+    n_poly = len(params) - 3
+    sigma = fwhm / SIGMA_TO_FWHM  # Convert FWHM to sigma
+    z = (x - mu) / sigma
+    g = np.exp(-0.5 * z**2)
+    J = np.empty((x.size, params.size))
+    # Profile enters with a minus sign, so residual derivatives flip sign.
+    J[:, 0] = g / yerr                               # d/dA
+    J[:, 1] = amp * g * z / sigma / yerr             # d/dmu
+    J[:, 2] = amp * g * z**2 / fwhm / yerr           # d/dfwhm
+    # Polynomial background: polyval1d(x - mean(x), params[3:])
+    xc = x - np.mean(x)
+    p = np.ones(x.size)
+    for k in range(n_poly):
+        J[:, 3 + k] = -p / yerr                      # d/d(coeff_k)
+        p = p * xc
+    return J

@@ -1,5 +1,5 @@
-
 from .base_model import DataModel
+from .mixins import FiberAttributeProxyMixin
 from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions
 
 __all__ = ['L1Model']
@@ -14,8 +14,7 @@ def _create_l1_extensions(num_fibers : int):
         ext.update(create_barycorr_extensions(fiber=fiber))
     return ext
 
-
-class L1Model(DataModel):
+class L1Model(FiberAttributeProxyMixin, DataModel):
     """
     HISPEC level 1 (L1) data products consist of 1D spectra immediately following spectral extraction. These spectra include a wavelength solution derived from the most recent wavelength calibration available in the calibration database (likely from the LFC). However, they do not yet incorporate the simultaneous etalon data to account for any wavelength drift or any additional corrections.
 

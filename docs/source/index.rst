@@ -21,6 +21,15 @@ Quickstart
    quickstart/quickstart
 
 
+Simulations
+===========
+
+.. toctree::
+   :maxdepth: 2
+
+   simulations/simulations
+
+
 Pipelines
 =========
 

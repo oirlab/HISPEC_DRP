@@ -8,7 +8,12 @@ import astropy.time
 import numpy as np
 import os
 
-def test_local_caldb(tmp_path, datadir):
+# Fixed epoch for cal-db ordering tests: spread over ~4 years without entering
+# ERFA "dubious year" territory (IERS leap-second tables are unreliable past ~2028).
+_CALDB_TEST_BASE_MJD = 60200.0  # 2023-10-27 UTC
+
+
+def test_local_caldb(tmp_path, datadir, monkeypatch):
 
     # Calibration cache
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
@@ -16,7 +21,7 @@ def test_local_caldb(tmp_path, datadir):
     # Store 5 files in the local cache
     N = 5
     dark_models = []
-    mjds = astropy.time.Time.now().mjd + np.arange(N) * 365
+    mjds = _CALDB_TEST_BASE_MJD + np.arange(N) * 365
     for i in range(N):
         dark_model = datamodels.DarkModel(meta={'mjd_start': mjds[i]})
         prim = RegisterCalibrationPrimitive()
@@ -31,7 +36,7 @@ def test_local_caldb(tmp_path, datadir):
         assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
 
         # Ensure we select the first dark
-        mjd0 = astropy.time.Time.now().mjd + 1
+        mjd0 = _CALDB_TEST_BASE_MJD + 1
         input_model = datamodels.L0Model(meta={'mjd_start': mjd0})
         dark1_filepath, _ = store.select_and_get_calibration(
             input_model.meta,
@@ -54,7 +59,14 @@ def test_local_caldb(tmp_path, datadir):
             DarkSelector()
         )
         assert dark3_filepath == dark_models[2]._filepath, "Wrong dark model retrieved from local DB"
-        # Test retrieval from DarkPrimitive
+        # Test retrieval from DarkPrimitive (local cache only; no remote KOA sync).
+        _store_init = HISPECCalibrationStore.__init__
+
+        def _local_only_store_init(self, *args, **kwargs):
+            kwargs["connect_remote"] = False
+            _store_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(HISPECCalibrationStore, "__init__", _local_only_store_init)
         dark_prim = DarkSubtractionPrimitive()
         dark4_filepath, _ = dark_prim.get_calibration(input_model, 'dark')
         assert dark4_filepath == dark_models[2]._filepath, "Wrong dark model retrieved via DarkSubtractionPrimitive"
@@ -80,7 +92,7 @@ def test_sync_db_from_existing_files(tmp_path, datadir):
     # Store 5 files in the local cache without registering them.
     N = 5
     dark_models = []
-    mjds = astropy.time.Time.now().mjd + np.arange(N) * 365
+    mjds = _CALDB_TEST_BASE_MJD + np.arange(N) * 365
     for i in range(N):
         dark_model = datamodels.DarkModel(meta={'mjd_start': mjds[i], 'origin' : 'KECK'
         ''})

@@ -9,7 +9,7 @@ from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 
 from ...datamodels.dqflags import DQ_FLAGS
-from .utils import get_mid_delta_times
+from .utils import get_mid_delta_times, SECONDS_PER_DAY
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 
 import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp_Brandt
@@ -268,7 +268,7 @@ def _fit_ramps_worker(args : tuple) -> tuple:
         var_rnoise_image_np[row, :] = var_rnoise
 
     mid_times_np[block_start:block_end, :] = start_times_np[block_start:block_end, :] +\
-                                             get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :])
+                                             get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :]) / SECONDS_PER_DAY
 
     _dq_raw = dq_raw_np[:, block_start:block_end, :] - (dq_raw_np[:, block_start:block_end, :] & DO_NOT_USE_FLAG_uint8)
     dq_image_np[block_start:block_end, :] |= np.bitwise_or.reduce(_dq_raw)
@@ -587,7 +587,7 @@ def fit_ramps_jwst(
             var_rnoise_image_np[row, :] = var_rnoise
 
         with numba_thread_scope(max_cores):
-            mid_times_np = start_times + get_mid_delta_times(times, dq_raw)
+            mid_times_np = start_times + get_mid_delta_times(times, dq_raw) / SECONDS_PER_DAY
 
     output = {}
     output['rate'] = slope_image_np

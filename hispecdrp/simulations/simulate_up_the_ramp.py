@@ -1,5 +1,5 @@
 """
-Simulate up-the-ramp (UTR) readouts and run Stage 0 (and optionally Stage 1) pipeline.
+Simulate up-the-ramp (UTR) readouts and run Stage 0–2 pipelines for end-to-end tests.
 
 This module provides functions to build simulated calibration models, generate
 ramp data from a rate map, and run the Stage 0 pipeline to produce rate/slope
@@ -12,9 +12,11 @@ helpers for the fiberflat and Stage 1 pipelines are included for full workflows.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
+import shutil
 
 import numpy as np
 
@@ -27,10 +29,11 @@ from ..utils.spectral_templates_utils import (
     load_btsettl_spectrum,
 )
 from ..datamodels.dqflags import DQ_FLAGS
-from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline, Stage1Pipeline
-from .create_ramp import create_ramp
+from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
+from . import e2e_support
+from .utr import create_ramp
 from .run_caldb import get_master_calibrations
-from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
+from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -38,10 +41,13 @@ SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
 
-def _fiberflat_rate_filename(spectrograph: str, fiber: int) -> str:
+def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -> str:
     """Default filename for a single-fiber fiberflat rate FITS (matches KOA-style naming)."""
     prefix = "HB" if spectrograph.upper() == "BSPEC" else "HR"
-    return f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}.fits"
+    base = f"{prefix}.20231006.00000.00_rate-FIBERFLAT-FIB{fiber}"
+    if exposure <= 1:
+        return f"{base}.fits"
+    return f"{base}.{exposure:03d}.fits"
 
 
 def get_expected_ramp_path(output_dir: str) -> str:
@@ -63,7 +69,7 @@ def get_expected_fiberflat_rate_paths(
     """Return paths where dummy fiber flat rate FITS would be saved (one per fiber in 1–3)."""
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
-    out_abs = os.path.abspath(output_dir)
+    out_abs = e2e_support.calibration_dir(output_dir)
     return [
         os.path.join(out_abs, fiberflat_filename(spectrograph, f))
         for f in sorted(fibers)
@@ -79,6 +85,25 @@ def ramp_file_exists(output_dir: str) -> bool:
 def rate_map_file_exists(output_dir: str) -> bool:
     """Return True if the rate map file already exists in output_dir."""
     return os.path.isfile(get_expected_rate_map_path(output_dir))
+
+
+def load_rate_map_array(filepath: str) -> np.ndarray:
+    """
+    Load a 2D rate map from disk.
+
+    Files written by :class:`~hispecdrp.simulations.simulate_rate_map.SimulateRateMap`
+    are plain FITS images (no ``DATAMODL`` header), so this uses ``astropy.io.fits``
+    rather than :func:`~hispecdrp.datamodels.open`.
+    """
+    from astropy.io import fits
+
+    data = fits.getdata(filepath, memmap=False)
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim != 2:
+        raise ValueError(
+            f"Rate map at {filepath!r} must be 2D; got shape {arr.shape}"
+        )
+    return arr
 
 
 def fiberflat_rate_files_exist(
@@ -101,9 +126,11 @@ __all__ = [
     "get_spectrum_path",
     "load_btsettl_spectrum",
     "create_ramp_and_calibrations",
+    "create_ramp_from_spectrum",
     "create_dummy_fiberflat_rate_files",
     "get_expected_ramp_path",
     "get_expected_rate_map_path",
+    "load_rate_map_array",
     "get_expected_fiberflat_rate_paths",
     "ramp_file_exists",
     "rate_map_file_exists",
@@ -113,13 +140,27 @@ __all__ = [
     "simulate_up_the_ramp",
     "run_fiberflat_pipeline",
     "run_stage1_simulation",
+    "run_stage2_simulation",
+    "get_default_stage1_prim_args",
+    "get_default_stage2_prim_args",
     "create_wavelength_solution_model_from_sim",
+    "register_sim_lfc_wavesol",
     "prepare_fiberflat_models",
     "get_fiberflat_prim_args",
 ]
 
+# Re-export Stage 1/2 E2E helpers from e2e_support.
+run_stage1_simulation = e2e_support.run_stage1_simulation
+run_stage2_simulation = e2e_support.run_stage2_simulation
+get_default_stage1_prim_args = e2e_support.get_default_stage1_prim_args
+get_default_stage2_prim_args = e2e_support.get_default_stage2_prim_args
 
-def create_wavelength_solution_model_from_sim(spectrograph: str):
+
+def create_wavelength_solution_model_from_sim(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+):
     """
     Build an LFCWavesolModel from the SimulateRateMap HDF wavelength solution for the given spectrograph.
 
@@ -129,6 +170,8 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     ----------
     spectrograph : str
         'BSPEC' or 'RSPEC'.
+    meta : dict or None, optional
+        Extra metadata fields (e.g. ``mjd_start``) merged into the model meta.
 
     Returns
     -------
@@ -144,9 +187,12 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     order_list = hispec_config.HISPECConfig.get_order_list(spectrograph)
 
     # Use the real HISPEC instrument config (provides metadata schema, num_fibers, etc.)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
     wavesol_model = LFCWavesolModel(
         config=hispec_config.HISPECConfig,
-        meta={"spectrograph": spectrograph},
+        meta=model_meta,
     )
     for fiber in (1, 2, 3):
         if fiber not in ws_dict or not ws_dict[fiber]:
@@ -167,8 +213,59 @@ def create_wavelength_solution_model_from_sim(spectrograph: str):
     return wavesol_model
 
 
+def register_sim_lfc_wavesol(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+    connect_remote: bool = False,
+    origin: str = "LOCAL",
+    new_version: bool = False,
+) -> tuple[str, dict]:
+    """
+    Build an HDF-based wavelength solution as ``LFCWavesolModel`` and register it in the local caldb.
+
+    The model uses ``cal_type='lfc_wavesol'``, so the default
+    :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector` used by
+    Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides. This
+    mirrors real-data processing where an LFC wavesol is already in the caldb.
+
+    Parameters
+    ----------
+    spectrograph : str
+        ``'BSPEC'`` or ``'RSPEC'``.
+    meta : dict or None, optional
+        Metadata merged into the wavesol (should include ``instrument_era`` and
+        ``mjd_start`` matching the science ramp / L0 for selector matching).
+    connect_remote : bool, optional
+        Open a remote KOA connection when registering. Default False (local cache only).
+    origin : str, optional
+        Registration origin label. Default ``'LOCAL'``.
+    new_version : bool, optional
+        Passed to :meth:`~hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.register_calibration`.
+        Default False (reuse an existing version family when present).
+
+    Returns
+    -------
+    tuple of (str, dict)
+        Local filepath and caldb record from registration.
+    """
+    from ..calibrations import HISPECCalibrationStore
+
+    wavesol_model = create_wavelength_solution_model_from_sim(spectrograph, meta=meta)
+    with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
+        local_path, cal_record = store.register_calibration(
+            wavesol_model, origin=origin, new_version=new_version
+        )
+    logger.info(
+        "Registered simulated LFC wavesol in caldb (spectrograph=%s): %s",
+        spectrograph,
+        local_path,
+    )
+    return local_path, cal_record
+
+
 def create_simulated_calibration_models(
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     gain: float = 1.0,
     bias_dn: float | None = None,
@@ -189,7 +286,8 @@ def create_simulated_calibration_models(
     Parameters
     ----------
     shape : tuple of int, optional
-        (ny, nx) detector dimensions. Default is (4096, 4096).
+        (ny, nx) detector dimensions. Default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     gain : float, optional
         Detector gain in e-/ADU. Default is 1.0.
     bias_dn : float or None, optional
@@ -218,7 +316,7 @@ def create_simulated_calibration_models(
         ``bias``, ``dark``, ``rn``. Each value is the corresponding
         calibration data model instance.
     """
-    ny, nx = shape
+    ny, nx = shape if shape is not None else e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE
     rng = np.random.default_rng(seed)
 
     if bias_dn is None:
@@ -311,6 +409,8 @@ def simulate_ramp_from_rate_map(
     clip_ramps: bool = True,
     poisson_noise: bool = True,
     kTC_noise: float = 50.0,
+    mjd_start: float | None = None,
+    target_meta: dict | None = None,
 ) -> datamodels.RampModel:
     """
     Simulate a ramp from a rate map (e-/s/pixel) using create_ramp and calibration models.
@@ -353,6 +453,23 @@ def simulate_ramp_from_rate_map(
     dark_model = calibration_models["dark"]
     rn_model = calibration_models["rn"]
 
+    rate_shape = tuple(np.asarray(rate_map, dtype=np.float64).shape)
+    for key, model in (
+        ("gain", gain_model),
+        ("detflat", detflat_model),
+        ("bias", bias_model),
+        ("dark", dark_model),
+        ("rn", rn_model),
+    ):
+        cal_shape = e2e_support.calibration_model_detector_shape(model)
+        if cal_shape != rate_shape:
+            raise ValueError(
+                f"Calibration '{key}' shape {cal_shape} does not match rate_map shape "
+                f"{rate_shape}. Regenerate simulated calibrations at the correct detector "
+                f"size ({e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE}) or delete stale "
+                f"sim_*.fits files under the output cals directory."
+            )
+
     gain_map = gain_model.gain if hasattr(gain_model, "gain") else gain_model["GAIN"]
     detflat_map = detflat_model.flat if hasattr(detflat_model, "flat") else detflat_model["FLAT"]
     bias_map = bias_model.bias if hasattr(bias_model, "bias") else bias_model["BIAS"]
@@ -369,6 +486,7 @@ def simulate_ramp_from_rate_map(
     rn_dn = np.asarray(rn_map, dtype=np.float64)
     read_noise_e = rn_dn * gain_arr
 
+    eff_mjd_start = 60577.0 if mjd_start is None else float(mjd_start)
     ramp_dict = create_ramp(
         rate_map,
         readtime=readtime,
@@ -381,12 +499,25 @@ def simulate_ramp_from_rate_map(
         read_noise=read_noise_e,
         kTC_noise=kTC_noise,
         poisson_noise=poisson_noise,
+        mjd_start=eff_mjd_start,
         convert_to_uint16=convert_to_uint16,
         clip_ramps=clip_ramps,
         max_cores=max_cores,
     )
 
     ramp_dict["meta"]["spectrograph"] = spectrograph
+    exposure_mid_mjd = eff_mjd_start + 0.5 * max(int(n_reads) - 1, 0) * float(readtime) / 86400.0
+    ramp_dict["meta"]["mjd_start"] = float(eff_mjd_start)
+    ramp_dict["meta"]["mjd_mid"] = float(exposure_mid_mjd)
+    if target_meta:
+        ramp_dict["meta"].update(
+            {k: v for k, v in target_meta.items() if v is not None}
+        )
+        ramp_dict["meta"]["mjd_start"] = float(eff_mjd_start)
+        if target_meta.get("mjd_mid") is not None:
+            ramp_dict["meta"]["mjd_mid"] = float(target_meta["mjd_mid"])
+        else:
+            ramp_dict["meta"]["mjd_mid"] = float(exposure_mid_mjd)
     ramp_model = datamodels.RampModel(
         data=ramp_dict["data"],
         dq_raw=ramp_dict["dq_raw"],
@@ -398,7 +529,7 @@ def simulate_ramp_from_rate_map(
 
 def get_default_stage0_prim_args(
     *,
-    max_cores: int = 1,
+    max_cores: int | None = 1,
     ramp_fit_method: str = "jwst_likely",
     run_bias_sub: bool = False,
     run_nonlin_corr: bool = False,
@@ -427,27 +558,61 @@ def get_default_stage0_prim_args(
         Nested dict of primitive names to keyword arguments for
         Stage0Pipeline.apply(..., prim_args=...).
     """
+    mc = max_cores if max_cores is not None else 1
     return {
-        "dq_init": {"max_cores": max_cores},
-        "saturation_check": {"max_cores": max_cores},
-        "bias_sub": {"run": run_bias_sub, "max_cores": max_cores},
-        "nonlin_corr": {"run": run_nonlin_corr, "max_cores": max_cores},
+        "dq_init": {"max_cores": mc},
+        "saturation_check": {"max_cores": mc},
+        "bias_sub": {"run": run_bias_sub, "max_cores": mc},
+        "nonlin_corr": {"run": run_nonlin_corr, "max_cores": mc},
         "jump_detec": {
             "run": run_jump_detec,
             "method": "tpd",
-            "max_cores": max_cores,
+            "max_cores": mc,
             "rejection_threshold": 4.0,
         },
         "ramp_fit": {
             "method": ramp_fit_method,
-            "max_cores": max_cores,
+            "max_cores": mc,
             "jwst_jump_detection": True,
             "jwst_jump_rejection_threshold": 4.0,
         },
-        "dark_sub": {"max_cores": max_cores},
-        "gain_corr": {"max_cores": max_cores},
-        "detflat_corr": {"max_cores": max_cores},
+        "dark_sub": {"max_cores": mc},
+        "gain_corr": {"max_cores": mc},
+        "detflat_corr": {"max_cores": mc},
     }
+
+
+def _build_fiberflat_rate_map(
+    srm: SimulateRateMap,
+    spectrograph: str,
+    *,
+    rate_map_method: str = "pyechelle",
+    pyechelle_exposure_time_s: float = 300.0,
+) -> np.ndarray:
+    """Build a 2-D fiberflat rate map with pyechelle raytracing or the native PRF convolver."""
+    method = str(rate_map_method).strip().lower()
+    if method == "pyechelle":
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed but rate_map_method='pyechelle'. "
+                "Install pyechelle (see docs/source/installation.rst) or pass rate_map_method='native'."
+            )
+        import astropy.units as u
+
+        return srm.create_pyechelle_rate_map(
+            spectrograph=spectrograph,
+            exposure_time=pyechelle_exposure_time_s * u.s,
+            save=False,
+        )
+    if method == "native":
+        return srm.create_native_rate_map(
+            spectrograph=spectrograph,
+            method="prf_convolution",
+            save=False,
+        )
+    raise ValueError(
+        f"Unknown fiberflat rate_map_method {rate_map_method!r}; use 'pyechelle' or 'native'."
+    )
 
 
 def create_dummy_fiberflat_rate_files(
@@ -456,52 +621,29 @@ def create_dummy_fiberflat_rate_files(
     output_dir: str,
     calibration_models: dict[str, datamodels.CalibrationModel],
     *,
-    flat_scale: float = 1e-14,
+    flat_scale: float = 2e-14,
     flat_temperature_k: float = 1000.0,
     readtime: float = 1.7,
     n_reads: int = 10,
     max_cores: int = 1,
     stage0_prim_args: dict | None = None,
     fiberflat_filename: callable | None = None,
+    fiberflat_coadd_exposures: int = 1,
+    fiberflat_duplicate_single_reduction: bool = False,
+    rate_map_method: str = "pyechelle",
+    pyechelle_exposure_time_s: float = 300.0,
 ) -> list[str]:
     """
-    Create dummy fiber flat rate FITS files using the same create_ramp / Stage 0 path as the science ramp.
+    Create simulated fiber flat rate FITS files using the same Stage 0 path as the science ramp.
 
-    For each requested fiber (1, 2, 3), a blackbody spectrum at the given temperature (0.8–3.0 µm,
-    optionally scaled) is placed on that fiber only, a rate map is built, a ramp is simulated,
-    Stage 0 is run, and the rate product is saved to output_dir. The resulting file paths can be
-    passed to :func:`run_fiberflat_pipeline`.
+    For each requested fiber (1, 2, 3), a whitelight blackbody spectrum (0.8–3.0 µm, scaled by
+    ``flat_scale``) is placed on that fiber only. A rate map is built with pyechelle raytracing
+    (default) or the native PRF convolver, then one or more ramp + Stage 0 reductions are run.
+    Paths are passed to :func:`run_fiberflat_pipeline`, which coadds frames sharing the same
+    fiber illumination pattern and derives trace positions with :class:`TracePositionPrimitive`.
 
-    Parameters
-    ----------
-    fibers : list of int
-        Fiber numbers (1, 2, 3) to create fiber flat rate files for.
-    spectrograph : str
-        Spectrograph name (e.g. "BSPEC", "RSPEC").
-    output_dir : str
-        Directory to save each rate FITS file.
-    calibration_models : dict
-        Calibration models (same as used for the science ramp). Must contain
-        dq, saturation, bias, gain, rn, dark, detflat.
-    flat_scale : float, optional
-        Scale factor for the fiber flat spectrum flux. Default is 1e-14.
-    flat_temperature_k : float, optional
-        Blackbody temperature in Kelvin for the fiber flat spectrum. Default is 1000.0.
-    readtime : float, optional
-        Time between reads in seconds. Default is 1.7.
-    n_reads : int, optional
-        Number of reads in each ramp. Default is 10.
-    max_cores : int, optional
-        Cores for create_ramp and Stage 0. Default is 1.
-    stage0_prim_args : dict or None, optional
-        Primitive arguments for Stage 0. If None, use :func:`get_default_stage0_prim_args`(max_cores).
-    fiberflat_filename : callable or None, optional
-        (spectrograph, fiber) -> filename. If None, use default KOA-style naming.
-
-    Returns
-    -------
-    list of str
-        Paths to the saved rate FITS files (one per fiber), in fiber order.
+    By default one rate FITS is written per fiber (``fiberflat_coadd_exposures=1``). Optional
+    multi-exposure coadd inputs are supported when ``fiberflat_coadd_exposures`` > 1.
     """
     import astropy.units as u
     from astropy.modeling.models import BlackBody
@@ -510,9 +652,11 @@ def create_dummy_fiberflat_rate_files(
         stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
+    if fiberflat_coadd_exposures < 1:
+        raise ValueError(f"fiberflat_coadd_exposures must be >= 1, got {fiberflat_coadd_exposures}")
 
-    # Blackbody spectrum 0.8–3.0 µm at high resolution to avoid interpolation errors in the simulation
-    n_wl_flat = 100_000
+    # Coarse BB grid; upsampled to R~3e5 when continuous=True (required for smooth native PRF maps).
+    n_wl_flat = 5_000 if str(rate_map_method).strip().lower() == "pyechelle" else 10_000
     wl_flat = np.linspace(0.8, 3.0, n_wl_flat) * u.micron
     wl_aa = wl_flat.to(u.AA)
     bb_scale = 1.0 * u.erg / (u.cm**2 * u.s * u.AA * u.sr)
@@ -522,48 +666,121 @@ def create_dummy_fiberflat_rate_files(
     # Convert per-Angstrom to per-micron: 1 micron = 1e4 AA => same flux density => multiply by 1e4
     flux_flat = (flat_scale * np.asarray(bb_lam_aa.value) * 1e4) * (u.erg / u.s / u.cm**2 / u.micron)
 
-    out_dir_abs = os.path.abspath(output_dir)
-    os.makedirs(out_dir_abs, exist_ok=True)
+    pipeline_root = e2e_support.ensure_output_directory(output_dir)
+    out_dir_abs = e2e_support.calibration_dir(pipeline_root)
     paths: list[str] = []
 
     for f in sorted(fibers):
         if f not in (1, 2, 3):
             continue
-        logger.info("Creating dummy fiber flat rate file for fiber %s.", f)
+        logger.info(
+            "Creating simulated fiber flat rate file(s) for fiber %s "
+            "(rate_map_method=%s, coadd_exposures=%s, duplicate_single_reduction=%s).",
+            f,
+            rate_map_method,
+            fiberflat_coadd_exposures,
+            fiberflat_duplicate_single_reduction,
+        )
         srm = SimulateRateMap()
         srm.output_directory = out_dir_abs
+        srm.pyechelle_outname = f"pyechelle_fiberflat_fib{f}.fits"
+        # Continuum blackbody: upsample to R~3e5 so the native PRF convolver stamps overlap
+        # along each order (continuous=False leaves ~15–20% of dispersion pixels empty).
         srm.set_fiber_spectrum(
             fiber_number=f,
             spectrum_wavelengths=wl_flat,
             spectrum_flux=flux_flat,
             continuous=True,
         )
-        rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
-        ramp_model = simulate_ramp_from_rate_map(
-            rate_map,
-            calibration_models,
-            readtime=readtime,
-            n_reads=n_reads,
-            max_cores=max_cores,
-            spectrograph=spectrograph,
-            poisson_noise=True,
-            convert_to_uint16=True,
+        rate_map = _build_fiberflat_rate_map(
+            srm,
+            spectrograph,
+            rate_map_method=rate_map_method,
+            pyechelle_exposure_time_s=pyechelle_exposure_time_s,
         )
-        rate_model = run_stage0_simulation(
-            ramp_model,
-            calibration_models,
-            output_dir=out_dir_abs,
-            prim_args=stage0_prim_args,
-        )
-        # Set object_fiber meta so group_by_illuminated_fiber (fiber flat pipeline) finds this fiber
-        obj_flat = "FIBERFLAT-B" if spectrograph.upper() == "BSPEC" else "FIBERFLAT-R"
-        for fib in (1, 2, 3):
-            setattr(rate_model.meta, f"object_fiber{fib}", obj_flat if fib == f else "BLOCKED")
-        filename = fiberflat_filename(spectrograph, f)
-        filepath = os.path.join(out_dir_abs, filename)
-        rate_model.save(filepath=filepath)
-        paths.append(filepath)
-        logger.debug("Saved dummy fiber flat rate file: %s", filepath)
+
+        def _finalize_and_save(rate_model: datamodels.DataModel, exposure: int) -> str:
+            obj_flat = "WHITELIGHT"
+            for fib in (1, 2, 3):
+                setattr(
+                    rate_model.meta,
+                    f"object_fiber{fib}",
+                    obj_flat if fib == f else "BLOCKED",
+                )
+            filename = fiberflat_filename(spectrograph, f, exposure)
+            filepath = os.path.join(out_dir_abs, filename)
+            rate_model.save(filepath=filepath)
+            logger.debug("Saved dummy fiber flat rate file: %s", filepath)
+            return filepath
+
+        if fiberflat_coadd_exposures == 1:
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            paths.append(_finalize_and_save(rate_model, 1))
+            continue
+
+        if fiberflat_duplicate_single_reduction:
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            primary_path = _finalize_and_save(rate_model, 1)
+            paths.append(primary_path)
+            for exposure in range(2, fiberflat_coadd_exposures + 1):
+                dup_path = os.path.join(
+                    out_dir_abs, fiberflat_filename(spectrograph, f, exposure)
+                )
+                shutil.copy2(primary_path, dup_path)
+                paths.append(dup_path)
+            continue
+
+        for exposure in range(1, fiberflat_coadd_exposures + 1):
+            ramp_model = simulate_ramp_from_rate_map(
+                rate_map,
+                calibration_models,
+                readtime=readtime,
+                n_reads=n_reads,
+                max_cores=max_cores,
+                spectrograph=spectrograph,
+                poisson_noise=True,
+                convert_to_uint16=True,
+            )
+            rate_model = run_stage0_simulation(
+                ramp_model,
+                calibration_models,
+                output_dir=out_dir_abs,
+                prim_args=stage0_prim_args,
+                max_cores=max_cores,
+            )
+            paths.append(_finalize_and_save(rate_model, exposure))
 
     return paths
 
@@ -573,6 +790,8 @@ def run_stage0_simulation(
     calibration_models: dict[str, datamodels.CalibrationModel],
     output_dir: str = ".",
     prim_args: dict | None = None,
+    *,
+    max_cores: int | None = None,
 ) -> datamodels.DataModel:
     """
     Run the Stage 0 pipeline on a simulated ramp with the given calibrations.
@@ -597,12 +816,26 @@ def run_stage0_simulation(
     """
     if prim_args is None:
         prim_args = get_default_stage0_prim_args()
+    if max_cores is not None:
+        prim_args = e2e_support.apply_max_cores_to_stage0_prim_args(prim_args, max_cores)
+    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
+        prim_args, Stage0Pipeline.PRIMITIVES
+    )
 
+    output_dir = e2e_support.ensure_output_directory(output_dir)
     logger.info("Running Stage 0 pipeline (output_dir=%s).", output_dir)
+    ny, nx = int(ramp_model.data.shape[1]), int(ramp_model.data.shape[2])
+    nonlin_model = calibration_models.get("nonlin") or e2e_support.identity_nonlin_calibration_model(
+        ny, nx
+    )
+
     pipe = Stage0Pipeline()
     pipe.dq_init.dq = calibration_models["dq"]
     pipe.saturation_check.saturation = calibration_models["saturation"]
     pipe.bias_sub.bias = calibration_models["bias"]
+    pipe.nonlin_corr.nonlin = nonlin_model
+    pipe.jump_detec.gain = calibration_models["gain"]
+    pipe.jump_detec.rn = calibration_models["rn"]
     pipe.ramp_fit.gain = calibration_models["gain"]
     pipe.ramp_fit.rn = calibration_models["rn"]
     pipe.dark_sub.dark = calibration_models["dark"]
@@ -614,7 +847,7 @@ def run_stage0_simulation(
 
 def create_ramp_and_calibrations(
     rate_map: np.ndarray | None = None,
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
@@ -635,6 +868,11 @@ def create_ramp_and_calibrations(
     datetime_obs: str | None = None,
     connect_remote: bool = True,
     sync_caldb_first: bool = True,
+    template_mag_ab: float | None = None,
+    template_2mass_band: str | None = None,
+    template_filename: str | None = None,
+    overwrite_ramp: bool = False,
+    target_meta: dict | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -650,9 +888,11 @@ def create_ramp_and_calibrations(
     ----------
     rate_map : np.ndarray or None, optional
         2D rate map in e-/s/pixel. If None, a default is created via SimulateRateMap.
-    shape : tuple of int, optional
+    shape : tuple of int or None, optional
         (ny, nx) for dummy calibrations when ``calibration_models`` is None and
-        ``use_master_calibrations`` is False. Default is (4096, 4096).
+        ``use_master_calibrations`` is False and ``rate_map`` is unavailable.
+        Normally inferred from ``rate_map``; default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) to place spectra on when building the
         default rate map. Only 1, 2, 3 are supported by SimulateRateMap; others
@@ -693,18 +933,96 @@ def create_ramp_and_calibrations(
         Whether to connect to remote when fetching master calibrations.
     sync_caldb_first : bool, optional
         When using master calibrations, sync store first.
+    template_mag_ab, template_2mass_band : optional
+        When building the default rate map from the bundled BT-Settl template, normalize
+        to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, or ``'K'``).
     **cal_kw
         Passed to :func:`create_simulated_calibration_models` when creating dummy calibrations.
 
     Returns
     -------
-    tuple of (RampModel, dict)
-        (ramp_model, calibration_models). Pass these to :func:`run_stage0_simulation`
-        to run the Stage 0 pipeline.
+    tuple of (RampModel, dict, ndarray)
+        ``(ramp_model, calibration_models, rate_map)``. Pass the first two to
+        :func:`run_stage0_simulation` to run the Stage 0 pipeline. ``rate_map`` is the
+        2D e-/s/pixel array used for ramp simulation (same data as ``rate_map.fits``).
     """
+    if (template_mag_ab is not None) ^ (template_2mass_band is not None):
+        raise ValueError(
+            "template_mag_ab and template_2mass_band must both be set or both be None."
+        )
+    _band: str | None = None
+    if template_2mass_band is not None:
+        _band = str(template_2mass_band).strip().upper()
+        if _band not in ("J", "H", "K"):
+            raise ValueError("template_2mass_band must be one of 'J', 'H', 'K'")
+
+    output_dir = e2e_support.ensure_output_directory(output_dir)
+    e2e_support.ensure_koa_calibration_cache_env(output_dir)
+    ramp_path = get_expected_ramp_path(output_dir)
+
+    if rate_map is None:
+        if fibers is None:
+            fibers = list(e2e_support.DEFAULT_RATE_MAP_FIBERS)
+        logger.info(
+            "Building default rate map (fibers=%s, spectrograph=%s, output_dir=%s).",
+            fibers,
+            spectrograph,
+            output_dir,
+        )
+        srm = SimulateRateMap()
+        srm.output_directory = output_dir
+        srm.rate_map_outname = DEFAULT_RATE_MAP_FILENAME
+        import astropy.units as u
+
+        if spectrum_wavelengths is not None and spectrum_flux is not None:
+            wl = spectrum_wavelengths
+            flux = spectrum_flux
+        else:
+            template_path = get_spectrum_path(
+                template_filename or e2e_support.DEFAULT_TEMPLATE_FILENAME,
+                base_dir=e2e_support.templates_data_dir(),
+            )
+            wl, flux = load_btsettl_spectrum(
+                template_path,
+                mag_ab=template_mag_ab,
+                filter_band=_band,
+            )
+            wl_val = np.asarray(getattr(wl, "value", wl), dtype=np.float64)
+            sort_idx = np.argsort(wl_val)
+            wl = wl[sort_idx]
+            flux = flux[sort_idx]
+        for f in fibers:
+            if f in (1, 2, 3):
+                srm.set_fiber_spectrum(
+                    fiber_number=f,
+                    spectrum_wavelengths=wl,
+                    spectrum_flux=flux,
+                    continuous=True,
+                )
+        if radial_velocity_km_s != 0.0:
+            if not (-500.0 <= radial_velocity_km_s <= 500.0):
+                raise ValueError(
+                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
+                )
+            rv_quantity = radial_velocity_km_s * u.km / u.s
+            logger.info(
+                "Applying template Doppler shift (topocentric) radial_velocity_km_s=%.6f",
+                float(radial_velocity_km_s),
+            )
+            for f in fibers:
+                if f in (1, 2, 3):
+                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
+        rate_map = srm.create_native_rate_map(
+            spectrograph=spectrograph, method="prf_convolution"
+        )
+        logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
+
     if calibration_models is None:
         if use_master_calibrations:
-            logger.info("Fetching master calibrations from calibration store (spectrograph=%s).", spectrograph)
+            logger.info(
+                "Fetching master calibrations from calibration store (spectrograph=%s).",
+                spectrograph,
+            )
             calibration_models = get_master_calibrations(
                 meta=None,
                 instrument_name=instrument_name,
@@ -716,39 +1034,36 @@ def create_ramp_and_calibrations(
                 sync_first=sync_caldb_first,
             )
         else:
-            logger.debug("Creating simulated calibration models (shape=%s).", shape)
-            calibration_models = create_simulated_calibration_models(shape, **cal_kw)
-
-    if rate_map is None:
-        if fibers is None:
-            fibers = [1]
-        logger.info("Building default rate map (fibers=%s, spectrograph=%s, output_dir=%s).", fibers, spectrograph, output_dir)
-        srm = SimulateRateMap()
-        srm.output_directory = os.path.abspath(output_dir)
-        srm.rate_map_outname = DEFAULT_RATE_MAP_FILENAME
-        import astropy.units as u
-
-        if spectrum_wavelengths is not None and spectrum_flux is not None:
-            wl = spectrum_wavelengths
-            flux = spectrum_flux
-        else:
-            wl = np.arange(0.9, 2.5, 2.5e-6) * u.micron
-            flux = np.ones_like(wl.value) * 1e-12 * u.erg / u.s / u.cm**2 / u.micron
-        # SimulateRateMap only supports fibers 1, 2, 3
-        for f in fibers:
-            if f in (1, 2, 3):
-                srm.set_fiber_spectrum(fiber_number=f, spectrum_wavelengths=wl, spectrum_flux=flux, continuous=True)
-        if radial_velocity_km_s != 0.0:
-            if not (-500.0 <= radial_velocity_km_s <= 500.0):
+            rm = np.asarray(rate_map, dtype=np.float64)
+            if rm.ndim != 2:
                 raise ValueError(
-                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
+                    f"rate_map must be 2D when creating dummy calibrations; got shape {rm.shape}"
                 )
-            rv_quantity = radial_velocity_km_s * u.km / u.s
-            for f in fibers:
-                if f in (1, 2, 3):
-                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
-        rate_map = srm.create_native_rate_map(spectrograph=spectrograph, method="prf_convolution")
-        logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
+            eff_shape = (int(rm.shape[0]), int(rm.shape[1]))
+            keys = ("dq", "saturation", "gain", "detflat", "bias", "dark", "rn")
+            cal_models: dict[str, datamodels.CalibrationModel] = {}
+            for k in keys:
+                fp = e2e_support.dummy_cal_path(output_dir, k)
+                cached = e2e_support.open_cached_stage0_calibration(
+                    fp, eff_shape, key=k
+                )
+                if cached is not None:
+                    cal_models[k] = cached
+            missing = [k for k in keys if k not in cal_models]
+            if missing:
+                logger.debug(
+                    "Creating simulated calibration models (shape=%s); missing=%s",
+                    eff_shape,
+                    missing,
+                )
+                new_models = create_simulated_calibration_models(eff_shape, **cal_kw)
+                cal_models |= new_models
+                for k in missing:
+                    try:
+                        cal_models[k].save(filepath=e2e_support.dummy_cal_path(output_dir, k))
+                    except Exception as e:
+                        logger.warning("Could not save dummy calibration %s: %s", k, e)
+            calibration_models = cal_models
 
     logger.info("Simulating ramp (n_reads=%s, readtime=%s s).", n_reads, readtime)
     ramp_model = simulate_ramp_from_rate_map(
@@ -760,13 +1075,126 @@ def create_ramp_and_calibrations(
         spectrograph=spectrograph,
         poisson_noise=poisson_noise,
         convert_to_uint16=convert_to_uint16,
+        mjd_start=mjd_start,
+        target_meta=target_meta,
     )
-    return ramp_model, calibration_models
+    if overwrite_ramp or not os.path.isfile(ramp_path):
+        ramp_model.save(filepath=ramp_path)
+    return ramp_model, calibration_models, np.asarray(rate_map, dtype=np.float64)
+
+
+def create_ramp_from_spectrum(
+    output_dir: str,
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | None = None,
+    template_filename: str | None = None,
+    mag_ab: float | None = 10.0,
+    filter_band: str | None = "J",
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
+    radial_velocity_km_s: float = 0.0,
+    use_master_calibrations: bool = True,
+    connect_remote: bool = False,
+    sync_caldb_first: bool = False,
+    n_reads: int = 10,
+    overwrite_ramp: bool = True,
+    register_wavesol: bool = True,
+    **kwargs,
+) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
+    """
+    Build a native rate map from a 1D spectrum and return a simulated ``RampModel``.
+
+    Convenience wrapper around :func:`create_ramp_and_calibrations` for the common
+    notebook / user path: stamp fibers with a BT-Settl (or custom) spectrum via
+    :class:`~hispecdrp.simulations.simulate_rate_map.SimulateRateMap`, then simulate
+    an up-the-ramp readout using master calibrations from ``KOA_CALIBRATION_CACHE``
+    (when ``use_master_calibrations`` is True).
+
+    When ``register_wavesol`` is True (default), also builds an HDF-based
+    ``LFCWavesolModel`` and registers it in the local caldb as ``lfc_wavesol`` so
+    Stage 1 can use the default wavelength-solution selector (same as real data).
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory for the rate map and raw ramp products.
+    spectrograph : str, optional
+        ``'BSPEC'`` or ``'RSPEC'``. Default ``'BSPEC'``.
+    fibers : list of int or None, optional
+        Fiber numbers to illuminate (1–3). Default ``[1, 2, 3]``.
+    template_filename : str or None, optional
+        BT-Settl HDF5 filename under the package templates directory. Ignored when
+        ``spectrum_wavelengths`` and ``spectrum_flux`` are provided. Default is the
+        E2E default template when neither a custom spectrum nor this name is given.
+    mag_ab, filter_band : optional
+        Normalize the BT-Settl template to this AB magnitude in a 2MASS band
+        (``'J'``, ``'H'``, or ``'K'``). Both must be set or both ``None``.
+    spectrum_wavelengths, spectrum_flux : optional
+        Custom 1D spectrum (with units). When both are set, the template is not loaded.
+    radial_velocity_km_s : float, optional
+        Doppler shift applied before rate-map generation. Default 0.
+    use_master_calibrations : bool, optional
+        Fetch Stage-0 masters from the KOA local caldb. Default True.
+    connect_remote, sync_caldb_first : bool, optional
+        Remote KOA options for master-cal lookup. Defaults False (use local cache).
+    n_reads : int, optional
+        Number of UTR reads. Default 10.
+    overwrite_ramp : bool, optional
+        Overwrite an existing ramp FITS under ``output_dir``. Default True.
+    register_wavesol : bool, optional
+        Register a simulated ``lfc_wavesol`` into ``KOA_CALIBRATION_CACHE`` for
+        default Stage 1 selection. Default True.
+    **kwargs
+        Forwarded to :func:`create_ramp_and_calibrations`.
+
+    Returns
+    -------
+    tuple
+        ``(ramp_model, calibration_models, rate_map)``.
+    """
+    if fibers is None:
+        fibers = [1, 2, 3]
+    ramp_model, calibration_models, rate_map = create_ramp_and_calibrations(
+        rate_map=None,
+        output_dir=output_dir,
+        spectrograph=spectrograph,
+        fibers=fibers,
+        spectrum_wavelengths=spectrum_wavelengths,
+        spectrum_flux=spectrum_flux,
+        radial_velocity_km_s=radial_velocity_km_s,
+        template_filename=template_filename,
+        template_mag_ab=mag_ab,
+        template_2mass_band=filter_band,
+        use_master_calibrations=use_master_calibrations,
+        connect_remote=connect_remote,
+        sync_caldb_first=sync_caldb_first,
+        n_reads=n_reads,
+        overwrite_ramp=overwrite_ramp,
+        **kwargs,
+    )
+    if register_wavesol:
+        wavesol_meta: dict = {"spectrograph": spectrograph.upper()}
+        ramp_meta = getattr(ramp_model, "meta", None)
+        if ramp_meta is not None:
+            for key in ("instrument_name", "instrument_era", "mjd_start"):
+                val = getattr(ramp_meta, key, None)
+                if val is None and hasattr(ramp_meta, "get"):
+                    val = ramp_meta.get(key)
+                if val is not None:
+                    wavesol_meta[key] = val
+        wavesol_meta.setdefault("instrument_era", kwargs.get("instrument_era", "0.0.1"))
+        register_sim_lfc_wavesol(
+            spectrograph,
+            meta=wavesol_meta,
+            connect_remote=False,
+        )
+    return ramp_model, calibration_models, rate_map
 
 
 def simulate_up_the_ramp(
     rate_map: np.ndarray | None = None,
-    shape: tuple[int, int] = (4096, 4096),
+    shape: tuple[int, int] | None = None,
     *,
     fibers: list[int] | None = None,
     spectrum_wavelengths=None,
@@ -807,10 +1235,11 @@ def simulate_up_the_ramp(
     rate_map : np.ndarray or None, optional
         2D rate map in e-/s/pixel. If None, a default rate map is created
         via SimulateRateMap. Default is None.
-    shape : tuple of int, optional
+    shape : tuple of int or None, optional
         (ny, nx) for creating dummy calibration models when
         ``calibration_models`` is None and ``use_master_calibrations`` is False.
-        Default is (4096, 4096).
+        Normally inferred from ``rate_map``; default is
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
     fibers : list of int or None, optional
         Fiber numbers (1, 2, 3, and/or 4) for default rate map. Passed to
         :func:`create_ramp_and_calibrations`. If None, default is [1].
@@ -882,7 +1311,7 @@ def simulate_up_the_ramp(
         use_master_calibrations,
         output_dir,
     )
-    ramp_model, calibration_models = create_ramp_and_calibrations(
+    ramp_model, calibration_models, _rate_map = create_ramp_and_calibrations(
         rate_map=rate_map,
         shape=shape,
         fibers=fibers,
@@ -926,13 +1355,13 @@ def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepa
 
     Existing FITS (e.g. from disk or GDrive) may lack these; the fiber flat pipeline and
     trace primitives require them. Infers fiber from ...FIB1.../FIB2.../FIB3... and
-    FIBERFLAT-B vs -R from HB vs HR in the path.
+    Uses WHITELIGHT for the illuminated fiber (per target.yaml object_fiber enum).
     """
     name = os.path.basename(filepath).upper()
     # Infer illuminated fiber from filename (e.g. rate-FIBERFLAT-FIB1.fits or ...FIB1...)
     match = re.search(r"FIB(?:ERFLAT-)?FIB([123])", name) or re.search(r"FIB([123])\b", name)
     fiber = int(match.group(1)) if match else 1
-    obj_flat = "FIBERFLAT-B" if "HB" in name or "BSPEC" in name else "FIBERFLAT-R"
+    obj_flat = "WHITELIGHT"
     for f in (1, 2, 3):
         setattr(model.meta, f"object_fiber{f}", obj_flat if f == fiber else "BLOCKED")
 
@@ -957,27 +1386,65 @@ def prepare_fiberflat_models(fiberflat_filepaths: list[str]) -> list[datamodels.
     return ff_models
 
 
+_DEFAULT_FIBERFLAT_DISP_RANGE = {"BSPEC": (300, 4000), "RSPEC": (400, 4000)}
+# BSPEC order 110 sits near cross-disp pixel ~105; (135, …) clips it and yields 38/39 traces.
+_DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
+# Default peak-finding threshold (fraction of the brightest order) for simulated fiberflats.
+# Robust order detection (NaN interpolation + order-spacing-based peak separation in
+# ``find_trace_positions``) makes a single value reliable across the blaze dynamic range of
+# both BSPEC and RSPEC, so a per-fiber tuned map is no longer required.
+_DEFAULT_FIBERFLAT_PROMINENCE = 0.02
+
+
 def get_fiberflat_prim_args(
     ff_models: list[datamodels.DataModel],
     *,
-    yrange: tuple[int, int] = (500, 4000),
-    xrange: tuple[int, int] = (100, 4050),
+    disp_range: tuple[int, int] | None = None,
+    xdisp_range: tuple[int, int] | None = None,
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
+    prominence_factor: float | dict[str, float] | None = None,
 ) -> dict:
     """Build default primitive arguments for ProcessFiberflatsPipeline from opened fiberflat models."""
     do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
-    ff_by_fiber = datamodels.group_by_illuminated_fiber(ff_models)
-    do_fibers = sorted(ff_by_fiber.keys(), key=int)
+    # Multiple rate files per fiber (for coadd) share the same illumination pattern; prim_args
+    # only need the distinct fiber ids, not one model per fiber.
+    do_fibers: list[str] = []
+    seen: set[str] = set()
+    for model in ff_models:
+        for fiber in range(1, model.num_fibers + 1):
+            val = getattr(model.meta, f"object_fiber{fiber}", None)
+            if val is None or val == "BLOCKED":
+                continue
+            key = str(fiber)
+            if key not in seen:
+                seen.add(key)
+                do_fibers.append(key)
+    do_fibers = sorted(do_fibers, key=int)
+    spectrograph = str(getattr(ff_models[0].meta, "spectrograph", "RSPEC") or "RSPEC").upper()
+    if disp_range is None:
+        disp_range = _DEFAULT_FIBERFLAT_DISP_RANGE.get(spectrograph, (500, 4000))
+    if xdisp_range is None:
+        xdisp_range = _DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050))
+    if prominence_factor is None:
+        prominence_factor = _DEFAULT_FIBERFLAT_PROMINENCE
     return {
-        "trace_pos": {"deg_pos": deg_pos, "deg_width": deg_width, "yrange": yrange, "xrange": xrange},
+        "trace_pos": {
+            "deg_pos": deg_pos,
+            "deg_width": deg_width,
+            "disp_range": disp_range,
+            "xdisp_range": xdisp_range,
+            "prominence_factor": prominence_factor,
+        },
         "spec_extract": {
             "extraction_aperture": extraction_aperture,
             "do_orders": do_orders,
             "do_fibers": do_fibers,
         },
         "set_wavesol": {"run": False},
+        "register_tracepos_cal": {"run": False},
+        "register_traceprof_cal": {"run": False},
         "register_fiberflat_cal": {"run": False},
     }
 
@@ -986,11 +1453,13 @@ def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
     prim_args: dict | None = None,
     *,
-    yrange: tuple[int, int] = (500, 4000),
-    xrange: tuple[int, int] = (100, 4050),
+    output_dir: str | None = None,
+    disp_range: tuple[int, int] | None = None,
+    xdisp_range: tuple[int, int] | None = None,
     deg_pos: int = 4,
     deg_width: int = 2,
     extraction_aperture: int = 10,
+    prominence_factor: float | dict[str, float] | None = None,
 ) -> dict[str, datamodels.DataModel]:
     """
     Run the ProcessFiberflatsPipeline on a list of fiberflat rate files.
@@ -998,14 +1467,17 @@ def run_fiberflat_pipeline(
     Parameters
     ----------
     fiberflat_filepaths : list of str
-        Paths to fiberflat rate FITS files (one per fiber).
+        Paths to fiberflat rate FITS files. Multiple paths with the same fiber
+        illumination pattern are coadded before trace finding.
     prim_args : dict or None, optional
         Primitive arguments. If None, built from the other keyword arguments.
         Default is None.
-    yrange : tuple of int, optional
-        Fitting range in spectral direction (pixels). Default is (500, 4000).
-    xrange : tuple of int, optional
-        XD direction range. Default is (100, 4050).
+    output_dir : str or None, optional
+        If set, pipeline products are written under this directory. Default is None.
+    disp_range : tuple of int or None, optional
+        Fitting range in spectral direction (pixels). Default depends on spectrograph.
+    xdisp_range : tuple of int or None, optional
+        Cross-dispersion (order) range in pixels. Default depends on spectrograph.
     deg_pos : int, optional
         Polynomial degree for trace position. Default is 4.
     deg_width : int, optional
@@ -1018,82 +1490,25 @@ def run_fiberflat_pipeline(
     dict
         Pipeline results with keys such as ``trace_pos``, ``trace_prof``.
     """
+    if output_dir is not None:
+        e2e_support.ensure_koa_calibration_cache_env(output_dir)
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
     ff_models = prepare_fiberflat_models(fiberflat_filepaths)
     if prim_args is None:
         prim_args = get_fiberflat_prim_args(
             ff_models,
-            yrange=yrange,
-            xrange=xrange,
+            disp_range=disp_range,
+            xdisp_range=xdisp_range,
             deg_pos=deg_pos,
             deg_width=deg_width,
             extraction_aperture=extraction_aperture,
+            prominence_factor=prominence_factor,
         )
+    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
+        prim_args, ProcessFiberflatsPipeline.PRIMITIVES
+    )
     pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
-    return pipe.apply(ff_models)
-
-
-def run_stage1_simulation(
-    rate_model: datamodels.DataModel,
-    trace_pos_model: datamodels.DataModel,
-    trace_prof_model: datamodels.DataModel,
-    prim_args: dict | None = None,
-    *,
-    extraction_aperture: int = 10,
-    do_orders: list | None = None,
-    do_fibers: list[str] | None = None,
-) -> datamodels.DataModel:
-    """
-    Run the Stage 1 pipeline on a rate (or slope) model with trace calibrations.
-
-    Parameters
-    ----------
-    rate_model : DataModel
-        Stage 0 output (rate/slope product).
-    trace_pos_model : DataModel
-        Trace position model from fiberflat pipeline.
-    trace_prof_model : DataModel
-        Trace profile model from fiberflat pipeline.
-    prim_args : dict or None, optional
-        Primitive arguments. If None, built from the other keyword arguments.
-        Default is None.
-    extraction_aperture : int, optional
-        Extraction aperture in pixels. Default is 10.
-    do_orders : list or None, optional
-        Orders to extract. If None, use order vector from rate model. Default is None.
-    do_fibers : list of str or None, optional
-        Fibers to extract (e.g. ['1','2','3']). Default is None.
-
-    Returns
-    -------
-    DataModel
-        Stage 1 spectral extraction result.
-    """
-    if do_orders is None and hasattr(rate_model, "make_order_vec"):
-        do_orders = rate_model.make_order_vec()
-    if do_orders is None:
-        do_orders = []
-    if do_fibers is None:
-        do_fibers = ["1", "2", "3"]
-    
-    if prim_args is not None:
-        method = prim_args.get("spec_extract", {}).get("method", "box")
-    else:
-        method = "box"
-
-    logger.info("Running Stage 1 simulation (do_orders=%s, do_fibers=%s, method=%s).", do_orders, do_fibers, method)
-    if prim_args is None:
-        prim_args = {
-            "spec_extract": {
-                "method": method,
-                "extraction_aperture": extraction_aperture,
-                "do_orders": do_orders,
-                "do_fibers": do_fibers,
-                "tracepos": trace_pos_model,
-                "traceprof": trace_prof_model,
-            },
-            "set_wavesol": {"run": False},
-        }
-
-    pipe = Stage1Pipeline(prim_args=prim_args)
-    return pipe.apply(rate_model)
+    apply_kw: dict = {}
+    if output_dir is not None:
+        apply_kw["output_dir"] = e2e_support.ensure_output_directory(output_dir)
+    return pipe.apply(ff_models, **apply_kw)

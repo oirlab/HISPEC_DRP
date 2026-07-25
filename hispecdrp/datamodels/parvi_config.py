@@ -53,7 +53,7 @@ class PARVIConfig:
 
         for fiber in range(1, cls.num_fibers + 1):
             key = f'object_fiber{fiber}'
-            props[key]['enum'] = [
+            props[key]['enum'] += [
                 'SCIENCE',
                 'WHITELIGHT',
                 'LFC',
@@ -62,8 +62,10 @@ class PARVIConfig:
                 'GASCELL-QUAD', 'GASCELL-HF4',
                 'SKY',
                 'BLOCKED',
-                'NONE'
+                'NONE',
+                'MINICOMB'
             ]
+            props[key]['enum'] = list(set(props[key]['enum']))
 
         props['instrument_mode']['enum'] = ['JH']
         props['instrument_mode']['default'] = 'JH'
@@ -85,9 +87,9 @@ class PARVIConfig:
 
         # Instrument
         if model.meta.order_start is None:
-            model.meta.order_start = 125
+            model.meta.order_start = 128
         if model.meta.order_end is None:
-            model.meta.order_end = 85
+            model.meta.order_end = 84
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
         if model.meta.lfc_nu0 is None:

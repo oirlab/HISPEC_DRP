@@ -338,6 +338,19 @@ class DataModel:
         else:
             filename = self.generate_filename(suffix=suffix)
             return os.path.join(os.getcwd(), filename)
+
+    def get_output_path(
+        self,
+        filename: str | None = None,
+        output_dir: str | None = None,
+        suffix: str | None = None,
+    ) -> str:
+        """Return the FITS path that :meth:`save` would write for ``output_dir`` / ``suffix``."""
+        return self._generate_output_path(
+            filename=filename,
+            output_dir=output_dir,
+            suffix=suffix,
+        )
     
     def to_hdulist(
         self,

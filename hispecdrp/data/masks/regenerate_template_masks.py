@@ -6,7 +6,7 @@ For each ``*.h5`` under ``hispecdrp/data/templates/``, writes:
 
 - ``<stem>.delta.mas`` — two-column mask from
   :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`.
-- ``<stem>.kpf.mas`` — three-column segment mask: each delta line center becomes a
+- ``<stem>.tophat.mas`` — three-column segment mask: each delta line center becomes a
   finite rest segment with half-width
   ``half_width_nm = slope * λ_center_nm + intercept`` using
   :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`, same weights
@@ -71,9 +71,9 @@ def main() -> None:
         ):
             md.pop(k, None)
         md["generator"] = (
-            "hispecdrp.data.masks.regenerate_template_masks:delta_table_to_kpf_segments"
+            "hispecdrp.data.masks.regenerate_template_masks:delta_table_to_tophat_segments"
         )
-        md["kpf_segment_half_width_law_nm_vs_center_nm"] = {
+        md["tophat_segment_half_width_law_nm_vs_center_nm"] = {
             "slope": float(slope),
             "intercept_nm": float(intercept),
             "half_width_nm_floor": 1.0e-12,
@@ -84,12 +84,12 @@ def main() -> None:
         }
         md["source_delta_mask_path"] = str(out_delta.resolve())
 
-        ml = MaskLines.from_kpf_segment_edges_um(
+        ml = MaskLines.from_tophat_segment_edges_um(
             lo_nm / 1000.0, hi_nm / 1000.0, weights, metadata=md
         )
-        out_kpf = masks_dir / f"{stem}.kpf.mas"
-        print(f"kpf:   {tpl.name} -> {out_kpf.name}")
-        ml.save(output_path=str(out_kpf))
+        out_tophat = masks_dir / f"{stem}.tophat.mas"
+        print(f"tophat: {tpl.name} -> {out_tophat.name}")
+        ml.save(output_path=str(out_tophat))
 
 
 if __name__ == "__main__":

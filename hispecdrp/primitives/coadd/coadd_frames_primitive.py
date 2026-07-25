@@ -94,6 +94,12 @@ class CoaddFramesPrimitive(BasePrimitive):
                 err_calc=self.err_calc,
                 primitive=self,
             )
+            if isinstance(key, tuple):
+                illum_idx = next(
+                    (i for i, val in enumerate(key) if str(val).upper() != "BLOCKED"),
+                    0,
+                )
+                output.generate_filename(suffix=f"coadded-fib{illum_idx + 1}")
             outputs.append(output)
 
         return dict(output=outputs)
@@ -108,7 +114,12 @@ def coadd_frames(
     err_calc : str = 'wse',
     primitive : BasePrimitive | None = None,
 ):
-    
+    # A single input frame is already coadded; running the weighted coadd path
+    # would NaN-out DQ-flagged pixels and break downstream trace finding.
+    if len(input) == 1:
+        only = input[0]
+        return datamodels.open(only) if isinstance(only, str) else only
+
     # Open the models
     input_models = [datamodels.open(f) for f in input]
 

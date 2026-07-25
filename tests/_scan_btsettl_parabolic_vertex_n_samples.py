@@ -6,7 +6,7 @@ Run from repo root::
 
   python tests/_scan_btsettl_parabolic_vertex_n_samples.py
 
-Requires BT-Settl template + lte049 mask (same as test_fit_ccf_kpf_style_btsettl_bspec_all_chunks_parallel).
+Requires BT-Settl template + lte049 mask (same as test_fit_ccf_tophat_style_btsettl_bspec_all_chunks_parallel).
 """
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def bias_m_s(n_samples: int, rvccf_l2, orders, mas_lte049, window_um: float, tmp
         do_orders=orders,
         window_size_um=window_um,
         v_step_coarse=_TEST_TEMPLATE_CCF_V_STEP_M_S,
-        mask_auto_hybrid_scout=False,
+        mask_auto_center_scout=False,
         outlier_sigma=4.0,
         max_cores=6,
         save_preview=False,
