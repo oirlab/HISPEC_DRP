@@ -1,3 +1,2 @@
-from .nonlin_primitive import NonlinearCorrectionPrimitive
-
-__all__ = ['NonlinearCorrectionPrimitive']
+from .nonlin_primitive import *
+from .make_nonlin_primitive import *

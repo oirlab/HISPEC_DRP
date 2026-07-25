@@ -1,12 +1,12 @@
 from hispecdrp import datamodels
 import numpy as np
+import os
 from hispecdrp.utils import download_gdrive_file
-from pydantic import ValidationError
 
 def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('HISPEC/L0/HB.20240924.0000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
+    filepath = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'HISPEC'
@@ -14,7 +14,7 @@ def test_hispec_level0(tmp_path, datadir):
         assert model.meta.spectrograph == 'BSPEC'
         assert model.meta.model_type == 'L0Model'
         assert model.meta.instrument_mode == 'YJHK'
-        shape = (4096, 4096)
+        shape = (4096, 4096 + 64)
         assert model.rate.shape == shape
         assert model.rate_err.shape == shape
         assert model.rate_var_poisson.shape == shape
@@ -35,7 +35,7 @@ def test_hispec_level0(tmp_path, datadir):
     # Set invalid metadata
     try:
         model.meta.exposure_time = 'abc'
-    except ValidationError:
+    except ValueError:
         pass
     else:
         raise RuntimeError("Invalid metadata was set.")
@@ -55,9 +55,12 @@ def test_hispec_level0(tmp_path, datadir):
 
 
 def test_parvi_level0(tmp_path, datadir):
+
+    import os
+    os.environ['HISPECDRP_INSTRUMENT_NAME'] = 'PARVI'
     
     # Science file (just tellurics)
-    filepath = download_gdrive_file('PARVI/L0/PR.20230802.82176.93_rate-SOLAR.fits', output_dir=datadir)
+    filepath = download_gdrive_file('PR.20260131.80205.77_rate-SOLAR.fits', output_dir=datadir)
 
     def _test_model_attrs(model):
         assert model.meta.instrument_name == 'PARVI'
@@ -87,3 +90,5 @@ def test_parvi_level0(tmp_path, datadir):
     # Test datamodels.open
     model = datamodels.open(filepath)
     _test_model_attrs(model)
+
+    del os.environ['HISPECDRP_INSTRUMENT_NAME']

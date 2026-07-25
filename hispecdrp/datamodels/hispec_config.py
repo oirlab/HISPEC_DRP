@@ -1,84 +1,144 @@
-import scipy.constants
-from .meta_data import FitsField, MetaModel, InstrumentMeta, TargetMeta
+import importlib.resources
+import logging
+from .base_model import DataModel
+from .meta_data import read_meta_schema
 
-from typing import ClassVar, Literal, Any, Self
-from pydantic import model_validator, ValidatorFunctionWrapHandler
+import scipy.constants
+from typing import ClassVar
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['HISPECConfig']
 
-num_fibers = 3
-instrument_name = 'HISPEC'
-instrument_aliases = {'BSPEC': 'HB', 'RSPEC': 'HR'}
-echelle_orders : dict[str, dict[str, int]] = {
-    'BSPEC': {
-        'order_start' : 148,
-        'order_end' : 110
-    },
-    'RSPEC': {
-        'order_start' : 97,
-        'order_end' : 60
-    }
-}
-
-clock_rate = 150_000
-
-class HISPECInstrumentMeta(InstrumentMeta):
-    instrument_name: Literal['HISPEC'] = FitsField(
-        fits_keyword="INSTRUME",
-        title="Instrument name",
-        orm_field=True,
-        default='HISPEC',
-        merge_rule='coalesce',
-    )
-    spectrograph: Literal['BSPEC', 'RSPEC'] = FitsField(
-        fits_keyword="SPECTROG",
-        title="Spectrograph name",
-        orm_field=True,
-        default='BSPEC',
-        merge_rule='coalesce',
-    )
-
-_valid_fiber_objects = [
-    'SCIENCE',
-    'FIBERFLAT-R', 'FIBERFLAT-B',
-    'LFC-R', 'LFC-B',
-    'ETALON-R', 'ETALON-B',
-    'UNe',
-    'GASCELL',
-    'SKY',
-    'SPECKLE',
-    'BLOCKED',
-    'NONE'
-]
-
-_valid_modes = ['YJHK', 'YJ', 'HK']
-
-HISPECTargetMeta = TargetMeta.create(instrument_name=instrument_name, num_fibers=num_fibers, valid_fiber_objects=_valid_fiber_objects)
-HISPECInstrumentMeta = InstrumentMeta.create(instrument_name=instrument_name, valid_spectrographs=list(instrument_aliases.keys()), valid_modes=_valid_modes)
-
-class HISPECMetaModel(HISPECInstrumentMeta, HISPECTargetMeta, MetaModel):
-
-    @model_validator(mode='wrap')
-    @classmethod
-    def set_hispec_defaults(cls, data: Any, handler: ValidatorFunctionWrapHandler) -> Self:
-        instance = handler(data)
-        if instance.spectrograph in echelle_orders:
-            if instance.order_start is None:
-                object.__setattr__(instance, 'order_start', echelle_orders[instance.spectrograph]['order_start'])
-            if instance.order_end is None:
-                object.__setattr__(instance, 'order_end', echelle_orders[instance.spectrograph]['order_end'])
-        if instance.clock_rate is None:
-            object.__setattr__(instance, 'clock_rate', clock_rate)
-        
-        return instance
-
 class HISPECConfig:
 
-    instrument_name : ClassVar[str] = instrument_name
+    # hispec_metadata_schema.yaml
+
+    instrument_name : ClassVar[str] = 'HISPEC'
     instrument_aliases : ClassVar[dict[str, str]] = {'BSPEC': 'HB', 'RSPEC': 'HR'}
-    num_fibers : ClassVar[int] = num_fibers
-    clock_rate : ClassVar[int] = clock_rate
-    lfc_nu0 = scipy.constants.c / (1559.91370 * 1E-9) # Hz
-    lfc_delta_nu = 10.000000174E9 # Hz
+    num_fibers : ClassVar[int] = 3
+
+    # TODO: Update LFC params, eventually in calibration DB
+    lfc_params : ClassVar[dict[str, float]] = {
+        'LFC-B' : {
+            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
+            'delta_nu' : 10.000000174E9, # Hz
+        },
+        'LFC-R' : {
+            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
+            'delta_nu' : 10.000000174E9, # Hz
+        },
+    }
+
+    echelle_orders : dict[str, dict[str, int]] = {
+        'BSPEC': {
+            'order_start' : 110,
+            'order_end' : 148
+        },
+        'RSPEC': {
+            'order_start' : 60,
+            'order_end' : 97
+        }
+    }
+
+    @classmethod
+    def get_order_list(cls, spectrograph: str) -> list[int]:
+        """
+        Return the list of echelle order numbers for a spectrograph (single source of truth).
+        Used by benchmarks and trace finding so order count and indices match model meta.
+        """
+        sp = (spectrograph or "").strip().upper()
+        if sp not in cls.echelle_orders:
+            return []
+        o = cls.echelle_orders[sp]
+        start, end = o['order_start'], o['order_end']
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+
+    @classmethod
+    def sync_echelle_orders_for_spectrograph(cls, model: 'DataModel', spectrograph: str) -> None:
+        """
+        Set ``meta.spectrograph``, ``meta.order_start``, and ``meta.order_end`` from
+        :attr:`echelle_orders` for the given spectrograph.
+
+        Use this when constructing or reloading simulated data so echelle order labels
+        match :meth:`get_order_list` and primitives that rely on ``make_order_vec()``
+        (e.g. spectral extraction, stellar RV), including after FITS headers carried
+        stale ORDERST/ORDEREND from an older run.
+        """
+        sp = (spectrograph or "").strip().upper()
+        if sp not in cls.echelle_orders:
+            logger.warning(
+                "Unknown spectrograph %r; leaving echelle order metadata unchanged on model.",
+                spectrograph,
+            )
+            return
+        o = cls.echelle_orders[sp]
+        model.meta.spectrograph = sp
+        model.meta.order_start = o["order_start"]
+        model.meta.order_end = o["order_end"]
+
+    metadata_schema_filename : ClassVar[str] = 'hispec_metadata_schema.yaml'
+
+    @classmethod
+    def get_metadata_schema(cls) -> dict:
+        
+        # Determine filepath to YAML schema file
+        metadata_dir = importlib.resources.files("hispecdrp.datamodels.metadata_schemas")
+        filepath = str(metadata_dir / cls.metadata_schema_filename)
+
+        # Load schema from YAML file with ref resolution
+        meta_schema = read_meta_schema(filepath)
+        
+        return meta_schema
+
+    @classmethod
+    def set_meta_defaults(cls, model : 'DataModel'):
+        """
+        Apply defaults dynamically.
+        These will continue to evolve as the DRP is developed.
+
+        Returns
+        -------
+        meta_schema : dict
+            The metadata schema dictionary.
+        """
+
+        # Instrument
+        if model.meta.instrument_mode is None:
+            model.meta.instrument_mode = 'YJHK'
+        if model.meta.spectrograph is None:
+            model.meta.spectrograph = 'BSPEC'
+        # Only fill echelle order bounds when unset. Unconditional overwrite breaks
+        # models whose 2-D spectra cover a subset of orders: meta must stay aligned
+        # with ``wave_fib*`` axis 0 (e.g. L2Model.from_datamodels + StellarRVPrimitive).
+        if model.meta.spectrograph in cls.echelle_orders:
+            if model.meta.order_start is None:
+                model.meta.order_start = cls.echelle_orders[model.meta.spectrograph]['order_start']
+            if model.meta.order_end is None:
+                model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
+        if model.meta.clock_rate is None:
+            model.meta.clock_rate = 150_000
+        # TODO: Defaults need to know which LFC, ignore until we have a more robust way to determine this from the metadata
+        # if model.meta.lfc_nu0 is None:
+        #     model.meta.lfc_nu0 = cls.lfc_params[model.meta.spectrograph]['nu0']
+        # if model.meta.lfc_delta_nu is None:
+        #     model.meta.lfc_delta_nu = cls.lfc_params[model.meta.spectrograph]['delta_nu']
+        
+        return model
     
-    meta_model : ClassVar[type[MetaModel]] = HISPECMetaModel
+    @classmethod
+    def get_instrument_alias(
+        cls,
+        model : DataModel | None = None,
+        spectrograph : str | None = None
+    ) -> str:
+        
+        if spectrograph is not None:
+            instrument_alias = cls.instrument_aliases.get(spectrograph.upper())
+            return instrument_alias
+        
+        if model is not None:
+            spectrograph = model.meta.spectrograph
+            instrument_alias = cls.instrument_aliases.get(spectrograph.upper())
+            return instrument_alias

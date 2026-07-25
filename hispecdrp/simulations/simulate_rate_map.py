@@ -1,4 +1,5 @@
 from hispecdrp.utils import download_gdrive_file
+from hispecdrp.datamodels import hispec_config
 
 try:
     from pyechelle.simulator import Simulator
@@ -6,14 +7,29 @@ try:
     from pyechelle.sources import CSVSource
     from pyechelle.spectrograph import ZEMAX
 except ImportError:
-    print("pyechelle package not found. pyechelle simulations will not run.")
+    Simulator = None  # type: ignore[misc, assignment]
+    Telescope = None
+    CSVSource = None
+    ZEMAX = None
 
+import logging
 import os
-import warnings
 import importlib.resources
 import h5py
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+# Default output filenames for saved products
+DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
+DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
+
+logger = logging.getLogger(__name__)
+
+# Default output filenames for saved products
+DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
+DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
 from numba import njit
 
 from scipy.interpolate import interp1d
@@ -27,7 +43,18 @@ from astropy.units import Quantity
 from astropy.io import fits
 import astropy.utils.data
 
-__all__ = ['SimulateRateMap', 'read_pyechelle_hdf']
+__all__ = [
+    "DEFAULT_RATE_MAP_FILENAME",
+    "DEFAULT_PYECHELLE_FILENAME",
+    "SimulateRateMap",
+    "read_pyechelle_hdf",
+]
+__all__ = [
+    "DEFAULT_RATE_MAP_FILENAME",
+    "DEFAULT_PYECHELLE_FILENAME",
+    "SimulateRateMap",
+    "read_pyechelle_hdf",
+]
 
 
 default_bspec_hdf = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
@@ -75,18 +102,26 @@ class SimulateRateMap:
     """
 
     def __init__(self) -> None:
-        self.hdf_file_directory: str = str(astropy.utils.data._get_download_cache_loc()) + '/'
+        self.hdf_file_directory = os.getenv('HISPECDRP_TEST_DATA_DIR')
+        if self.hdf_file_directory is None:
+            self.hdf_file_directory = os.path.join(
+                str(astropy.utils.data._get_download_cache_loc()),
+                'HISPECDRP_TEST_DATA'
+            )
+        self.hdf_file_directory += os.sep
+
         self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
         self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
         self.output_directory: str = os.getcwd()
-        self.pyechelle_outname: str = '_pyechelle_out.fits'
-        self.rate_map_outname: str = 'rate_map_out.fits'
+        self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
+        self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
+        self.rate_map_outname: str = DEFAULT_RATE_MAP_FILENAME
 
         self.telescope_primary_diameter: Quantity = 9.96 * u.m
         self.fibers: dict = {}
 
-        self.bspec_orders: list[int] = list(range(110, 150))
-        self.rspec_orders: list[int] = list(range(59, 99))
+        self.bspec_orders: list[int] = hispec_config.HISPECConfig.get_order_list("BSPEC")
+        self.rspec_orders: list[int] = hispec_config.HISPECConfig.get_order_list("RSPEC")
 
         self.rate_map: np.ndarray[np.float64] = None
 
@@ -108,11 +143,11 @@ class SimulateRateMap:
         if continuous and not _check_wavelength_sampling(
             spectrum_wavelengths, min_resolution=3e5
         ):
-            print(
-                "Input spectrum does not have sufficient sampling for HISPEC "
-                "simulation.\nThe input spectrum will be interpolated to a higher "
-                "sampling.\nIf the input is intended to be a list of unresolved lines, "
-                " or you do not want to interpolate to higher sampling, set continuous=False."
+            logger.warning(
+                "Input spectrum does not have sufficient sampling for HISPEC simulation. "
+                "The input spectrum will be interpolated to a higher sampling. "
+                "If the input is intended to be a list of unresolved lines, or you do not want "
+                "to interpolate to higher sampling, set continuous=False."
             )
             spectrum_wavelengths, spectrum_flux = _upsample_spectrum(
                 spectrum_wavelengths,
@@ -210,6 +245,78 @@ class SimulateRateMap:
             self.fibers[fiber_number]["wavelength"],
             self.fibers[fiber_number]["flux"],
         )
+    
+
+    def get_wavelength_solution(self,
+                                spectrograph: str = "BSPEC",
+                                ) -> dict[int, dict[str, np.ndarray]]:
+        """Get wavelength solution from HDF model file as a nested dictionary of the form:
+        {order_number: {'wavelengths': np.ndarray, 'x': np.ndarray, 'y': np.ndarray}}
+        where the wavelength, x, and y arrays are all 1D and correspond to each other.
+        """
+        spectrograph = spectrograph.upper()
+
+        if spectrograph not in ("BSPEC", "RSPEC"):
+            raise ValueError("Spectrograph must be BSPEC or RSPEC!")
+        
+        model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
+        model_path = self.hdf_file_directory + model
+
+        if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
+            logger.info("Model file not found locally. Attempting to download to %s", model_path)
+            download_gdrive_file(model, use_cached=True)
+
+        if os.path.isfile(model_path) is False:
+            raise FileNotFoundError(f".hdf model file not found at {model_path}!")
+
+        model_data = read_pyechelle_hdf(model_path)
+
+        order_list = (
+            self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
+        )
+        order_list_str = [str(o) for o in order_list]
+
+        self.wavelength_solution = {}
+        for fiber in [*range(1,4)]:
+            self.wavelength_solution[fiber] = {}
+            fiber_key = f"fiber_{fiber}"
+            for od in order_list_str:
+                self.wavelength_solution[fiber][int(od)] = {}
+                ow = model_data[fiber_key][od]['xy_wavelengths']
+                ox = model_data[fiber_key][od]["x"]
+
+                # Interpolate wavelength as function of detector x pixel.
+                # HDF traces may not be strictly sorted in x and may contain duplicate x values,
+                # which breaks PchipInterpolator's requirement that x be strictly increasing.
+                ox = np.asarray(ox, dtype=np.float64)
+                ow = np.asarray(ow, dtype=np.float64)
+                good = np.isfinite(ox) & np.isfinite(ow)
+                ox = ox[good]
+                ow = ow[good]
+                if ox.size < 2:
+                    raise ValueError(f"Not enough valid samples for fiber {fiber} order {od} wavelength solution.")
+
+                # Sort by x
+                sidx = np.argsort(ox)
+                oxs = ox[sidx]
+                ows = ow[sidx]
+
+                # Merge duplicates in x by averaging wavelength at the same pixel
+                ux, inv = np.unique(oxs, return_inverse=True)
+                if ux.size < 2:
+                    raise ValueError(f"Not enough unique x samples for fiber {fiber} order {od} wavelength solution.")
+                wsum = np.bincount(inv, weights=ows)
+                wcnt = np.bincount(inv)
+                uow = wsum / np.maximum(wcnt, 1)
+
+                fx = PchipInterpolator(ux, uow, extrapolate=True)
+
+                self.wavelength_solution[fiber][int(od)] = {
+                    "pixel": np.arange(4096),
+                    "wavelength": fx(np.arange(4096))[::-1] # reversed to account for mirrored hdf file
+                }
+
+        return self.wavelength_solution
 
 
     def create_pyechelle_rate_map(
@@ -236,6 +343,13 @@ class SimulateRateMap:
         Temporary CSV files are created during this process to feed pyechelle custom spectra.
         A sinc^2 blaze efficiency is applied internally by pyechelle, it cannot be turned off."""
 
+        if Simulator is None:
+            raise ImportError(
+                "pyechelle is not installed. Install the HISPEC fork "
+                "(see docs/source/installation.rst) or use "
+                "SimulateRateMap.create_native_rate_map instead."
+            )
+
         spectrograph = spectrograph.upper()
 
         if spectrograph not in ("BSPEC", "RSPEC"):
@@ -245,7 +359,7 @@ class SimulateRateMap:
         model_path = self.hdf_file_directory + model
 
         if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally. Attemping to download to ', model_path)
+            logger.info("Model file not found locally. Attempting to download to %s", model_path)
             download_gdrive_file(model, use_cached=True)
 
         if os.path.isfile(model_path) is False:
@@ -254,6 +368,7 @@ class SimulateRateMap:
         if os.path.isdir(self.output_directory) is False:
             os.mkdir(self.output_directory)
 
+        logger.info("Running pyechelle simulation (spectrograph=%s, exposure_time=%s).", spectrograph, exposure_time)
         sim = Simulator(ZEMAX(path=model_path))
         sim.set_ccd(1)
         sim.set_bias(0)
@@ -281,7 +396,7 @@ class SimulateRateMap:
         sim.set_sources(fiber_sources)
 
         output_path = os.path.join(
-            self.output_directory, f"{spectrograph}{self.pyechelle_outname}"
+            self.output_directory, self.pyechelle_outname
         )
 
         sim.set_output(output_path, overwrite=True)
@@ -291,12 +406,17 @@ class SimulateRateMap:
             fits.getdata(output_path) / exposure_time.to(u.s).value
         )
 
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
+
         if save:
             save_path = os.path.join(
                 self.output_directory,
-                f"{spectrograph}_pyechelle_{self.rate_map_outname}",
+                self.rate_map_outname,
             )
-            print('Saving rate map to ', save_path)
+            logger.info("Saving pyechelle rate map to %s", save_path)
             fits.writeto(save_path, data=self.rate_map, overwrite=True)
         else:
             os.remove(csv_path)
@@ -346,7 +466,7 @@ class SimulateRateMap:
         model_path = self.hdf_file_directory + model
 
         if os.path.isfile(model_path) is False and model in [default_bspec_hdf, default_rspec_hdf]:
-            print('Model file not found locally. Attemping to download to ', model_path)
+            logger.info("Model file not found locally. Attempting to download to %s", model_path)
             download_gdrive_file(model, use_cached=True)
 
         if os.path.isfile(model_path) is False:
@@ -359,6 +479,7 @@ class SimulateRateMap:
         )
         order_list_str = [str(o) for o in order_list]
 
+        logger.info("Creating native rate map (spectrograph=%s, method=%s).", spectrograph, method)
         detector_shape = (model_data["nx"], model_data["ny"])
         pixelsize = model_data["pixelsize"]
         blaze_angle = model_data["blaze_angle"] * u.deg
@@ -410,14 +531,19 @@ class SimulateRateMap:
 
         self.rate_map = np.sum(rate_map_array, axis=0)
 
+        # correct orientation from hdf file
+        self.flip_rate_map_horizontal()
+        self.rotate_rate_map_vertical()
+        self.add_channel_rate_map(where='right')
+
         if save and self.rate_map is not None:
             if os.path.isdir(self.output_directory) is False:
                 os.mkdir(self.output_directory)
 
             save_path = os.path.join(
-                self.output_directory, f"{spectrograph}_{self.rate_map_outname}"
+                self.output_directory, self.rate_map_outname
             )
-            print('Saving rate map to ', save_path)
+            logger.info("Saving rate map to %s", save_path)
             fits.writeto(save_path, data=self.rate_map, overwrite=True)
 
         return self.rate_map
@@ -449,13 +575,42 @@ class SimulateRateMap:
 
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
+
     
+    def flip_rate_map_horizontal(self):
+        """Flip the rate map horizontally to correct for backwards hdf file"""
+        if self.rate_map is not None:
+            self.rate_map = np.flip(self.rate_map, axis=1)
+        return self.rate_map
+
+    def rotate_rate_map_vertical(self):
+        """Rotate the rate map so orders are vertical"""
+        if self.rate_map is not None:
+            self.rate_map = np.rot90(self.rate_map, 3)
+        return self.rate_map
+    
+    def add_channel_rate_map(self, where='right'):
+        """Add extra channel to rate map at left or right."""
+        if self.rate_map is None:
+            raise ValueError("Rate map must be generated before adding channel!")
+        
+        new_channel = np.zeros((4096, 64))
+
+        if where == 'left':
+            self.rate_map = np.hstack((new_channel, self.rate_map))
+        elif where == 'right':
+            self.rate_map = np.hstack((self.rate_map, new_channel))
+        else:
+            raise ValueError("where must be 'left' or 'right'!")
+        
+        return self.rate_map
+
 
 def bilinear_weights_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -475,7 +630,7 @@ def bilinear_weights_rate_map(
         Nested structure containing wavelength trace and PSF stamps for orders. 
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector (ny, nx) pixel size, default = (4096, 4096).
+        Detector (ny, nx) pixel size, default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns (affects oversampling), default = 10.
 
@@ -488,7 +643,7 @@ def bilinear_weights_rate_map(
     det = np.zeros(detector_shape, dtype=np.float64)
 
     for od in orders:
-        print('Simulating order', od)
+        logger.debug("Simulating order %s", od)
 
         ow = orders[od]['xy_wavelengths']
         ox = orders[od]['x']
@@ -615,7 +770,7 @@ def psf_prf_convolution_rate_map(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
-    detector_shape: tuple[int, int] = (4096, 4096),
+    detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
@@ -636,7 +791,7 @@ def psf_prf_convolution_rate_map(
         Nested dictionary containing trace coordinates and PSF stamps.
         Top level keys are order numbers (str).
     detector_shape : tuple of int, optional
-        Detector pixels (ny, nx). Default = (4096, 4096).
+        Detector pixels (ny, nx). Default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns, used to determine oversampling.
     apply_blaze : bool, optional
@@ -654,7 +809,7 @@ def psf_prf_convolution_rate_map(
     det = np.zeros(detector_shape, dtype=np.float64)
 
     for od in orders:
-        print('Simulating order', od)
+        logger.debug("Simulating order %s", od)
 
         ow = orders[od]['xy_wavelengths']
         ox = orders[od]["x"]

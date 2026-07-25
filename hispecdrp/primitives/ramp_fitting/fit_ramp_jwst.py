@@ -9,8 +9,11 @@ from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 
 from ...datamodels.dqflags import DQ_FLAGS
-from .utils import get_mid_delta_times
+from .utils import get_mid_delta_times, SECONDS_PER_DAY
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
+
+import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp_Brandt
+import hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt as fitramp_cython
 
 from tqdm import tqdm
 
@@ -22,6 +25,81 @@ JUMP_DET_FLAG = DQ_FLAGS["JUMP_DET"]
 SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
+
+
+def _fit_ramps_cython_row(indata: tuple) -> tuple:
+    """
+    Passes data for each row of a ramp to Tim Brandt's likelihood-based ramp fitting algorithm in Cython.
+
+    Parameters
+    ----------
+    indata : Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]
+        Tuple containing the following elements:
+            ramp row index (int)
+            read times (np.ndarray)
+            ramp data (np.ndarray)
+            readnoise (np.ndarray)
+            gain (np.ndarray)
+            DQ cube (np.ndarray)
+            DQ image (np.ndarray)
+            dark current (np.ndarray)
+            algorithm (str)
+
+    Returns
+    -------
+    i : int
+        Index of input row from the ramps, same as input.
+    slope : np.ndarray
+        Slope image (1, nx).
+    dq_out : np.ndarray
+        Output data quality image with flags from algorithm (1, nx).
+    var_poisson : np.ndarray
+        Output variance from poisson noise (1, nx).
+    var_rnoise : np.ndarray
+        Output variance from read noise (1, nx).
+    err : np.ndarray
+        Output error in slope image (1, nx).
+    """
+
+    i, readtimes, data_3d, readnoise_2d, gain_2d, groupdq, pixeldq_2d, dark_current_2d, algorithm = indata
+
+    # We are implicitly fitting by row, so columns is only other axis and nrows=1
+    nints, n_reads, ny, nx = data_3d.shape
+
+    _ramps = data_3d[0, :, 0,:]
+    _dq_raw = groupdq[0, :, 0,:]
+
+    y0 = 0
+    diff_times = np.diff(readtimes)[:, None]
+    diffs = np.diff(_ramps, axis=0).astype(np.float64) / diff_times
+    n0, n1 = diffs.shape
+
+    n_reads,n_ramps = _dq_raw.shape
+    mask = ((_dq_raw & DO_NOT_USE_FLAG_uint8) | (_dq_raw & SATURATED_FLAG_uint8)).astype(np.bool)
+    mask2 = (_dq_raw & JUMP_DET_FLAG_uint8).astype(np.bool)
+    diffs2use = ~(mask[1:n_reads] | mask[0:n_reads - 1] | mask2[1:n_reads])
+    diffs2use = diffs2use.astype(np.uint8)
+
+    # todo: try to put covar in shared memory?
+    covar = fitramp_Brandt.Covar(readtimes.astype(np.float64))
+
+    cguess = np.sum(diffs*diffs2use, axis=0)
+    cguess /= np.sum(diffs2use, axis=0)
+    cguess *= cguess > 0
+
+    cython_out = fitramp_cython.fit_ramps_row(
+        diffs, diffs2use,
+        covar.alpha_phnoise, covar.beta_phnoise,
+        covar.alpha_readnoise, covar.beta_readnoise,
+        readnoise_2d[0,:].astype(np.float64),gain_2d[0,:].astype(np.float64), cguess, n1, n0)
+    logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np = cython_out
+
+    var_poisson = np.full((1, nx),np.nan)
+    var_rnoise = np.full((1, nx),np.nan)
+    dq = np.zeros((1, nx), dtype=np.uint32)
+
+    return (i, countrate_np, dq, var_poisson, var_rnoise, uncert_np)
+
 
 def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     """
@@ -76,7 +154,7 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     ramp_data.flags_saturated = DQ_FLAGS['SATURATED']
     ramp_data.flags_no_gain_val = DQ_FLAGS['UNRELIABLE_FLAT'] # Check if this is best/optimal flag
     ramp_data.flags_unreliable_slope = DQ_FLAGS['UNRELIABLE_SLOPE']
-    ramp_data.flags_chargeloss = DQ_FLAGS['OUTLIER'] # Check if this is best/optimal flag - only required by OLS_C
+    ramp_data.flags_chargeloss = DQ_FLAGS['OUTLIER'] # Check if this is best/optimal flag - only required by FIXSEN_C
 
     # Explicitly set data arrays
     ramp_data.data = data_3d
@@ -94,7 +172,7 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     ramp_data.num_rows = ny
     ramp_data.nframes = 1 # this corresponds to nints instead of nframes as above
 
-    # Required by OLS_C for frame time
+    # Required by FIXSEN_C for frame time
     ramp_data.frame_time = 0.0
     ramp_data.group_time = group_time
     ramp_data.groupgap = 0
@@ -117,8 +195,8 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
         image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
             ramp_data, readnoise_2d, gain_2d
         )
-    elif algorithm == 'OLS_C':
-        # Call to C extension for OLS slope fitting
+    elif algorithm == 'FIXSEN_C':
+        # Call to C extension for FIXSEN slope fitting
         image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(
             ramp_data, gain_2d, readnoise_2d, weighting, save_opt)
 
@@ -175,7 +253,10 @@ def _fit_ramps_worker(args : tuple) -> tuple:
             dark_np[[row], :],
             algorithm
         )
-        results.append(_fit_ramps_jwst_row(args_row))
+        if algorithm == 'CYTHON_LIKELY':
+            results.append(_fit_ramps_cython_row(args_row))
+        else:
+            results.append(_fit_ramps_jwst_row(args_row))
 
     for row_element in results:
         row, outdata, dq, var_poisson, var_rnoise, err = row_element
@@ -187,7 +268,7 @@ def _fit_ramps_worker(args : tuple) -> tuple:
         var_rnoise_image_np[row, :] = var_rnoise
 
     mid_times_np[block_start:block_end, :] = start_times_np[block_start:block_end, :] +\
-                                             get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :])
+                                             get_mid_delta_times(times, dq_raw_np[:, block_start:block_end, :]) / SECONDS_PER_DAY
 
     _dq_raw = dq_raw_np[:, block_start:block_end, :] - (dq_raw_np[:, block_start:block_end, :] & DO_NOT_USE_FLAG_uint8)
     dq_image_np[block_start:block_end, :] |= np.bitwise_or.reduce(_dq_raw)
@@ -281,7 +362,7 @@ def fit_ramps_jwst(
     max_cores : int, optional
         Number of cores for parallelization. Default is 1 (no parallelization).
     algorithm : str, optional
-        Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_OLS'. Default is 'JWST_LIKELY'.
+        Ramp fitting algorithm to use.  Options are 'JWST_LIKELY' or 'JWST_FOXSEN'. Default is 'JWST_LIKELY'.
     
     Returns
     -------
@@ -293,8 +374,10 @@ def fit_ramps_jwst(
 
     if algorithm.lower() in ('jwst_likely', 'jwst_like', 'jwst_likelihood'):
         algorithm = 'LIKELY'
-    elif algorithm.lower() in ('jwst_ols', 'jwst_ols_c'):
-        algorithm = 'OLS_C'
+    elif algorithm.lower() in ('jwst_fixsen', 'jwst_fixsen_c'):
+        algorithm = 'FIXSEN_C'
+    elif algorithm.lower() in ('cython_likely', 'cython_like', 'cython_likelihood'):
+        algorithm = 'CYTHON_LIKELY'
     else:
         raise ValueError(f'Unrecognized JWST ramp fitting algorithm {algorithm}')
 
@@ -424,7 +507,6 @@ def fit_ramps_jwst(
             for block_start in range(0, ny, block_size):
                 block_end = min(block_start + block_size, ny)
 
-                # block_start, block_end, times, algorithm, types_tuple = args
                 args = (block_start, block_end, times, jump_rejection_threshold, types_tuple)
                 args_list.append(args)
 
@@ -440,7 +522,6 @@ def fit_ramps_jwst(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
-            # block_start, block_end, times, algorithm, types_tuple = args
             args = (block_start, block_end, times, algorithm, types_tuple)
             args_list.append(args)
 
@@ -491,7 +572,10 @@ def fit_ramps_jwst(
                 algorithm
             )
 
-            results.append(_fit_ramps_jwst_row(args))
+            if algorithm == 'CYTHON_LIKELY':
+                results.append(_fit_ramps_cython_row(args))
+            else:
+                results.append(_fit_ramps_jwst_row(args))
 
         for row_element in results:
             row, outdata, dq, var_poisson, var_rnoise, err = row_element
@@ -503,7 +587,7 @@ def fit_ramps_jwst(
             var_rnoise_image_np[row, :] = var_rnoise
 
         with numba_thread_scope(max_cores):
-            mid_times_np = start_times + get_mid_delta_times(times, dq_raw)
+            mid_times_np = start_times + get_mid_delta_times(times, dq_raw) / SECONDS_PER_DAY
 
     output = {}
     output['rate'] = slope_image_np

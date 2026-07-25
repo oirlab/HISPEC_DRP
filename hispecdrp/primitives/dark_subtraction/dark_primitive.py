@@ -4,15 +4,44 @@ from ... import datamodels
 import numpy as np
 from numba import njit, prange
 from ...utils.parallelization_utils import numba_thread_scope
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['DarkSubtractionPrimitive', 'dark_subtraction_rate']
 
 
 class DarkSubtractionPrimitive(BasePrimitive):
-    
+    """
+    Subtract the dark current from the input data.
+
+    This primitive applies the appropriate dark calibration to the
+    input data product. The dark frame is subtracted from the science data,
+    the associated uncertainties are propagated by adding errors in
+    quadrature, and data quality (DQ) flags are combined using a bitwise OR.
+
+    Parameters
+    ----------
+    input : str or L0Model
+        Input file path or data model to process. Currently, this is expected
+        to be a level 0 (rate map) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'darksub'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for Numba parallel processing. Default is 1.
+
+    Calibrations
+    ------------
+    dark : DarkModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.DarkSelector`
+
+    Returns
+    -------
+    output
+        The dark-subtracted data model with updated error and data quality arrays.
+    """
     ARGUMENTS = {
         'suffix' : 'darksub',
-        'output_model' : 'input',
         'max_cores' : 1,
     }
 
@@ -36,7 +65,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying dark correction with {dark_model} to {input_model}")
+        logger.info(f"Applying dark correction with {dark_model} to {input_model}")
 
         # Perform dark subtraction
         dark_subtraction_rate(

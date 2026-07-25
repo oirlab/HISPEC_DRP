@@ -1,21 +1,18 @@
-Stage 2
-=======
+================
+Stage 2 Pipeline
+================
 
 Overview
 --------
+**Input:** Level 1 (uncalibrated spectra) data.
 
-The stage 2 pipeline converts level 1 uncalibrated 1D spectra into level 2, calibrated spectra.
+**Output:** Level 2 (calibrated spectra) data.
 
+The stage 1 pipeline converts level 1 (uncalibrated spectra) data into level 2 (calibrated spectra) data.
 
-**Class**: :py:class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`
+*Under development*
 
+Documentation
+-------------
 
-Primitives
-----------
-
-TBD.
-
-Arguments
----------
-
-None.
+*Under development*

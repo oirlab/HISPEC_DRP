@@ -5,7 +5,7 @@ from .meta_data import *
 from .dqflags import *
 
 # Base model class
-from .base_model import *
+from .base_model import DataModel, CalibrationModel
 
 # Utils
 from .utils import *
@@ -27,7 +27,7 @@ from .dark import *
 from .bias import *
 from .read_noise import *
 from .detector_flat import *
-from .detector_gain import *
+from .gain import *
 from .nonlin import *
 from .lfcfitparams import *
 from .lfcwavesol import *
@@ -36,15 +36,22 @@ from .ref_etalon import *
 from .tracepos import *
 from .traceprof import *
 from .fiberflat import *
+from .sim_wavesol import *
 
 # Instrument config
 from .parvi_config import *
 from .hispec_config import *
 INSTRUMENT_CONFIGS = {
-    'HISPEC' : HISPECConfig,
-    'PARVI'  : PARVIConfig
+    'hispec' : HISPECConfig,
+    'parvi'  : PARVIConfig
 }
 
 # Registry of models
 _local_dict = locals()
-MODEL_REGISTER = {name : _local_dict[name] for name in _local_dict if name.endswith('Model')}
+MODEL_REGISTER = {
+    name : _local_dict[name]
+    for name in _local_dict 
+        if isinstance(_local_dict[name], type)
+            and issubclass(_local_dict[name], DataModel)
+            and _local_dict[name] not in (DataModel, CalibrationModel)
+}

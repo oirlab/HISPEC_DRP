@@ -2,17 +2,46 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...utils.math import delta_pix_to_delta_wave, delta_wave_to_delta_vel, robust_stats, weighted_quantile
 from ...calibrations import ReferenceEtalonSelector
+import logging
 
 from koa_middleware import CalibrationStore
 
 import numpy as np
 import scipy.constants
 
+logger = logging.getLogger(__name__)
+
 __all__ = ['CalculateEtalonDriftCorrectionPrimitive', 'ApplyDriftCorrectionPrimitive']
 
 class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
+    """
+    Determines the per-etalon-peak drift by matching each etalon peak based on a proximity threshold in wavelength space.
 
+    **For now, a per-order drift is calculated** as the weighted average of the drifts measured in detector pixels. The drift is then converted to effective drifts in wavelength and velocity units according to the local dispersion.
+
+    Corrects the wavelength drifts. Currently only the Fabry-Pérot etalons are used to measure and correct for any drifts. Drifts are also currently calculated on a per-order basis which is subject to change as the instrument is characterized.
+
+    *Calculation and applying the WLS are separate primitives while other WLS sources are under development.*
+
+    Parameters
+    ----------
+    input
+        Level 1 or 2 data product.
+    suffix : str, optional
+        Suffix for the output data product. Default is 'driftcalc'.
+    do_fibers : Sequence[str], optional
+        List of fibers to perform drift correction for. If None, all fibers will be used.
+    do_orders : Sequence[int], optional
+        List of orders to perform drift correction for. If None, all orders will be used.
+
+    Calibrations
+    ------------
+    ref_etalon : ReferenceEtalonModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.ReferenceEtalonSelector`
+    """
+# 
     ARGUMENTS = {
+        'suffix' : 'driftcalc',
         'do_fibers' : None,
         'do_orders' : None,
     }
@@ -28,6 +57,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
 
         input_model = datamodels.open(self.input)
         ref_model, _ = self.get_calibration(input_model, 'ref_etalon')
+        ref_model = datamodels.open(ref_model)
         output_model = self.get_output_model(input_model)
 
         # Get fibers and orders
@@ -60,7 +90,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
                 lcs_ref_err = line_center_errs_ref[order_mask_ref]
 
                 if len(lcs) == 0 or len(lcs_ref) == 0:
-                    self.log.info(f'No etalon lines found for {order=}, {fiber=}. Skipping.')
+                    logger.info(f'No etalon lines found for {order=}, {fiber=}. Skipping.')
                     continue
 
                 drifts = calculate_etalon_drifts_pix(lcs, lcs_err, lcs_ref, lcs_ref_err)
@@ -127,17 +157,25 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
 
 class ApplyDriftCorrectionPrimitive(BasePrimitive):
     """
-    fiber_reference_map: A mapping of fiber numbers to their reference fibers.
-        Dict. <fiber_to_correct_for> : <from_fiber>.
-        Example:
+    Applies the calculated drift corrections to the input data's wavelength grid as a classical Doppler shift.
+
+    Parameters
+    ----------
+    input
+        Level 1 or 2 data product.
+    suffix : str, optional
+        Suffix for the output data product. Default is 'driftcorr'.
+    fiber_reference_map : dict[str, str]
+        A mapping of fiber numbers to their reference fibers.
+        *Example to apply drift from fiber 1 to fibers 1-3.:*
 
             >>> fiber_reference_map = {
                     '1' : '1',
                     '2' : '1',
                     '3' : '1'
                 }
-
-        to apply drift from fiber 1 to fibers 1-3.
+    do_orders : Sequence[int], optional
+        List of orders to perform drift correction for. If None, all orders will be used.
     """
 
     ARGUMENTS = {
@@ -156,7 +194,7 @@ class ApplyDriftCorrectionPrimitive(BasePrimitive):
                 drift_table = getattr(input_model, f'drift_fib{ref_fiber}')
                 k = np.where(drift_table['ORDER'] == order)[0]
                 if len(k) == 0:
-                    self.log.warning(f'No drift correction found for {fiber=} {order=}. Skipping.')
+                    logger.warning(f'No drift correction found for {fiber=} {order=}. Skipping.')
                     continue
                 k = k[0]
                 drift_vel = drift_table['DRIFT_VEL'][k]
@@ -166,23 +204,36 @@ class ApplyDriftCorrectionPrimitive(BasePrimitive):
         return dict(output=input_model)
     
 
-def calculate_etalon_drifts_pix(
+def calculate_drifts_from_line_centers(
     line_centers : np.ndarray,
     line_centers_err : np.ndarray,
     line_centers_ref : np.ndarray,
-    line_centers_ref_err : float = 0.0,
-    max_sep : int = 5
+    line_centers_ref_err : np.ndarray,
+    max_sep : float = 1
 ) -> list[dict[str, float]]:
     drifts = []
-    for i, lc in enumerate(line_centers):
-        diffs = np.abs(line_centers_ref - lc)
-        if np.count_nonzero(diffs < max_sep) == 1:
-            k = np.argmin(diffs)
-            drift_err = np.sqrt(line_centers_err[i]**2 + line_centers_ref_err[k]**2)
+    for i_ref in range(len(line_centers_ref)):
+        lc_ref = line_centers_ref[i_ref]
+        lc_ref_err = line_centers_ref_err[i_ref]
+        diffs = line_centers - lc_ref
+        k = np.argmin(np.abs(diffs))
+        if abs(diffs[k]) < max_sep:
+            lc = line_centers[k]
+            lc_err = line_centers_err[k]
+            drift = lc - lc_ref
+            drift_err = np.sqrt(lc_err**2 + lc_ref_err**2)
             drifts.append({
-                'PIXEL': lc,
-                'PIXEL_REF': line_centers_ref[k],
-                'DRIFT': lc - line_centers_ref[k],
+                'MU_REF': lc_ref,
+                'MU': lc,
+                'DRIFT': drift,
                 'DRIFT_ERR': drift_err
             })
+        else:
+            drifts.append({
+                'MU_REF': lc_ref,
+                'MU': np.nan,
+                'DRIFT': np.nan,
+                'DRIFT_ERR': np.nan
+            })
+
     return drifts

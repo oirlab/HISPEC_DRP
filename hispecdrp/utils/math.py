@@ -2,10 +2,11 @@ import numpy as np
 import scipy.constants
 from numpy.polynomial.chebyshev import chebvander2d
 from numba import njit
+from scipy.interpolate import interp1d
 
 __all__ = [
     'delta_wave_to_delta_vel', 'delta_vel_to_delta_wave', 'delta_pix_to_delta_wave',
-    'polyval1d', 'solve_chebyshev2d',
+    'polyval1d', 'solve_chebyshev2d', 'nanmedian_axis0_ignore_empty_columns',
 ]
 
 def delta_wave_to_delta_vel(delta_wave : np.ndarray | float, wave : np.ndarray | float) -> np.ndarray | float:
@@ -282,10 +283,16 @@ def biweight_midvariance(
     """
     Calculate the biweight midvariance of an array.
 
-    Args:
-        x (np.ndarray): Array of values.
-        c (float): Tuning constant for biweight estimator (default=9.0). See astropy documentation for details.
-        M (float | None): Initial guess of the location. If None, it will be calculated as the median location of x.
+    See https://docs.astropy.org/en/latest/api/astropy.stats.biweight_midvariance.html for details.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of values.
+    c : float
+        Tuning constant for biweight estimator (default=9.0). See astropy documentation for details.
+    M : float | None
+        Initial guess of the location. If None, it will be calculated as the median location of x.
     """
     
     # Flatten
@@ -478,3 +485,81 @@ def median_filter_2d(data, dq, window_size : tuple[int, int]):
             else:
                 out[iy, ix] = _calc_median_insertion_sort(temp, m)
     return out
+
+
+def nanmedian_axis0_ignore_empty_columns(arr: np.ndarray) -> np.ndarray:
+    """
+    Column-wise median of finite values (axis 0). Columns with no finite entries are NaN.
+
+    ``np.nanmedian(..., axis=0)`` emits ``RuntimeWarning: All-NaN slice`` when entire
+    columns are NaN; this matches ``nanmedian`` for mixed finite/NaN columns but avoids
+    that warning.
+    """
+    a = np.asarray(arr, dtype=np.float64)
+    if a.ndim != 2:
+        raise ValueError("nanmedian_axis0_ignore_empty_columns: expected a 2-D array")
+    n_row, n_col = a.shape
+    if n_col == 0:
+        return np.array([], dtype=np.float64)
+    if n_row == 0:
+        return np.full(n_col, np.nan, dtype=np.float64)
+    fin = np.isfinite(a)
+    cnt = np.sum(fin, axis=0)
+    out = np.full(n_col, np.nan, dtype=np.float64)
+    for j in range(n_col):
+        if cnt[j] > 0:
+            out[j] = float(np.median(a[fin[:, j], j]))
+    return out
+
+
+def get_err_from_posterior(x, posterior):
+    """ Return the mode, and the left and right errors of a distribution. The errors are defined with a 68% confidence level.
+
+    Note: Copy pasted from BREADS https://github.com/jruffio/breads
+
+    Parameters
+    ----------
+    x : Sampling of the 1D posterior
+    posterior : Posterior array
+
+    Returns
+    -------
+        Mode, left error, right error
+
+    """
+    ind = np.argsort(posterior)
+    cum_posterior = np.zeros(np.shape(posterior))
+    cum_posterior[ind] = np.cumsum(posterior[ind])
+    cum_posterior = cum_posterior/np.max(cum_posterior)
+    argmax_post = np.argmax(cum_posterior)
+    if len(x[0:np.min([argmax_post+1,len(x)])]) < 2:
+        lx = x[0]
+    else:
+        tmp_cumpost = cum_posterior[0:np.min([argmax_post+1,len(x)])]
+        tmp_x= x[0:np.min([argmax_post+1,len(x)])]
+        deriv_tmp_cumpost = np.insert(tmp_cumpost[1::]-tmp_cumpost[0:np.size(tmp_cumpost)-1],np.size(tmp_cumpost)-1,0)
+        try:
+            whereinflection = np.where(deriv_tmp_cumpost<0)[0][0]
+            where2keep = np.where((tmp_x<=tmp_x[whereinflection])+(tmp_cumpost>=tmp_cumpost[whereinflection]))
+            tmp_cumpost = tmp_cumpost[where2keep]
+            tmp_x = tmp_x[where2keep]
+        except:
+            pass
+        lf = interp1d(tmp_cumpost,tmp_x,bounds_error=False,fill_value=x[0])
+        lx = lf(1-0.6827)
+    if len(x[argmax_post::]) < 2:
+        rx=x[-1]
+    else:
+        tmp_cumpost = cum_posterior[argmax_post::]
+        tmp_x= x[argmax_post::]
+        deriv_tmp_cumpost = np.insert(tmp_cumpost[1::]-tmp_cumpost[0:np.size(tmp_cumpost)-1],np.size(tmp_cumpost)-1,0)
+        try:
+            whereinflection = np.where(deriv_tmp_cumpost>0)[0][0]
+            where2keep = np.where((tmp_x>=tmp_x[whereinflection])+(tmp_cumpost>=tmp_cumpost[whereinflection]))
+            tmp_cumpost = tmp_cumpost[where2keep]
+            tmp_x = tmp_x[where2keep]
+        except:
+            pass
+        rf = interp1d(tmp_cumpost,tmp_x,bounds_error=False,fill_value=x[-1])
+        rx = rf(1-0.6827)
+    return x[argmax_post],x[argmax_post]-lx,rx-x[argmax_post]

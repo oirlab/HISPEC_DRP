@@ -5,6 +5,9 @@ from ...datamodels.dqflags import DQ_FLAGS
 from ...utils.parallelization_utils import numba_thread_scope
 from numba import njit, prange
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['CheckSaturationPrimitive', 'check_saturation']
 
@@ -14,10 +17,41 @@ SATURATED_FLAG_uint8 =  np.uint8(DQ_FLAGS["SATURATED"])
 DO_NOT_USE_FLAG_uint8 = np.uint8(DQ_FLAGS["DO_NOT_USE"])
 
 class CheckSaturationPrimitive(BasePrimitive):
-    
+    """
+    Flag saturated reads in the input data.
+
+    This primitive identifies pixels that exceed their per-pixel saturation
+    threshold, as defined in the saturation calibration reference file. For
+    any read in which a pixel is saturated, the corresponding ``SATURATED``
+    flag is set in the data quality (DQ) array.
+
+    Parameters
+    ----------
+    input : str or RampModel
+        Input file path or data model to process. Currently, this is expected
+        to be a raw (ramp) data product.
+    suffix : str or None, optional
+        Suffix to append to the output filename. Default is ``'satcheck'``.
+    max_cores : int, optional
+        Maximum number of CPU cores to use for processing. Default is 1 (no parallelization).
+
+    Returns
+    -------
+    output : DataModel
+        Data model with the ``SATURATED`` DQ flags set for affected pixels and
+        reads.
+
+    Calibrations
+    ------------
+    saturation : SaturationModel
+        - selector: :class:`~hispecdrp.calibrations.selectors.SaturationSelector`
+
+    - **saturation**: SaturationModel
+        The saturation calibration model used for flagging.
+    """
+
     ARGUMENTS = {
-        'suffix' : 'checksat',
-        'output_model' : 'input',
+        'suffix' : 'satcheck',
         'max_cores' : 1,
     }
 
@@ -41,7 +75,7 @@ class CheckSaturationPrimitive(BasePrimitive):
         result = self.get_output_model(input_model)
 
         # Log
-        self.log.info(f"Applying saturation check with {saturation_model} to {input_model}")
+        logger.info(f"Applying saturation check with {saturation_model} to {input_model}")
 
         if not hasattr(input_model, "DQ_RAW"):
             raise AttributeError("Input model has no DQ_RAW array to flag saturation.")

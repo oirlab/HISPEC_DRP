@@ -8,4 +8,4 @@ Development
    datamodels
    pipelines
    primitives
-   selectors_design
+   selectors

@@ -1,5 +1,5 @@
-from hispecdrp.datamodels.traceprof import _create_traceprof_extensions
 from .base_model import CalibrationModel
+from .mixins import FiberAttributeProxyMixin
 
 from astropy.io import fits
 import numpy as np
@@ -29,11 +29,28 @@ def _create_tracepos_extensions(num_fibers: int):
     return ext
 
 
-class TracePosModel(CalibrationModel):
+class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
+    """
+    The trace positions are determined from the fiber flat data. They are stored as polynomial coeffs and evaluated positions for each order/fiber.
+
+    Extensions
+    ----------
+
+    HDU Name          HDU Type   Data Type   Dimensions       Units     Description
+    --------          --------   ---------   ----------       -----     -----------
+    COEFF_POS_FIB#    Image      Float64     Nord x Ncoeff    None      Polynomial coefficients for the trace positions of fiber #.
+    COEFF_FWHM_FIB#   Image      Float64     Nord x Ncoeff    None      Polynomial coefficients for the trace widths (FWHM) of fiber #.
+    POS_FIB#          Image      Float64     Nord x Ncoeff    Pixels    Evaluated positions for fiber #.
+    FWHM_FIB#         Image      Float64     Nord x Ncoeff    Pixels    Evaluated fwhm for fiber #.
+    """
     CAL_TYPE = 'tracepos'
-    def __init__(self, *args, **kwargs):
-        if 'config' in kwargs and kwargs['config'] is not None:
-            self.EXTENSIONS.update(_create_tracepos_extensions(kwargs['config'].num_fibers))
-        else:
-            self.EXTENSIONS.update(_create_tracepos_extensions(self.DEFAULT_CONFIG.num_fibers))
-        super().__init__(*args, **kwargs)
+
+    def _get_extensions(self):
+        ext = self.EXTENSIONS.copy()
+        ext.update(_create_tracepos_extensions(self.config.num_fibers))
+        return ext
+    
+    def on_init(self):
+        super().on_init()
+        self.meta.set_default('exposure_type', 'SPEC')
+        self.meta.set_default('target_name', 'WHITELIGHT')

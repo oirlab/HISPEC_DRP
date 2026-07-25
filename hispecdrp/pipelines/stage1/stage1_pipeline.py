@@ -6,6 +6,16 @@ __all__ = ['Stage1Pipeline']
 
 class Stage1Pipeline(BasePipeline):
 
+    """
+    Pipeline to process level 0 (rate map) data to generate level 1 (uncalibrated spectra) data.
+
+    This pipeline performs the following steps:
+
+    - :class:`~hispecdrp.primitives.spectral_extraction.spectral_extraction_primitive.SpectralExtractionPrimitive`
+    - :class:`~hispecdrp.primitives.wavesol.set_wavesol_primitive.SetInitialWLSPrimitive`
+    
+    """
+
     PRIMITIVES = {
         'spec_extract' : SpectralExtractionPrimitive,
         'set_wavesol' : SetInitialWLSPrimitive,

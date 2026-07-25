@@ -6,21 +6,23 @@ import matplotlib.pyplot as plt
 from .extraction_utils import get_extraction_window
 DO_NOT_USE = DQ_FLAGS['DO_NOT_USE']
 
-
 def extract_spectrum_box(
     input_data : np.ndarray,
     input_err : np.ndarray,
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     extraction_aperture : float,
-    xrange : tuple | None = None,
+    pix_range : tuple | None = None,
     spec_output : np.ndarray = None,
     err_output : np.ndarray = None,
     var_rnoise_output : np.ndarray = None,
     var_poisson_output : np.ndarray = None,
     dq_output : np.ndarray = None,
+    mid_time_output : np.ndarray = None,
+    orders_are_vertical : bool = True,
 ) -> dict:
     """
     Box spectral extraction.
@@ -37,12 +39,14 @@ def extract_spectrum_box(
         2D array of input read noise variance.
     input_var_poisson : np.ndarray
         2D array of input Poisson noise variance.
+    input_mid_time : np.ndarray
+        2D array of input mid times for each pixel.
     trace_positions : np.ndarray
         2D array of y-coordinates for the extraction (order, ypos).
     extraction_aperture : float
         Width of the aperture to use for extraction.
-    xrange : tuple, optional.
-        Range of x-coordinates to extract (xmin, xmax).
+    pix_range : tuple, optional.
+        Range of pixel-coordinates to extract (min, max) in the spectral direction.
     spec_output : np.ndarray
         1D array to store extracted spectrum.
     err_output : np.ndarray
@@ -53,6 +57,10 @@ def extract_spectrum_box(
         1D array to store extracted Poisson noise variance.
     dq_output : np.ndarray
         1D array to store extracted data quality flags.
+    mid_time_output : np.ndarray
+        1D array to store extracted mid times.
+    orders_are_vertical : bool
+        Whether the orders are oriented vertically.
 
     Returns
     -------
@@ -60,34 +68,44 @@ def extract_spectrum_box(
         Dictionary containing extracted flux, error, read noise variance for the box extracted spectrum.
     """
     ny, nx = input_data.shape
-    if xrange is None:
-        xrange = (0, nx - 1)
+    if pix_range is None:
+        if orders_are_vertical:
+            pix_range = (0, ny - 1)
+            npix = ny
+        else:
+            pix_range = (0, nx - 1)
+            npix = nx
 
     if spec_output is None:
-        spec_output = np.full(nx, np.nan, dtype=input_data.dtype)
+        spec_output = np.full(npix, np.nan, dtype=input_data.dtype)
     if err_output is None:
-        err_output = np.full(nx, np.nan, dtype=input_err.dtype)
+        err_output = np.full(npix, np.nan, dtype=input_err.dtype)
     if var_rnoise_output is None:
-        var_rnoise_output = np.full(nx, np.nan, dtype=input_var_rnoise.dtype)
+        var_rnoise_output = np.full(npix, np.nan, dtype=input_var_rnoise.dtype)
     if var_poisson_output is None:
-        var_poisson_output = np.full(nx, np.nan, dtype=input_var_poisson.dtype)
+        var_poisson_output = np.full(npix, np.nan, dtype=input_var_poisson.dtype)
     if dq_output is None:
-        dq_output = np.full(nx, 0, dtype=input_dq.dtype)
-    
+        dq_output = np.full(npix, 0, dtype=input_dq.dtype)
+    if mid_time_output is None:
+        mid_time_output = np.full(npix, np.nan, dtype=input_mid_time.dtype)
+
     _extract_box_numba(
         input_data=input_data,
         input_err=input_err,
         input_dq=input_dq,
         input_var_rnoise=input_var_rnoise,
         input_var_poisson=input_var_poisson,
+        input_mid_time=input_mid_time,
         trace_positions=trace_positions,
         extraction_aperture=extraction_aperture,
-        xrange=xrange,
+        pix_range=pix_range,
         spec_output=spec_output,
         err_output=err_output,
         var_rnoise_output=var_rnoise_output,
         var_poisson_output=var_poisson_output,
         dq_output=dq_output,
+        mid_time_output=mid_time_output,
+        orders_are_vertical=orders_are_vertical,
     )
 
     return dict(
@@ -96,6 +114,7 @@ def extract_spectrum_box(
         var_rnoise=var_rnoise_output,
         var_poisson=var_poisson_output,
         dq=dq_output,
+        mid_time=mid_time_output,
     )
 
 @njit(nogil=True, parallel=False, cache=True)
@@ -105,31 +124,52 @@ def _extract_box_numba(
     input_dq : np.ndarray,
     input_var_rnoise : np.ndarray,
     input_var_poisson : np.ndarray,
+    input_mid_time : np.ndarray,
     trace_positions : np.ndarray,
     extraction_aperture : float,
-    xrange : tuple,
+    pix_range : tuple,
     spec_output : np.ndarray,
     err_output : np.ndarray,
     var_rnoise_output : np.ndarray,
     var_poisson_output : np.ndarray,
     dq_output : np.ndarray,
+    mid_time_output : np.ndarray,
+    orders_are_vertical : bool = True,
 ):
 
-    # Loop over spectral bins
-    for x in range(xrange[0], xrange[1] + 1):
+    n_cross = input_data.shape[1] if orders_are_vertical else input_data.shape[0]
 
-        # Get extraction window
-        window_inds, W = get_extraction_window(trace_positions[x], extraction_aperture)
+    # Loop over spectral bins
+    for x in range(pix_range[0], pix_range[1] + 1):
+
+        # Get extraction window (clip to detector; non-finite trace → empty window)
+        window_inds, W = get_extraction_window(
+            trace_positions[x], extraction_aperture, n_cross
+        )
+        if len(window_inds) == 0 or np.sum(W) <= 0.0:
+            spec_output[x] = np.nan
+            err_output[x] = np.nan
+            var_rnoise_output[x] = np.nan
+            var_poisson_output[x] = np.nan
+            dq_output[x] = DO_NOT_USE
+            continue
 
         # Slices for this spectral bin
-        D = input_data[window_inds, x].copy()
-        D_var = input_err[window_inds, x]**2
-        D_var_poisson = input_var_poisson[window_inds, x].copy()
-        D_var_rnoise = input_var_rnoise[window_inds, x].copy()
-        D_dq = input_dq[window_inds, x]
+        if orders_are_vertical:
+            D = input_data[x, window_inds].copy()
+            D_var = input_err[x, window_inds]**2
+            D_var_poisson = input_var_poisson[x, window_inds].copy()
+            D_var_rnoise = input_var_rnoise[x, window_inds].copy()
+            D_dq = input_dq[x, window_inds]
+        else:
+            D = input_data[window_inds, x].copy()
+            D_var = input_err[window_inds, x]**2
+            D_var_poisson = input_var_poisson[window_inds, x].copy()
+            D_var_rnoise = input_var_rnoise[window_inds, x].copy()
+            D_dq = input_dq[window_inds, x]
 
         # Mask bad pixels
-        M = (D_dq == 0) & (D > 0) & (D_var > 0) & (D_var_poisson > 0) & (D_var_rnoise > 0)
+        M = (D_dq & DO_NOT_USE) == 0
         bad = np.where(~M)[0]
         n_good = len(M) - len(bad)
         if n_good == 0:
@@ -167,3 +207,6 @@ def _extract_box_numba(
         var_rnoise_output[x] = np.sum(M * W**2 * D_var_rnoise) / N**2
         var_poisson_output[x] = np.sum(M * W**2 * D_var_poisson) / N**2
         dq_output[x] = 0
+
+        # Mid times
+        mid_time_output[x] = np.sum(M * W * input_mid_time[x, window_inds]) / np.sum(M * W)

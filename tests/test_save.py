@@ -1,120 +1,271 @@
 from hispecdrp import datamodels
-from hispecdrp import FitLFCLinesPrimitive, ProcessLFCPipeline
-from hispecdrp.utils import download_gdrive_file
-
+from hispecdrp.simulations.utr import create_ramp
+from hispecdrp.pipelines import Stage0Pipeline
+from hispecdrp.primitives import DarkSubtractionPrimitive
 import os
-import numpy as np
 import copy
+import numpy as np
 
 def test_save_result_primitive(tmp_path, datadir):
+    
+    shape = (100, 100)
 
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
-    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    do_fibers = ['2']
+    os.environ['KOA_SKIP_CALIBRATION_VERSION'] = '1'
+    
+    # Create input science model
+    input_model = datamodels.L0Model()
+    input_model.rate = np.abs(np.random.randn(*shape) * 0.01 + 1).astype(np.float32)
+    input_model.rate_err = np.full(shape, 0.01, dtype=np.float32)
+    input_model.rate_var_poisson = np.abs(np.random.randn(*shape).astype(np.float32))
+    input_model.rate_var_rnoise = np.abs(np.random.randn(*shape).astype(np.float32))
+    input_model.dq = np.zeros(shape, dtype=np.uint32)
+    
+    # Create dark calibration model
+    dark_model = datamodels.DarkModel()
+    dark_model.rate = (np.random.randn(*shape) * 0.01 + 1).astype(np.float32)
+    dark_model.rate_err = np.full(shape, 0.01, dtype=np.float32)
+    dark_model.rate_var_poisson = np.abs(np.random.randn(*shape).astype(np.float32))
+    dark_model.rate_var_rnoise = np.abs(np.random.randn(*shape).astype(np.float32))
+    dark_model.dq = np.zeros(shape, dtype=np.uint32)
+    dark_filepath = dark_model.save(output_dir=tmp_path)
 
     # Test passing output_dir
-    prim = FitLFCLinesPrimitive()
+    prim = DarkSubtractionPrimitive()
     suffix = 'my-test-file'
-    line_fits_model = prim.apply(
-        lfc_path,
-        do_orders=do_orders,
-        do_fibers=do_fibers,
+    result_model = prim.apply(
+        input_model.copy(),
+        dark=dark_filepath,
         save_result=True,
         output_dir=tmp_path,
         suffix=suffix
     )
-    assert os.path.isfile(line_fits_model._filepath)
+    assert os.path.isfile(result_model._filepath)
 
     # Test that the suffix was applied
-    assert line_fits_model._filepath.endswith(f'{suffix}.fits')
-    assert line_fits_model.meta.filename.endswith(f'{suffix}.fits')
-
-    # Test passing output_path
-    output_path = str(tmp_path / 'my-test-file.fits')
-    prim = FitLFCLinesPrimitive()
-    line_fits_model = prim.apply(
-        lfc_path,
-        do_orders=do_orders,
-        do_fibers=do_fibers,
-        save_result=True,
-        output_path=output_path,
-    )
-    assert line_fits_model._filepath == output_path
-    assert line_fits_model.meta.filename == os.path.basename(output_path)
-    assert os.path.isfile(output_path)
+    assert result_model._filepath.endswith(f'{suffix}.fits')
+    assert result_model.meta.filename.endswith(f'{suffix}.fits')
 
     # Test output_dir with in memory data model (model._filepath = model.meta.filename = None)
-    lfc_model = datamodels.open(lfc_path)
-    lfc_model._filepath = None
-    lfc_model.meta.filename = None
-    prim = FitLFCLinesPrimitive()
-    line_fits_model = prim.apply(
-        lfc_model,
-        do_orders=do_orders,
-        do_fibers=do_fibers,
+    input_model._filepath = None
+    input_model.meta.filename = None
+    prim = DarkSubtractionPrimitive()
+    result_model = prim.apply(
+        input_model.copy(),
+        dark=dark_filepath,
         save_result=True,
         output_dir=tmp_path,
     )
-    output_path = str(tmp_path / line_fits_model.meta.filename)
-    assert line_fits_model._filepath == output_path
+    output_path = str(tmp_path / result_model.meta.filename)
+    assert result_model._filepath == output_path
     assert os.path.isfile(output_path)
+
+    # Test explicitly passing output_file and output_dir
+    # Test passing output_dir
+    prim = DarkSubtractionPrimitive()
+    output_file = 'myfile.fits'
+    result_model = prim.apply(
+        input_model.copy(),
+        dark=dark_filepath,
+        save_result=True,
+        output_dir=tmp_path,
+        output_file=output_file
+    )
+    output_path = str(tmp_path / output_file)
+    assert os.path.isfile(result_model._filepath)
+    assert result_model._filepath == output_path
+
+    # Test that the file is NOT saved if save_result=False
+    prim = DarkSubtractionPrimitive()
+    output_file = 'myfile.fits'
+    result_model = prim.apply(
+        input_model.copy(),
+        dark=dark_filepath,
+        #save_result=True,
+        output_dir=tmp_path,
+        output_file=output_file
+    )
+    output_path = str(tmp_path / output_file)
+    assert os.path.isfile(result_model._filepath)
+    assert result_model._filepath == output_path
 
 
 def test_save_result_pipeline(tmp_path, datadir):
-    do_orders = [90, 91, 92, 93, 94, 96, 97, 98, 99]
-    do_fibers = ['2']
-    lfc_path = download_gdrive_file('PARVI/L2/PR.20230725.83774.17_spec-LFC.fits', use_cached=True, output_dir=datadir)
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+    
+    max_slope = 1000  # e-/s
+    ny, nx = 100, 100
+
+    # Create an ideal ramp (1D array for demonstration)
+    ideal_ramp = np.linspace(0, 1.5*np.iinfo(np.uint16).max, 1001, endpoint=True)
+    nonlin_coeffs = [-1e-6, 1, 0]
+    nonlinear_ramp = np.polyval(nonlin_coeffs, ideal_ramp)
+    nonlin_correction_coefs = np.polyfit(nonlinear_ramp, ideal_ramp, deg=5)
+
+    # Nonlinear model
+    coeffs = np.broadcast_to(nonlin_correction_coefs[::-1, None, None], (np.size(nonlin_correction_coefs), ny, nx))
+    thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
+    max = np.full(shape=(ny, nx), fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
+    nonlin_dq = np.zeros(shape=(ny,nx), dtype=np.uint32)
+    nonlin_model = datamodels.NonlinearCorrectionModel(
+        coeffs=coeffs,
+        nonlin_thresh=thresh,
+        nonlin_max=max,
+        dq=nonlin_dq
+    )
+    
+    # --- Create DQ init map ---
+    dq_map = np.zeros((ny, nx), dtype=np.uint32)
+    dqinit_model = datamodels.DQModel(dq=dq_map)
+
+    # --- Create saturation threshold map ---
+    saturation_threshold = np.iinfo(np.uint16).max  # DN
+    saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
+    saturation_model = datamodels.SaturationModel(
+        sat_thresh=saturation_map,
+        dq=np.zeros_like(saturation_map, dtype=np.uint32)
+    )
+
+    # --- Create random gain map ---
+    gain = 1.0  # e-/ADU
+    gain_map = np.full((ny, nx), gain, dtype=np.float32)
+    gain_model = datamodels.GainModel(
+        gain=gain_map,
+        rn=np.full_like(gain_map, 0.0),
+        cov=np.full((2, 2, ny, nx), 0, dtype=np.float32),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
+
+    # --- Create random dark map ---
+    dark_current = 10  # e-/s
+    dark_map = np.random.normal(loc=dark_current, scale=dark_current / 10, size=(ny, nx)).astype(np.float32)
+    dark_model = datamodels.DarkModel(
+        rate=dark_map / gain_map,  # dark in DN/s
+        rate_err=np.zeros_like(dark_map),
+        rate_var_rnoise=np.zeros_like(dark_map),
+        rate_var_poisson=np.zeros_like(dark_map),
+        dq=np.zeros_like(dark_map, dtype=np.uint32)
+    )
+
+    # --- Create bias map ---
+    bias = 1000  # e-/s
+    bias_map = np.full((ny, nx), bias, dtype=np.float32)
+    bias_model = datamodels.BiasModel(
+        bias=bias_map / gain_map,  # bias in DN
+        ktc=np.zeros_like(bias_map),  # kTC in DN
+        dq=np.zeros_like(bias_map, dtype=np.uint32)
+    )
+
+    # --- Create random flat map ---
+    detflat_map = np.random.normal(loc=1, scale=0.1, size=(ny, nx)).astype(np.float32)
+    detflat_model = datamodels.DetectorFlatModel(
+        flat=detflat_map,
+        flat_err=np.zeros_like(detflat_map),
+        flat_var_rnoise=np.zeros_like(detflat_map),
+        flat_var_poisson=np.zeros_like(detflat_map),
+        dq=np.zeros_like(detflat_map, dtype=np.uint32)
+    )
+
+    # --- Create random read noise map ---
+    RN = 20.0  # e-
+    rn_map = np.full((ny, nx), RN, dtype=np.float32)
+    rn_model = datamodels.ReadNoiseModel(
+        rn=rn_map / gain_map,
+        rn_err=np.zeros_like(rn_map),
+        dq=np.zeros_like(gain_map, dtype=np.uint32)
+    )
+
+    # --- Create a fake UTR cube ---
+    electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
+    readtime = 1.5
+    n_reads = 10
+    max_cores = 1
+    ramp_data = create_ramp(
+        electron_rate_map,  # in e-/s
+        readtime=readtime, n_reads=n_reads,
+        nonlin_coeffs=nonlin_coeffs,
+        gain=gain_map,  # in e-/s
+        flat=detflat_map,
+        dark=dark_map,  # in e-/s
+        bias=bias_map,  # in e-/s
+        kTC_noise=50,  # in e-/s
+        poisson_noise=False, read_noise=0,  # in e-/s
+        convert_to_uint16=False, clip_ramps=True,
+        max_cores=max_cores
+    )
+    ramp_model = datamodels.RampModel(
+        data=ramp_data['data'],
+        dq_raw=ramp_data['dq_raw'],
+        meta=ramp_data['meta']
+    )
+    ramp_model.generate_filename()
+
+    # --- Specify the primitive arguments here ---
     prim_args = {
-        'fit_lfc_lines' : {
-            'do_orders': do_orders,
-            'do_fibers': do_fibers,
+        'dq_init': {
+            'dq': dqinit_model,
         },
-        'lfc_wavesol' : {
-            'fit_orders': do_orders,
-            'opt_weights': True,
-            'do_fibers': do_fibers,
-            'deg_inter_order': 6,
-            'deg_intra_order': 9,
+        'saturation_check': {
+            'saturation': saturation_model,
         },
-        'lsf' : {
-            'do_fibers': do_fibers,
-            'deg_inter_order': 3,
-            'deg_intra_order': 3,
-            'fit_orders': do_orders,
+        'bias_sub': {
+            'run': False,
+            'bias': bias_model,
         },
-        'register_wave_cal' : {
-            'run': True,
+        'nonlin_corr': {
+            'nonlin': nonlin_model,
         },
-        'register_lsf_cal' : {
-            'run': True
-        }
+        'jump_detec' : {
+            'run': False,
+            'method': 'tpd',
+            'rejection_threshold': 4.0,
+            'gain': gain_model,
+            'rn': rn_model,
+        },
+        'ramp_fit' : {
+            'method': 'jwst_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
+            'jwst_jump_detection': False,
+            'jwst_jump_rejection_threshold': 4.0,
+            'gain': gain_model,
+            'rn': rn_model,
+        },
+        'dark_sub': {
+            'dark': dark_model,
+        },
+        'gain_corr': {
+            'gain': gain_model,
+        },
+        'detflat_corr': {
+            'detflat': detflat_model,
+        },
     }
 
-    # Test saving a particular primitive's result.
-    _prim_args = copy.deepcopy(prim_args)
-    _prim_args['lfc_wavesol']['save_result'] = True
-    _prim_args['lfc_wavesol']['output_dir'] = tmp_path
-    _prim_args['fit_lfc_lines']['full_output'] = True 
-    pipe = ProcessLFCPipeline()
-    result = pipe.apply(lfc_path, prim_args=_prim_args)
-    wavesol_model = result['wavesol']
-    assert os.path.isfile(wavesol_model._filepath)
+    # Test that pipeline saves automatically with nothing explicity specified.
+    pipe = Stage0Pipeline()
+    model_result = pipe.apply(ramp_model, prim_args=prim_args)
+    output_path = os.path.join(os.getcwd(), model_result.generate_filename())
+    assert os.path.isfile(output_path)
+    assert model_result._filepath == output_path
 
-    # Test pipeline level saving
-    _prim_args = copy.deepcopy(prim_args)
-    _prim_args['fit_lfc_lines']['save_result'] = True
-    _prim_args['fit_lfc_lines']['output_dir'] = None # Make sure the pipeline sets this
-    suffix = 'saved-from-pipeline'
-    pipe = ProcessLFCPipeline()
-    result = pipe.apply(lfc_path, prim_args=_prim_args, save_result=True, output_dir=tmp_path, suffix=suffix)
-    wavesol_model = result['wavesol']
-    lsf_model = result['lsf']
-    assert wavesol_model._filepath == str(tmp_path / wavesol_model.generate_filename(suffix=suffix))
-    assert lsf_model._filepath == str(tmp_path / lsf_model.generate_filename(suffix=suffix))
-    assert os.path.isfile(wavesol_model._filepath)
-    assert os.path.isfile(lsf_model._filepath)
+    # Test with explicit output_dir
+    pipe = Stage0Pipeline()
+    model_result = pipe.apply(ramp_model, prim_args=prim_args, output_dir=tmp_path)
+    output_path = os.path.join(tmp_path, model_result.generate_filename())
+    assert os.path.isfile(output_path)
+    assert model_result._filepath == output_path
 
-    # Test line file is saved to output_dir as well
-    lfc_model = datamodels.open(lfc_path)
-    assert os.path.isfile(str(tmp_path / datamodels.LFCFitParamsModel.from_datamodels(lfc_model).generate_filename()))
+    # Test that a primitive saves the result
+    prim_args2 = copy.deepcopy(prim_args)
+    prim_args2['dark_sub']['save_result'] = True
+    prim_args2['dark_sub']['output_dir'] = tmp_path
+    suffix = 'dark_subtracted_test'
+    prim_args2['dark_sub']['suffix'] = suffix
+    
+    pipe = Stage0Pipeline()
+    model_result = pipe.apply(ramp_model, prim_args=prim_args2)
+    
+    output_path_darksub = os.path.join(tmp_path, model_result.generate_filename(suffix=suffix))
+    assert os.path.isfile(output_path_darksub)
+
+    # Test that the pipeline's final output is saved with the correct name and path
+    output_path_pipe = os.path.join(tmp_path, model_result.generate_filename())
+    assert os.path.isfile(output_path_pipe)
+    assert model_result._filepath == output_path_pipe

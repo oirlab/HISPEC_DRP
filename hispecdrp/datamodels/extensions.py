@@ -1,30 +1,30 @@
 from astropy.io import fits
 import numpy as np
 
+# NOTE:
 # _HDU = no key specified
 # No _HDU = key already specified
 
 
 # Common Image HDUs
-
 IMAGE_UINT8_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint8}
 IMAGE_UINT16_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint16}
 IMAGE_UINT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.uint32}
 IMAGE_FLOAT32_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.float32}
 IMAGE_FLOAT64_HDU = {'hdu_type' : fits.ImageHDU, 'dtype' : np.float64}
 
-
 # Only specified in DataModel
-
 RECEIPT = {
     'RECEIPT': {
         'hdu_type' : fits.BinTableHDU,
         'columns' : {
-            'PROC_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
-            'DRP_VERSION' : str, # DRP semver
             'CLASS' : str, # Primitive class
-            'FILENAME' : str, # Input base filename
-            'ARGUMENTS' : str, # JSON rep of args ?
+            'PROC_START_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
+            'PROC_END_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
+            'FILENAME' : str, # Base filename (is this useful?)
+            'ARGUMENTS' : str, # JSON rep of args. This may become problematic with arrays.
+            'DRP_VERSION' : str, # DRP semver
+            'DRP_GIT_COMMIT_ID' : str, # full SHA1
             'STATUS' : str, # COMPLETED, FAILED, SKIPPED
         }
     }
@@ -34,15 +34,15 @@ CALIBRATIONS = {
     'CALIBRATIONS': {
         'hdu_type': fits.BinTableHDU,
         'columns': {
-            'ID': str, # UUID
-            'FILENAME': str, # Base filename of the calibration
+            'CAL_ROLE': str, # Role of calibration
             'CAL_TYPE': str, # Type of calibration
-            'CAL_ROLE' : str, # Role of calibration, typically the same as cal_type
+            'FILENAME': str, # Base filename of the calibration
+            'ID': str, # UUID
             'DATETIME_OBS': str, # Observation date and time YYYY-MM-DDTHH:MM:SS.sss
+            'LAST_PROCESSED': str, # When calibration was last processed. This is NOT equal to the last_updated timestamp in the calibration DB.
+            'TIME_APPLIED' : str, # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
+            'CLASS' : str, # Primitive class that used the calibration.
             'DRP_VERSION': str, # DRP semver calibration was processed with (not necessarily current version)
-            'NOTE': str, # Note for calibration matching ORM
-            'LAST_UPDATED': str, # When calibration was last updated in the DB.
-            'TIME_APPLIED' : str # Time calibration was applied YYYY-MM-DDTHH:MM:SS.sss
         }
     }
 }
@@ -52,8 +52,9 @@ DATA_ANCESTORS = {
         'hdu_type': fits.BinTableHDU,
         'columns': {
             'FILENAME' : str,
-            'DATETIME_OBS' : str,
-            'PRIMITIVE' : str,
+            'CLASS' : str,
+            'TIME_APPLIED' : str,
+            # ''... controlled by include_ancestors
         }
     }
 }
@@ -202,19 +203,31 @@ def create_lfcfitparam_extensions(fiber : str) -> dict[str, dict]:
 
 #### RVs
 
+# Element dtype for each 1D CCF vector stored in the ``CCF`` column (the table column itself is ``object``).
+RVCCF_CCF_ELEM_DTYPE = np.float64
+
 RVCCF_HDU = {
     'hdu_type' : fits.BinTableHDU,
     'columns' : {
-        'MBJDW' : np.float64,
-        'BERVW' : np.float64,
-        'RV' : np.float64,
-        'RV_ERR' : np.float64,
-        'WAVELENGTH' : np.float64,
-        'RESOLUTION' : np.float64,
-        'TELL_ABS' : np.float64,
-        'BIS' : np.float64,
-        'RV_ABS' : np.float64,
-        'RV_ABS_ERR' : np.float64,
+        'MBJDW' : np.float64,  # flux-weighted modified BJD
+        'BERVW' : np.float64,  # flux-weighted barycentric correction (km/s)
+        'RV' : np.float64,  # chunk RV (m/s)
+        'RV_ERR' : np.float64,  # chunk RV uncertainty (m/s)
+        'ORDER' : np.int16,  # echelle order of the chunk
+        'WAVELENGTH' : np.float64,  # chunk center wavelength (µm)
+        'RESOLUTION' : np.float64,  # resolving power R = λ/Δλ
+        'TELL_ABS' : np.float64,  # telluric absorption metric
+        'BIS' : np.float64,  # line bisector span (m/s)
+        'RV_ABS' : np.float64,  # absolute-frame RV (m/s)
+        'RV_ABS_ERR' : np.float64,  # uncertainty on RV_ABS (m/s)
+        'INLIER' : np.uint8,  # 1 = used in aggregate, 0 = rejected by median/MAD outlier
+        'CHUNK_ID' : np.int32,  # serial chunk index in the exposure
+        'N_GOOD' : np.int32,  # good pixels in chunk (-1 if unknown)
+        'V_MIN' : np.float64,  # CCF velocity grid min (m/s)
+        'V_MAX' : np.float64,  # CCF velocity grid max (m/s)
+        'V_STEP' : np.float64,  # CCF velocity sampling step (m/s)
+        'N_VEL' : np.int32,  # length of CCF(v)
+        'CCF' : object,  # object column: each row is a 1D np.ndarray, dtype ``RVCCF_CCF_ELEM_DTYPE``; empty if absent
     }
 }
 

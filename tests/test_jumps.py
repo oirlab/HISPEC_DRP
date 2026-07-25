@@ -1,9 +1,8 @@
 from hispecdrp import datamodels
-from hispecdrp import simulations
+import benchmarks as simulations
 from hispecdrp import jump_detection_difference
 from hispecdrp import jump_detection_jwst
 import numpy as np
-import os
 
 def test_jumps(tmp_path, datadir):
     np.random.seed(12345)
@@ -18,12 +17,17 @@ def test_jumps(tmp_path, datadir):
     gain_data = np.ones((ny, nx), dtype=np.float32) * gain_val
     read_noise_data = np.ones((ny, nx), dtype=np.float32) * read_noise_val
 
-    ramp_data = simulations.create_ramp(source, readtime=1.0, n_reads=16,
-                                       gain=gain_val, flat = 1, dark = 0, bias = 1000,
-                                       kTC_noise = 50, read_noise=read_noise_val, poisson_noise=True, convert_to_uint16 = True,
-                                       nonlin_coeffs=None, clip_ramps = False)
-    ramp_model = datamodels.RampModel(data=dict(data=ramp_data['data'], dq_raw=ramp_data['dq_raw']),
-                                      meta=ramp_data['meta'])
+    ramp_data = simulations.create_ramp(
+        source, readtime=1.0, n_reads=16,
+        gain=gain_val, flat = 1, dark = 0, bias = 1000,
+        kTC_noise = 50, read_noise=read_noise_val, poisson_noise=True, convert_to_uint16 = True,
+        nonlin_coeffs=None, clip_ramps = False
+    )
+    ramp_model = datamodels.RampModel(
+        data=ramp_data['data'],
+        dq_raw=ramp_data['dq_raw'],
+        meta=ramp_data['meta']
+    )
 
     # Modify rows to insert a jump of 100 on specified reads in pixel at specified column
     # Also, create a comparison array with JUMP_DET flag set
@@ -41,12 +45,14 @@ def test_jumps(tmp_path, datadir):
     # At this threshold, both methods should work
     thresh = 6.0
 
-    jump_detection_jwst(ramp_model.data, 
-                            ramp_model.dq_raw, 
-                            dq_pixel, 
-                            gain=gain_data,
-                            rdnoise=read_noise_data,
-                            rejection_threshold=thresh)
+    jump_detection_jwst(
+        ramp_model.data, 
+        ramp_model.dq_raw, 
+        dq_pixel, 
+        gain=gain_data,
+        rdnoise=read_noise_data,
+        rejection_threshold=thresh
+    )
 
     np.testing.assert_array_equal(dq_comp, ramp_model.dq_raw)
 

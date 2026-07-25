@@ -1,24 +1,43 @@
 from __future__ import annotations
 from astropy.io import fits
-from .meta_data import MetaModel
-import numpy as np
-import warnings
+import os
+from typing import TYPE_CHECKING
+import astropy.time
+from datetime import datetime
+if TYPE_CHECKING:
+    from ..datamodels import DataModel
+
+from koa_middleware.utils import generate_koa_filehandle
+
+import logging
+logger = logging.getLogger(__name__)
 
 
-def open(init, copy : bool = False, config : type | None = None, **kwargs):
+def open(
+    init,
+    copy : bool = False,
+    config : type | None = None,
+    **kwargs
+) -> 'DataModel':
     """
-    Creates a DataModel from a FITS file. Automatically select the right DataModel class based on the `DATAMODL` header keyword.
-    More types might be added later.
+    Creates a DataModel from a FITS file.
+    Automatically select the right DataModel class based on the 'DATAMODL' header keyword.
 
-    Args:
-        init:
-            filepath: Full path to FITS file.
-            DataModel: Return the given DataModel instance or make a copy if `copy=True`.
-        copy (bool): If True, return a copy of the DataModel instance. If `init` is a `str`, this is ignored.
-        kwargs: Additional keyword arguments for the DataModel constructor.
+    Parameters
+    ----------
+    init
+        filepath (str): Full path to FITS file.
+        DataModel: Return the given DataModel instance or make a copy if ``copy=True``.
+    copy : bool
+        If True, return a copy of the DataModel instance.
+        If ``init`` is a filepath, this is ignored.
+    kwargs:
+        Additional keyword arguments for the DataModel constructor.
     
-    Returns:
-        DataModel : The specific DataModel instance.
+    Returns
+    -------
+    DataModel
+        The specific DataModel instance.
     """
 
     # If init is already a datamodel, copy and return
@@ -32,92 +51,167 @@ def open(init, copy : bool = False, config : type | None = None, **kwargs):
     # Convert path to string
     if isinstance(init, str):
         with fits.open(init, memmap=True) as hdulist:
-            model_class = get_model_type_from_hdulist(hdulist)
+            model_class = get_model_type(hdulist)
             if config is None:
-                config = get_config_from_hdulist(hdulist)
+                config = get_instrument_config(hdulist)
         model = model_class(filepath=init, config=config, **kwargs)
     elif isinstance(init, fits.HDUList):
-        model_class = get_model_type_from_hdulist(init)
+        model_class = get_model_type(init)
         if config is None:
-            config = get_config_from_hdulist(init)
+            config = get_instrument_config(init)
         model = model_class(filepath=init, config=config, **kwargs)
+    else:
+        raise TypeError(f"init must be a file path string or a FITS HDUList, got {type(init).__name__}")
 
     # Return the model
     return model
 
-
-    
-def get_config_from_hdulist(hdu_list : fits.HDUList):
+def get_model_type(input: str | fits.HDUList):
     """
-    Get the instrument config class associated with a filepath.
+    Get the data model class from a FITS file path, HDUList, or model name string.
 
     Parameters
     ----------
-    hdu_list : fits.HDUList
-        Input HDU list.
-
-    Returns
-    -------
-    config_class : type
-        The config class if found.
-    """
-    primary = hdu_list[0]
-    instrument_name = primary.header.get('INSTRUME')
-    if instrument_name is None:
-        raise ValueError(f"No INSTRUME key found in FITS header: {instrument_name}")
-    else:
-        from . import INSTRUMENT_CONFIGS
-        config_class = INSTRUMENT_CONFIGS.get(instrument_name, None)
-        if config_class is None:
-            raise ValueError(f"Instrument config for '{instrument_name}' not found.")
-        return config_class
-
-
-def get_model_type_from_hdulist(hdu_list : fits.HDUList):
-    """
-    Get the model type from the primary header, lookup to get class
-
-    Parameters
-    ----------
-    hdu_list : fits.HDUList
-        The initializer.
-
-    Returns
-    -------
-    model_class : type
-        The name of the model class if found.
-    """
-    primary = hdu_list[0]
-    model_type = primary.header.get('DATAMODL')
-    if model_type is None:
-        raise ValueError(f"No DATAMODL key found in FITS header: {model_type}")
-    else:
-        return get_model_type_from_name(model_type)
-
-
-def get_model_type_from_name(model_name : str):
-    """
-    Get the model type from the primary header, lookup to get class
-
-    Parameters
-    ----------
-    model_name : str
-        Name of the data model class (e.g. 'L0Model').
+    input : str or fits.HDUList
+        - FITS HDUList: extracts DATAMODL from primary header
+        - str ending in '.fits' or '.fit': interpreted as FITS file path
+        - Other str: interpreted as model name
 
     Returns
     -------
     model_class : type
         The DataModel class.
+
+    Raises
+    ------
+    ValueError
+        If DATAMODL key is missing in the FITS header, or model name not found.
+    TypeError
+        If source is not HDUList or str.
     """
     from . import MODEL_REGISTER
-    model_class = MODEL_REGISTER.get(model_name, None)
+
+    if isinstance(input, fits.HDUList):
+        model_name = input[0].header.get("DATAMODL")
+        if model_name is None:
+            raise ValueError("No DATAMODL key found in primary FITS header.")
+
+    elif isinstance(input, str):
+        if os.path.isfile(input):
+            with fits.open(input) as hdulist:
+                model_name = hdulist[0].header.get("DATAMODL")
+                if model_name is None:
+                    raise ValueError(f"No DATAMODL key found in primary FITS header: {input}")
+        else:
+            # Treat as model name directly
+            model_name = input
+
+    else:
+        raise TypeError("input must be a FITS file path, HDUList, or model name string.")
+
+    model_class = MODEL_REGISTER.get(model_name)
     if model_class is None:
         raise ValueError(f"Model type '{model_name}' not found in MODEL_REGISTER.")
+
+    return model_class
+
+def get_instrument_config(
+    input : str | fits.HDUList | None = None,
+    instrument_name : str | None = None
+) -> type:
+    """
+    Get the instrument configuration class from either a FITS filename or an HDUList.
+    
+    Parameters
+    ----------
+    input : str or fits.HDUList, optional
+        Either a FITS filename path or an already-opened HDUList object.
+        The INSTRUME keyword will be read from the primary header.
+    instrument_name : str, optional
+        The instrument name. If provided, this will be used instead of reading the instrument name from the FITS header.
+    
+    Returns
+    -------
+    config_class : type
+        The instrument config class if found.
+    
+    Raises
+    ------
+    TypeError
+        If input is neither a string nor an HDUList.
+    ValueError
+        If no INSTRUME keyword is found in the header, or if the instrument
+        config is not found in INSTRUMENT_CONFIGS.
+    """
+    from . import INSTRUMENT_CONFIGS
+
+    if instrument_name is None:
+        assert input is not None, "Either input or instrument_name must be provided."
+        instrument_name = get_instrument_name(input)
+    
+    if instrument_name is not None:
+        config_class = INSTRUMENT_CONFIGS.get(instrument_name.lower(), None)
     else:
-        return model_class
+        config_class = None
+    
+    return config_class
+
+def get_instrument_name(input : str | fits.HDUList):
+    """
+    Get the instrument name from either a FITS filename or an HDUList.
+    
+    Parameters
+    ----------
+    input : str or fits.HDUList
+        Either a FITS filename path or an already-opened HDUList object.
+        The INSTRUME keyword will be read from the primary header.
+    
+    Returns
+    -------
+    instrument_name : str
+        The instrument name if found.
+    
+    Raises
+    ------
+    TypeError
+        If input is neither a string nor an HDUList.
+    ValueError
+        If no INSTRUME keyword is found in the header.
+    """
+    if isinstance(input, fits.HDUList):
+        instrument_name = input[0].header.get("INSTRUME")
+
+    elif isinstance(input, str):
+        if not os.path.isfile(input):
+            raise ValueError(f"File does not exist: {input}")
+        with fits.open(input) as hdulist:
+            instrument_name = hdulist[0].header.get("INSTRUME")
+
+    else:
+        raise TypeError("input must be a FITS file path or HDUList.")
+
+    return instrument_name
 
 
-def associate_fibers(input: list[str | 'DataModel']) -> dict[str, object]:
+    
+    # # Open the file or use the provided HDUList
+    # if isinstance(input, str):
+    #     with fits.open(input, memmap=True) as hdulist:
+    #         instrument_name = hdulist[0].header.get('INSTRUME')
+    # elif isinstance(input, fits.HDUList):
+    #     instrument_name = input[0].header.get('INSTRUME')
+    # else:
+    #     raise TypeError(
+    #         f"input must be a string (filename) or fits.HDUList, got {type(input).__name__}"
+    #     )
+    
+    # # Check if INSTRUME keyword was found
+    # if instrument_name is None:
+    #     raise ValueError("No INSTRUME key found in FITS header")
+    
+    # return instrument_name
+
+def group_by_illuminated_fiber(input: list[str | 'DataModel']) -> dict[str, object]:
     """
     Associate input models by fiber.
 
@@ -146,10 +240,9 @@ def associate_fibers(input: list[str | 'DataModel']) -> dict[str, object]:
 
     return fiber_map
 
-
-def group_input_by_fiber_object(input: list[str | 'DataModel']) -> dict[tuple, list]:
+def group_by_fiber_combination(input: list[str | 'DataModel']) -> dict[tuple, list]:
     """
-    Group input models by objects in each fiber.
+    Group input models by like-objects in each fiber.
 
     Parameters
     ----------
@@ -158,9 +251,15 @@ def group_input_by_fiber_object(input: list[str | 'DataModel']) -> dict[tuple, l
 
     Returns
     -------
-    inputs_grouped : dict[str, object]
+    inputs_grouped : dict[tuple[str, ...], list[data]]
         Dictionary with keys as tuples of object names per fiber and values as lists of corresponding input models.
-        Example: {('SCIENCE', 'SKY', 'BLOCKED'): [model1, model2], ('BLOCKED', 'SCIENCE', 'SKY') : [model3, model4]}
+        Example:
+
+            >>> inputs_grouped = {
+                ('SCIENCE', 'SKY', 'BLOCKED'): [model1, model2],
+                ('BLOCKED', 'SCIENCE', 'SKY') : [model3, model4]
+            }
+
     """
     inputs_grouped = {}
     input_models = [open(f, meta_only=True) for f in input]
@@ -185,61 +284,111 @@ def group_input_by_fiber_object(input: list[str | 'DataModel']) -> dict[tuple, l
 
     return inputs_grouped
 
+def _set_datetime_meta(model : 'DataModel'):
+    if model.meta.datetime_obs is None and model.meta.mjd_start is None:
+        logger.warning("No time info is present, adopting current time for datetime_obs and mjd_start.")
+        model.meta.datetime_obs = datetime.now().isoformat(timespec="milliseconds")
+        model.meta.mjd_start = astropy.time.Time(model.meta.datetime_obs, format="isot", scale="utc").mjd
+    elif model.meta.datetime_obs is not None and model.meta.mjd_start is None:
+        dt = astropy.time.Time(model.meta.datetime_obs, format="isot", scale="utc")
+        model.meta.mjd_start = dt.mjd
+    elif model.meta.datetime_obs is None and model.meta.mjd_start is not None:
+        model.meta.datetime_obs = astropy.time.Time(model.meta.mjd_start, format="mjd", scale="utc").isot
 
-def merge_meta(models: list['DataModel']) -> MetaModel:
+    dt = astropy.time.Time(model.meta.datetime_obs, format="isot", scale="utc")
+    if model.meta.koa_date_obs is None:
+        model.meta.koa_date_obs = dt.strftime("%Y-%m-%d")
+    if model.meta.koa_utc_obs is None:
+        model.meta.koa_utc_obs = dt.strftime("%H:%M:%S.%f").rstrip("0").rstrip(".")
+
+def _set_koa_meta(model: 'DataModel') -> 'DataModel':
+    model.meta.koa_id = model.meta.filename
+    if model.meta.koa_id is not None:
+        model.meta.koa_filepath = generate_koa_filehandle(
+            model.meta.instrument_name,
+            model.meta.datetime_obs,
+            model.meta.koa_id
+        )
+    else:
+        model.meta.koa_filepath = None
+    return model
+
+def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> 'DataModel':
+
+    from ..primitives.utils import (
+        get_stellar_data_gaia_from_source_id,
+        get_2mass_from_gaia
+    )
+
+    if gaia_id is None:
+        gaia_id = model.meta.target_gaia_id
+    
+    gaia_props = [p for p in model.meta.fields if p.startswith('target_gaia_')]
+    if (
+        model.meta.target_gaia_id is not None
+        and any(getattr(model.meta, p) is None for p in gaia_props)
+    ):
+        gaia_data = get_stellar_data_gaia_from_source_id(model.meta.target_gaia_id)
+        model.meta.set_default('target_gaia_epoch', gaia_data['ref_epoch'])
+        model.meta.set_default('target_gaia_px', gaia_data['parallax'])
+        model.meta.set_default('target_gaia_ra', gaia_data['ra'])
+        model.meta.set_default('target_gaia_dec', gaia_data['dec'])
+        model.meta.set_default('target_gaia_rapm', gaia_data['pmra'])
+        model.meta.set_default('target_gaia_decpm', gaia_data['pmdec'])
+        model.meta.set_default('target_gaia_teff', gaia_data['teff_gspphot'])
+        model.meta.set_default('target_gaia_rvsys', gaia_data['radial_velocity'])
+        model.meta.set_default('target_gaia_vbroad', gaia_data['vbroad'])
+
+        if model.meta.target_2mass_id is None:
+            tmass_data = get_2mass_from_gaia(model.meta.target_gaia_id)
+            model.meta.set_default('target_2mass_id', tmass_data['twomass_id'])
+            model.meta.set_default('target_2mass_mag_j', tmass_data['j_m'])
+            model.meta.set_default('target_2mass_mag_h', tmass_data['h_m'])
+            model.meta.set_default('target_2mass_mag_ks', tmass_data['ks_m'])
+
+def get_instrument_alias(instrument_name : str, spectrograph : str | None = None) -> str:
     """
-    Merge the meta information from multiple DataModel instances.
+    Get the instrument alias for a given instrument name.
 
     Parameters
     ----------
-    models : list[DataModel]
-        List of DataModel instances to merge meta information from.
+    instrument_name : str
+        The instrument name.
 
     Returns
     -------
-    meta : MetaModel
-        Merged metadata model.
+    instrument_alias : str
+        The instrument alias.
     """
-    meta_class = models[0].meta.__class__
-    merged_data = {}
+    config = get_instrument_config(instrument_name=instrument_name)
+    return config.get_instrument_alias(spectrograph=spectrograph)
 
-    for key, field in meta_class.model_fields.items():
-        values = [getattr(model.meta, key) for model in models]
-        if not values:
-            continue
-        merge_rule = field.json_schema_extra.get('merge_rule', 'first') or 'first'
-        if merge_rule == 'drop':
-            merged_value = None
-        elif merge_rule == 'first':
-            merged_value = values[0]
-        elif merge_rule == 'last':
-            merged_value = values[-1]
-        elif merge_rule == 'sum':
-            merged_value = np.sum(np.array(values).astype(float))
-        elif merge_rule == 'max':
-            merged_value = np.max(np.array(values).astype(float))
-        elif merge_rule == 'min':
-            merged_value = np.min(np.array(values).astype(float))
-        elif merge_rule == 'mean':
-            merged_value = np.mean(np.array(values).astype(float))
-        elif merge_rule == 'coalesce':
-            first_non_none = next((v for v in values if v is not None), None)
-            other_values = [v for v in values if v is not None and v != first_non_none]
-            if other_values:
-                warnings.warn("Multiple differing non-None values detected, using the first one")
-            merged_value = first_non_none
-        elif merge_rule == 'min_datetime':
-            datetime_values = [np.datetime64(v) for v in values if v is not None]
-            merged_value = str(np.min(np.array(datetime_values))) if datetime_values else None
-        elif merge_rule == 'max_datetime':
-            datetime_values = [np.datetime64(v) for v in values if v is not None]
-            merged_value = str(np.max(np.array(datetime_values))) if datetime_values else None
-        elif merge_rule == 'mean_datetime':
-            datetime_values = [np.datetime64(v) for v in values if v is not None]
-            merged_value = str(np.mean(np.array(datetime_values))) if datetime_values else None
-        elif callable(merge_rule):
-            merged_value = merge_rule(values)
-        else:
-            raise ValueError(f"Unknown merge rule '{merge_rule}' for meta field '{key}'")
-        merged_data[key] = merged_value
-    return meta_class(**merged_data)
+def _as_model_list(other: DataModel | list[DataModel] | dict[DataModel]) -> list[DataModel]:
+    from .base_model import DataModel
+    if isinstance(other, DataModel):
+        return [other]
+    elif isinstance(other, dict):
+        return list(other.values())
+    elif isinstance(other, list):
+        return other
+    raise ValueError(f"Expected DataModel, list, or dict — got {type(other).__name__}")
+
+def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        for row in model.receipt:
+            target.receipt.add_row(row)
+
+def append_calibrations(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        for row in model.calibrations:
+            target.calibrations.add_row(row)
+
+def append_ancestors(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    for model in _as_model_list(other):
+        new_cols = [c for c in model.data_ancestors.colnames if c not in target.data_ancestors.colnames]
+        if new_cols:
+            target._extend_data_ancestors_columns(new_cols)
+
+        for row in model.data_ancestors:
+            row_dict = {c: row[c] for c in model.data_ancestors.colnames}
+            target.data_ancestors.add_row(row_dict)

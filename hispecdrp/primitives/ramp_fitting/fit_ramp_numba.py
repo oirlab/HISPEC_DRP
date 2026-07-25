@@ -1,7 +1,7 @@
 from numba import njit, prange
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
-from .utils import get_mid_delta_times_ramp, get_ramp_chunks, bitwise_or_reduce
+from .utils import get_mid_delta_times_ramp, get_ramp_chunks, bitwise_or_reduce, seconds_to_mjd_offset
 from ...utils.parallelization_utils import numba_thread_scope
 
 SATURATED_FLAG = DQ_FLAGS["SATURATED"]
@@ -58,23 +58,38 @@ def _fit_ramp_slope_pedestal(
 
     n_chunk = 0
     for k in range(len(first_indices)):
-        if first_indices[k] == last_indices[k] or rdnoise == 0:
+        if first_indices[k] == last_indices[k]:
             continue
         _times = times[first_indices[k]: last_indices[k]]
         _ramp = ramp[first_indices[k]: last_indices[k]]
 
-        n = len(_times) / rdnoise**2
-        times_tot = np.sum(_times) / rdnoise**2
-        times2_tot = np.sum(_times**2) / rdnoise**2
-        ramp_tot = np.sum(_ramp) / rdnoise**2
-        timesramp_tot = np.sum(_times * _ramp) / rdnoise**2
-        deno = (n * times2_tot - times_tot**2)
+        # n = len(_times) / rdnoise**2
+        # times_tot = np.sum(_times) / rdnoise**2
+        # times2_tot = np.sum(_times**2) / rdnoise**2
+        # ramp_tot = np.sum(_ramp) / rdnoise**2
+        # timesramp_tot = np.sum(_times * _ramp) / rdnoise**2
+        # deno = (n * times2_tot - times_tot**2)
 
+        if rdnoise == 0.0:
+            n = len(_times)
+            times_tot = np.sum(_times)
+            times2_tot = np.sum(_times**2)
+            ramp_tot = np.sum(_ramp)
+            timesramp_tot = np.sum(_times * _ramp)
+        else:
+            inv_var = 1.0 / (rdnoise * rdnoise)
+            n = len(_times) * inv_var
+            times_tot = np.sum(_times) * inv_var
+            times2_tot = np.sum(_times**2) * inv_var
+            ramp_tot = np.sum(_ramp) * inv_var
+            timesramp_tot = np.sum(_times * _ramp) * inv_var
+
+        deno = (n * times2_tot - times_tot**2)
         slope = (n * timesramp_tot - times_tot * ramp_tot) / deno
         b = (times2_tot * ramp_tot - times_tot * timesramp_tot) / deno
 
         var_rnoise = n / deno
-        var_poisson = np.abs((slope + dark_current) * gain) / (_times[-1] - _times[0])
+        var_poisson = np.abs((slope + dark_current)) / ((_times[-1] - _times[0])* gain)
         b_var = times2_tot / deno
 
         if var_rnoise + var_poisson > 0:
@@ -135,7 +150,9 @@ def _fit_ramps_slope_pedestal(
             )
 
             slope_image[i, j], slope_err[i, j], var_rnoise[i, j], var_poisson[i, j], b[i, j], b_err[i, j] = out
-            mid_time[i, j] = start_times[i, j] + get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            mid_time[i, j] = start_times[i, j] + seconds_to_mjd_offset(
+                get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            )
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)
@@ -297,11 +314,11 @@ def _fit_ramp_mcds(
         d2md1 = (d2 - d1)
         slope = (n2 - n1) / d2md1
 
-        var_rnoise = (2 * num_coadd) * rdnoise**2 / d2md1**2
+        var_rnoise = (2 * num_coadd) * (rdnoise/num_coadd)**2 / d2md1**2
         if dark_current is not None:
-            var_poisson = np.abs((slope + dark_current) * gain) / d2md1
+            var_poisson = np.abs((slope + dark_current)) / (d2md1*gain)
         else:
-            var_poisson = np.abs(slope * gain) / d2md1
+            var_poisson = np.abs(slope) / (d2md1*gain)
 
         var_sum = var_rnoise + var_poisson
         if var_sum > 0:
@@ -314,7 +331,8 @@ def _fit_ramp_mcds(
             poisson_denom_sum += 1 / var_poisson
 
     if n_chunk == 0 or slope_denom_sum == 0:
-        slope, slope_err, var_rnoise, var_poisson = 0.0, -1.0, -1.0, -1.0
+        #slope, slope_err, var_rnoise, var_poisson = 0.0, -1.0, -1.0, -1.0
+        slope, slope_err, var_rnoise, var_poisson = 0.0, 0.0, 0.0, 0.0
     else:
         slope = slope_num_sum / slope_denom_sum
         slope_err = np.sqrt(1 / slope_denom_sum)
@@ -353,7 +371,9 @@ def _fit_ramps_mcds(
             )
 
             slope_image[i, j], slope_err[i, j], var_rnoise[i, j], var_poisson[i, j] = out
-            mid_time[i, j] = start_times[i, j] + get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            mid_time[i, j] = start_times[i, j] + seconds_to_mjd_offset(
+                get_mid_delta_times_ramp(times, dq_raw[:, i, j])
+            )
 
             # if all reads are flagged as bad, set output DQ of rate to DO_NOT_USE
             # _if_all_reads_bad = np.all(dq[:,i, j] & DO_NOT_USE_FLAG_uint8 == DO_NOT_USE_FLAG_uint8)

@@ -1,30 +1,39 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import os
-import astropy.table
+from astropy.table import Table, Column
 from astropy.io import fits
 from copy import deepcopy
-from datetime import datetime
 
-from .hispec_config import HISPECConfig
-from .parvi_config import PARVIConfig
-from .meta_data import MetaModel
 from hispecdrp import __version__
 import numpy as np
 import warnings
 from astropy.io.fits.verify import VerifyWarning
-import uuid
-from typing import Any, Sequence
-from .utils import open as datamodel_open, merge_meta, get_config_from_hdulist
+from uuid import uuid4 as make_uuid4
+from typing import Any, Sequence, Self, ClassVar, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..primitives.base_primitive import BasePrimitive
+
+from hispecdrp.calibrations.hispec_store import HISPECCalibrationStore
+
+from .utils import (
+    open as datamodel_open,
+    get_instrument_config,
+    append_ancestors as _append_ancestors,
+    append_receipts as _append_receipts,
+    append_calibrations as _append_calibrations,
+)
+
+from .meta_data import MetaModel, merge_meta, get_meta_schema
 from ..utils import convert_endianness
-
-from ..calibrations import get_calibration_orm_class, pydantic_field_to_sqlalchemy_column, get_orm_field_name
-
 from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS
+from .utils import _set_datetime_meta, _set_koa_meta, _set_target_meta
 
-from .dqflags import DQ_FLAGS
-
-from koa_middleware import CalibrationORM
 from koa_middleware import CalibrationStore
+from koa_middleware.utils import get_koa_id_timestamp_from_datetime, get_env_var_bool
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 _VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
@@ -33,10 +42,17 @@ class DataModel:
     """
     Base class for data models.
 
-    Class Attributes:
-        EXTENSIONS (dict): Extensions and their properties.
-        INHERIT_EXTENSIONS (bool): Whether to inherit extensions from parent class. Defaults to True.
-        ALLOWED_ATTRIBUTES (list): List of attributes that can be set directly on the DataModel.
+    Parameters
+    ----------
+    EXTENSIONS : dict
+        Extensions and their properties.
+    _INHERIT_EXTENSIONS : bool
+    Whether to inherit extensions from parent class. Defaults to True.
+        Whether to inherit extensions from parent class. Defaults to True.
+    _ALLOWED_ATTRIBUTES : list[str]
+        List of attributes that can be set directly on the DataModel.
+    _DEFAULT_INSTRUMENT : str
+        Default instrument name for the DataModel.
     """
 
     EXTENSIONS = {
@@ -46,27 +62,25 @@ class DataModel:
         **DATA_ANCESTORS,
     }
 
-    INHERIT_EXTENSIONS = True
-
-    ALLOWED_ATTRIBUTES = [
-        'EXTENSIONS', 'INHERIT_EXTENSIONS',
-        'meta', '_data', '_filepath', 'ALLOWED_ATTRIBUTES',
-        'DEFAULT_CONFIG', 'config',
+    _ALLOWED_ATTRIBUTES = [
+        'meta', 'config', 'EXTENSIONS',
     ]
 
-    DEFAULT_CONFIG = HISPECConfig
+    _INHERIT_EXTENSIONS = True
 
-    DQ_FLAGS = DQ_FLAGS
+    _DEFAULT_INSTRUMENT = 'HISPEC'
 
     def __init__(
         self,
         filepath : str | None = None,
-        data : dict | None = None,
-        meta : MetaModel | None = None,
+        meta : MetaModel | dict | None = None,
         meta_only : bool = False,
         extensions : str | list[str] | None = None,
         correct_dtypes : bool = False,
         config : type | None = None,
+        validate_meta : bool = True,
+        instrument_name : str | None = None,
+        **kwargs
     ):
         """
         Initialize a DataModel object.
@@ -77,28 +91,37 @@ class DataModel:
             Path to a FITS file to load.
         data : dict, optional
             Dictionary containing the data (numpy arrays or astropy tables). Keys should match the schema's extension names.
-        meta : dict, optional
-            Dictionary containing metadata. Keys should match the schema's property paths.
+        meta : MetaModel | dict | None, optional
+            Metadata as a MetaModel instance or dictionary. Keys should match the schema's property paths.
         meta_only : bool, optional
             If True, only metadata is loaded and no data is read from the FITS file. Defaults to False.
         extensions : str, list[str], optional
             List of extensions to load from the FITS file. Defaults to all extensions.
         correct_dtypes : bool, optional
             Whether to correct the data types of the data arrays upon reading them in. Defaults to False.
-        config : Any, optional
-            The instrument config class. If None, uses self.DEFAULT_CONFIG.
+        config : type | None, optional
+            The instrument config class. If None, it will be determined based on the filepath and instrument name.
+        validate_meta : bool, optional
+            Whether to validate the metadata against the schema. Defaults to True.
+        kwargs
+            Any valid data attributes.
         """
 
+        # Resolve instrument config and name
         if config is not None:
             self.config = config
         else:
-            if filepath is not None:
-                with fits.open(filepath, memmap=True) as hdulist:
-                    self.config = get_config_from_hdulist(hdulist)
-                if self.config is None:
-                    self.config = self.DEFAULT_CONFIG
-            else:
-                self.config = self.DEFAULT_CONFIG
+            self.config = self._get_instrument_config(
+                meta=meta,
+                filepath=filepath,
+                instrument_name=instrument_name,
+            )
+
+        # Validate metadata or not
+        self._validate_meta = validate_meta
+
+        # Get the extension names now that we know the instrument
+        self.EXTENSIONS = self._get_extensions()
 
         # Set the optional filepath
         if filepath is not None:
@@ -106,40 +129,57 @@ class DataModel:
                 raise FileNotFoundError(f"File not found: {filepath}")
             self._filepath = os.path.abspath(filepath)
             self.init_meta(meta=meta)
+            self.meta.filename = os.path.basename(self._filepath)
             if not meta_only:
                 self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
-            else:
-                self._data = {}
         else:
             self._filepath = None
             self.init_meta(meta=meta)
             if not meta_only:
-                self.init_data(data=data, correct_dtypes=correct_dtypes)
-            else:
-                self._data = {}
+                self.init_data(correct_dtypes=correct_dtypes, **kwargs)
 
         # Hook
         self.on_init()
-    
-    def set_meta_from_headers(
-        self,
-        extensions : str | list[str] | None = None,
-    ) -> dict[str, fits.Header]:
-        """
-        Set the metadata from the headers of the FITS file.
+
+    def _get_extensions(self):
+        return self.EXTENSIONS
+
+    @classmethod
+    def _get_instrument_config(
+        cls,
+        meta : MetaModel | None,
+        filepath : str | None,
+        instrument_name : str | None = None,
+    ):
         
-        Args:
-            extensions (str, list[str], optional): List of extensions to read. Defaults to None.
-        """
-        extensions = self._resolve_extensions(extensions)
-        with fits.open(self._filepath, memmap=True) as hdulist:
-            for attr, field in self.meta.__class__.model_fields.items():
-                fits_hdu = field.json_schema_extra['fits_hdu']
-                fits_keyword = field.json_schema_extra['fits_keyword']
-                header = hdulist[fits_hdu].header
-                if fits_keyword in header:
-                    self.meta[attr] = header[fits_keyword]
-        return self.meta
+        # Instrument name from filepath
+        if instrument_name is not None:
+            config = get_instrument_config(instrument_name=instrument_name)
+            return config
+        
+        # Instrument name from provided metadata
+        if isinstance(meta, (MetaModel, dict)):
+            instrument_name = meta.get('instrument_name')
+            if instrument_name is not None:
+                config = get_instrument_config(instrument_name=instrument_name)
+                return config
+        
+        # Instrument name from FITS header
+        if instrument_name is None and isinstance(filepath, str):
+            config = get_instrument_config(filepath)
+
+        # Instrument name from environment variable
+        if instrument_name is None:
+            instrument_name = os.getenv('HISPECDRP_INSTRUMENT_NAME')
+        
+        # Log error
+        if instrument_name is None:
+            instrument_name = cls._DEFAULT_INSTRUMENT
+
+        # Get config for this instrument
+        config = get_instrument_config(instrument_name=instrument_name)
+
+        return config
     
     def read_data(
         self,
@@ -150,24 +190,65 @@ class DataModel:
         """
         Read the data from the FITS file.
 
-        Args:
-            extensions (str, list[str], optional): List of extensions to read. Defaults to None.
-            do_not_scale_image_data (bool | None, optional): Whether to not scale data according to BZERO and BSCALE. See astropy behavior.
-            correct_dtypes (bool, optional): Whether to correct the data types of each data format to the specified data format.
+        Parameters
+        ----------
+        extensions : str or list of str, optional
+            List of extensions to read. Defaults to None.
+        do_not_scale_image_data : bool or None, optional
+            Whether to not scale data according to BZERO and BSCALE. See astropy behavior.
+        correct_dtypes : bool, optional
+            Whether to correct the data types of each data format to the specified data format.
+
         """
         extensions = self._resolve_extensions(extensions)
-        self._data = {}
         with fits.open(
             self._filepath,
             memmap=False,
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
+                extl = extname.lower()
                 if extname in hdulist:
-                    self._data[extname] = self.read_extension_data(hdulist[extname], correct_dtype=correct_dtypes)
-        return self._data
+                    data = self.read_extension_data(
+                        hdulist[extname],
+                        correct_dtype=correct_dtypes
+                    )
+                    setattr(self, extl, data)
+                elif extname not in self.EXTENSIONS:
+                    raise ValueError(f"Extension {extname} not found in FITS file: {self._filepath}")
+
+        # Initialize remaining extensions not set by user or FITS file
+        for extname in self.EXTENSIONS:
+            extl = extname.lower()
+            if getattr(self, extl, None) is None:
+                if 'columns' in self.EXTENSIONS[extname]:
+                    setattr(self, extl, Table({
+                        name: np.array([], dtype=dtype)
+                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
+                    }))
+                else:
+                    setattr(self, extl, None) # Keep Image HDUs as None
     
-    def read_extension_data(self, hdu : _VALID_HDU, correct_dtype : bool = False) -> np.ndarray | astropy.table.Table:
+    def read_extension_data(
+        self, hdu : _VALID_HDU,
+        correct_dtype : bool = False
+    ) -> np.ndarray | Table:
+        """
+        Read data from a specific HDU.
+
+        Parameters
+        ----------
+        hdu : _VALID_HDU
+            The HDU to read data from.
+        correct_dtype : bool, optional
+            Whether to correct the data type of the data. Defaults to False.
+
+        Returns
+        -------
+        data : np.ndarray or Table
+            If an ImageHDU, returns a numpy ndarray.
+            If a BinTableHDU, returns an astropy Table.
+        """
         hdu_type = type(hdu)
         data = hdu.data
         if hdu_type is fits.ImageHDU:
@@ -175,11 +256,11 @@ class DataModel:
             if data is not None:
                 if not np.issubdtype(data.dtype, dtype):
                     if correct_dtype:
-                        warnings.warn(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
+                        logger.warning(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
                         data = data.astype(dtype, copy=False)
                 data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
-            data = astropy.table.Table(data)
+            data = Table(data)
         return data
 
     def save(
@@ -188,7 +269,7 @@ class DataModel:
         filename : str | None = None,
         output_dir : str | None = None,
         suffix : str | None = None,
-        add_missing_metadata : bool = False,
+        include_missing_metadata : bool = False,
         include_empty_extensions : bool = False,
         correct_dtypes : bool = False,
         **kwargs
@@ -196,78 +277,156 @@ class DataModel:
         """
         Save the DataModel to a FITS file.
 
-        Args:
-            filepath (str, optional): The filepath to save to. Defaults to self._filepath.
-            filename (str, optional): The filename to save to. Defaults to None.
-            output_dir (str, optional): The directory to save to. Defaults to None.
-            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
-            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
-            include_empty_extensions (bool, optional): Whether to include empty extensions in the output. Defaults to False.
-            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
-            kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
+        Parameters
+        ----------
+        filepath : str, optional
+            The filepath to save to. Defaults to self._filepath.
+        filename : str, optional
+            The filename to save to. Defaults to None.
+        output_dir : str, optional
+            The directory to save to. Defaults to None.
+        suffix : str, optional
+            An optional suffix to append to the filename. Defaults to None.
+        include_missing_metadata : bool, optional
+            Whether to add missing metadata to the header. Defaults to False.
+        include_empty_extensions : bool, optional
+            Whether to include empty extensions in the output. Defaults to False.
+        correct_dtypes : bool, optional
+            Whether to correct the data types of the data arrays. Defaults to False.
+        **kwargs
+            Additional keyword arguments to pass to the fits.HDUList.writeto method.
         """
+        # TODO: Reconsider how _filepath is set.
         if filepath is not None:
             self._filepath = filepath
         else:
-            self._filepath = self.get_output_path(
+            self._filepath = self._generate_output_path(
                 filename=filename,
                 output_dir=output_dir,
                 suffix=suffix
             )
+            
         self.on_save()
-        return self.to_fits(
+        hdulist = self.to_hdulist(
             include_empty_extensions=include_empty_extensions,
-            add_missing_metadata=add_missing_metadata,
+            include_missing_metadata=include_missing_metadata,
             correct_dtypes=correct_dtypes,
-            **kwargs
         )
+        self._save_fits(hdulist, **kwargs)
+        return self._filepath
     
-    def get_output_path(
+    def _generate_output_path(
         self,
         filename : str | None = None,
         output_dir : str | None = None,
         suffix : str | None = None,
     ) -> str:
         if output_dir is not None and filename is not None:
-            filepath = os.path.join(output_dir, filename)
+            self.meta.filename = filename
+            return os.path.join(
+                os.path.abspath(output_dir),
+                filename
+            )
         elif output_dir is not None and filename is None:
             filename = self.generate_filename(suffix=suffix)
-            filepath = os.path.abspath(os.path.join(output_dir, filename))
+            return os.path.join(
+                os.path.abspath(output_dir),
+                filename
+            )
         elif output_dir is None and filename is not None:
-            filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
+            return os.path.join(os.getcwd(), filename)
         else:
             filename = self.generate_filename(suffix=suffix)
-            filepath = os.path.abspath(os.path.join(os.getcwd(), filename))
-        return filepath
+            return os.path.join(os.getcwd(), filename)
 
-    def to_fits(self, include_empty_extensions : bool = False, add_missing_metadata : bool = False, correct_dtypes : bool = True, output_verify : str = 'fix', **kwargs):
+    def get_output_path(
+        self,
+        filename: str | None = None,
+        output_dir: str | None = None,
+        suffix: str | None = None,
+    ) -> str:
+        """Return the FITS path that :meth:`save` would write for ``output_dir`` / ``suffix``."""
+        return self._generate_output_path(
+            filename=filename,
+            output_dir=output_dir,
+            suffix=suffix,
+        )
+    
+    def to_hdulist(
+        self,
+        include_empty_extensions : bool = False,
+        include_missing_metadata : bool = False,
+        correct_dtypes : bool = False,
+    ) -> str:
         """
         Write the DataModel to a FITS file.
         
-        Args:
-            kwargs: Additional keyword arguments to pass to the fits.HDUList.writeto method.
+        Parameters
+        ----------
+        include_empty_extensions : bool, optional
+            Whether to include empty extensions in the output. Defaults to False.
+        include_missing_metadata : bool, optional
+            Whether to add missing metadata to the header. Defaults to False.
+        correct_dtypes : bool, optional
+            Whether to correct the data types of the data arrays. Defaults to False.
+
+        Returns
+        -------
+        str
+            The filepath the DataModel was saved to.
         """
-        if 'overwrite' not in kwargs:
-            kwargs['overwrite'] = True
-        if self._filepath is None:
-            raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         hdulist = fits.HDUList()
         extensions_list = list(self.EXTENSIONS.keys())
         extensions_list = ['PRIMARY'] \
-                        + [e for e in self.EXTENSIONS.keys() if e not in {'PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS'}] \
-                        + ['RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS']
+            + [e for e in self.EXTENSIONS.keys() if e not in {'PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS'}] \
+            + ['RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS']
         for extname in extensions_list:
             if not include_empty_extensions \
-                and (extname not in self._data or self._data[extname] is None) \
+                and self._extension_missing_or_empty(extname) \
                 and extname not in ('RECEIPT', 'PRIMARY'):
                 continue
-            hdu = self.make_hdu(extname, add_missing_metadata=add_missing_metadata, correct_dtypes=correct_dtypes)
-            hdulist.append(hdu)
+            hdu = self.make_hdu(
+                extname,
+                include_missing_metadata=include_missing_metadata,
+                correct_dtypes=correct_dtypes
+            )
+            if hdu is not None:
+                hdulist.append(hdu)
+        
+        return hdulist
+
+    def _extension_missing_or_empty(self, extname: str) -> bool:
+        """
+        True if extension data is absent or an empty BinTable.
+
+        Empty :class:`astropy.table.Table` (0 rows) must be treated like missing when
+        building FITS output with ``include_empty_extensions=False``: Astropy cannot
+        serialize 0-row tables that include object columns (e.g. variable-length
+        ``CCF`` arrays) because no row exists to infer inner dtypes
+        (:func:`astropy.io.fits.table_to_hdu` / ``ColDefs._init_from_array``).
+        """
+        extl = extname.lower()
+        val = getattr(self, extl, None)
+        if val is None:
+            return True
+        if isinstance(val, Table) and len(val) == 0:
+            return True
+        return False
+
+    def _save_fits(
+        self,
+        hdulist : fits.HDUList,
+        **kwargs
+    ):
+        if self._filepath is None:
+            raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
+        kwargs.setdefault('overwrite', True)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', VerifyWarning)
-            hdulist.writeto(self._filepath, output_verify=output_verify, **kwargs)
-
-        return self._filepath
+            hdulist.writeto(
+                self._filepath,
+                **kwargs
+            )
 
     def on_init(self):
         """
@@ -278,6 +437,22 @@ class DataModel:
             self.meta.filename = os.path.basename(self._filepath)
         self.meta.drp_version = __version__
 
+        _set_datetime_meta(self)
+        _set_koa_meta(self)
+        _set_target_meta(self)
+
+        if self.meta.last_processed is None:
+            self.meta.last_processed = self.meta.datetime_obs
+
+        if self.meta.instrument_era is None:
+           self.meta.instrument_era = "0.0.1"
+
+        # Apply instrument metadata defaults
+        self.config.set_meta_defaults(self)
+
+        # if self.meta.filename is None:
+        #     self.generate_filename()
+
     def on_save(self):
         """
         Hook called before a datamodel is saved. The default implementation:
@@ -286,46 +461,75 @@ class DataModel:
         if self._filepath is None:
             raise ValueError("No filepath specified. Set self._filepath to save the DataModel.")
         self.meta.filename = os.path.basename(self._filepath)
-        if self.meta.last_updated is None:
-            self.meta.last_updated = datetime.now().isoformat(timespec="milliseconds")
-        self.meta.model_type = self.__class__.__name__
+        _set_koa_meta(self)
 
-    def make_hdu(self, extname : str, add_missing_metadata : bool = False, correct_dtypes : bool = True) -> _VALID_HDU:
+    def make_hdu(
+        self,
+        extname : str,
+        include_missing_metadata : bool = False,
+        correct_dtypes : bool = False
+    ) -> _VALID_HDU:
         """
         Create an HDU for an extension name.
         
-        Args:
-            extname (str): The extension name.
-            add_missing_metadata (bool, optional): Whether to add missing metadata to the header. Defaults to False.
-            correct_dtypes (bool, optional): Whether to correct the data types of the data arrays. Defaults to False.
+        Parameters
+        ----------
+        extname : str
+            The extension name.
+        include_missing_metadata : bool, optional
+            Whether to add missing metadata to the header. Defaults to False.
+        correct_dtypes : bool, optional
+            Whether to correct the data types of the data arrays. Defaults to False.
         """
+        extl = extname.lower()
         hdu_class = self.EXTENSIONS[extname]['hdu_type']
-        header = self.meta.to_fits_header(extname=extname, add_missing_metadata=add_missing_metadata)
+        header = self.meta.to_fits_header(
+            extname=extname,
+            include_missing_metadata=include_missing_metadata
+        )
+
+        # Primary HDU is empty, only header
         if hdu_class is fits.PrimaryHDU:
-            return hdu_class(header=header)
-        if hdu_class is fits.ImageHDU:
-            data = self._data.get(extname, None)
+            hdu = hdu_class(header=header)
+        
+        # Convert Image HDU data to correct dtype if needed
+        elif hdu_class is fits.ImageHDU:
+            data = getattr(self, extl, None)
             if data is not None and correct_dtypes:
                 dtype = self.EXTENSIONS[extname]['dtype']
-                _data = data.astype(dtype)
-            else:
-                _data = data
-            hdu = hdu_class(data=_data, name=extname, header=header)
+                data = data.astype(dtype)
+            hdu = hdu_class(data=data, name=extname)
+        
+        # Nothing special for BIN tables
         elif hdu_class is fits.BinTableHDU:
-            data = self._data.get(extname, None)
-            hdu = hdu_class(data=data, name=extname, header=header)
-        return hdu
+            data = getattr(self, extl, None)
+            if data is None:
+                return None
+            elif len(data) == 0:
+                dtypes = {name: data[name].dtype for name in data.colnames}
+                if any(dtype == object for dtype in dtypes.values()):
+                    return None
+                else:
+                    return hdu_class(data=data, name=extname)
+            else:
+                return hdu_class(data=data, name=extname)
+            #if data is None:
+            #    hdu = hdu_class(data=data, name=extname)
+            #elif isinstance(data, Table):
 
+
+        return hdu
+    
     def __repr__(self):
-        if self._filepath is not None:
-            return f"{self.__class__.__name__}('{os.path.basename(self._filepath)}')"
+        if self.meta.filename is not None:
+            return f"{self.__class__.__name__}('{self.meta.filename}')"
         else:
             return f"{self.__class__.__name__}()"
     
     def __init_subclass__(cls):
         subclasses = cls.mro()[::-1]
         for _cls in subclasses:
-            if hasattr(_cls, "EXTENSIONS") and cls.INHERIT_EXTENSIONS:
+            if hasattr(_cls, "EXTENSIONS") and cls._INHERIT_EXTENSIONS:
                 for extname in _cls.EXTENSIONS:
                     if extname not in cls.EXTENSIONS:
                         cls.EXTENSIONS[extname] = _cls.EXTENSIONS[extname]
@@ -334,19 +538,28 @@ class DataModel:
             if 'RECEIPT' in cls.EXTENSIONS:
                 cls.EXTENSIONS = {**{k: v for k, v in cls.EXTENSIONS.items() if k != 'RECEIPT'}, 'RECEIPT': cls.EXTENSIONS['RECEIPT']}
 
-    def copy(self):
+    def copy(self) -> Self:
         """
-        Create a deep copy of the object.
+        Create a deep copy of the DataModel object.
         """
         model_out = deepcopy(self)
         model_out._filepath = None
+        if model_out.meta.cal_type is not None:
+            model_out.meta.cal_id = None
         return model_out
     
-    def __deepcopy__(self, memo):
-        result = self.__class__.__new__(self.__class__)
+    def __deepcopy__(self, memo) -> Self:
+        cls = self.__class__
+        result = cls.__new__(cls)
         memo[id(self)] = result
+
         for k, v in self.__dict__.items():
-            setattr(result, k, deepcopy(v, memo))
+            # Skip things that shouldn't be deepcopied
+            if isinstance(v, (type, type(deepcopy), type(None))):
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+
         return result
 
     def _resolve_extensions(self, extensions : str | list[str] | None = None):
@@ -356,132 +569,208 @@ class DataModel:
             return [extensions.upper()]
         else:
             return [e.upper() for e in extensions]
-
-    def __getattr__(self, attr): # This is only called if the attribute is not found in the instance's __dict__
-        attru = attr.upper()
-        if attru not in self.EXTENSIONS:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
-        if attru in self._data:
-            return self._data[attru]
-        else:
-            return None
         
+    def __getattr__(self, attr):
+        attrl = attr.lower()
+
+        if attrl in self.__dict__:
+            return self.__dict__[attrl]
+
+        # Or try super's getattr if the parent class has it
+        try:
+            return super().__getattribute__(attrl)
+        except AttributeError:
+            pass
+
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'")
+
     def __setattr__(self, attr, value):
+        if attr.startswith("_") or attr in self._ALLOWED_ATTRIBUTES:
+            return super().__setattr__(attr, value)
+
         attru = attr.upper()
         if attru in self.EXTENSIONS:
-            self._data[attru] = value
-        elif attr in self.ALLOWED_ATTRIBUTES:
-            super().__setattr__(attr, value)
-        else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}' or is not allowed to be set directly")
+            attrl = attru.lower()
+            return super().__setattr__(attrl, value)
 
-    def init_data(self, data : dict | None = None, correct_dtypes : bool = False):
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{attr}' "
+            "or is not allowed to be set directly"
+        )
+
+    def init_data(
+        self,
+        correct_dtypes : bool = False,
+        **kwargs
+    ):
         """
         Initialize the data.
 
-        Args:
-            data (dict, optional): Dictionary containing data arrays (numpy) or tables (DataFrames).
-                Keys should match the schema's extension names. Defaults to None.
+        Parameters
+        ----------
+        correct_dtypes : bool, optional
+            Whether to correct the data types of the data arrays upon initializing them. Defaults to False.
+        kwargs
+            Any valid data attributes to set.
         """
-        self._data = {}
-        if data is not None:
-            for key in data:
-                if key.upper() in self.EXTENSIONS:
-                    if isinstance(data[key], astropy.table.Table):
-                        self._data[key.upper()] = data[key]
-                    elif isinstance(data[key], np.ndarray):
-                        if correct_dtypes:
-                            self._data[key.upper()] = data[key].astype(self.EXTENSIONS[key.upper()]['dtype'])
-                        else:
-                            self._data[key.upper()] = data[key]
+
+        # User input data via kwargs
+        for key in kwargs:
+            keyu = key.upper()
+            keyl = key.lower()
+            val = kwargs[key]
+            if keyu in self.EXTENSIONS:
+                if isinstance(val, Table):
+                    setattr(self, keyl, val)
+                elif isinstance(val, np.ndarray):
+                    if correct_dtypes:
+                        setattr(self, keyl, val.astype(self.EXTENSIONS[keyu]['dtype']))
+                    else:
+                        setattr(self, keyl, val)
+            else:
+                raise ValueError(f"Unknown extension: {key.upper()}")
+            
+        def _init_empty_table(extdef : dict) -> Table:
+            cols = []
+            for name, spec in extdef["columns"].items():
+                if isinstance(spec, dict):
+                    dtype = spec.get("dtype")
+                    shape = spec.get("shape")
                 else:
-                    raise ValueError(f"Unknown extension: {key.upper()}")
-        if 'RECEIPT' not in self._data:
-            self.init_receipt()
+                    dtype = spec
+                    shape = None
+                if shape is not None:
+                    data = np.empty((0, *shape), dtype=dtype)
+                else:
+                    data = np.empty(0, dtype=dtype)
+                cols.append(Column(name=name, data=data))
+            return Table(cols)
 
         # Initialize remaining extensions
         for extname in self.EXTENSIONS:
-            if extname not in self._data:
+            extl = extname.lower()
+            if getattr(self, extl, None) is None:
                 if 'columns' in self.EXTENSIONS[extname]:
-                    self._data[extname] = astropy.table.Table({
-                        name: np.array([], dtype=dtype)
-                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    })
+                    # setattr(self, extl, Table({
+                    #     name: np.array([], dtype=dtype)
+                    #     for name, dtype in self.EXTENSIONS[extname]['columns'].items()
+                    # }))
+                    setattr(
+                        self, extl,
+                        _init_empty_table(self.EXTENSIONS[extname])
+                    )
                 else:
-                    self._data[extname] = None # Keep Image HDUs as None
+                    setattr(self, extl, None)
 
-    def init_meta(self, meta : MetaModel | dict | None = None) -> MetaModel:
+    def init_meta(self, meta: dict | MetaModel | None = None):
         """
         Initialize the metadata and optionally merge in provided metadata.
 
         Parameters
         ----------
-        meta : MetaModel | dict, optional
+        meta : dict or MetaModel, optional
             Existing metadata to store or merge.
         """
-        
-        if isinstance(meta, MetaModel):
-            self.meta = meta
-            return self.meta
-        
+
+        # Get meta schema
+        meta_schema = get_meta_schema(config=self.config)
+
         # Meta from file headers
         if self._filepath is None:
-            meta_from_headers = {}
+            meta_from_file = {}
         else:
-            meta_from_headers = self.read_meta_from_fits_headers()
+            meta_from_file = self.read_meta_from_fits_headers(schema=meta_schema)
 
-        if isinstance(meta, dict):
-            self.meta = self.config.meta_model(**(meta_from_headers | meta))
-        elif meta is None:
-            self.meta = self.config.meta_model(**meta_from_headers)
+        # Set initial meta from user input
+        if isinstance(meta, MetaModel):
+            self.meta = meta
+
+        # Case 2: dict or None -> build MetaModel
         else:
-            raise ValueError(f"Unknown type for meta: {type(meta)}")
-        return self.meta
-    
-    def read_meta_from_fits_headers(self) -> dict:
+            if meta is not None and not isinstance(meta, dict):
+                raise ValueError(f"Unknown type for meta: {type(meta)}")
+
+            merged = dict(meta_from_file)
+            if meta:
+                merged |= meta
+
+            self.meta = MetaModel(meta_schema, merged)
+
+    def read_meta_from_fits_headers(self, schema : dict) -> dict:
         """
         Read metadata from the FITS headers.
 
-        Returns:
-            dict: Metadata dictionary with keys matching the model fields, and values read in from the FITS headers.
+        Returns
+        -------
+        meta_dict : dict
+            Dictionary of metadata read from the FITS headers.
+            Keys are property names, values are the corresponding header values.
         """
+        if schema is None:
+            schema = self.meta._schema
         meta_dict = {}
-        meta_model_class = self.config.meta_model
         with fits.open(self._filepath, memmap=True) as hdulist:
-            for attr, field in meta_model_class.model_fields.items():
-                fits_hdu = field.json_schema_extra['fits_hdu']
-                fits_keyword = field.json_schema_extra['fits_keyword']
+            for prop_name in schema['properties']:
+                sub_schema = schema['properties'][prop_name]
+                fits_hdu = sub_schema['fits_hdu']
+                fits_keyword = sub_schema['fits_keyword']
                 header = hdulist[fits_hdu].header
                 if fits_keyword in header:
-                    meta_dict[attr] = header[fits_keyword]
-                else:
-                    warnings.warn("Missing FITS keyword '{fits_keyword}' in HDU '{fits_hdu}' for metadata field '{attr}', using default value if available.")
-        
+                    meta_dict[prop_name] = header[fits_keyword]
         return meta_dict
 
-    def init_receipt(self):
-        """
-        Initialize the receipt.
-        """
-        if 'RECEIPT' not in self._data:
-            self._data['RECEIPT'] = astropy.table.Table({
-                name: np.array([], dtype=dtype)
-                for name, dtype in self.EXTENSIONS['RECEIPT']['columns'].items()
-            })
+    def _extend_data_ancestors_columns(self, new_columns : list[str]):
+        def _json_schema_to_python_dtype(t : str):
+            if t == 'string':
+                return np.str_
+            elif t == 'integer':
+                return np.int64
+            elif t == 'number':
+                return np.float64
+            elif t == 'boolean':
+                return bool
+            else:
+                raise ValueError(f"Unsupported JSON schema type: {t}")
+
+        for col in new_columns:
+            col = col.upper()
+            if col not in self.data_ancestors.colnames:
+                # Add new column with object dtype to support None
+                self.data_ancestors.add_column(Column(
+                    name=col,
+                    data=[None] * len(self.data_ancestors),
+                    dtype=_json_schema_to_python_dtype(
+                        self.meta._schema['properties'][col.lower()]['type']
+                    )
+                ))
 
     @property
     def extinfo(self):
         for extname, info in self.EXTENSIONS.items():
+            extl = extname.lower()
             hdu_type = info['hdu_type']
             if hdu_type is fits.PrimaryHDU:
                 continue
             if hdu_type is fits.ImageHDU:
-                if extname in self._data and self._data[extname] is not None:
-                    dtype = self._data[extname].dtype
-                    print(f"Extension: {extname}\n  dtype: {dtype}\n  shape: {self._data[extname].shape}")
+                data = getattr(self, extl, None)
+                if data is not None:
+                    dtype = data.dtype
+                    print(f"{extname}\n  dtype: {dtype}\n  shape: {data.shape}")
             elif hdu_type is fits.BinTableHDU:
-                if len(self._data[extname]) > 0:
-                    print(f"Extension: {extname}\n  columns: {list(self._data[extname].columns)}\n  nrows: {len(self._data[extname])})")
+                data = getattr(self, extl, None)
+                if data is not None:
+                    print(f"Extension: {extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
+
+    @property
+    def data_dict(self):
+        data = {}
+        for extname, info in self.EXTENSIONS.items():
+            extl = extname.lower()
+            hdu_type = info['hdu_type']
+            if hdu_type is fits.PrimaryHDU:
+                continue
+            data[extl] = getattr(self, extl, None)
+        return data
 
     @property
     def data_level_suffix(self):
@@ -491,9 +780,39 @@ class DataModel:
     def from_datamodels(
         cls,
         input : Any,
-        include_data: bool = True,
-        copy_data: bool = True,
+        append_receipts: bool = True,
+        ancestor_rule : str = 'these', # 'these', 'append', 'none'
+        append_calibrations: bool = True,
+        include_data : bool = False,
+        primitive : 'BasePrimitive' | None = None,
+        **kwargs
     ) -> 'DataModel':
+        """
+        Create a new DataModel by merging metadata from multiple input models.
+
+        Parameters
+        ----------
+        input : DataModel | str | list[DataModel | str] | dict[str, DataModel | str]
+            Input DataModel(s) or file path(s) to merge.
+        append_receipts : bool, optional
+            Whether to append receipts from input models. Defaults to True.
+        ancestor_rule : str, optional
+            Rule for handling data ancestors. Defaults to 'these'.
+            Rules are:
+                - 'these': Add the input models themselves to the data ancestors of the output model, but do not copy their ancestors.
+                - 'append': Copy the data ancestors from the input models to the output model, but do not include the input models themselves as ancestors.
+                - 'none': Do not copy ancestors or add input models as ancestors.
+
+        append_calibrations : bool, optional
+            Whether to append calibrations from input models. Defaults to True.
+        include_data : bool, optional
+            Whether to include data from the input model (must only be one). Defaults to False.
+
+        Returns
+        -------
+        DataModel
+            A new DataModel with merged metadata and optional data.
+        """
 
         if input is None:
             raise ValueError("No models provided")
@@ -502,31 +821,66 @@ class DataModel:
         if isinstance(input, (str, DataModel)):
             input = [input]
         elif isinstance(input, dict):
-            input = list(input.values())
+            input = [
+                item
+                for v in input.values()
+                for item in (v if isinstance(v, list) else [v])
+            ]
         elif not isinstance(input, Sequence):
             raise ValueError("Input must be a DataModel, filepath, list of DataModels/filepaths, or dict of DataModels/filepaths.")
+        
+        # Sort inputs by datetime_obs
+        input = sorted(input, key=lambda x: datamodel_open(x, meta_only=True).meta.datetime_obs)
 
         # Merge metadata
         meta_out = merge_meta(input)
 
+        # Get first model
+        first_model = datamodel_open(input[0])
+
         # Create new model
-        first_model = datamodel_open(input[0], meta_only=True)
-        model_out = cls(meta=meta_out, config=first_model.config)
+        model_out = cls(
+            meta=meta_out,
+            instrument_name=meta_out.instrument_name,
+            config=first_model.config,
+        )
 
-        # Merge data only if requested and single model
-        if include_data and len(input) == 1:
+        # Forward data?
+        if include_data:
+            assert len(input) == 1, "Cannot include data when merging multiple models. Set include_data=False or provide a single model."
             first_model = datamodel_open(input[0])
-            data_out = {k: v for k, v in first_model._data.items() if k in model_out.EXTENSIONS}
-            if copy_data:
-                data_out = deepcopy(data_out)
-            model_out._data.update(data_out)
+            for extname in model_out.EXTENSIONS:
+                if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS', 'RECEIPT'):
+                    continue
+                if extname in first_model.EXTENSIONS:
+                    extl = extname.lower()
+                    setattr(model_out, extl, getattr(first_model, extl, None))
 
-        # Always append receipt, data ancestors, and calibrations tables
+        ancestor_rule = ancestor_rule.lower()
         for _input in input:
+
             input_model = datamodel_open(_input)
-            model_out.append_receipts(input_model)
-            model_out.append_ancestors(input_model)
-            model_out.append_calibrations(input_model)
+
+            if append_receipts:
+                _append_receipts(model_out, input_model)
+
+            if ancestor_rule == 'append':
+                _append_ancestors(model_out, input_model)
+            elif ancestor_rule == 'these':
+                # Add THIS model to the ancestors table, not its ancestors
+                primitive.add_data_ancestors(model_out, input_model)
+            elif ancestor_rule == 'none':
+                # Do nothing
+                pass
+            else:
+                raise ValueError(f"Unknown ancestor_rule: {ancestor_rule}")
+
+            if append_calibrations:
+                _append_calibrations(model_out, input_model)
+
+        for k in kwargs:
+            if hasattr(model_out, k):
+                setattr(model_out, k, kwargs[k])
 
         return model_out
     
@@ -536,10 +890,20 @@ class DataModel:
     @staticmethod
     def _make_order_vec(order_start : int, order_end : int) -> np.ndarray:
         """
-        Create an order vector based on the order start and end metadata. If order_end < order_start, the vector will be in descending order.
+        Create an order vector based on the order start and end metadata.
+        If order_end < order_start, the vector will be in descending order.
+
+        Parameters
+        ----------
+        order_start : int
+            The starting order number.
+        order_end : int
+            The ending order number.
         
-        Returns:
-            np.ndarray: An array of integers from order_start to order_end.
+        Returns
+        -------
+        np.ndarray
+            An array of integers from order_start to order_end.
         """
         step = 1 if order_end >= order_start else -1
         return np.arange(order_start, order_end + step, step).astype(np.int16)
@@ -560,94 +924,18 @@ class DataModel:
         Returns:
             dict: A dictionary where keys are fiber numbers and values are dictionaries of attributes without the '_fib#' suffix.
         """
-        data = {}
-        for attr in self._data:
-            attr_lower = attr.lower()
-            if '_fib' in attr_lower:
+        trace_data = {}
+        for attr in self.EXTENSIONS:
+            attrl = attr.lower()
+            if '_fib' in attrl:
                 try:
-                    kind, fiber = attr_lower.rsplit('_fib', 1)
+                    kind, fiber = attrl.rsplit('_fib', 1)
                     fiber = int(fiber)
                 except ValueError:
                     continue
-                if fiber not in data:
-                    data[fiber] = {}
-                data[fiber][kind] = getattr(self, attr)
-        return data
-
-    def add_calibration(
-        self,
-        calibration : MetaModel | DataModel | str | dict,
-        cal_role : str,
-        date_time : str,
-        note : str | None = None,
-        replace_existing : bool = True,
-    ) -> None:
-        """
-        Add a calibration to the DataModel's calibrations table.
-        
-        Args:
-            calibration (MetaModel | DataModel | str | dict): The calibration to add. Can be:
-                - MetaModel object
-                - DataModel object
-                - String filepath (will load metadata to create entry)
-                - Dict with calibration column values
-            date_time (str): The datetime the calibration was used in ISO format.
-            role (str): The role of this calibration. Defaults to 'SINGLE'.
-        """
-
-        # Check if role already exists
-        remove_row_index = None
-        if cal_role in self.calibrations['CAL_ROLE']:
-            if replace_existing:
-                remove_row_index = np.where(self.calibrations['CAL_ROLE']==cal_role)[0][0]
-            else:
-                warnings.warn(f"Calibration with role '{cal_role}' already exists for {self} and replace_existing=False, skipping.")
-                return
-
-        # Case 1: MetaModel object
-        #   New row from ORM object
-        if isinstance(calibration, MetaModel):
-            new_row = {
-                'ID' : calibration.cal_id,
-                'FILENAME' : calibration.filename,
-                'CAL_TYPE' : calibration.cal_type,
-                'CAL_ROLE' : cal_role,
-                'DATETIME_OBS' : calibration.datetime_obs,
-                'DRP_VERSION' : calibration.drp_version,
-                'NOTE' : calibration.note,
-                'LAST_UPDATED' : calibration.last_updated,
-                'TIME_APPLIED' : date_time,
-            }
-
-        # Case 2: filepath or DataModel
-        # NOTE: This path should be used with caution
-        #   and limited to dev purposes or limited user cases, never at Keck.
-        elif isinstance(calibration, (str, DataModel)):
-            from .utils import open as open_datamodel
-            cal_model = open_datamodel(calibration, meta_only=True)
-            new_row = {
-                'ID' : cal_model.meta.cal_id or '',
-                'FILENAME' : cal_model.meta.filename or '',
-                'CAL_TYPE' : cal_model.CAL_TYPE,
-                'CAL_ROLE' : cal_role,
-                'DATETIME_OBS' : cal_model.meta.datetime_obs,
-                'DRP_VERSION' : __version__,
-                'NOTE' : note or '',
-                'LAST_UPDATED' : '',
-                'TIME_APPLIED' : date_time,
-            }
-        else:
-            raise ValueError("Invalid calibration input")
-
-        # Delete existing row if specified
-        if remove_row_index is not None:
-            self.calibrations.remove_row(remove_row_index)
-
-        # Add new row
-        self.calibrations.add_row(new_row)
-
-        # Return new row
-        return new_row
+                trace_data.setdefault(fiber, {})
+                trace_data[fiber][kind] = getattr(self, attr, None)
+        return trace_data
 
     def load_calibration_from_role(
         self,
@@ -656,34 +944,44 @@ class DataModel:
         """
         Load a calibration from the DataModel's calibrations table.
 
-        Args:
-            cal_role (str): The role of the calibration to load.
+        Parameters
+        ----------
+        cal_role : str
+            The role of the calibration to load.
 
-        Returns:
-            DataModel: The loaded calibration ORM object.
+        Returns
+        -------
+        dict
+            The calibration record.
         """
         row = self.get_calibration_from_role(cal_role)
         cal_id = row['ID']
-        with CalibrationStore(orm_class=self.META_MODEL) as store:
-            return store.get_calibration_by_id(cal_id)
+        with CalibrationStore(instrument_name=self.meta.instrument_name) as store:
+            return store.get_calibration(calibration=cal_id)
 
-    def get_calibration_from_role(self, cal_role : str) -> DataModel:
+    def get_calibration_from_role(self, cal_role : str) -> dict:
         """
         Return the row from the DataModel's calibrations table.
 
-        Args:
-            cal_role (str): The role of the calibration to load.
+        Parameters
+        ----------
+        cal_role : str
+            The role of the calibration to load.
 
-        Returns:
-            dict: The row from the DataModel's calibrations table.
+        Returns
+        -------
+        dict
+            The row from the DataModel's calibrations table.
         """
-        # Match on cal_type and role
+        # Match on cal_role
         mask = self.calibrations['CAL_ROLE'] == cal_role
         indices = np.where(mask)[0]
         if len(indices) == 0:
             return None
         if len(indices) > 1:
             raise ValueError(f"Multiple calibrations found with role '{cal_role}' in {self.__class__.__name__}")
+        # ! This can happen since we append calibration tables when say coadding data products.
+        # TODO: Check if they are unique, raise warning if not?
         row_index = indices[0]
         return dict(self.calibrations[row_index])
 
@@ -701,56 +999,92 @@ class DataModel:
 
     def generate_filename(self, suffix: str | None = None) -> str:
         """
-        See _generate_filename for details.
+        Generate a filename for the datamodel.
+        Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}_{suffix}.fits
+
+            - Instrument aliases:
+                
+                - HISPEC (BSPEC): HB
+                - HISPEC (RSPEC): HR
+                - PARVI: PR
+
+            - SSSSS.SS is the seconds of the day with two decimal places, calculated from the datetime_obs metadata attribute.
+
+            - ``suffix`` is an optional string that can be appended to the end of the filename, separated by an underscore. This can be used to further specify any processing steps or other special information about the datamodel. The provided suffix suffix will automatically be appended to datamodel's ``data_level_suffix`` attribute with a hyphen. Ex: ``suffix='darksub'`` would produce a suffix 'rate-darksub' for a level 0 model.
+
+        Stores the generated filename in `self.meta.filename`.
+        Sets `self._filepath` to None since we do not know the 
+
+        Parameters
+        ----------
+        suffix : str, optional
+            An optional suffix to append to the filename. Defaults to None.
         """
-        date_time = self.meta.datetime_obs
+        datetime_obs = self.meta.datetime_obs
 
         # Determine instrument alias
-        spectrograph = getattr(self.meta, "spectrograph", None)
-        if spectrograph is not None:
-            spectrograph = spectrograph.upper()
-            instrument_alias = self.config.instrument_aliases[spectrograph]
-        else:
-            raise ValueError("meta.spectrograph is None, cannot determine spectrograph alias.")
+        instrument_alias = self.config.get_instrument_alias(self)
+        assert instrument_alias is not None, \
+        f"Instrument alias not found for instrument '{self.instrument_name}' and spectrograph '{self.meta.spectrograph}'."
 
         # Determine suffix
-        if suffix is None:
-            if getattr(self, "data_level_suffix", None) is not None:
-                suffix = self.data_level_suffix
+        if suffix is not None:
+            suffix = f"{self.data_level_suffix}-{suffix}"
         else:
-            if getattr(self, "data_level_suffix", None) is not None:
-                suffix = f"{self.data_level_suffix}-{suffix}"
+            suffix = self.data_level_suffix
 
-        return self._generate_filename(
+        filename = self._generate_filename(
             instrument_alias=instrument_alias,
-            date_time=date_time,
+            datetime_obs=datetime_obs,
             suffix=suffix
         )
+
+        self.meta.filename = filename
+
+        if self._filepath is not None:
+            input_dir = os.path.dirname(os.path.abspath(self._filepath))
+            self._filepath = os.path.join(input_dir, self.meta.filename)
+
+        return self.meta.filename
 
     @staticmethod
     def _generate_filename(
         instrument_alias : str,
-        date_time : str,
-        suffix : str | None = None
+        datetime_obs : str,
+        suffix : str,
     ) -> str:
         """
-        Create a filename for a HISPEC data product.
+        Generate a filename for a non-calibration datamodel.
+        This method should not be called by the user. Instead, call self.generate_filename which will determine the instrument alias and suffix automatically based on the datamodel's metadata and config.
         Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}_{suffix}.fits
 
-        Args:
-            instrument_alias (str): The two letter instrument alias.
-            date_time (str): The properly formated datetime of the observation in .
-            suffix (str, optional): An optional suffix to append to the filename. Defaults to None.
+        Examples
+        --------
+        - HISPEC (BSPEC):
+            'HB.20240924.00000.00_rate-darksub.fits'
+        
+        - HISPEC (RSPEC):
+            'HR.20240924.00000.00_rate.fits'
 
-        Returns:
-            str : The filename
+        - PARVI:
+            'PR.20240924.00000.00_rate.fits'
+
+        Parameters
+        ----------
+        instrument_alias : str
+            The two letter instrument alias.
+        datetime_obs : str
+            The ISO date and time of the observation.
+        suffix : str
+            The suffix to append to the filename. Required.
+
+        Returns
+        -------
+        str
+            The filename
         """
-        dt = astropy.time.Time(date_time, precision=3, format='isot')
-        dt = dt.datetime
-        midnight = datetime.combine(dt.date(), datetime.min.time())
-        seconds = (dt - midnight).total_seconds()
-        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:08.2f}"
-        filename = f"{instrument_alias}.{date_time}.fits"
+        datetime_str = get_koa_id_timestamp_from_datetime(datetime_obs)
+        filename = f"{instrument_alias}.{datetime_str}.fits"
         if suffix:
             filename = "".join([filename[0:-5], "_", suffix, ".fits"])
         return filename
@@ -763,124 +1097,172 @@ class DataModel:
     def instrument_name(self) -> str:
         return self.config.instrument_name
     
-    def get_calibration_orm_class(self) -> type[CalibrationORM]:
-        """
-        Get the CalibrationORM class corresponding to this model's metadata.
-        See hispecdrp.calibrations.orm.get_calibration_orm_class.
-        """
-        return get_calibration_orm_class(self.meta)
-    
-    def append_receipts(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-        for other_model in others:
-            for row in other_model.receipt:
-                self.receipt.add_row(row)
+    @classmethod
+    def has_extension(cls, extname: str) -> bool:
+        return extname.upper() in cls.EXTENSIONS
 
-    def append_calibrations(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-        for other_model in others:
-            for row in other_model.calibrations:
-                self.calibrations.add_row(row)
+    def has_extension_value(self, extname: str) -> bool:
+        """NOTE: Utility of this method TBD"""
+        return getattr(self, extname.upper(), None) is not None
 
-    def append_ancestors(self, other : DataModel | list[DataModel] | dict[DataModel]) -> None:
-        if isinstance(other, DataModel):
-            others = [other]
-        elif isinstance(other, dict):
-            others = list(other.values())
-        elif isinstance(other, list):
-            others = other
-        else:
-            raise ValueError("Invalid type for other")
-        for other_model in others:
-            for row in other_model.data_ancestors:
-                self.data_ancestors.add_row(row)
+    @property
+    def shape(self):
+        ext = self.primary_extension_name
+        if ext is None:
+            return None
+        val = getattr(self, ext, None)
+        if val is None:
+            return None
+        if isinstance(val, np.ndarray):
+            return val.shape
+        return None
 
 class CalibrationModel(DataModel):
 
-    CAL_TYPE = None # Type of calibration
+    CAL_TYPE : ClassVar[str] = None # Type of calibration
 
     def on_init(self):
-        super().on_init()
         self.meta.cal_type = self.CAL_TYPE
+        if self.meta.master_cal is None:
+            self.meta.master_cal = True
         if self.meta.cal_id is None:
             self.generate_calibration_id()
+        super().on_init()
 
     def generate_calibration_id(self) -> str:
         """
-        Generate the calibration ID.
+        Generate the calibration ID which is reproducible UUID 7.
 
         Returns
         -------
         cal_id : str
             The calibration ID
         """
-        filename = self.meta.filename or 'unknown'
-        drp_version = self.meta.drp_version or 'unknown'
-        last_updated = self.meta.last_updated or datetime.now().isoformat(timespec="milliseconds")
-        UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "HISPEC_DRP")
-        self.meta.cal_id = str(uuid.uuid5(UUID_NAMESPACE, filename + drp_version + last_updated))
+        self.meta.cal_id = str(make_uuid4())
         return self.meta.cal_id
     
-    def generate_filename(self, suffix: str | None = None) -> str:
-        
-        # Determine instrument alias
-        spectrograph = getattr(self.meta, "spectrograph", None)
-        instrument_alias = self.config.instrument_aliases.get(spectrograph)
-        assert instrument_alias is not None, \
-        f"Instrument alias not found for instrument '{self.instrument_name}' and spectrograph '{spectrograph}'"
+    def generate_calibration_version(self, origin : str | None = None) -> str:
+        if origin is not None:
+            self.meta.origin = origin
+        if self.meta.origin is None:
+            self.meta.origin = os.getenv('KOA_CALIBRATION_ORIGIN', 'LOCAL')
+        with HISPECCalibrationStore(
+            instrument_name=self.meta.instrument_name,
+            connect_remote=False
+        ) as store:
+            self.meta.cal_version = store.generate_calibration_version(
+                self, origin=self.meta.origin
+            )
+        return self.meta.cal_version
 
-        # Determine master_cal
-        master_cal = getattr(self.meta, "master_cal")
-
-        return self._generate_filename(
-            instrument_alias=instrument_alias,
-            date_time=self.meta.datetime_obs,
-            cal_type=self.CAL_TYPE,
-            master=master_cal,
-            suffix=suffix
-        )
-
-    @staticmethod
-    def _generate_filename(
-        instrument_alias : str,
-        date_time : str,
-        cal_type : str,
-        master : bool = False,
-        suffix : str | None = None
+    def generate_filename(
+        self,
+        suffix: str | None = None,
+        origin : str | None = None,
+        auto_version : bool = None,
     ) -> str:
         """
-        Create a filename for a PARVI calibration data product.
 
-        Format: {instrument_alias}_{date_time}_[master-]{cal_type}_{suffix}.fits
-            datetime : YYYYMMDDTHHMMSS.
+        Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}.[master-]{cal_type}.{cal_version}[_{suffix}].fits
+            datetime_obs : YYYYMMDD.SSSSSS.SS. Where SSSSSS.SS is the number of seconds since midnight.
             cal_type : The type of calibration data.
-            master : Insert 'master-' before the cal_type if `master=True`.
+            master_cal : Insert 'master-' before the cal_type if `master_cal=True`.
+            cal_version : The version of the calibration file. If None, queries the local cache for the latest version if ``auto_version=True``.
             suffix : optional suffix
 
         Parameters
         ----------
-        date_time : str
+        suffix : str, optional
+            An optional suffix to append to the filename. Defaults to None.
+        origin : str, optional
+            The origin of the calibration, either 'LOCAL' or 'KECK'.
+        auto_version : bool, optional
+            If True, generate a new calibration version.
+
+        Returns
+        -------
+        filename : str
+            The generated filename.
+        
+        """
+        
+        # Determine instrument alias
+        instrument_alias = self.config.get_instrument_alias(self)
+        assert instrument_alias is not None, \
+        f"Instrument alias not found for instrument '{self.instrument_name}' and spectrograph '{self.meta.spectrograph}.'"
+
+        # Determine master_cal
+        master_cal = getattr(self.meta, "master_cal")
+
+        skip_version = get_env_var_bool('KOA_SKIP_CALIBRATION_VERSION', default=False)
+        cache_defined = isinstance(os.getenv('KOA_CALIBRATION_CACHE'), str)
+        if not skip_version and cache_defined and auto_version is not False:
+            if self.meta.cal_version is None and auto_version:
+                self.generate_calibration_version(origin=origin)
+
+        filename = self._generate_filename(
+            instrument_alias=instrument_alias,
+            datetime_obs=self.meta.datetime_obs,
+            cal_type=self.CAL_TYPE,
+            master_cal=master_cal,
+            cal_version=self.meta.cal_version,
+            origin=self.meta.origin,
+            suffix=suffix
+        )
+
+        self.meta.filename = filename
+
+        _set_koa_meta(self)
+
+        if self._filepath is not None:
+            input_dir = os.path.dirname(os.path.abspath(self._filepath))
+            self._filepath = os.path.join(input_dir, self.meta.filename)
+
+        return self.meta.filename
+
+    @staticmethod
+    def _generate_filename(
+        instrument_alias : str,
+        datetime_obs : str,
+        cal_type : str,
+        master_cal : bool = False,
+        cal_version : str | None = None,
+        origin : str | None = None,
+        suffix : str | None = None,
+    ) -> str:
+        """
+        Create a filename for a calibration data product.
+
+        Format: {instrument_alias}.{YYYYMMDD}.{SSSSS.SS}.[master-]{cal_type}.{cal_version}[_{suffix}].fits
+            datetime_obs : YYYYMMDD.SSSSSS.SS. Where SSSSSS.SS is the number of seconds since midnight.
+            cal_type : The type of calibration data.
+            master_cal : Insert 'master-' before the cal_type if `master_cal=True`.
+            cal_version : The version of the calibration file. If None, queries the local cache for the latest version if ``auto_version=True``.
+            suffix : optional suffix
+        
+        Examples
+        --------
+        'HB.20240924.00000.00.dark.001.fits'
+        'HB.20240924.00000.00.dark.001-local.fits'
+        'HB.20240924.00000.00.master-dark.001.fits'
+        'HB.20240924.00000.00.master-dark.001_custom.fits'
+        'HB.20240924.00000.00.master-dark.001-local_custom.fits'
+        'HB.20240924.00000.00.dark.001_custom.fits'
+
+        Parameters
+        ----------
+        datetime_obs : str
             The date and time of the observation.
         instrument_alias : str
             The two letter instrument alias.
         cal_type : str
             The type of calibration data.
-        master : bool, optional
+        master_cal : bool, optional
             If True, insert 'master-' before the cal_type. Defaults to False.
+        cal_version : str, optional
+            The version of the calibration file. If None, queries the local cache.
+        origin : str, optional
+            The origin of the calibration file, either 'LOCAL' or 'KECK'. If None,
         suffix : str, optional
             An optional suffix to append to the filename. Defaults to None.
 
@@ -889,38 +1271,49 @@ class CalibrationModel(DataModel):
         filename : str
             The generated filename.
         """
-        dt = astropy.time.Time(date_time, precision=3, format='isot')
-        dt = dt.datetime
-        midnight = datetime.combine(dt.date(), datetime.min.time())
-        seconds = (dt - midnight).total_seconds()
-        date_time = dt.strftime("%Y%m%d") + '.' + f"{seconds:07.2f}"
-        if master:
-            cal_type = f"master-{cal_type}"
-        filename = f"{instrument_alias}.{date_time}.{cal_type}.fits"
+
+        # Convert date time string to KOA format
+        datetime_str = get_koa_id_timestamp_from_datetime(datetime_obs)
+
+        # Strings for master and origin
+        if master_cal:
+            cal_type = f"mastercal-{cal_type}"
+        else:
+            cal_type = f"cal-{cal_type}"
+
+        # Construct starting filename
+        filename = f"{instrument_alias}.{datetime_str}.{cal_type}"
+
+        # Version
+        if cal_version is not None:
+            if isinstance(origin, str) and origin.lower() == 'local':
+                cal_version = f"{cal_version}-local"
+            filename = f"{filename}.{cal_version}"
+        
+        # Add suffix
         if suffix is not None:
-            filename = "".join([filename[:-5], "_", suffix, ".fits"])
+            filename = f"{filename}_{suffix}"
+
+        # File extension
+        filename = f"{filename}.fits"
+
         return filename
-    
-    def to_orm(self, note : str | None = None) -> CalibrationORM:
+
+    def to_record(self, note: str | None = None) -> dict:
         """
-        Convert the CalibrationModel metadata to a CalibrationORM object. Keep for backwards compatibility with koa_middleware.
+        Get the calibration record as a dictionary from the metadata.
 
         Parameters
         ----------
-        note (str, optional): An optional note to add to or update the ORM object with. If None, the field meta.note is used.
+        note : str, optional
+            An optional note to add to or update the record with.
 
         Returns
         -------
-        cal_orm : CalibrationORM
-            The CalibrationORM object.
+        dict
+            The calibration record as a dictionary.
         """
-        meta_vals = {}
-        for attr, field in self.meta.__class__.model_fields.items():
-            if field.json_schema_extra['orm_field']:
-                sql_field_name = get_orm_field_name(attr, field)
-                meta_vals[sql_field_name] = getattr(self.meta, attr)
-        orm_class = get_calibration_orm_class(self.meta)
-        meta_orm = orm_class(**meta_vals)
         if note is not None:
-            meta_orm.note = note
-        return meta_orm
+            self.meta.note = note
+        record = self.meta.to_record()
+        return record

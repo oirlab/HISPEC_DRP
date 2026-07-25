@@ -1,4 +1,5 @@
-# wavelength (nm),transmission (I/F) 
+# wavelength (nm),transmission (I/F)
+# Provenance: HISPEC instrument end-to-end throughput model (BSPEC, LGS, blaze not applied).
 9.000000000000000000e+02,1.474447207153451002e-05
 9.001000000000000227e+02,1.423472816802565574e-05
 9.002000000000000455e+02,1.372127438897188738e-05
