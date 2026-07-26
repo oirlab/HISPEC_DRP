@@ -44,7 +44,7 @@ def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -
 
 
 def get_expected_ramp_path(output_dir: str) -> str:
-    """Return the path where the simulated ramp is saved (same convention as run_simulated_pipeline)."""
+    """Return the path where the simulated ramp is saved (``simulated_ramp.fits`` under ``output_dir``)."""
     return os.path.join(os.path.abspath(output_dir), DEFAULT_SIMULATED_RAMP_FILENAME)
 
 

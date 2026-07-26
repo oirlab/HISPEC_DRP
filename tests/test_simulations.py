@@ -9,7 +9,11 @@ import astropy.units as u
 import pytest
 
 import hispecdrp.simulations as simulations
-from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path, load_btsettl_spectrum
+from hispecdrp.primitives.utils.spectral_utils import (
+    fetch_svo_2mass_filter,
+    get_spectrum_path,
+    load_btsettl_spectrum,
+)
 
 
 def test_simulate_rate_map():
@@ -141,7 +145,6 @@ def test_fetch_svo_2mass_filter():
     """fetch_svo_2mass_filter returns wavelength and transmission arrays (requires network)."""
     pytest.importorskip("urllib.request")
     try:
-        from hispecdrp.utils import fetch_svo_2mass_filter
         wl_A, trans = fetch_svo_2mass_filter("J")
     except OSError:
         pytest.skip("SVO filter service unreachable (network or server)")
