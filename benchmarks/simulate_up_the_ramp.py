@@ -27,7 +27,7 @@ so package imports resolve::
 Use ``-o`` / ``--output-dir`` only to override the output directory.
 
 Use ``-j N`` or ``--max-cores N`` (integer ≥ 1) to set the same parallelism
-budget for :func:`~benchmarks.create_ramp.create_ramp` and for
+budget for :func:`~hispecdrp.simulations.create_ramp` and for
 ``max_cores`` on every Stage 0 primitive that accepts it (via pipeline
 ``prim_args``). Default is 1.
 """
