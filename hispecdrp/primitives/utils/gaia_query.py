@@ -1,9 +1,9 @@
 import logging
 import math
+import os
 import re
 
 import numpy as np
-from astroquery.vizier import Vizier
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -18,6 +18,9 @@ __all__ = [
     "_convert_epoch_gaia",
     "get_2mass_from_gaia",
     "get_2mass_data_vizier",
+    "query_vizier",
+    "vizier_mirrors",
+    "vizier_timeout",
 ]
 
 _GAIA_EPOCHS = {
@@ -35,11 +38,163 @@ VIZIER_MIRRORS = [
     "vizier.idia.ac.za",       # IDIA / South Africa
 ]
 
+# Per-request socket timeout (seconds). A finite timeout is what makes the mirror
+# fallback effective: astroquery's default can leave a stalled mirror blocking
+# indefinitely, so the remaining servers are never tried.
+VIZIER_TIMEOUT_DEFAULT = 60.0
+
+# Number of full passes over the mirror list before giving up.
+VIZIER_MAX_ROUNDS_DEFAULT = 4
+
 # VizieR mirror of the Gaia DR3 main source catalog.
 GAIA_DR3_VIZIER_ID = "I/355/gaiadr3"
 
 # VizieR id of the 2MASS All-Sky Point Source Catalog (JHKs photometry, Vega system).
 TWOMASS_PSC_VIZIER_ID = "II/246"
+
+
+def vizier_mirrors() -> list[str]:
+    """Return the VizieR servers to try, in order.
+
+    ``HISPEC_DRP_VIZIER_MIRRORS`` (comma-separated hostnames) overrides the built-in
+    list, which lets a site with a local VizieR/Gaia DR3 mirror (e.g. Keck's offline
+    DR3) redirect every query in the DRP without code changes.
+    """
+    raw = os.environ.get("HISPEC_DRP_VIZIER_MIRRORS", "").strip()
+    if not raw:
+        return list(VIZIER_MIRRORS)
+    servers = [s.strip() for s in raw.split(",") if s.strip()]
+    return servers or list(VIZIER_MIRRORS)
+
+
+def vizier_timeout() -> float:
+    """Per-request VizieR timeout in seconds (``HISPEC_DRP_VIZIER_TIMEOUT`` overrides)."""
+    raw = os.environ.get("HISPEC_DRP_VIZIER_TIMEOUT", "").strip()
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid HISPEC_DRP_VIZIER_TIMEOUT=%r; using %.0fs",
+                raw, VIZIER_TIMEOUT_DEFAULT,
+            )
+    return VIZIER_TIMEOUT_DEFAULT
+
+
+def _vizier_class():
+    """Import :class:`astroquery.vizier.Vizier` lazily.
+
+    ``astroquery`` is imported on first query rather than at module import: importing it
+    can stall on network/config access, and ``hispecdrp/__init__`` pulls in every
+    primitive, so a top-level import would make ``import hispecdrp`` hang (see issue
+    #201).
+    """
+    from astroquery.vizier import Vizier
+
+    return Vizier
+
+
+def query_vizier(
+    *,
+    catalog: str,
+    columns: list[str] | None = None,
+    center: SkyCoord | None = None,
+    radius_deg: float | None = None,
+    constraints: dict | None = None,
+    column_filters: dict | None = None,
+    row_limit: int = 50,
+    max_rounds: int | None = None,
+    description: str | None = None,
+):
+    """Query one VizieR catalog, trying mirror servers in order with retry rounds.
+
+    Shared fallback layer for every VizieR query in the DRP, following the POTPyRI
+    ``query_vizier_region`` / ``query_gaia_dr3_region`` pattern: clear the astroquery
+    cache, walk :func:`vizier_mirrors` catching per-server errors, and repeat the whole
+    list up to ``max_rounds`` times for transient failures. Each request uses a finite
+    timeout (:func:`vizier_timeout`) so one unresponsive mirror cannot block the rest.
+
+    Exactly one of ``center`` (with ``radius_deg``) or ``constraints`` must be given,
+    selecting a cone search or a constraint query respectively.
+
+    Parameters
+    ----------
+    catalog : str
+        VizieR catalog identifier (e.g. ``'I/355/gaiadr3'``).
+    columns : list of str, optional
+        Columns to request; defaults to all columns (``['**']``).
+    center : astropy.coordinates.SkyCoord, optional
+        Cone-search center.
+    radius_deg : float, optional
+        Cone-search radius in degrees. Required with ``center``.
+    constraints : dict, optional
+        Column constraints for ``query_constraints`` (e.g. ``{'Source': '==12345'}``).
+    column_filters : dict, optional
+        VizieR server-side column filters (e.g. ``{'Gmag': '<8'}``).
+    row_limit : int
+        Maximum rows to return (``-1`` for unlimited).
+    max_rounds : int, optional
+        Full passes over the mirror list. Defaults to
+        :data:`VIZIER_MAX_ROUNDS_DEFAULT`.
+    description : str, optional
+        Short label for log messages; defaults to ``catalog``.
+
+    Returns
+    -------
+    astropy.table.Table or None
+        First table of the response, or ``None`` if every mirror failed or no row
+        matched.
+    """
+    if (center is None) == (constraints is None):
+        raise ValueError("Provide exactly one of center (with radius_deg) or constraints.")
+    if center is not None and radius_deg is None:
+        raise ValueError("radius_deg is required with center.")
+
+    vizier_cls = _vizier_class()
+    label = description or catalog
+    rounds = VIZIER_MAX_ROUNDS_DEFAULT if max_rounds is None else int(max_rounds)
+    timeout = vizier_timeout()
+    cols = list(columns) if columns else ["**"]
+
+    # A stale/corrupt astroquery cache entry otherwise reproduces the same failure on
+    # every mirror and every round (POTPyRI clears it for the same reason).
+    try:
+        vizier_cls.clear_cache()
+    except Exception:  # noqa: BLE001 - cache clearing is best-effort
+        logger.debug("VizieR cache clear failed (continuing).", exc_info=True)
+
+    last_error: Exception | None = None
+    for round_idx in range(rounds):
+        for server in vizier_mirrors():
+            try:
+                vizier = vizier_cls(
+                    columns=cols,
+                    column_filters=dict(column_filters or {}),
+                    vizier_server=server,
+                    timeout=timeout,
+                )
+                vizier.ROW_LIMIT = row_limit
+                if center is not None:
+                    result = vizier.query_region(
+                        center, radius=radius_deg * u.deg, catalog=catalog
+                    )
+                else:
+                    result = vizier.query_constraints(catalog=catalog, **constraints)
+                if result is not None and len(result) > 0 and len(result[0]) > 0:
+                    logger.info("VizieR query succeeded via %s (%s)", server, label)
+                    return result[0]
+            except Exception as e:  # noqa: BLE001 - mirror fallback is intentional
+                last_error = e
+                logger.warning("VizieR mirror %s failed for %s: %s", server, label, e)
+        if last_error is not None:
+            logger.error(
+                "All VizieR mirrors failed for %s (round %d/%d); last error: %s",
+                label, round_idx + 1, rounds, last_error,
+            )
+    return None
+
 
 # Map of the Gaia TAP ``gaiadr3.gaia_source`` column names (the keys returned by the
 # original ``Gaia.launch_job`` queries) to candidate column names in the VizieR
@@ -160,9 +315,9 @@ def _query_gaia_dr3_vizier(
     center: SkyCoord | None = None,
     radius_deg: float | None = None,
     row_limit: int = 1,
-    max_rounds: int = 4,
+    max_rounds: int | None = None,
 ):
-    """Query the VizieR Gaia DR3 mirror, iterating servers (and retry rounds) on failure.
+    """Query the VizieR Gaia DR3 mirror via the shared mirror-fallback layer.
 
     Exactly one of ``source_id`` or ``center`` (with ``radius_deg``) must be provided.
 
@@ -175,40 +330,24 @@ def _query_gaia_dr3_vizier(
     if (source_id is None) == (center is None):
         raise ValueError("Provide exactly one of source_id or center.")
 
-    for round_idx in range(max_rounds):
-        last_error: Exception | None = None
-        for server in VIZIER_MIRRORS:
-            try:
-                if source_id is not None:
-                    vizier = Vizier(columns=["**"], vizier_server=server)
-                    vizier.ROW_LIMIT = row_limit
-                    result = vizier.query_constraints(
-                        catalog=GAIA_DR3_VIZIER_ID, Source=f"=={source_id}"
-                    )
-                else:
-                    # ``+_r`` adds and sorts ascending by angular separation from center.
-                    vizier = Vizier(columns=["**", "+_r"], vizier_server=server)
-                    vizier.ROW_LIMIT = row_limit
-                    result = vizier.query_region(
-                        center, radius=radius_deg * u.deg, catalog=GAIA_DR3_VIZIER_ID
-                    )
-                if result is not None and len(result) > 0 and len(result[0]) > 0:
-                    logger.info(
-                        "Gaia DR3 VizieR query succeeded via %s (%s)",
-                        server, GAIA_DR3_VIZIER_ID,
-                    )
-                    return result[0]
-            except Exception as e:  # noqa: BLE001 - mirror fallback is intentional
-                last_error = e
-                logger.warning(
-                    "VizieR mirror %s failed for %s: %s", server, GAIA_DR3_VIZIER_ID, e
-                )
-        if last_error is not None:
-            logger.error(
-                "All VizieR mirrors failed for %s (round %d/%d); last error: %s",
-                GAIA_DR3_VIZIER_ID, round_idx + 1, max_rounds, last_error,
-            )
-    return None
+    if source_id is not None:
+        return query_vizier(
+            catalog=GAIA_DR3_VIZIER_ID,
+            constraints={"Source": f"=={source_id}"},
+            row_limit=row_limit,
+            max_rounds=max_rounds,
+            description=f"Gaia DR3 source_id={source_id}",
+        )
+    # ``+_r`` adds and sorts ascending by angular separation from center.
+    return query_vizier(
+        catalog=GAIA_DR3_VIZIER_ID,
+        columns=["**", "+_r"],
+        center=center,
+        radius_deg=radius_deg,
+        row_limit=row_limit,
+        max_rounds=max_rounds,
+        description="Gaia DR3 cone search",
+    )
 
 # Shared column list for both query functions
 _GAIA_COLUMNS = [
@@ -544,39 +683,17 @@ def get_2mass_data_vizier(ra: float, dec: float, radius_arcsec: float = 3.0) -> 
     """
     center = SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame="icrs")
     radius_deg = (radius_arcsec * u.arcsec).to(u.degree).value
-    columns = [
-        "2MASS", "RAJ2000", "DEJ2000",
-        "Jmag", "e_Jmag", "Hmag", "e_Hmag", "Kmag", "e_Kmag",
-        "+_r",  # add and sort ascending by angular separation from center
-    ]
 
-    table = None
-    last_error: Exception | None = None
-    for server in VIZIER_MIRRORS:
-        try:
-            vizier = Vizier(columns=columns, vizier_server=server)
-            vizier.ROW_LIMIT = 50
-            result = vizier.query_region(
-                center, radius=radius_deg * u.deg, catalog=TWOMASS_PSC_VIZIER_ID
-            )
-            if result is not None and len(result) > 0 and len(result[0]) > 0:
-                logger.info(
-                    "2MASS VizieR query succeeded via %s (%s)",
-                    server, TWOMASS_PSC_VIZIER_ID,
-                )
-                table = result[0]
-                break
-        except Exception as e:  # noqa: BLE001 - mirror fallback is intentional
-            last_error = e
-            logger.warning(
-                "VizieR mirror %s failed for %s: %s", server, TWOMASS_PSC_VIZIER_ID, e
-            )
-    if table is None:
-        if last_error is not None:
-            logger.error(
-                "All VizieR mirrors failed for %s; last error: %s",
-                TWOMASS_PSC_VIZIER_ID, last_error,
-            )
+    table = query_vizier(
+        catalog=TWOMASS_PSC_VIZIER_ID,
+        # ``+_r`` adds and sorts ascending by angular separation from center.
+        columns=_TWOMASS_PSC_COLUMNS + ["+_r"],
+        center=center,
+        radius_deg=radius_deg,
+        row_limit=50,
+        description="2MASS PSC cone search",
+    )
+    if table is None or len(table) == 0:
         return None
 
     return _twomass_row_to_dict(table[0], table.colnames)
@@ -614,28 +731,13 @@ _TWOMASS_PSC_COLUMNS = [
 
 def _query_2mass_by_designation(designation: str) -> dict | None:
     """Look up a single 2MASS PSC source by its designation on VizieR (mirror fallback)."""
-    last_error: Exception | None = None
-    for server in VIZIER_MIRRORS:
-        try:
-            vizier = Vizier(columns=_TWOMASS_PSC_COLUMNS, vizier_server=server)
-            vizier.ROW_LIMIT = 5
-            result = vizier.query_constraints(
-                catalog=TWOMASS_PSC_VIZIER_ID, **{"2MASS": f"=={designation}"}
-            )
-            if result is not None and len(result) > 0 and len(result[0]) > 0:
-                logger.info(
-                    "2MASS VizieR designation lookup succeeded via %s (%s)",
-                    server, TWOMASS_PSC_VIZIER_ID,
-                )
-                return _twomass_row_to_dict(result[0][0], result[0].colnames)
-        except Exception as e:  # noqa: BLE001 - mirror fallback is intentional
-            last_error = e
-            logger.warning(
-                "VizieR mirror %s failed for %s: %s", server, TWOMASS_PSC_VIZIER_ID, e
-            )
-    if last_error is not None:
-        logger.error(
-            "All VizieR mirrors failed for %s designation lookup; last error: %s",
-            TWOMASS_PSC_VIZIER_ID, last_error,
-        )
-    return None
+    table = query_vizier(
+        catalog=TWOMASS_PSC_VIZIER_ID,
+        columns=_TWOMASS_PSC_COLUMNS,
+        constraints={"2MASS": f"=={designation}"},
+        row_limit=5,
+        description=f"2MASS PSC designation={designation}",
+    )
+    if table is None or len(table) == 0:
+        return None
+    return _twomass_row_to_dict(table[0], table.colnames)

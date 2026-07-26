@@ -1,5 +1,27 @@
-import pytest
+import glob
 import os
+
+import pytest
+
+# Stray pipeline products that some tests write into the process cwd (often the repo root).
+_REPO_ROOT_STRAY_GLOBS = (
+    "HB.*.fits",
+    "HR.*.fits",
+    "simulated_ramp.fits",
+    "rate_map.fits",
+)
+
+
+def _cleanup_repo_root_stray_fits() -> None:
+    """Remove known test-generated FITS left in the repository root."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    for pattern in _REPO_ROOT_STRAY_GLOBS:
+        for path in glob.glob(os.path.join(root, pattern)):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -49,6 +71,11 @@ def pytest_configure(config):
         os.environ["HISPEC_DRP_BSPEC_BTSETTL_WINDOW_UM"] = str(w_um).strip()
     if config.getoption("--bspec-relax-parallel-asserts", default=False):
         os.environ["HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS"] = "1"
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # Always scrub repo-root litter, including interrupted / failed sessions.
+    _cleanup_repo_root_stray_fits()
 
 
 @pytest.fixture(scope="session")

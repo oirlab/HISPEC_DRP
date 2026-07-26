@@ -43,9 +43,3 @@ Default E2E runs query:
 
 Runs without network access require pre-cached HDF data, offline calibration YAML paths,
 and ``use_gaia_target=False``.
-
-Historical note
----------------
-
-The former ``hispecdrp/simulations/END_TO_END_SIMULATION_NOTES.md`` has been superseded
-by :doc:`../simulations/overview`.

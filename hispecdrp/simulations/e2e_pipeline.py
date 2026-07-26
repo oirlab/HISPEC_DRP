@@ -40,6 +40,18 @@ from .simulate_up_the_ramp import (
     run_stage0_simulation,
 )
 
+# Imports used by merged sim-HDF / infinite-S/N / preview helpers (formerly separate modules).
+import re
+from scipy.interpolate import PchipInterpolator
+
+from .. import datamodels
+from ..datamodels import hispec_config
+from ..datamodels.fiberflat import FiberflatModel
+from ..datamodels.lfcwavesol import LFCWavesolModel
+from ..datamodels.tracepos import TracePosModel
+from ..datamodels.traceprof import TraceProfModel
+from .simulate_rate_map import SimulateRateMap, read_pyechelle_hdf
+
 logger = logging.getLogger(__name__)
 
 
@@ -344,11 +356,9 @@ def materialize_stage1_calibrations(
         else:
             stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
             if stage1_uses_sim_hdf_trace(config):
-                from .sim_hdf_calibrations import materialize_stage1_bundle_from_sim_hdf
 
                 extraction_aperture = 10.0
                 if config.infinite_snr_rv_validation:
-                    from .e2e_infinite_snr_rv import merge_infinite_snr_stage1_prim_args
 
                     extraction_aperture = float(
                         merge_infinite_snr_stage1_prim_args({})
@@ -566,7 +576,6 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         )
 
     if config.infinite_snr_rv_validation:
-        from .e2e_infinite_snr_rv import apply_infinite_snr_rv_e2e_config
 
         config = apply_infinite_snr_rv_e2e_config(config)
 
@@ -697,10 +706,6 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     stage1_prim_args = None
     stage2_prim_args = None
     if config.infinite_snr_rv_validation:
-        from .e2e_infinite_snr_rv import (
-            merge_infinite_snr_stage1_prim_args,
-            merge_infinite_snr_stage2_prim_args,
-        )
 
         stage1_prim_args = merge_infinite_snr_stage1_prim_args(None)
         stage2_prim_args = merge_infinite_snr_stage2_prim_args(None)
@@ -775,11 +780,6 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
 
     infinite_snr_rv_evaluation = None
     if config.infinite_snr_rv_validation:
-        from .e2e_infinite_snr_rv import (
-            assert_infinite_snr_rv_recovery,
-            evaluate_infinite_snr_rv_recovery,
-            log_infinite_snr_rv_evaluation,
-        )
 
         infinite_snr_rv_evaluation = evaluate_infinite_snr_rv_recovery(
             stage2_model,
@@ -792,14 +792,13 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
 
     if config.make_preview_html:
         try:
-            from . import e2e_previews
 
-            base_name = e2e_previews.infer_exposure_base_name(
+            base_name = infer_exposure_base_name(
                 stage0_model=stage0_model,
                 stage1_model=stage1_model,
                 stage2_model=stage2_model,
             )
-            html_path = e2e_previews.generate_e2e_preview_report(
+            html_path = generate_e2e_preview_report(
                 out_dir_abs,
                 exposure_base_name=base_name,
                 gaia_target=gaia_target,
@@ -822,3 +821,1340 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         calibration_sources=dict(cal_bundle.sources),
         infinite_snr_rv_evaluation=infinite_snr_rv_evaluation,
     )
+
+# ========================================================================
+# Sim-HDF Stage-1 calibrations (formerly sim_hdf_calibrations.py)
+# ========================================================================
+
+_DEFAULT_FWHM_PIX = 3.5
+_TRACE_POLY_DEG = 2
+
+
+def _order_list(spectrograph: str) -> list[int]:
+    return list(hispec_config.HISPECConfig.get_order_list(spectrograph.upper()))
+
+
+def _load_hdf_model_data(spectrograph: str) -> tuple[str, dict]:
+    srm = SimulateRateMap()
+    spectrograph = spectrograph.upper()
+    model = srm.bspec_hdf_model if spectrograph == "BSPEC" else srm.rspec_hdf_model
+    model_path = srm.hdf_file_directory + model
+    return spectrograph, read_pyechelle_hdf(model_path)
+
+
+def _orient_hdf_pixel_xy(
+    ox: np.ndarray,
+    oy: np.ndarray,
+    *,
+    nx: int = 4096,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Map native HDF detector ``(x, y)`` to oriented rate-map ``(row, col)``.
+
+    Matches ``SimulateRateMap.flip_rate_map_horizontal`` followed by
+    ``rotate_rate_map_vertical`` (``rot90`` ``k=3``) with ``orders_are_vertical=True``
+    extraction along spectral rows.
+    """
+    ox = np.asarray(ox, dtype=np.float64)
+    oy = np.asarray(oy, dtype=np.float64)
+    row = (nx - 1) - ox
+    col = (nx - 1) - oy
+    return row, col
+
+
+def _interp_oriented_spectral_row(
+    row: np.ndarray,
+    values: np.ndarray,
+    *,
+    n_pix: int = 4096,
+) -> np.ndarray:
+    """Interpolate ``values`` onto spectral row indices ``0 .. n_pix-1``."""
+    row = np.asarray(row, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    good = np.isfinite(row) & np.isfinite(values)
+    row = row[good]
+    values = values[good]
+    if row.size < 2:
+        return np.full(n_pix, np.nan, dtype=np.float64)
+    sidx = np.argsort(row)
+    rows = row[sidx]
+    vals = values[sidx]
+    ur, inv = np.unique(rows, return_inverse=True)
+    if ur.size < 2:
+        return np.full(n_pix, np.nan, dtype=np.float64)
+    uvals = np.bincount(inv, weights=vals) / np.maximum(np.bincount(inv), 1)
+    f = PchipInterpolator(ur, uvals, extrapolate=True)
+    return f(np.arange(n_pix, dtype=np.float64))
+
+
+def get_sim_hdf_trace_grids(
+    spectrograph: str,
+    *,
+    n_pix: int = 4096,
+) -> dict[int, dict[int, dict[str, np.ndarray]]]:
+    """
+    Per-fiber, per-order detector grids from the HDF model.
+
+    Returns ``{fiber: {order: {pixel, wavelength, y_pos}}}`` with ``pixel`` = ``0..n_pix-1``
+    indexing the **spectral row** in the oriented rate map (same convention as
+    ``orders_are_vertical=True`` extraction). ``y_pos[pixel]`` is the cross-dispersion
+    column at that row.
+    """
+    spectrograph, model_data = _load_hdf_model_data(spectrograph)
+    order_list = _order_list(spectrograph)
+    nx = int(model_data.get("nx", n_pix))
+    out: dict[int, dict[int, dict[str, np.ndarray]]] = {}
+    pixel = np.arange(n_pix, dtype=np.float64)
+    for fiber in (1, 2, 3):
+        out[fiber] = {}
+        fiber_key = f"fiber_{fiber}"
+        for od in order_list:
+            od_s = str(od)
+            if od_s not in model_data.get(fiber_key, {}):
+                continue
+            block = model_data[fiber_key][od_s]
+            ow = np.asarray(block["xy_wavelengths"], dtype=np.float64)
+            ox = np.asarray(block["x"], dtype=np.float64)
+            oy = np.asarray(block["y"], dtype=np.float64)
+            good = np.isfinite(ox) & np.isfinite(oy) & np.isfinite(ow)
+            if int(np.sum(good)) < 2:
+                continue
+            row, col = _orient_hdf_pixel_xy(ox[good], oy[good], nx=nx)
+            wavelength = _interp_oriented_spectral_row(row, ow[good], n_pix=n_pix)
+            y_pos = _interp_oriented_spectral_row(row, col, n_pix=n_pix)
+            out[fiber][od] = {
+                "pixel": pixel.copy(),
+                "wavelength": wavelength.astype(np.float64),
+                "y_pos": y_pos.astype(np.float64),
+            }
+    return out
+
+
+def _fit_trace_poly_coeffs(y_row: np.ndarray, deg: int = _TRACE_POLY_DEG) -> np.ndarray:
+    x = np.arange(y_row.size, dtype=np.float64)
+    ok = np.isfinite(y_row)
+    if int(np.sum(ok)) < deg + 1:
+        return np.full(deg + 1, np.nan, dtype=np.float64)
+    return np.polyfit(x[ok], y_row[ok], deg)
+
+
+def create_tracepos_model_from_sim_hdf(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+) -> TracePosModel:
+    """TracePosModel with POS/FWHM rows taken from the HDF echelle model."""
+    spectrograph = spectrograph.upper()
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    order_list = _order_list(spectrograph)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    model = TracePosModel(config=hispec_config.HISPECConfig, meta=model_meta)
+    n_pix = 4096
+    pixel_arr = np.arange(n_pix, dtype=np.float64)
+    for fiber in (1, 2, 3):
+        rows = []
+        coeff_pos = []
+        coeff_fwhm = []
+        for order in order_list:
+            if order not in grids.get(fiber, {}):
+                rows.append(np.full(n_pix, np.nan, dtype=np.float64))
+                coeff_pos.append(np.full(_TRACE_POLY_DEG + 1, np.nan))
+                coeff_fwhm.append(np.full(_TRACE_POLY_DEG + 1, np.nan))
+                continue
+            y_row = grids[fiber][order]["y_pos"]
+            rows.append(y_row)
+            coeff_pos.append(_fit_trace_poly_coeffs(y_row))
+            coeff_fwhm.append(np.polyfit(pixel_arr, np.full(n_pix, _DEFAULT_FWHM_PIX), 1))
+        pos = np.stack(rows, axis=0)
+        fwhm = np.full_like(pos, _DEFAULT_FWHM_PIX, dtype=np.float64)
+        setattr(model, f"coeff_pos_fib{fiber}", np.stack(coeff_pos, axis=0))
+        setattr(model, f"coeff_fwhm_fib{fiber}", np.stack(coeff_fwhm, axis=0))
+        setattr(model, f"pos_fib{fiber}", pos)
+        setattr(model, f"fwhm_fib{fiber}", fwhm)
+    return model
+
+
+def create_tracepos_model_from_fiberflat_rates(
+    fiberflat_rate_paths: list[str],
+    *,
+    spectrograph: str,
+    meta: dict | None = None,
+    prominence_factor: float = 0.02,
+) -> TracePosModel:
+    """
+    TracePosModel from peak finding on simulated fiber-flat rate maps.
+
+    Uses the same detector orientation as science simulations (post flip/rotate),
+    unlike :func:`create_tracepos_model_from_sim_hdf` which reads raw HDF ``x/y``.
+    """
+    from ..primitives.trace_fitting.tracepos_primitive import TracePositionPrimitive
+    from .simulate_up_the_ramp import (
+        _DEFAULT_FIBERFLAT_DISP_RANGE,
+        _DEFAULT_FIBERFLAT_XDISP_RANGE,
+    )
+
+    spectrograph = spectrograph.upper()
+    models_by_fiber: dict[str, datamodels.DataModel] = {}
+    for path in fiberflat_rate_paths:
+        model = datamodels.open(path)
+        base = str(getattr(model.meta, "filename", path)).upper()
+        fib = None
+        for f in (1, 2, 3):
+            if f"FIB{f}" in base or f"FIBERFLAT-FIB{f}" in base:
+                fib = str(f)
+                break
+        if fib is None:
+            logger.warning("Skipping fiberflat rate %s (fiber not inferred from name).", path)
+            continue
+        models_by_fiber[fib] = model
+    if not models_by_fiber:
+        raise ValueError("No fiberflat rate paths with inferable fiber labels.")
+    prim = TracePositionPrimitive()
+    prim.init_args(
+        deg_pos=4,
+        deg_width=2,
+        disp_range=_DEFAULT_FIBERFLAT_DISP_RANGE.get(spectrograph, (500, 4000)),
+        xdisp_range=_DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050)),
+        prominence_factor=prominence_factor,
+        output_model=TracePosModel,
+    )
+    trace_pos: TracePosModel = prim.apply(models_by_fiber)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    for key, val in model_meta.items():
+        setattr(trace_pos.meta, key, val)
+    logger.info(
+        "Sim HDF trace_pos from fiberflat rates spectrograph=%s n_rate_files=%d",
+        spectrograph,
+        len(fiberflat_rate_paths),
+    )
+    return trace_pos
+
+
+def create_traceprof_model_from_sim_hdf(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+    detector_shape: tuple[int, int] = (4096, 4160),
+) -> TraceProfModel:
+    """Placeholder trace profiles (box extraction does not use them)."""
+    spectrograph = spectrograph.upper()
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    model = TraceProfModel(config=hispec_config.HISPECConfig, meta=model_meta)
+    ny, nx = detector_shape
+    for fiber in (1, 2, 3):
+        prof = np.ones((ny, nx), dtype=np.float64)
+        err = np.zeros((ny, nx), dtype=np.float64)
+        setattr(model, f"prof_fib{fiber}", prof)
+        setattr(model, f"prof_err_fib{fiber}", err)
+    return model
+
+
+def create_wavelength_solution_model_from_sim_hdf(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+) -> LFCWavesolModel:
+    """LFCWavesolModel from the same HDF grids as :func:`create_tracepos_model_from_sim_hdf`."""
+    spectrograph = spectrograph.upper()
+    order_list = _order_list(spectrograph)
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    wavesol = LFCWavesolModel(config=hispec_config.HISPECConfig, meta=model_meta)
+    for fiber in (1, 2, 3):
+        wave_rows = []
+        for order in order_list:
+            block = grids.get(fiber, {}).get(order)
+            if block is None:
+                break
+            wave_rows.append(np.asarray(block["wavelength"], dtype=np.float64))
+        if wave_rows:
+            wave_arr = np.stack(wave_rows, axis=0)
+            setattr(wavesol, f"wave_fib{fiber}", wave_arr)
+            setattr(
+                wavesol,
+                f"spec_dq_fib{fiber}",
+                np.zeros(wave_arr.shape, dtype=np.uint32),
+            )
+    return wavesol
+
+
+def _extract_box_one_order(
+    rate: np.ndarray,
+    rate_err: np.ndarray,
+    rate_dq: np.ndarray,
+    trace_y: np.ndarray,
+    *,
+    extraction_aperture: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    from ..primitives.spectral_extraction.extract_box import extract_spectrum_box
+
+    rate = np.asarray(rate, dtype=np.float64)
+    if rate_err.shape != rate.shape:
+        rate_err = np.zeros_like(rate, dtype=np.float64)
+    else:
+        rate_err = np.asarray(rate_err, dtype=np.float64)
+    if rate_dq.shape != rate.shape:
+        rate_dq = np.zeros_like(rate, dtype=np.uint32)
+    else:
+        rate_dq = np.asarray(rate_dq, dtype=np.uint32)
+    ny, nx = rate.shape
+    spec = np.full(ny, np.nan, dtype=np.float64)
+    err = np.full(ny, np.nan, dtype=np.float64)
+    var_r = np.zeros_like(rate, dtype=np.float64)
+    var_p = np.zeros_like(rate, dtype=np.float64)
+    dq = np.zeros_like(rate, dtype=np.uint32)
+    mid = np.zeros_like(rate, dtype=np.float64)
+    extract_spectrum_box(
+        input_data=rate,
+        input_err=rate_err,
+        input_dq=rate_dq,
+        input_var_rnoise=var_r,
+        input_var_poisson=var_p,
+        input_mid_time=mid,
+        trace_positions=trace_y,
+        extraction_aperture=extraction_aperture,
+        spec_output=spec,
+        err_output=err,
+        var_rnoise_output=var_r,
+        var_poisson_output=var_p,
+        dq_output=dq,
+        mid_time_output=mid,
+        orders_are_vertical=True,
+    )
+    return spec, err
+
+
+def create_fiberflat_model_from_rate_maps(
+    rate_paths: list[str],
+    tracepos_model: TracePosModel,
+    *,
+    spectrograph: str,
+    meta: dict | None = None,
+    extraction_aperture: float = 10.0,
+) -> FiberflatModel:
+    """
+    Box-extract simulated fiber-flat rate maps with HDF ``tracepos_model`` rows.
+
+    Produces a ``FiberflatModel`` consistent with the science extraction geometry.
+    """
+    spectrograph = spectrograph.upper()
+    order_list = _order_list(spectrograph)
+    hdf_grids = get_sim_hdf_trace_grids(spectrograph)
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    ff = FiberflatModel(config=hispec_config.HISPECConfig, meta=model_meta)
+    n_orders = len(order_list)
+    n_pix = 4096
+
+    for path in rate_paths:
+        l0 = datamodels.open(path)
+        fib = None
+        base = str(getattr(l0.meta, "filename", path)).upper()
+        for f in (1, 2, 3):
+            if f"FIB{f}" in base or f"FIBERFLAT-FIB{f}" in base:
+                fib = f
+                break
+        if fib is None:
+            logger.warning("Skipping fiberflat rate %s (fiber not inferred from name).", path)
+            continue
+        pos = getattr(tracepos_model, f"pos_fib{fib}")
+        rate = l0.rate
+        rate_err = getattr(l0, "rate_err", None)
+        if rate_err is None:
+            rate_err = np.zeros_like(rate, dtype=np.float64)
+        rate_dq = getattr(l0, "rate_dq", None)
+        if rate_dq is None:
+            rate_dq = getattr(l0, "dq", None)
+        if rate_dq is None:
+            rate_dq = np.zeros_like(rate, dtype=np.uint32)
+        spec_rows = []
+        err_rows = []
+        wave_rows = []
+        for i, _order in enumerate(order_list):
+            if i >= pos.shape[0]:
+                break
+            trace_y = pos[i]
+            spec, err = _extract_box_one_order(
+                rate,
+                rate_err,
+                rate_dq,
+                trace_y,
+                extraction_aperture=extraction_aperture,
+            )
+            spec_rows.append(spec)
+            err_rows.append(err)
+            wave = hdf_grids.get(fib, {}).get(_order, {}).get("wavelength")
+            if wave is None:
+                wave = np.full(n_pix, np.nan, dtype=np.float64)
+            wave_rows.append(np.asarray(wave, dtype=np.float64))
+        if not spec_rows:
+            continue
+        spec_arr = np.stack(spec_rows, axis=0).astype(np.float32)
+        err_arr = np.stack(err_rows, axis=0).astype(np.float32)
+        setattr(ff, f"spec_fib{fib}", spec_arr)
+        setattr(ff, f"spec_err_fib{fib}", err_arr)
+        setattr(ff, f"spec_var_poisson_fib{fib}", np.zeros_like(spec_arr, dtype=np.float32))
+        setattr(ff, f"spec_var_rnoise_fib{fib}", np.zeros_like(spec_arr, dtype=np.float32))
+        setattr(ff, f"spec_dq_fib{fib}", np.zeros(spec_arr.shape, dtype=np.uint32))
+        setattr(ff, f"wave_fib{fib}", np.stack(wave_rows, axis=0).astype(np.float64))
+
+    return ff
+
+
+def materialize_stage1_bundle_from_sim_hdf(
+    *,
+    spectrograph: str,
+    fiberflat_rate_paths: list[str],
+    meta: dict | None = None,
+    extraction_aperture: float = 10.0,
+) -> dict[str, Any]:
+    """Return ``trace_pos``, ``trace_prof``, ``fiberflat``, and ``wavesol`` from HDF truth."""
+    spectrograph = spectrograph.upper()
+    trace_pos = create_tracepos_model_from_fiberflat_rates(
+        fiberflat_rate_paths,
+        spectrograph=spectrograph,
+        meta=meta,
+    )
+    trace_prof = create_traceprof_model_from_sim_hdf(spectrograph, meta=meta)
+    wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+    fiberflat = create_fiberflat_model_from_rate_maps(
+        fiberflat_rate_paths,
+        trace_pos,
+        spectrograph=spectrograph,
+        meta=meta,
+        extraction_aperture=extraction_aperture,
+    )
+    logger.info(
+        "Sim HDF Stage-1 bundle ready spectrograph=%s n_fiberflat_rates=%d extraction_aperture=%.1f",
+        spectrograph,
+        len(fiberflat_rate_paths),
+        float(extraction_aperture),
+    )
+    return {
+        "trace_pos": trace_pos,
+        "trace_prof": trace_prof,
+        "fiberflat": fiberflat,
+        "wavesol": wavesol,
+    }
+
+# ========================================================================
+# Infinite-S/N RV validation (formerly e2e_infinite_snr_rv.py)
+# ========================================================================
+
+
+HIGH_PRECISION_STELLAR_RV_ARGS: dict[str, Any] = {
+    "algorithm": "ccf_line_mask",
+    "mask_ccf_pixel_interp_order": 1,
+    "mask_auto_center_scout": False,
+    "window_line_by_line": True,
+    "v_half_window": 500.0,
+    "v_step_coarse": 0.01,
+    "chunk_rv_prior_half_width_m_s": 3000.0,
+    "outlier_sigma": 4.0,
+    "preview_write_png": False,
+    "save_overlay_debug": False,
+    "save_preview": False,
+}
+
+
+@dataclass(frozen=True)
+class InfiniteSnrRvThresholds:
+    max_abs_bias_km_s: float = 0.20
+    max_fiber_bias_spread_km_s: float = 0.15
+    min_inlier_chunks: int = 3
+
+
+DEFAULT_INFINITE_SNR_RV_THRESHOLDS = InfiniteSnrRvThresholds()
+
+
+@dataclass
+class InfiniteSnrRvFiberResult:
+    fiber: int
+    measured_rv_m_s: float | None
+    rv_err_m_s: float | None
+    bias_m_s: float | None
+    bias_km_s: float | None
+    n_inlier_chunks: int
+    n_total_chunks: int
+    inlier_median_bias_m_s: float | None
+
+
+@dataclass
+class InfiniteSnrRvEvaluation:
+    injected_rv_km_s: float
+    injected_rv_m_s: float
+    fibers: list[InfiniteSnrRvFiberResult]
+    max_abs_bias_km_s: float | None
+    fiber_bias_spread_km_s: float | None
+
+    @property
+    def passed_default_thresholds(self) -> bool:
+        th = DEFAULT_INFINITE_SNR_RV_THRESHOLDS
+        if self.max_abs_bias_km_s is None or self.fiber_bias_spread_km_s is None:
+            return False
+        if self.max_abs_bias_km_s > th.max_abs_bias_km_s:
+            return False
+        if self.fiber_bias_spread_km_s > th.max_fiber_bias_spread_km_s:
+            return False
+        if any(r.n_inlier_chunks < th.min_inlier_chunks for r in self.fibers):
+            return False
+        return True
+
+
+def apply_infinite_snr_rv_e2e_config(config: E2EConfig) -> E2EConfig:
+    from dataclasses import replace
+    from ..utils.line_mask_utils import paired_line_mask_path_for_template
+
+    mask_path = config.stellar_rv_mask_path
+    if mask_path is None and config.template_filename:
+        try:
+            mask_path = paired_line_mask_path_for_template(config.template_filename)
+        except FileNotFoundError:
+            logger.warning(
+                "Infinite-S/N RV: paired mask for template %s not found; using default mask.",
+                config.template_filename,
+            )
+
+    return replace(
+        config,
+        infinite_snr_rv_validation=True,
+        poisson_noise=False,
+        convert_to_uint16=False,
+        stage1_trace_source=STAGE1_TRACE_SOURCE_SIM_HDF,
+        stellar_rv_mask_path=mask_path,
+        make_preview_html=False,
+    )
+
+
+def merge_infinite_snr_stage1_prim_args(
+    prim_args: dict | None,
+    *,
+    extraction_aperture: int = 10,
+) -> dict:
+    import copy
+
+    out = copy.deepcopy(prim_args or {})
+    out.setdefault("spec_extract", {})
+    out["spec_extract"]["method"] = "box"
+    out["spec_extract"]["extraction_aperture"] = int(extraction_aperture)
+    return out
+
+
+def merge_infinite_snr_stage2_prim_args(prim_args: dict | None) -> dict:
+    import copy
+
+    out = copy.deepcopy(prim_args or {})
+    out.setdefault("stellar_rv", {})
+    out["stellar_rv"].update(HIGH_PRECISION_STELLAR_RV_ARGS)
+    return out
+
+
+def evaluate_infinite_snr_rv_recovery(
+    stage2_model: datamodels.DataModel | None,
+    *,
+    injected_rv_km_s: float,
+    fibers: list[int] | None = None,
+) -> InfiniteSnrRvEvaluation:
+    injected_m_s = float(injected_rv_km_s) * 1000.0
+    if stage2_model is None:
+        return InfiniteSnrRvEvaluation(
+            injected_rv_km_s=float(injected_rv_km_s),
+            injected_rv_m_s=injected_m_s,
+            fibers=[],
+            max_abs_bias_km_s=None,
+            fiber_bias_spread_km_s=None,
+        )
+    if fibers is None:
+        fibers = [1, 2, 3]
+    rows: list[InfiniteSnrRvFiberResult] = []
+    biases_km: list[float] = []
+    for fib in fibers:
+        avg = getattr(stage2_model, f"rvccfavg_fib{fib}", None)
+        chunks = getattr(stage2_model, f"rvccf_fib{fib}", None)
+        meas = err = bias_m_s = None
+        n_in = n_tot = 0
+        inlier_med = None
+        if avg is not None and len(avg) > 0:
+            meas = float(avg["RV"][0])
+            err = float(avg["RV_ERR"][0])
+            if np.isfinite(meas):
+                bias_m_s = meas - injected_m_s
+                biases_km.append(bias_m_s / 1000.0)
+        if chunks is not None and len(chunks) > 0:
+            rv_c = np.asarray(chunks["RV"], dtype=np.float64)
+            n_tot = int(rv_c.size)
+            chunk_names = getattr(chunks, "colnames", None)
+            if chunk_names is None and hasattr(chunks, "dtype"):
+                chunk_names = chunks.dtype.names
+            if chunk_names and "INLIER" in chunk_names:
+                inl = np.asarray(chunks["INLIER"], dtype=bool)
+            else:
+                inl = np.isfinite(rv_c)
+            ok = inl & np.isfinite(rv_c)
+            n_in = int(np.sum(ok))
+            if n_in > 0:
+                inlier_med = float(np.median(rv_c[ok] - injected_m_s))
+        rows.append(
+            InfiniteSnrRvFiberResult(
+                fiber=int(fib),
+                measured_rv_m_s=meas,
+                rv_err_m_s=err,
+                bias_m_s=bias_m_s,
+                bias_km_s=(bias_m_s / 1000.0) if bias_m_s is not None else None,
+                n_inlier_chunks=n_in,
+                n_total_chunks=n_tot,
+                inlier_median_bias_m_s=inlier_med,
+            )
+        )
+    max_abs = max((abs(b) for b in biases_km), default=None)
+    spread = (max(biases_km) - min(biases_km)) if len(biases_km) >= 2 else None
+    return InfiniteSnrRvEvaluation(
+        injected_rv_km_s=float(injected_rv_km_s),
+        injected_rv_m_s=injected_m_s,
+        fibers=rows,
+        max_abs_bias_km_s=max_abs,
+        fiber_bias_spread_km_s=spread,
+    )
+
+
+def assert_infinite_snr_rv_recovery(
+    evaluation: InfiniteSnrRvEvaluation,
+    *,
+    thresholds: InfiniteSnrRvThresholds | None = None,
+) -> None:
+    th = thresholds or DEFAULT_INFINITE_SNR_RV_THRESHOLDS
+    if evaluation.max_abs_bias_km_s is None:
+        raise AssertionError("Infinite-S/N RV evaluation: no measured RVs (stage2 missing?).")
+    if evaluation.max_abs_bias_km_s > th.max_abs_bias_km_s:
+        raise AssertionError(
+            f"Infinite-S/N RV max |bias|={evaluation.max_abs_bias_km_s:.4f} km/s "
+            f"> {th.max_abs_bias_km_s:.4f} km/s"
+        )
+    if (
+        evaluation.fiber_bias_spread_km_s is not None
+        and evaluation.fiber_bias_spread_km_s > th.max_fiber_bias_spread_km_s
+    ):
+        raise AssertionError(
+            f"Infinite-S/N RV fiber spread={evaluation.fiber_bias_spread_km_s:.4f} km/s "
+            f"> {th.max_fiber_bias_spread_km_s:.4f} km/s"
+        )
+    for row in evaluation.fibers:
+        if row.n_inlier_chunks < th.min_inlier_chunks:
+            raise AssertionError(
+                f"Infinite-S/N RV fiber {row.fiber}: n_inlier={row.n_inlier_chunks} "
+                f"< {th.min_inlier_chunks}"
+            )
+
+
+def log_infinite_snr_rv_evaluation(evaluation: InfiniteSnrRvEvaluation) -> None:
+    logger.info(
+        "Infinite-S/N RV evaluation injected=%.3f km/s max|bias|=%s spread=%s passed=%s",
+        evaluation.injected_rv_km_s,
+        f"{evaluation.max_abs_bias_km_s:.4f} km/s" if evaluation.max_abs_bias_km_s is not None else "—",
+        f"{evaluation.fiber_bias_spread_km_s:.4f} km/s"
+        if evaluation.fiber_bias_spread_km_s is not None
+        else "—",
+        evaluation.passed_default_thresholds,
+    )
+    for row in evaluation.fibers:
+        logger.info(
+            "  fib%d: bias=%s km/s n_inlier=%d/%d inlier_med=%s m/s",
+            row.fiber,
+            f"{row.bias_km_s:+.4f}" if row.bias_km_s is not None else "—",
+            row.n_inlier_chunks,
+            row.n_total_chunks,
+            f"{row.inlier_median_bias_m_s:.1f}" if row.inlier_median_bias_m_s is not None else "—",
+        )
+
+# ========================================================================
+# E2E HTML / PNG preview report (formerly e2e_previews.py)
+# ========================================================================
+
+PREVIEWS_SUBDIR = "previews"
+REPORT_HTML_NAME = "index.html"
+
+# Longest image dimension (pixels) for rendered detector/rate previews.
+_MAX_IMAGE_DIM = 1100
+
+# Canonical ordering and display labels for Stage 0 / Stage 1 step tokens. Tokens are the text
+# after the suffix dash in the saved filename (e.g. ``HB...._raw-dqinit.fits`` -> ``dqinit``).
+_STAGE0_TOKEN_ORDER: dict[str, str] = {
+    "dqinit": "DQ Init",
+    "satcheck": "Saturation Check",
+    "biassub": "Bias Subtraction",
+    "refpixcorr": "Reference Pixel Correction",
+    "nonlincorr": "Nonlinearity Correction",
+    "jumpdetec": "Jump Detection",
+    "rampfit": "Ramp Fitting",
+    "darksub": "Dark Subtraction",
+    "gaincorr": "Gain Correction",
+    "detflatcorr": "Detector Flat Correction",
+}
+_STAGE1_TOKEN_ORDER: dict[str, str] = {
+    "specextract": "Spectral Extraction",
+    "wavesolinit": "Initial Wavelength Solution",
+}
+_STAGE2_TOKEN_ORDER: dict[str, str] = {
+    "blaze_correct": "Blaze Correction",
+    "barycorr": "Barycentric Correction",
+    "stellar_rv": "Stellar RV (CCF)",
+}
+
+# Filename suffix tokens: <base>_<group>-<token>.fits
+_PRODUCT_RE = re.compile(r"^(?P<base>.+?)_(?P<group>raw|rate|specuncal|spec)-(?P<token>[A-Za-z0-9_]+)\.fits$")
+
+
+@dataclass
+class PreviewItem:
+    """One rendered preview belonging to a (stage, primitive) section."""
+
+    primitive_label: str
+    primitive_order: int
+    images: list[str] = field(default_factory=list)  # paths relative to the report dir
+    links: list[tuple[str, str]] = field(default_factory=list)  # (label, href)
+    caption: str = ""
+
+
+def infer_exposure_base_name(
+    *,
+    stage0_model=None,
+    stage1_model=None,
+    stage2_model=None,
+) -> str | None:
+    """Best-effort science exposure base name (e.g. ``HB.20260612.57502.95``) from a model."""
+    for model in (stage2_model, stage1_model, stage0_model):
+        if model is None:
+            continue
+        meta = getattr(model, "meta", None)
+        fname = getattr(meta, "filename", None) if meta is not None else None
+        if not fname:
+            fname = getattr(model, "_filepath", None)
+        if fname:
+            base = _strip_product_suffix(os.path.basename(str(fname)))
+            if base:
+                return base
+    return None
+
+
+def _strip_product_suffix(filename: str) -> str | None:
+    m = _PRODUCT_RE.match(filename)
+    if m:
+        return m.group("base")
+    # Fall back to a bare ``<base>_rate.fits`` / ``<base>_specuncal.fits`` style name.
+    m2 = re.match(r"^(?P<base>.+?)_(raw|rate|specuncal|spec)\.fits$", filename)
+    if m2:
+        return m2.group("base")
+    return None
+
+
+def _infer_base_from_dir(output_dir: str) -> str | None:
+    """Pick the exposure base with the most products directly under ``output_dir``."""
+    counts: dict[str, int] = {}
+    for name in os.listdir(output_dir):
+        if not name.endswith(".fits"):
+            continue
+        m = _PRODUCT_RE.match(name)
+        if not m:
+            continue
+        counts[m.group("base")] = counts.get(m.group("base"), 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=lambda k: counts[k])
+
+
+# --------------------------------------------------------------------------------------
+# Image rendering helpers
+# --------------------------------------------------------------------------------------
+
+
+def _downsample_2d(arr: np.ndarray, max_dim: int = _MAX_IMAGE_DIM) -> np.ndarray:
+    """Stride-downsample a 2-D array so its longest dimension is <= ``max_dim``."""
+    a = np.asarray(arr)
+    if a.ndim != 2:
+        return a
+    ny, nx = a.shape
+    step = max(1, int(np.ceil(max(ny, nx) / float(max_dim))))
+    if step <= 1:
+        return a
+    return a[::step, ::step]
+
+
+def _finite_mean_std(arr: np.ndarray) -> tuple[float, float]:
+    """Mean and sample std of finite pixels in a 2-D (or collapsible) array."""
+    a = np.asarray(arr, dtype=np.float64).ravel()
+    finite = a[np.isfinite(a)]
+    if finite.size == 0:
+        return float("nan"), float("nan")
+    return float(np.mean(finite)), float(np.std(finite))
+
+
+def _format_2d_frame_title(base_title: str, mean: float, std: float) -> str:
+    """Append pixel mean and standard deviation to a matplotlib frame title."""
+    return f"{base_title}\nMean={mean:.2f}, Standard Deviation={std:.2f}"
+
+
+def _save_detector_image_png(arr2d: np.ndarray, out_path: str, title: str) -> None:
+    """Render a 2-D detector/rate image with robust percentile scaling to ``out_path``."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    a = _downsample_2d(np.asarray(arr2d, dtype=np.float64))
+    finite = np.isfinite(a)
+    if np.any(finite):
+        vmin, vmax = np.nanpercentile(a[finite], [1.0, 99.0])
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
+            vmin = float(np.nanmin(a[finite]))
+            vmax = float(np.nanmax(a[finite]))
+            if vmin == vmax:
+                vmax = vmin + 1.0
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    fig, ax = plt.subplots(figsize=(7.2, 7.0))
+    im = ax.imshow(a, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("detector x (downsampled)")
+    ax.set_ylabel("detector y (downsampled)")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=95)
+    plt.close(fig)
+
+
+def _save_orders_spectra_png(
+    flux: np.ndarray,
+    dq: np.ndarray | None,
+    out_path: str,
+    title: str,
+) -> None:
+    """Render 1-D extracted spectra (one panel per order) for a single fiber."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    f = np.asarray(flux, dtype=np.float64)
+    if f.ndim != 2:
+        f = np.atleast_2d(f)
+    n_orders, n_pix = f.shape
+    dq_arr = np.asarray(dq) if dq is not None else None
+
+    ncols = 4
+    nrows = int(np.ceil(n_orders / ncols))
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(ncols * 3.4, nrows * 1.7), squeeze=False
+    )
+    x = np.arange(n_pix)
+    for k in range(nrows * ncols):
+        ax = axes[k // ncols][k % ncols]
+        if k >= n_orders:
+            ax.axis("off")
+            continue
+        y = f[k].copy()
+        if dq_arr is not None and dq_arr.shape == f.shape:
+            y = np.where(dq_arr[k] != 0, np.nan, y)
+        ax.plot(x, y, lw=0.5, color="#1f77b4")
+        ax.set_title(f"order {k}", fontsize=7)
+        ax.tick_params(labelsize=6)
+        ax.margins(x=0.0)
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
+    fig.savefig(out_path, dpi=95)
+    plt.close(fig)
+
+
+# --------------------------------------------------------------------------------------
+# Per-stage preview builders
+# --------------------------------------------------------------------------------------
+
+
+def _read_hdu_data(path: str, names: list[str]):
+    from astropy.io import fits
+
+    with fits.open(path, memmap=False) as hdul:
+        available = {hdu.name.upper(): i for i, hdu in enumerate(hdul)}
+        for name in names:
+            idx = available.get(name.upper())
+            if idx is not None and hdul[idx].data is not None:
+                return np.asarray(hdul[idx].data)
+    return None
+
+
+def _build_stage0_item(
+    path: str,
+    token: str,
+    *,
+    kind: str,
+    previews_dir: str,
+    report_dir: str,
+) -> PreviewItem | None:
+    label = _STAGE0_TOKEN_ORDER.get(token, token)
+    order = list(_STAGE0_TOKEN_ORDER).index(token) if token in _STAGE0_TOKEN_ORDER else 999
+    out_png = os.path.join(previews_dir, f"stage0_{token}.png")
+    if kind == "ramp_mean":
+        cube = _read_hdu_data(path, ["DATA", "SCI"])
+        if cube is None or cube.ndim < 3:
+            logger.warning("Stage 0 preview: no ramp cube in %s; skipping.", path)
+            return None
+        # Mean across the read axis (axis 0 for (nreads, ny, nx); collapse leading axes if 4-D).
+        img = np.asarray(cube, dtype=np.float64)
+        while img.ndim > 2:
+            img = np.nanmean(img, axis=0)
+        base_title = f"{label}: mean of detector across all reads"
+        mean, std = _finite_mean_std(img)
+        title = _format_2d_frame_title(base_title, mean, std)
+        caption = (
+            "Average of the detector counts across all UTR reads. "
+            f"Mean={mean:.2f}, Standard Deviation={std:.2f}."
+        )
+    else:  # rate_map
+        img = _read_hdu_data(path, ["RATE", "SCI", "DATA"])
+        if img is None:
+            logger.warning("Stage 0 preview: no rate image in %s; skipping.", path)
+            return None
+        img = np.asarray(img, dtype=np.float64)
+        while img.ndim > 2:
+            img = img[0]
+        base_title = f"{label}: rate map"
+        mean, std = _finite_mean_std(img)
+        title = _format_2d_frame_title(base_title, mean, std)
+        caption = (
+            "Rate map (e-/s per pixel) after this step. "
+            f"Mean={mean:.2f}, Standard Deviation={std:.2f}."
+        )
+    _save_detector_image_png(img, out_png, title)
+    rel = os.path.relpath(out_png, report_dir)
+    return PreviewItem(
+        primitive_label=label,
+        primitive_order=order,
+        images=[rel],
+        caption=caption,
+    )
+
+
+def _build_stage1_item(
+    path: str,
+    token: str,
+    *,
+    previews_dir: str,
+    report_dir: str,
+) -> PreviewItem | None:
+    from astropy.io import fits
+
+    label = _STAGE1_TOKEN_ORDER.get(token, token)
+    order = list(_STAGE1_TOKEN_ORDER).index(token) if token in _STAGE1_TOKEN_ORDER else 999
+    images: list[str] = []
+    with fits.open(path, memmap=False) as hdul:
+        hdu_names = [h.name.upper() for h in hdul]
+        spec_names = sorted(
+            (hdu.name for hdu in hdul if re.match(r"^SPEC_UNCAL_FIB\d+$", hdu.name.upper())),
+            key=lambda s: int(re.search(r"\d+", s).group()),
+        )
+        for spec_name in spec_names:
+            fib = int(re.search(r"\d+", spec_name).group())
+            flux = hdul[spec_name].data
+            if flux is None:
+                continue
+            dq_name = f"SPEC_DQ_FIB{fib}"
+            dq = hdul[dq_name].data if dq_name.upper() in hdu_names else None
+            out_png = os.path.join(previews_dir, f"stage1_{token}_fib{fib}.png")
+            _save_orders_spectra_png(
+                np.asarray(flux),
+                np.asarray(dq) if dq is not None else None,
+                out_png,
+                f"{label}: extracted 1-D spectra, fiber {fib}",
+            )
+            images.append(os.path.relpath(out_png, report_dir))
+    if not images:
+        return None
+    return PreviewItem(
+        primitive_label=label,
+        primitive_order=order,
+        images=images,
+        caption="Extracted 1-D spectrum per echelle order (flux vs. detector column).",
+    )
+
+
+def _collect_stage2_items(
+    output_dir: str,
+    base: str,
+    report_dir: str,
+) -> list[PreviewItem]:
+    """Collect the pipeline's default Stage 2 previews already written next to the L2 products."""
+    items: dict[str, PreviewItem] = {}
+    for name in sorted(os.listdir(output_dir)):
+        if not name.startswith(base + "_spec"):
+            continue
+        if not name.lower().endswith((".png", ".html")):
+            continue  # default previews only (skip .fits products)
+        path = os.path.join(output_dir, name)
+        token = None
+        for tok in _STAGE2_TOKEN_ORDER:
+            if f"_spec-{tok}" in name or f"-{tok}_" in name or f"-{tok}." in name:
+                token = tok
+                break
+        if "stellar_rv" in name:
+            token = "stellar_rv"
+        if token is None:
+            continue
+        label = _STAGE2_TOKEN_ORDER.get(token, token)
+        order = list(_STAGE2_TOKEN_ORDER).index(token) if token in _STAGE2_TOKEN_ORDER else 999
+        item = items.setdefault(
+            token, PreviewItem(primitive_label=label, primitive_order=order, caption="")
+        )
+        rel = os.path.relpath(path, report_dir)
+        if name.lower().endswith(".png"):
+            item.images.append(rel)
+        elif name.lower().endswith(".html"):
+            item.links.append((name.replace(base + "_", ""), rel))
+    return [it for it in items.values() if it.images or it.links]
+
+
+def _collect_fiberflat_items(output_dir: str, report_dir: str) -> list[PreviewItem]:
+    """Collect trace-position previews from the fiberflat pipeline under ``output_dir/cals/``."""
+    cals_dir = os.path.join(output_dir, "cals")
+    if not os.path.isdir(cals_dir):
+        return []
+
+    previews: list[tuple[float, str]] = []
+    for name in os.listdir(cals_dir):
+        lower = name.lower()
+        if "mastercal-tracepos" not in lower or not lower.endswith("_preview.png"):
+            continue
+        path = os.path.join(cals_dir, name)
+        if os.path.isfile(path):
+            previews.append((os.path.getmtime(path), path))
+
+    if not previews:
+        return []
+
+    # Use the most recently written trace-pos preview (current E2E run).
+    _, best_path = max(previews, key=lambda t: t[0])
+    rel = os.path.relpath(best_path, report_dir)
+    return [
+        PreviewItem(
+            primitive_label="Trace Positions",
+            primitive_order=0,
+            images=[rel],
+            caption=(
+                "Fitted echelle trace centroids on simulated fiberflat rate maps "
+                "(ProcessFiberflatsPipeline / TracePositionPrimitive)."
+            ),
+        )
+    ]
+
+
+# --------------------------------------------------------------------------------------
+# HTML report
+# --------------------------------------------------------------------------------------
+
+_HTML_CSS = """
+:root { color-scheme: light dark; }
+body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+       margin: 0; padding: 1.5rem; line-height: 1.4; }
+h1 { font-size: 1.5rem; margin: 0 0 0.25rem 0; }
+.subtitle { color: #888; margin-bottom: 1.25rem; font-size: 0.9rem; }
+details.stage { border: 1px solid #8884; border-radius: 8px; margin: 0 0 1rem 0; padding: 0.25rem 0.75rem; }
+details.stage > summary { font-size: 1.15rem; font-weight: 600; cursor: pointer; padding: 0.5rem 0; }
+details.prim { border-top: 1px dashed #8884; margin: 0.25rem 0; padding: 0.25rem 0.25rem 0.5rem 0.75rem; }
+details.prim > summary { font-size: 1rem; font-weight: 500; cursor: pointer; padding: 0.4rem 0; }
+.caption { color: #888; font-size: 0.85rem; margin: 0.1rem 0 0.5rem 0; }
+.gallery { display: flex; flex-wrap: wrap; gap: 0.75rem; max-height: 80vh; overflow: auto;
+           padding: 0.25rem; border: 1px solid #8882; border-radius: 6px; }
+.gallery img { max-width: 100%; height: auto; border: 1px solid #8884; border-radius: 4px; }
+.gallery figure { margin: 0; }
+.links a { display: inline-block; margin: 0.2rem 0.6rem 0.2rem 0; }
+.rv-summary { margin: 1.25rem 0 0.5rem 0; }
+.rv-summary h2 { font-size: 1.15rem; margin: 0 0 0.5rem 0; }
+.rv-summary table { border-collapse: collapse; width: 100%; max-width: 960px; font-size: 0.9rem; }
+.rv-summary th, .rv-summary td { border: 1px solid #8884; padding: 0.45rem 0.55rem; text-align: right; }
+.rv-summary th:first-child, .rv-summary td:first-child { text-align: center; }
+.rv-summary th { background: #8882; font-weight: 600; }
+.rv-summary caption { caption-side: top; text-align: left; color: #888; font-size: 0.85rem; margin-bottom: 0.35rem; }
+"""
+
+
+def _render_item_html(item: PreviewItem) -> str:
+    parts = [f'<details class="prim" open><summary>{_esc(item.primitive_label)}</summary>']
+    if item.caption:
+        parts.append(f'<div class="caption">{_esc(item.caption)}</div>')
+    if item.images:
+        parts.append('<div class="gallery">')
+        for img in item.images:
+            parts.append(
+                f'<figure><a href="{_esc(img)}" target="_blank">'
+                f'<img src="{_esc(img)}" loading="lazy"></a></figure>'
+            )
+        parts.append("</div>")
+    if item.links:
+        parts.append('<div class="links">')
+        for label, href in item.links:
+            parts.append(f'<a href="{_esc(href)}" target="_blank">{_esc(label)} &#8599;</a>')
+        parts.append("</div>")
+    parts.append("</details>")
+    return "\n".join(parts)
+
+
+def _render_stage_html(stage_title: str, items: list[PreviewItem]) -> str:
+    items = sorted(items, key=lambda it: (it.primitive_order, it.primitive_label))
+    body = "\n".join(_render_item_html(it) for it in items)
+    return (
+        f'<details class="stage" open><summary>{_esc(stage_title)}</summary>\n{body}\n</details>'
+    )
+
+
+def _esc(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _fmt_num(value: float | None, *, decimals: int = 3, unit: str = "") -> str:
+    if value is None or not np.isfinite(value):
+        return "—"
+    return f"{value:.{decimals}f}{unit}"
+
+
+def _render_rv_performance_table_html(
+    perf_rows: list,
+    *,
+    injected_rv_km_s: float,
+    injected_berv_km_s: float | None = None,
+) -> str:
+    """HTML table of E2E RV recovery metrics (from :func:`collect_e2e_rv_performance_rows`)."""
+    from . import e2e_support
+
+    if not perf_rows:
+        return ""
+
+    header = (
+        f"Injected stellar RV = {_fmt_num(injected_rv_km_s, decimals=3)} km/s "
+        f"({_fmt_num(injected_rv_km_s * 1000.0, decimals=1)} m/s); "
+        "excludes BERV (simulation Doppler uses topocentric ``Gaia RV - BERV``; "
+        "Stage 2 CCF converts measured RV to barycentric via ``ccf_zb``)"
+    )
+    if injected_berv_km_s is not None and np.isfinite(injected_berv_km_s):
+        header += (
+            f". Reference BERV at ``mjd_mid`` = {_fmt_num(injected_berv_km_s, decimals=3)} km/s "
+            f"({_fmt_num(injected_berv_km_s * 1000.0, decimals=1)} m/s)"
+        )
+    header += (
+        ". Measured RV and σ(⟨RV⟩) from RVCCFAVG; BERV column from Stage 2 "
+        "``BARYCORR_FIB*``; inlier scatter is RMS of "
+        "inlier chunk RVs about ⟨RV⟩ (same metric as the Stage 2 preview sidebar)."
+    )
+    body_rows: list[str] = []
+    for row in perf_rows:
+        if not isinstance(row, e2e_support.E2ERVPerformanceRow):
+            continue
+        body_rows.append(
+            "<tr>"
+            f"<td>{row.fiber}</td>"
+            f"<td>{_fmt_num(row.injected_rv_km_s, decimals=3)}</td>"
+            f"<td>{_fmt_num(row.berv_km_s, decimals=3)}</td>"
+            f"<td>{_fmt_num(row.measured_rv_km_s, decimals=3)}</td>"
+            f"<td>{_fmt_num(row.bias_m_s, decimals=1)}</td>"
+            f"<td>{_fmt_num(row.rv_err_m_s, decimals=3)}</td>"
+            f"<td>{_fmt_num(row.inlier_scatter_m_s, decimals=3)}</td>"
+            f"<td>{row.n_inlier_chunks} / {row.n_total_chunks}</td>"
+            "</tr>"
+        )
+    if not body_rows:
+        return ""
+
+    return f"""
+<section class="rv-summary">
+<h2>RV performance summary</h2>
+<table>
+<caption>{_esc(header)}</caption>
+<thead>
+<tr>
+<th>Fiber</th>
+<th>Injected stellar RV (km/s)</th>
+<th>BERV (km/s)</th>
+<th>Measured RV (km/s)</th>
+<th>Bias (m/s)</th>
+<th>σ(⟨RV⟩) (m/s)</th>
+<th>Inlier scatter (m/s)</th>
+<th>Inlier chunks</th>
+</tr>
+</thead>
+<tbody>
+{os.linesep.join(body_rows)}
+</tbody>
+</table>
+</section>
+"""
+
+
+def generate_e2e_preview_report(
+    output_dir: str,
+    *,
+    exposure_base_name: str | None = None,
+    gaia_target=None,
+    stage2_model=None,
+    injected_rv_km_s: float | None = None,
+    fibers: list[int] | None = None,
+) -> str:
+    """
+    Render PNG previews and write ``index.html`` summarizing the E2E run.
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory containing the saved per-step FITS products (the E2E ``output_dir``).
+    exposure_base_name : str or None
+        Science exposure base name (e.g. ``HB.20260612.57502.95``). If ``None``, inferred
+        from the products in ``output_dir``.
+    gaia_target : optional
+        :class:`~hispecdrp.simulations.e2e_gaia.E2EGaiaTarget` for a short header summary.
+    stage2_model : optional
+        Stage 2 L2 model for the RV performance table. When omitted, the table is skipped.
+    injected_rv_km_s : float or None
+        Template Doppler RV injected before rate-map generation. Defaults to
+        ``gaia_target.injected_rv_km_s`` when available.
+    fibers : list of int or None
+        Fibers to include in the RV table (default ``[1, 2, 3]``).
+
+    Returns
+    -------
+    str
+        Absolute path to the written ``index.html``.
+    """
+    output_dir = os.path.abspath(output_dir)
+    base = exposure_base_name or _infer_base_from_dir(output_dir)
+    if not base:
+        raise RuntimeError(f"Could not determine exposure base name in {output_dir!r}")
+
+    previews_dir = os.path.join(output_dir, PREVIEWS_SUBDIR)
+    os.makedirs(previews_dir, exist_ok=True)
+    report_dir = output_dir
+    report_path = os.path.join(output_dir, REPORT_HTML_NAME)
+
+    stage0_items: list[PreviewItem] = []
+    stage1_items: list[PreviewItem] = []
+
+    for name in sorted(os.listdir(output_dir)):
+        if not name.startswith(base + "_") or not name.endswith(".fits"):
+            continue
+        m = _PRODUCT_RE.match(name)
+        if not m:
+            continue
+        group = m.group("group")
+        token = m.group("token")
+        path = os.path.join(output_dir, name)
+        try:
+            if group == "raw":
+                item = _build_stage0_item(
+                    path, token, kind="ramp_mean",
+                    previews_dir=previews_dir, report_dir=report_dir,
+                )
+                if item:
+                    stage0_items.append(item)
+            elif group == "rate":
+                item = _build_stage0_item(
+                    path, token, kind="rate_map",
+                    previews_dir=previews_dir, report_dir=report_dir,
+                )
+                if item:
+                    stage0_items.append(item)
+            elif group == "specuncal" and token == "specextract":
+                item = _build_stage1_item(
+                    path, token, previews_dir=previews_dir, report_dir=report_dir,
+                )
+                if item:
+                    stage1_items.append(item)
+        except Exception:
+            logger.exception("Failed to build preview for %s", name)
+
+    stage2_items = _collect_stage2_items(output_dir, base, report_dir)
+    fiberflat_items = _collect_fiberflat_items(output_dir, report_dir)
+
+    # Header summary
+    summary_bits = [f"Exposure: <code>{_esc(base)}</code>"]
+    if gaia_target is not None:
+        meta = getattr(gaia_target, "target_meta", {}) or {}
+        summary_bits.append(f"Target: <code>{_esc(meta.get('target_name', '?'))}</code>")
+        summary_bits.append(f"Gaia DR3 <code>{_esc(getattr(gaia_target, 'source_id', '?'))}</code>")
+        summary_bits.append(f"injected RV = {getattr(gaia_target, 'injected_rv_km_s', float('nan')):.3f} km/s")
+
+    stages_html = []
+    if stage0_items:
+        stages_html.append(_render_stage_html("Stage 0 — detector reduction", stage0_items))
+    if fiberflat_items:
+        stages_html.append(
+            _render_stage_html("Fiberflat calibration — trace positions", fiberflat_items)
+        )
+    if stage1_items:
+        stages_html.append(_render_stage_html("Stage 1 — spectral extraction", stage1_items))
+    if stage2_items:
+        stages_html.append(_render_stage_html("Stage 2 — spectral calibration & RV", stage2_items))
+
+    eff_injected_rv = injected_rv_km_s
+    if eff_injected_rv is None and gaia_target is not None:
+        eff_injected_rv = getattr(gaia_target, "injected_rv_km_s", None)
+    eff_injected_berv = None
+    if gaia_target is not None:
+        eff_injected_berv = getattr(gaia_target, "berv_km_s", None)
+    rv_table_html = ""
+    if stage2_model is not None and eff_injected_rv is not None:
+        from . import e2e_support
+
+        perf_rows = e2e_support.collect_e2e_rv_performance_rows(
+            stage2_model,
+            injected_rv_km_s=float(eff_injected_rv),
+            injected_berv_km_s=(
+                float(eff_injected_berv)
+                if eff_injected_berv is not None and np.isfinite(eff_injected_berv)
+                else None
+            ),
+            fibers=fibers,
+        )
+        rv_table_html = _render_rv_performance_table_html(
+            perf_rows,
+            injected_rv_km_s=float(eff_injected_rv),
+            injected_berv_km_s=(
+                float(eff_injected_berv)
+                if eff_injected_berv is not None and np.isfinite(eff_injected_berv)
+                else None
+            ),
+        )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HISPEC E2E previews — {_esc(base)}</title>
+<style>{_HTML_CSS}</style>
+</head>
+<body>
+<h1>HISPEC end-to-end simulation previews</h1>
+<div class="subtitle">{' &middot; '.join(summary_bits)}</div>
+{os.linesep.join(stages_html)}
+{rv_table_html}
+</body>
+</html>
+"""
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    logger.info(
+        "E2E previews: wrote %d stage-0, %d fiberflat, %d stage-1, %d stage-2 sections to %s",
+        len(stage0_items), len(fiberflat_items), len(stage1_items), len(stage2_items), report_path,
+    )
+    return report_path

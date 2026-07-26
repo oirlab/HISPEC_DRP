@@ -20,14 +20,14 @@ authentication.
 
 from __future__ import annotations
 
-# Allow running as script: python hispecdrp/simulations/run_caldb.py (relative imports need package context)
+# Allow running as script: python hispecdrp/calibrations/run_caldb.py (relative imports need package context)
 if __name__ == "__main__" and __package__ is None:
     import sys
     import os
     _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if _root not in sys.path:
         sys.path.insert(0, _root)
-    __package__ = "hispecdrp.simulations"
+    __package__ = "hispecdrp.calibrations"
 
 import argparse
 import logging
@@ -35,8 +35,8 @@ import os
 import sys
 
 from .. import datamodels
-from ..utils.logging import LogConfig, ROOT_LOGGER
-from ..calibrations import (
+from ..utils.logging import ROOT_LOGGER, setup_default_logging
+from . import (
     HISPECCalibrationStore,
     DQSelector,
     SaturationSelector,
@@ -392,16 +392,16 @@ def main() -> None:
     """
     Parse command-line arguments and run the calibration DB sync.
 
-    Configures logging via :class:`hispecdrp.utils.logging.LogConfig`, then calls
+    Configures logging via :func:`hispecdrp.utils.logging.setup_default_logging`, then calls
     :func:`run` with the parsed options. See the script help (e.g.
-    ``python -m hispecdrp.simulations.run_caldb --help``) for available arguments.
+    ``python -m hispecdrp.calibrations.run_caldb --help``) for available arguments.
 
     Returns
     -------
     None
     """
-    config = LogConfig(level=logging.INFO, enable_stdout=True, enable_file=False)
-    config.apply([ROOT_LOGGER, __name__])
+    setup_default_logging()
+    logging.getLogger(ROOT_LOGGER).setLevel(logging.INFO)
     parser = argparse.ArgumentParser(
         description="Sync HISPEC calibration DB from KOA and download missing calibration files.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

@@ -9,7 +9,7 @@ using the same fiber flat and cross correlation using the same spectral template
 as the rate map; it is only run when a valid --spectrum template file exists. Use --fibers to restrict to fibers 1, 2, 3, and/or 4. Use --spectrum with
 a BT-Settl .h5 file path to use that spectrum for the rate map instead of a flat spectrum.
 
-Calibration cache uses the default (see run_caldb) if KOA_CALIBRATION_CACHE is not set.
+Calibration cache uses the default (see hispecdrp.calibrations.run_caldb) if KOA_CALIBRATION_CACHE is not set.
 Dummy fiber flat rate files are created with a blackbody spectrum (0.8--3.0 µm, optional temperature and scale)
 using the same create_ramp / Stage 0 path, then run through the fiber flat pipeline.
 
@@ -39,8 +39,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hispecdrp import datamodels, simulations
+from hispecdrp import datamodels
+from hispecdrp.calibrations.run_caldb import get_master_calibrations
 from hispecdrp.pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline, ProcessFiberflatsPipeline
+from hispecdrp.simulations import simulate_up_the_ramp as simulations
 from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
 from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
 
@@ -547,7 +549,7 @@ def parse_args():
         "--spectrum",
         default="lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5",
         metavar="PATH",
-        help="BT-Settl spectrum .h5 filename in simulations/data/ or absolute path. Default: lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5",
+        help="BT-Settl spectrum .h5 filename in hispecdrp/data/templates/ or absolute path. Default: lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5",
     )
     parser.add_argument(
         "--radial-velocity",
@@ -669,7 +671,7 @@ def main():
         ramp_model = datamodels.open(ramp_path)
         if args.use_master_calibrations:
             logger.info("Loading master calibrations from calDB...")
-            calibration_models = simulations.get_master_calibrations(
+            calibration_models = get_master_calibrations(
                 meta=None,
                 instrument_name=None,
                 instrument_era="0.0.1",

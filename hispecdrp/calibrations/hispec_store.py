@@ -56,9 +56,124 @@ class HISPECCalibrationStore(CalibrationStore):
             A tuple containing:
                 - ``str``: The local file path where the calibration was saved.
                 - ``dict``: The calibration metadata dictionary as added to the database.
+
+        Notes
+        -----
+        Upstream ``koa_middleware.CalibrationStore.register_calibration`` snapshots
+        ``cal.to_record()`` *before* ``cal.save()`` and discards the return value of
+        ``generate_calibration_version``, so ``filename`` / ``koa_id`` / ``cal_version``
+        can be stored as ``None`` even though the FITS file is written. This override
+        assigns those fields on the model and record before insert, and returns any
+        existing version-family match instead of ``(None, None)``.
         """
+        from koa_middleware.utils import generate_md5_file
+
         cal = datamodels.open(cal)
-        return super().register_calibration(cal, origin=origin, new_version=new_version)
+
+        if origin is not None:
+            cal.meta.origin = origin
+        elif getattr(cal.meta, "origin", None) is None:
+            cal.meta.origin = os.getenv("KOA_CALIBRATION_ORIGIN", "LOCAL")
+
+        if self.calibration_record_in_cache(cal, mode="id"):
+            existing = self.calibration_record_in_cache(cal, mode="id")
+            logger.warning("Calibration already exists in cache: %s! Skipping registration.", cal)
+            return self._existing_calibration_path_and_record(existing)
+
+        if not new_version and self.calibration_record_in_cache(cal, mode="version-family"):
+            existing = self.calibration_record_in_cache(cal, mode="version-family")
+            logger.warning("Calibration already exists in cache: %s! Skipping registration.", cal)
+            return self._existing_calibration_path_and_record(existing)
+
+        cal_record = cal.to_record()
+
+        if new_version:
+            # Middleware's generate_calibration_version sets origin on the dict and
+            # *returns* the version string but does not assign cal_version itself.
+            version = self.generate_calibration_version(cal_record, origin=cal.meta.origin)
+            cal_record["cal_version"] = version
+            cal.meta.cal_version = version
+            cal.meta.origin = cal_record.get("origin") or cal.meta.origin
+
+        if not getattr(cal.meta, "filename", None):
+            cal.generate_filename(origin=cal.meta.origin, auto_version=False)
+
+        cal_record["filename"] = cal.meta.filename
+        cal_record["koa_id"] = cal_record.get("koa_id") or cal.meta.filename
+        cal_record["origin"] = cal_record.get("origin") or cal.meta.origin
+        if getattr(cal.meta, "koa_filepath", None):
+            cal_record["koa_filepath"] = cal.meta.koa_filepath
+        if getattr(cal.meta, "cal_version", None) and not cal_record.get("cal_version"):
+            cal_record["cal_version"] = cal.meta.cal_version
+
+        local_filepath = cal.save(output_dir=self.data_dir)
+        fname = os.path.basename(local_filepath)
+        cal_record["filename"] = getattr(cal.meta, "filename", None) or fname
+        cal_record["koa_id"] = cal_record.get("koa_id") or cal_record["filename"]
+        if getattr(cal.meta, "koa_filepath", None):
+            cal_record["koa_filepath"] = cal.meta.koa_filepath
+
+        cal_record["file_md5"] = generate_md5_file(local_filepath)
+        cal_record_added = self.local_db.add(cal_record)
+        return local_filepath, cal_record_added
+
+    def _existing_calibration_path_and_record(
+        self, existing: dict | list | None
+    ) -> tuple[str | None, dict | None]:
+        """Return ``(path, record)`` for a pre-existing cache row, or ``(None, None)``.
+
+        Upstream ``calibration_record_in_cache(..., mode="version-family")`` returns a
+        ``list[dict]`` when multiple version-family matches exist (default
+        ``include_version=False``). Normalize to a single record before path lookup.
+        """
+        if not existing:
+            return None, None
+        if isinstance(existing, list):
+            chosen = None
+            for row in existing:
+                if isinstance(row, dict) and row.get("filename"):
+                    chosen = row
+                    break
+            existing = chosen or (existing[0] if existing else None)
+            if not isinstance(existing, dict):
+                return None, None
+        try:
+            path = self.calibration_file_in_cache(existing)
+        except Exception:  # noqa: BLE001 - missing/null filename should not crash callers
+            logger.warning(
+                "Existing calibration record is not usable (filename=%r).",
+                existing.get("filename"),
+            )
+            return None, existing
+        if path and existing.get("filename"):
+            return path, existing
+        return None, existing
+
+    def _prepare_cal_record(
+        self,
+        cal_model: CalibrationModel,
+        origin: str = "LOCAL",
+    ) -> dict:
+        """Build a DB record from an on-disk / in-memory calibration model."""
+        from koa_middleware.utils import generate_md5_file
+
+        if origin and not getattr(cal_model.meta, "origin", None):
+            cal_model.meta.origin = origin
+
+        filepath = getattr(cal_model, "_filepath", None)
+        if not getattr(cal_model.meta, "filename", None) and filepath:
+            cal_model.meta.filename = os.path.basename(filepath)
+
+        record = cal_model.to_record()
+        if not record.get("filename") and filepath:
+            record["filename"] = os.path.basename(filepath)
+        if not record.get("origin"):
+            record["origin"] = origin
+        if not record.get("koa_id"):
+            record["koa_id"] = record.get("filename")
+        if filepath and os.path.isfile(filepath) and not record.get("file_md5"):
+            record["file_md5"] = generate_md5_file(filepath)
+        return record
 
     # Select and get calibration
     def select_and_get_calibration(
@@ -266,6 +381,40 @@ class HISPECCalibrationStore(CalibrationStore):
         
         return super().calibration_record_in_cache(cal, mode=mode)
     
+    def generate_calibration_version(
+        self,
+        calibration,
+        origin: str | None = None,
+    ) -> str:
+        """Generate the next version string; accept a model or a metadata dict.
+
+        Upstream ``koa_middleware`` assigns ``calibration['origin']`` and therefore
+        only works with dicts. Datamodel callers (and
+        :meth:`~hispecdrp.datamodels.base_model.CalibrationModel.generate_calibration_version`)
+        pass the model itself, so convert to a record first and write the version
+        back onto the model when applicable.
+        """
+        model = None
+        if isinstance(calibration, datamodels.CalibrationModel):
+            model = calibration
+            if origin is not None:
+                model.meta.origin = origin
+            elif getattr(model.meta, "origin", None) is None:
+                model.meta.origin = os.getenv("KOA_CALIBRATION_ORIGIN", "LOCAL")
+            calibration = model.to_record()
+
+        version = super().generate_calibration_version(calibration, origin=origin)
+        # Upstream sets origin on the dict but does not assign the returned version.
+        if isinstance(calibration, dict):
+            calibration["cal_version"] = version
+            if origin is not None:
+                calibration["origin"] = origin.upper()
+        if model is not None:
+            model.meta.cal_version = version
+            if calibration.get("origin"):
+                model.meta.origin = calibration["origin"]
+        return version
+
     def get_version_family_column_names(self, cal_type : str):
         """
         Retrieves the column names for the version family attributes.

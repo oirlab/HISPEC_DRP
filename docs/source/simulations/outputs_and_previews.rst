@@ -27,7 +27,7 @@ HTML preview report
 -------------------
 
 When ``make_preview_html=True`` (default),
-:func:`~hispecdrp.simulations.e2e_previews.generate_e2e_preview_report` writes:
+:func:`~hispecdrp.simulations.e2e_pipeline.generate_e2e_preview_report` writes:
 
 * ``<output_dir>/index.html`` — scrollable report by stage and primitive
 * ``<output_dir>/previews/*.png`` — rendered PNG previews

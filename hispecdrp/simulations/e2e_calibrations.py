@@ -486,20 +486,6 @@ def log_stage1_trace_bundle_status(bundle: E2ECalibrationBundle) -> None:
     )
 
 
-def log_missing_stage1_trace_masters(bundle: E2ECalibrationBundle) -> None:
-    """Log which Stage 1 trace/fiberflat masters are still missing from KOA/config."""
-    if bundle.has_master_trace_bundle:
-        return
-    missing = [k for k in STAGE1_TRACE_KEYS if getattr(bundle, k) is None]
-    if missing:
-        logger.warning(
-            "KOA/config trace bundle incomplete (missing %s); dummy fiberflat "
-            "simulation and ProcessFiberflatsPipeline will run unless paths are "
-            "provided in calibration_config.",
-            missing,
-        )
-
-
 def complete_stage0_calibrations(
     calibration_models: dict[str, datamodels.CalibrationModel],
     rate_map: np.ndarray | None,

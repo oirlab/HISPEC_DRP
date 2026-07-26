@@ -44,12 +44,13 @@ classifiers = [
 ]
 
 dependencies = [
+  # numba>=0.66 is required for NumPy 2.4+; older numba raises ImportError at import.
   "numpy>=2.0",
   "scipy",
   "matplotlib",
   "astropy",
   "gitpython",
-  "numba",
+  "numba>=0.66.0",
   "tqdm",
   "stcal==1.15.2",
   "gdown",
@@ -59,6 +60,7 @@ dependencies = [
   "h5py",
   "jsonschema",
   "jsonref",
+  # Required by barycenter_correction (imported via hispecdrp.primitives).
   "barycorrpy>=0.4.4",
   "plotly",
   "kaleido>=1",  # v1 API (write_fig_sync); PNG previews avoid plotly.io engine deprecation

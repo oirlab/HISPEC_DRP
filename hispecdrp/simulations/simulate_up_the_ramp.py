@@ -1,18 +1,14 @@
 """
-Simulate up-the-ramp (UTR) readouts and run Stage 0–2 pipelines for end-to-end tests.
+Simulate up-the-ramp (UTR) readouts and Stage 0 / fiberflat helpers.
 
-This module provides functions to build simulated calibration models, generate
-ramp data from a rate map, and run the Stage 0 pipeline to produce rate/slope
-products. Calibrations can be (1) dummy/simulated via
-:func:`create_simulated_calibration_models`, or (2) master calibrations
-downloaded from the calibration store via :func:`run_caldb.get_master_calibrations`
-when ``use_master_calibrations=True`` in :func:`simulate_up_the_ramp`. Optional
-helpers for the fiberflat and Stage 1 pipelines are included for full workflows.
+Build simulated calibration models, generate ramp data from a rate map, and run
+the Stage 0 and fiberflat pipelines. Master calibrations come from
+:func:`hispecdrp.calibrations.run_caldb.get_master_calibrations` when
+``use_master_calibrations=True``.
 """
 
 from __future__ import annotations
 
-import copy
 import logging
 import os
 import re
@@ -24,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 from .. import datamodels
 from ..utils.spectral_templates_utils import (
-    fetch_svo_2mass_filter,
     get_spectrum_path,
     load_btsettl_spectrum,
 )
@@ -32,12 +27,10 @@ from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
 from . import e2e_support
 from .utr import create_ramp
-from .run_caldb import get_master_calibrations
+from ..calibrations.run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
-SIMULATIONS_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
 
@@ -53,11 +46,6 @@ def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -
 def get_expected_ramp_path(output_dir: str) -> str:
     """Return the path where the simulated ramp is saved (same convention as run_simulated_pipeline)."""
     return os.path.join(os.path.abspath(output_dir), DEFAULT_SIMULATED_RAMP_FILENAME)
-
-
-def get_expected_rate_map_path(output_dir: str) -> str:
-    """Return the path where the rate map is saved by SimulateRateMap.create_native_rate_map."""
-    return os.path.join(os.path.abspath(output_dir), DEFAULT_RATE_MAP_FILENAME)
 
 
 def get_expected_fiberflat_rate_paths(
@@ -82,30 +70,6 @@ def ramp_file_exists(output_dir: str) -> bool:
     return os.path.isfile(get_expected_ramp_path(output_dir))
 
 
-def rate_map_file_exists(output_dir: str) -> bool:
-    """Return True if the rate map file already exists in output_dir."""
-    return os.path.isfile(get_expected_rate_map_path(output_dir))
-
-
-def load_rate_map_array(filepath: str) -> np.ndarray:
-    """
-    Load a 2D rate map from disk.
-
-    Files written by :class:`~hispecdrp.simulations.simulate_rate_map.SimulateRateMap`
-    are plain FITS images (no ``DATAMODL`` header), so this uses ``astropy.io.fits``
-    rather than :func:`~hispecdrp.datamodels.open`.
-    """
-    from astropy.io import fits
-
-    data = fits.getdata(filepath, memmap=False)
-    arr = np.asarray(data, dtype=np.float64)
-    if arr.ndim != 2:
-        raise ValueError(
-            f"Rate map at {filepath!r} must be 2D; got shape {arr.shape}"
-        )
-    return arr
-
-
 def fiberflat_rate_files_exist(
     output_dir: str,
     spectrograph: str,
@@ -122,38 +86,21 @@ def fiberflat_rate_files_exist(
 __all__ = [
     "create_simulated_calibration_models",
     "simulate_ramp_from_rate_map",
-    "fetch_svo_2mass_filter",
-    "get_spectrum_path",
-    "load_btsettl_spectrum",
     "create_ramp_and_calibrations",
     "create_ramp_from_spectrum",
     "create_dummy_fiberflat_rate_files",
     "get_expected_ramp_path",
-    "get_expected_rate_map_path",
-    "load_rate_map_array",
     "get_expected_fiberflat_rate_paths",
     "ramp_file_exists",
-    "rate_map_file_exists",
     "fiberflat_rate_files_exist",
     "get_default_stage0_prim_args",
     "run_stage0_simulation",
-    "simulate_up_the_ramp",
     "run_fiberflat_pipeline",
-    "run_stage1_simulation",
-    "run_stage2_simulation",
-    "get_default_stage1_prim_args",
-    "get_default_stage2_prim_args",
     "create_wavelength_solution_model_from_sim",
     "register_sim_lfc_wavesol",
     "prepare_fiberflat_models",
     "get_fiberflat_prim_args",
 ]
-
-# Re-export Stage 1/2 E2E helpers from e2e_support.
-run_stage1_simulation = e2e_support.run_stage1_simulation
-run_stage2_simulation = e2e_support.run_stage2_simulation
-get_default_stage1_prim_args = e2e_support.get_default_stage1_prim_args
-get_default_stage2_prim_args = e2e_support.get_default_stage2_prim_args
 
 
 def create_wavelength_solution_model_from_sim(
@@ -255,6 +202,12 @@ def register_sim_lfc_wavesol(
     with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
         local_path, cal_record = store.register_calibration(
             wavesol_model, origin=origin, new_version=new_version
+        )
+    if local_path is None or not (cal_record or {}).get("filename"):
+        raise RuntimeError(
+            f"Failed to register simulated LFC wavesol for spectrograph={spectrograph!r}: "
+            f"local_path={local_path!r}, filename={(cal_record or {}).get('filename')!r}. "
+            "The caldb row must have a non-null filename so Stage 1 set_wavesol can resolve it."
         )
     logger.info(
         "Registered simulated LFC wavesol in caldb (spectrograph=%s): %s",
@@ -1191,162 +1144,6 @@ def create_ramp_from_spectrum(
         )
     return ramp_model, calibration_models, rate_map
 
-
-def simulate_up_the_ramp(
-    rate_map: np.ndarray | None = None,
-    shape: tuple[int, int] | None = None,
-    *,
-    fibers: list[int] | None = None,
-    spectrum_wavelengths=None,
-    spectrum_flux=None,
-    radial_velocity_km_s: float = 0.0,
-    output_dir: str = ".",
-    calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
-    use_master_calibrations: bool = False,
-    readtime: float = 1.7,
-    n_reads: int = 10,
-    spectrograph: str = "RSPEC",
-    max_cores: int = 1,
-    poisson_noise: bool = True,
-    convert_to_uint16: bool = True,
-    stage0_prim_args: dict | None = None,
-    instrument_name: str | None = None,
-    instrument_era: str = "0.0.1",
-    mjd_start: float | None = None,
-    datetime_obs: str | None = None,
-    connect_remote: bool = True,
-    sync_caldb_first: bool = True,
-    **cal_kw,
-) -> tuple[datamodels.RampModel, datamodels.DataModel, dict]:
-    """
-    High-level up-the-ramp simulation: create calibrations, ramp, and run Stage 0.
-
-    If ``rate_map`` is None, a simple rate map is generated using
-    :class:`SimulateRateMap` with a flat spectrum on fiber 1 (for testing).
-    Otherwise the provided rate map (e-/s/pixel) is used.
-
-    Calibrations are either (1) taken from the calibration store (master
-    calibrations) when ``use_master_calibrations`` is True, (2) passed in via
-    ``calibration_models``, or (3) created as dummy models via
-    :func:`create_simulated_calibration_models`(shape, **cal_kw).
-
-    Parameters
-    ----------
-    rate_map : np.ndarray or None, optional
-        2D rate map in e-/s/pixel. If None, a default rate map is created
-        via SimulateRateMap. Default is None.
-    shape : tuple of int or None, optional
-        (ny, nx) for creating dummy calibration models when
-        ``calibration_models`` is None and ``use_master_calibrations`` is False.
-        Normally inferred from ``rate_map``; default is
-        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
-    fibers : list of int or None, optional
-        Fiber numbers (1, 2, 3, and/or 4) for default rate map. Passed to
-        :func:`create_ramp_and_calibrations`. If None, default is [1].
-    spectrum_wavelengths : array-like with units or None, optional
-        Input spectrum wavelengths for default rate map. Passed to
-        :func:`create_ramp_and_calibrations`.
-    spectrum_flux : array-like with units or None, optional
-        Input spectrum flux. Passed to :func:`create_ramp_and_calibrations`.
-    radial_velocity_km_s : float, optional
-        Radial velocity in km/s (-500 to 500) to apply to the spectrum when
-        building the rate map. Passed to :func:`create_ramp_and_calibrations`.
-        Default is 0.0.
-    output_dir : str, optional
-        Output directory for Stage 0. Default is ".".
-    calibration_models : dict or None, optional
-        Calibration models to use. If None, either master calibrations are
-        fetched (when ``use_master_calibrations`` is True) or dummy models
-        are created. Default is None.
-    use_master_calibrations : bool, optional
-        If True and ``calibration_models`` is None, fetch DQ, saturation,
-        gain, detflat, bias, dark, and read noise from the calibration store
-        via :func:`run_caldb.get_master_calibrations`. Requires KOA_CALIBRATION_CACHE
-        and (for remote) synced/downloaded calibrations. Default is False.
-    readtime : float, optional
-        Time between reads in seconds. Default is 1.7.
-    n_reads : int, optional
-        Number of reads. Default is 10.
-    spectrograph : str, optional
-        Spectrograph name. Default is "RSPEC".
-    max_cores : int, optional
-        Cores for ramp creation and Stage 0. Default is 1.
-    poisson_noise : bool, optional
-        Whether to add Poisson noise when creating the ramp. Default is True.
-    convert_to_uint16 : bool, optional
-        Whether to convert ramp data to uint16. Default is True.
-    stage0_prim_args : dict or None, optional
-        Primitive args for Stage 0. If None, use default. Default is None.
-    instrument_name : str or None, optional
-        Instrument name for the calibration store. Used when
-        ``use_master_calibrations`` is True. Default is None.
-    instrument_era : str, optional
-        Instrument era for calibration selection. Used when
-        ``use_master_calibrations`` is True. Default is "0.0.1".
-    mjd_start : float or None, optional
-        MJD start for calibration selection. Used when
-        ``use_master_calibrations`` is True. Default is None (current time).
-    datetime_obs : str or None, optional
-        ISO datetime for calibration selection. Used when
-        ``use_master_calibrations`` is True if mjd_start is None.
-        Default is None.
-    connect_remote : bool, optional
-        Whether to connect to remote when fetching master calibrations.
-        Default is True.
-    sync_caldb_first : bool, optional
-        When ``use_master_calibrations`` is True, sync from remote and add
-        local cache files to the DB before selecting. Default is True.
-    **cal_kw
-        Passed to :func:`create_simulated_calibration_models` when
-        ``calibration_models`` is None and ``use_master_calibrations`` is False.
-
-    Returns
-    -------
-    tuple of (RampModel, DataModel, dict)
-        (ramp_model, stage0_result_model, calibration_models).
-    """
-    logger.info(
-        "simulate_up_the_ramp: rate_map=%s, use_master_calibrations=%s, output_dir=%s.",
-        "provided" if rate_map is not None else "default",
-        use_master_calibrations,
-        output_dir,
-    )
-    ramp_model, calibration_models, _rate_map = create_ramp_and_calibrations(
-        rate_map=rate_map,
-        shape=shape,
-        fibers=fibers,
-        spectrum_wavelengths=spectrum_wavelengths,
-        spectrum_flux=spectrum_flux,
-        radial_velocity_km_s=radial_velocity_km_s,
-        output_dir=output_dir,
-        calibration_models=calibration_models,
-        use_master_calibrations=use_master_calibrations,
-        readtime=readtime,
-        n_reads=n_reads,
-        spectrograph=spectrograph,
-        max_cores=max_cores,
-        poisson_noise=poisson_noise,
-        convert_to_uint16=convert_to_uint16,
-        instrument_name=instrument_name,
-        instrument_era=instrument_era,
-        mjd_start=mjd_start,
-        datetime_obs=datetime_obs,
-        connect_remote=connect_remote,
-        sync_caldb_first=sync_caldb_first,
-        **cal_kw,
-    )
-
-    if stage0_prim_args is None:
-        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
-
-    logger.info("Running Stage 0 simulation.")
-    result = run_stage0_simulation(
-        ramp_model,
-        calibration_models,
-        output_dir=output_dir,
-        prim_args=stage0_prim_args,
-    )
-    return ramp_model, result, calibration_models
 
 
 def _patch_fiberflat_model_object_fiber_meta(model: datamodels.DataModel, filepath: str) -> None:

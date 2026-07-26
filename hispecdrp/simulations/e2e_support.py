@@ -49,11 +49,6 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def default_simulation_output_dir() -> str:
-    """Absolute path to ``test_data/`` at the repository root."""
-    return str(repository_root() / "test_data")
-
-
 def templates_data_dir() -> str:
     """Bundled BT-Settl templates under ``hispecdrp/data/templates``."""
     import hispecdrp

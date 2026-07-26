@@ -30,7 +30,14 @@ Pass a YAML path via ``calibration_config``:
        calibration_config="path/to/e2e_calibrations.yaml",
    )
 
-See ``hispecdrp/simulations/e2e_calibrations.example.yaml``.
+See ``docs/source/simulations/e2e_calibrations.example.yaml``.
+
+Modes of the same CLI:
+
+.. code-block:: bash
+
+   python -m hispecdrp.simulations.run_e2e_sim --calibrations-only
+   python -m hispecdrp.simulations.run_e2e_sim --infinite-snr-rv
 
 To skip KOA entirely for stage 0:
 
@@ -49,7 +56,7 @@ KOA cache maintenance
 
 .. code-block:: bash
 
-   python -m hispecdrp.simulations.run_caldb --sync --download
+   python -m hispecdrp.calibrations.run_caldb --sync --download
 
 Requires KOA authentication (:doc:`../installation`).
 

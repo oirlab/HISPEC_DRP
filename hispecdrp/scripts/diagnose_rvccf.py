@@ -7,7 +7,7 @@ Run from repo root or with PYTHONPATH set:
 
   python -m hispecdrp.scripts.diagnose_rvccf --specuncal /path/to/HB.20240924.00000.00_specuncal.fits --template /path/to/template.h5
 
-If --template is omitted, a default path under hispecdrp/simulations/data is tried.
+If --template is omitted, a default path under hispecdrp/data/templates is tried.
 """
 from __future__ import annotations
 

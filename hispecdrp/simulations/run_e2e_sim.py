@@ -5,10 +5,13 @@ Hard-coded entry point for :mod:`hispecdrp.simulations.e2e_pipeline`.
 Run from the **repository root** with the ``hispec`` conda env::
 
     python -m hispecdrp.simulations.run_e2e_sim
+    python -m hispecdrp.simulations.run_e2e_sim --calibrations-only
+    python -m hispecdrp.simulations.run_e2e_sim --infinite-snr-rv
 
-Adjust the literals in ``main()`` below for output directory, reads, cores, etc.
-Set ``calibration_config`` to a YAML path (see ``e2e_calibrations.example.yaml``)
-to pin specific FITS files; set ``use_master_calibrations=False`` to skip KOA.
+Adjust the literals in ``_base_config()`` below for output directory, reads, cores, etc.
+Set ``calibration_config`` to a YAML path (see
+``docs/source/simulations/e2e_calibrations.example.yaml``) to pin specific FITS files;
+set ``use_master_calibrations=False`` to skip KOA.
 
 Stage 1 trace / fiberflat products (``mastercal-tracepos``, ``mastercal-traceprof``,
 ``mastercal-fiberflat``) are controlled by ``stage1_trace_source``:
@@ -20,10 +23,12 @@ Stage 1 trace / fiberflat products (``mastercal-tracepos``, ``mastercal-tracepro
 
 from __future__ import annotations
 
+import argparse
 import logging
+from pathlib import Path
 
 from hispecdrp.simulations.e2e_gaia import DEFAULT_E2E_MJD_START
-from hispecdrp.simulations.e2e_pipeline import E2EConfig, run_e2e_simulation
+from hispecdrp.simulations.e2e_pipeline import E2EConfig, run_e2e_calibrations, run_e2e_simulation
 from hispecdrp.simulations.e2e_support import repository_root
 from hispecdrp.utils.line_mask_utils import packaged_default_line_mask_path
 
@@ -40,20 +45,15 @@ DEFAULT_TEMPLATE_2MASS_BAND = "J"
 DEFAULT_GAIA_SOURCE_ID = "3438436918943830144"
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO)
-
-    output_dir = str(repository_root() / "test_data")
-    n_reads = 10
-    max_cores = 1
-    spectrograph = "BSPEC"
-
-    config = E2EConfig(
-        output_dir=output_dir,
-        n_reads=n_reads,
+def _base_config(*, output_dir: str | None = None) -> E2EConfig:
+    """Shared defaults for the full E2E run and CLI mode variants."""
+    out = output_dir or str(repository_root() / "test_data")
+    return E2EConfig(
+        output_dir=out,
+        n_reads=10,
         readtime=1.7,
-        max_cores=max_cores,
-        spectrograph=spectrograph,
+        max_cores=1,
+        spectrograph="BSPEC",
         mjd_start=DEFAULT_E2E_MJD_START,
         fibers=[1, 2, 3],
         fiberflat_fibers=[1, 2, 3],
@@ -92,6 +92,8 @@ def main() -> int:
         calibration_kwargs={},
     )
 
+
+def _run_full(config: E2EConfig) -> int:
     res = run_e2e_simulation(config)
     log = logging.getLogger(__name__)
     log.info(
@@ -103,6 +105,99 @@ def main() -> int:
         sorted(res.calibration_models.keys()),
     )
     return 0
+
+
+def _run_calibrations_only(config: E2EConfig) -> int:
+    """Resolve/materialize calibrations only (no science ramp or Stages 0–2)."""
+    config.calibrations_only = True
+    config.write_calibration_manifest = True
+    config.materialize_stage1_trace = True
+    config.connect_remote = True
+    config.sync_caldb_first = True
+    config.download_missing_koa = True
+    config.run_stage1 = False
+    config.run_stage2 = False
+    config.make_preview_html = False
+
+    res = run_e2e_calibrations(config)
+    log = logging.getLogger(__name__)
+    n_warn = len(res.summary.validation_warnings) if res.summary else 0
+    log.info(
+        "Calibrations-only run complete: %d product(s), %d validation warning(s), "
+        "manifest in %s/cals/calibration_manifest.json",
+        len(res.summary.rows) if res.summary else 0,
+        n_warn,
+        res.output_dir,
+    )
+    return 1 if n_warn else 0
+
+
+def _run_infinite_snr_rv(config: E2EConfig) -> int:
+    """Noiseless / HDF-truth Stage-1 / high-precision RV validation run."""
+    from hispecdrp.simulations.e2e_pipeline import (
+        apply_infinite_snr_rv_e2e_config,
+        assert_infinite_snr_rv_recovery,
+        log_infinite_snr_rv_evaluation,
+    )
+
+    # Dedicated subdirectory so full-E2E products are not overwritten.
+    if Path(config.output_dir).name != "infinite_snr_rv":
+        config.output_dir = str(Path(config.output_dir) / "infinite_snr_rv")
+    config.overwrite_ramp = False
+    config.infinite_snr_rv_validation = True
+    config.infinite_snr_rv_assert = False
+    config = apply_infinite_snr_rv_e2e_config(config)
+
+    res = run_e2e_simulation(config)
+    log = logging.getLogger(__name__)
+    if res.infinite_snr_rv_evaluation is not None:
+        log_infinite_snr_rv_evaluation(res.infinite_snr_rv_evaluation)
+        if config.infinite_snr_rv_assert:
+            assert_infinite_snr_rv_recovery(res.infinite_snr_rv_evaluation)
+
+    log.info(
+        "Infinite-S/N RV validation done: stage2=%s passed=%s",
+        type(res.stage2_model).__name__ if res.stage2_model is not None else None,
+        res.infinite_snr_rv_evaluation.passed_default_thresholds
+        if res.infinite_snr_rv_evaluation is not None
+        else None,
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="HISPEC DRP end-to-end simulation entry point.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--calibrations-only",
+        action="store_true",
+        help="Resolve and materialize calibrations only (no science ramp / Stages 0–2).",
+    )
+    mode.add_argument(
+        "--infinite-snr-rv",
+        action="store_true",
+        help=(
+            "Noiseless rate map + sim-HDF Stage-1 cals + high-precision stellar RV; "
+            "evaluate recovery vs injected Gaia barycentric RV."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory (default: <repo>/test_data, or …/infinite_snr_rv for that mode).",
+    )
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO)
+    config = _base_config(output_dir=args.output_dir)
+
+    if args.calibrations_only:
+        return _run_calibrations_only(config)
+    if args.infinite_snr_rv:
+        return _run_infinite_snr_rv(config)
+    return _run_full(config)
 
 
 if __name__ == "__main__":
