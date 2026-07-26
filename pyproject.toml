@@ -26,12 +26,14 @@ requires-python = ">=3.11.0"
 
 authors = [
   {name = "Bryson Cale", email = "brcale@ucsd.edu" },
-  {name = "Jean-Baptiste Ruffio", email = "jruffio@ucsd.edu" }
+  {name = "Jean-Baptiste Ruffio", email = "jruffio@ucsd.edu" },
+  {name = "Charlie Kilpatrick", email = "ckilpatrick@northwestern.edu" }
 ]
 
 maintainers = [
   {name = "Bryson Cale", email = "brcale@ucsd.edu" },
-  {name = "Jean-Baptiste Ruffio", email = "jruffio@ucsd.edu" }
+  {name = "Jean-Baptiste Ruffio", email = "jruffio@ucsd.edu" },
+  {name = "Charlie Kilpatrick", email = "ckilpatrick@northwestern.edu" }
 ]
 
 classifiers = [
@@ -78,6 +80,7 @@ examples = ["emcee"]
 [project.urls]
 "Documentation" = "https://oirlab.github.io/HISPEC_DRP/"
 "Source" = "https://github.com/oirlab/HISPEC_DRP"
+"Maintainer: Charlie Kilpatrick" = "https://github.com/charliekilpatrick"
 
 [tool.setuptools]
 include-package-data = true
