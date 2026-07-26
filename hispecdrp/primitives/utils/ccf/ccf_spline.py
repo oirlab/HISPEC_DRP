@@ -9,7 +9,7 @@ from hispecdrp.utils.physical_constants import C_M_S
 from ....utils.parallelization_utils import njit
 
 from .ccf_common import _velocity_grid_from_window
-from .cubic_spline import cubic_spline_build, cubic_spline_eval_scalar_arrays
+from ..cubic_spline import cubic_spline_build, cubic_spline_eval_scalar_arrays
 
 __all__ = [
     "compute_ccf_spline",

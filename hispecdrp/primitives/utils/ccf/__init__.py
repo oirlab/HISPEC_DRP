@@ -5,7 +5,7 @@ Package layout (implementation modules under :mod:`hispecdrp.primitives.utils.cc
 
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_common` — velocity grids, ``z_b``, shared stats
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_rv_content` — photon-limited RV content, Doppler λ map
-* :mod:`~hispecdrp.primitives.utils.ccf.cubic_spline` — Numba not-a-knot cubic spline on spectra
+* :mod:`~hispecdrp.primitives.utils.cubic_spline` — Numba not-a-knot cubic spline on spectra
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_spline` — delta-mask CCF via spline spectrum sampling
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_tophat` — finite-width top-hat mask CCF
 * :mod:`~hispecdrp.primitives.utils.ccf.ccf_bisector` — Queloz BIS + NEID weighted-percentile bisector RV
@@ -23,7 +23,7 @@ from .ccf_rv_content import (
 )
 from .ccf_spline import compute_ccf_spline
 from .ccf_tophat import TOPHAT_MASK_CCF_SEGMENT_SAMPLES, compute_ccf_tophat
-from .cubic_spline import (
+from ..cubic_spline import (
     cubic_spline_build,
     cubic_spline_eval,
     cubic_spline_eval_scalar,

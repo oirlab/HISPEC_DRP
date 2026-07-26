@@ -20,7 +20,8 @@ from scipy.ndimage import maximum_filter1d
 from scipy.signal import argrelextrema
 
 from hispecdrp.utils.physical_constants import C_M_S
-from hispecdrp.utils.spectral_templates_utils import load_template_from_path
+# Imported lazily inside helpers that need templates to avoid circular imports
+# during ``hispecdrp.primitives.utils`` package bootstrap.
 
 logger = logging.getLogger(__name__)
 
@@ -1367,6 +1368,8 @@ def build_line_mask_from_template(
         transmission_file if transmission_file is not None else _DEFAULT_ATMOSPHERE_REL
     )
     trans_path_abs = os.path.abspath(trans_path_resolved)
+
+    from hispecdrp.primitives.utils.spectral_utils import load_template_from_path
 
     wave_um, flux = load_template_from_path(
         template_path, wl_min_um=wl_min_um, wl_max_um=wl_max_um

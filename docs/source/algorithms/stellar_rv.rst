@@ -280,7 +280,7 @@ See also
 --------
 
 - :mod:`hispecdrp.primitives.utils.ccf.ccf_utils` — template CCF + mask-line CCF
-- :mod:`hispecdrp.utils.spectral_templates_utils`
+- :mod:`hispecdrp.primitives.utils.spectral_utils`
 - :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview` — preview generation
 
 

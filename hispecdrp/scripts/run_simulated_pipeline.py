@@ -44,7 +44,7 @@ from hispecdrp.calibrations.run_caldb import get_master_calibrations
 from hispecdrp.pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline, ProcessFiberflatsPipeline
 from hispecdrp.simulations import simulate_up_the_ramp as simulations
 from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
-from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
+from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path, load_btsettl_spectrum
 
 # Use package logger name so records propagate to "hispecdrp" (which has the handler).
 # When run as __main__, __name__ is "__main__", so they would go to root and be dropped (root is WARNING, no handler).

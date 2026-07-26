@@ -4,7 +4,8 @@ from ...datamodels import DataModel
 from ... import datamodels
 import numpy as np
 from numba import njit, prange
-from ...utils.math import bitwise_or_reduce_uint32, biweight_location, biweight_midvariance
+from ..utils.array_utils import bitwise_or_reduce_uint32
+from ..utils.stats import biweight_location, biweight_midvariance
 import logging
 
 logger = logging.getLogger(__name__)

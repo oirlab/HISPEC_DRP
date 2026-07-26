@@ -9,7 +9,7 @@ import astropy.units as u
 import pytest
 
 import hispecdrp.simulations as simulations
-from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
+from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path, load_btsettl_spectrum
 
 
 def test_simulate_rate_map():

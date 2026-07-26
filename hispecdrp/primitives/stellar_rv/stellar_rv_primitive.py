@@ -45,7 +45,7 @@ from ..utils.ccf.ccf_utils import (
     masked_ccf_rv,
     process_orders_rvs_numba_parallel,
 )
-from ...utils.spectral_templates_utils import resolve_stellar_template_to_log_micron
+from ..utils.spectral_utils import resolve_stellar_template_to_log_micron
 from ..barycenter_correction.barycenter_corr import resolve_ccf_zb
 
 __all__ = [
@@ -133,7 +133,7 @@ class StellarRVPrimitive(BasePrimitive):
     template_path : str or None
         **Default:** ``None``. Path to a stellar template spectrum on disk for
         ``ccf_stellar_template``. Passed to
-        :func:`~hispecdrp.utils.spectral_templates_utils.resolve_stellar_template_to_log_micron`
+        :func:`~hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron`
         with ``template_wavelength`` / ``template_flux`` when those are set.
     template_wavelength : array-like or None
         **Default:** ``None``. In-memory template wavelength grid (µm). Used with

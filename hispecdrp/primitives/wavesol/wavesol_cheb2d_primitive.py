@@ -2,7 +2,8 @@ from ... import datamodels
 from ..base_primitive import BasePrimitive
 import logging
 
-from ...utils.math import delta_wave_to_delta_vel, solve_chebyshev2d_ols
+from ..utils.spectral_utils import delta_wave_to_delta_vel
+from ..utils.array_utils import solve_chebyshev2d_ols
 import numpy as np
 
 logger = logging.getLogger(__name__)

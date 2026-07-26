@@ -1,6 +1,6 @@
 from numba import njit
 import numpy as np
-from ...utils.math import any_sc
+from ..utils.array_utils import any_sc
 from ...datamodels.dqflags import DQ_FLAGS
 import matplotlib.pyplot as plt
 from .extraction_utils import get_extraction_window

@@ -19,7 +19,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from .. import datamodels
-from ..utils.spectral_templates_utils import (
+from ..primitives.utils.spectral_utils import (
     get_spectrum_path,
     load_btsettl_spectrum,
 )

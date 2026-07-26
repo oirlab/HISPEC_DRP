@@ -47,7 +47,7 @@ Line-mask utilities (``line_mask_utils``)
 and template-to-mask tooling used by ``ccf_line_mask``.
 
 - **Template mask generation**: loads a stellar template (HDF5 via
-  :mod:`hispecdrp.utils.spectral_templates_utils`), detects absorption centers (e.g.
+  :mod:`hispecdrp.primitives.utils.spectral_utils`), detects absorption centers (e.g.
   :func:`~hispecdrp.utils.line_mask_utils.detect_template_line_centers_gradient_um`),
   applies depth/deblending/telluric filters, and writes a **delta** mask via
   :func:`~hispecdrp.utils.line_mask_utils.build_line_mask_from_template` (two on-disk columns:

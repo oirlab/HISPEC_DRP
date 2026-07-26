@@ -120,7 +120,7 @@ def main():
     # Load template and overlap
     if template_path:
         try:
-            from hispecdrp.utils.spectral_templates_utils import load_btsettl_spectrum
+            from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
             w_t, f_t = load_btsettl_spectrum(template_path, wl_min_um=0.8, wl_max_um=3.0)
             tw = w_t.to_value("micron")
             tf = np.asarray(f_t.value, dtype=np.float64)
@@ -129,7 +129,7 @@ def main():
             tw = tf = None
     else:
         try:
-            from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
+            from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path, load_btsettl_spectrum
             default_path = get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
             w_t, f_t = load_btsettl_spectrum(default_path, wl_min_um=0.8, wl_max_um=3.0)
             tw = w_t.to_value("micron")
