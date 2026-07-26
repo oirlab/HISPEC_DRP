@@ -1,3 +1,6 @@
-"""Performance benchmarks for the HISPEC DRP pipeline stages."""
+"""Performance benchmarks for the HISPEC DRP pipeline stages.
 
-from .run_caldb import *
+Run from the repository root::
+
+    python -m benchmarks.run_perf
+"""
