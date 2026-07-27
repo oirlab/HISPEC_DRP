@@ -366,14 +366,46 @@ def run(
                         logger.info("  ... and %d more.", len(missing) - 10)
                 else:
                     # Download each missing calibration (get_calibration downloads if not cached)
+                    n_ok = 0
+                    n_fail = 0
                     for i, rec in enumerate(missing, 1):
                         cal_id = rec.get("id")
                         filename = rec.get("filename", "?")
                         try:
                             local_path, _ = store.get_calibration(cal=rec)
-                            logger.info("[%d/%d] Downloaded: %s -> %s", i, len(missing), filename, local_path)
+                            size = (
+                                os.path.getsize(local_path)
+                                if local_path and os.path.isfile(local_path)
+                                else None
+                            )
+                            logger.info(
+                                "[%d/%d] Verified: %s -> %s (%s bytes)",
+                                i,
+                                len(missing),
+                                filename,
+                                local_path,
+                                size,
+                            )
+                            n_ok += 1
                         except Exception as e:
-                            logger.warning("[%d/%d] Failed to get calibration %s: %s", i, len(missing), filename, e)
+                            n_fail += 1
+                            logger.warning(
+                                "[%d/%d] Failed to get calibration %s: %s",
+                                i,
+                                len(missing),
+                                filename,
+                                e,
+                            )
+                    still = store.get_missing_local_files() or []
+                    if cal_type is not None:
+                        still = [m for m in still if m.get("cal_type") == cal_type]
+                    if n_fail or still:
+                        raise RuntimeError(
+                            f"KOA download incomplete: {n_ok} verified, {n_fail} failed, "
+                            f"{len(still)} still missing from cache. "
+                            "Metadata sync is not enough — FITS files must exist under "
+                            "KOA_CALIBRATION_CACHE."
+                        )
 
         # Add any files currently in the local cache that are not yet in the cal DB
         if not dry_run:

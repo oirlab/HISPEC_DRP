@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 import logging
 logger = logging.getLogger(__name__)
 
+from .download_verify import (
+    ensure_calibration_on_disk,
+    normalize_downloaded_calibration_path,
+)
+
 __all__ = ['HISPECCalibrationStore']
 
 class HISPECCalibrationStore(CalibrationStore):
@@ -237,6 +242,75 @@ class HISPECCalibrationStore(CalibrationStore):
             result.get("id"),
         )
         return self.get_calibration(result)
+
+    def download_calibration_file(
+        self,
+        calibration: dict | str,
+    ) -> str:
+        """
+        Download a remote calibration into ``data_dir`` under the DB filename.
+
+        Wraps ``koa_middleware`` so a zip that uses a different member name is
+        moved to the expected cache path, then verifies the file exists and is
+        non-trivial before returning.
+        """
+        if isinstance(calibration, dict):
+            cal_record = calibration
+        elif isinstance(calibration, str):
+            cal_record = self.calibration_record_in_cache(calibration, mode="id") or {
+                "id": calibration
+            }
+        else:
+            raise TypeError("Calibration must be a dict or str.")
+
+        expected = self._get_local_filepath(cal_record)
+        if expected is None:
+            # Fall back to middleware behavior when filename is absent.
+            path = super().download_calibration_file(calibration)
+            return ensure_calibration_on_disk(path, cal_record=cal_record)
+
+        path = super().download_calibration_file(calibration)
+        path = normalize_downloaded_calibration_path(path, expected)
+        return ensure_calibration_on_disk(
+            path,
+            expected_filename=os.path.basename(expected),
+            cal_record=cal_record if isinstance(cal_record, dict) else None,
+        )
+
+    def get_calibration(self, cal: dict | str) -> tuple[str, dict]:
+        """Retrieve a calibration file and verify it is present on disk."""
+        path, record = super().get_calibration(cal)
+        expected = self._get_local_filepath(record)
+        if expected is not None:
+            path = normalize_downloaded_calibration_path(path, expected)
+        try:
+            path = ensure_calibration_on_disk(
+                path,
+                expected_filename=(record or {}).get("filename"),
+                cal_record=record if isinstance(record, dict) else None,
+            )
+            return path, record
+        except (FileNotFoundError, RuntimeError) as first_err:
+            # Stale empty/truncated cache hits: remove and force a fresh download.
+            if path and os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    logger.warning(
+                        "Removed invalid cached calibration %s (%s); re-downloading.",
+                        path,
+                        first_err,
+                    )
+                except OSError:
+                    raise first_err from None
+            if self.remote_db is None:
+                raise
+            path = self.download_calibration_file(record)
+            path = ensure_calibration_on_disk(
+                path,
+                expected_filename=(record or {}).get("filename"),
+                cal_record=record if isinstance(record, dict) else None,
+            )
+            return path, record
 
     def save_calibration_file(self, cal: CalibrationModel, cal_record : dict | None = None) -> str:
         """

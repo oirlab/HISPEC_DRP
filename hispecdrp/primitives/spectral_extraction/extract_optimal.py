@@ -187,8 +187,8 @@ def _extract_optimal_numba(
             P = profile[window_inds, x].copy()
             T = input_mid_time[window_inds, x].copy()
 
-        # Mask bad pixels
-        M = (D_dq & DO_NOT_USE) == 0
+        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate / variance / profile
+        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D) & np.isfinite(D_var)
 
         if np.any(~np.isfinite(P)):
             M[:] = False
@@ -203,7 +203,7 @@ def _extract_optimal_numba(
             mid_time_output[x] = np.nan
             continue
 
-                # Set bad pixels to zero / inf
+        # Set bad pixels to zero / inf so they cannot contribute to the weighted sum
         D[bad] = 0.0
         D_var[bad] = np.inf
         D_var_poisson[bad] = np.inf

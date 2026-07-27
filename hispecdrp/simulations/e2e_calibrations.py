@@ -225,13 +225,33 @@ def _sync_koa_store(
     if not missing:
         return
     logger.info("Downloading %d missing KOA calibration file(s).", len(missing))
+    failed: list[str] = []
     for i, rec in enumerate(missing, 1):
         filename = rec.get("filename", "?")
         try:
             local_path, _ = store.get_calibration(cal=rec)
-            logger.info("[%d/%d] Downloaded KOA cal: %s", i, len(missing), local_path or filename)
+            # HISPECCalibrationStore.get_calibration already verifies on-disk.
+            logger.info(
+                "[%d/%d] Verified KOA cal: %s (%s bytes)",
+                i,
+                len(missing),
+                local_path or filename,
+                os.path.getsize(local_path) if local_path and os.path.isfile(local_path) else "?",
+            )
         except Exception as e:
+            failed.append(str(filename))
             logger.warning("[%d/%d] Failed to download KOA cal %s: %s", i, len(missing), filename, e)
+    still_missing = store.get_missing_local_files() or []
+    if skip_cal_types:
+        still_missing = [r for r in still_missing if r.get("cal_type") not in set(skip_cal_types)]
+    if failed or still_missing:
+        names = [r.get("filename") or r.get("id") for r in still_missing]
+        raise RuntimeError(
+            f"KOA calibration download incomplete: {len(failed)} failed, "
+            f"{len(still_missing)} still missing ({names[:5]}). "
+            "Auth/metadata sync can succeed without FITS files on disk; "
+            "check KOA_CALIBRATION_CACHE writability and Keck calibrations API access."
+        )
 
 
 def _open_calibration_file(key: str, path: str) -> datamodels.CalibrationModel:

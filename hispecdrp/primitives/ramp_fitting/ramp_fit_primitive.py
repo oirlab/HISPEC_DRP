@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...calibrations import GainSelector,ReadNoiseSelector
+from ...datamodels.dqflags import DQ_FLAGS
 import logging
 
 from .fit_ramp_numba import fit_ramps_ols, fit_ramps_mcds
@@ -11,6 +12,28 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 __all__ = ['FitRampPrimitive']
+
+_DO_NOT_USE = int(DQ_FLAGS["DO_NOT_USE"])
+
+
+def flag_nonfinite_rate_pixels(rate, rate_err, dq, *, do_not_use: int = _DO_NOT_USE):
+    """
+    OR ``do_not_use`` into ``dq`` wherever ``rate`` or ``rate_err`` is non-finite.
+
+    Ramp fits often leave inter-order / empty pixels as ``rate==0`` with NaN
+    ``rate_err`` and a clear DQ bit; extraction previously treated those as good.
+    Returns ``(dq, n_flagged)``; ``dq`` is copied only when flags are added.
+    """
+    rate_a = np.asarray(rate)
+    rate_err_a = np.asarray(rate_err)
+    dq_a = np.asarray(dq)
+    bad = (~np.isfinite(rate_err_a)) | (~np.isfinite(rate_a))
+    n_bad = int(np.count_nonzero(bad))
+    if n_bad == 0:
+        return dq_a, 0
+    dq_out = dq_a.copy()
+    dq_out[bad] = dq_out[bad] | int(do_not_use)
+    return dq_out, n_bad
 
 
 class FitRampPrimitive(BasePrimitive):
@@ -204,6 +227,17 @@ class FitRampPrimitive(BasePrimitive):
         output_model.rate_var_rnoise = result['rate_var_rnoise']
         output_model.dq = result['dq']
         output_model.mid_time = result['mid_time']
+
+        # Unfitted / empty pixels often return rate=0 with non-finite rate_err and
+        # leave DQ clear. Flag them DO_NOT_USE so extraction and later stages skip them.
+        output_model.dq, n_bad = flag_nonfinite_rate_pixels(
+            output_model.rate, output_model.rate_err, output_model.dq
+        )
+        if n_bad:
+            logger.info(
+                "Ramp fit: flagged %d pixels with non-finite rate/rate_err as DO_NOT_USE.",
+                n_bad,
+            )
 
         return dict(output=output_model, method=self.method, mcds_num_coadd=_mcds_num_coadd)
     

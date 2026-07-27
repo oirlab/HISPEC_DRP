@@ -168,8 +168,8 @@ def _extract_box_numba(
             D_var_rnoise = input_var_rnoise[window_inds, x].copy()
             D_dq = input_dq[window_inds, x]
 
-        # Mask bad pixels
-        M = (D_dq & DO_NOT_USE) == 0
+        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate / variance (NaN err → NaN var)
+        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D) & np.isfinite(D_var)
         bad = np.where(~M)[0]
         n_good = len(M) - len(bad)
         if n_good == 0:
@@ -180,11 +180,12 @@ def _extract_box_numba(
             dq_output[x] = DO_NOT_USE
             continue
 
-        # Set bad pixels to zero / inf
+        # Zero bad pixels (M already excludes them). Use 0 not inf for variances:
+        # ``M * inf`` is NaN and would poison the error sum.
         D[bad] = 0
-        D_var[bad] = np.inf
-        D_var_poisson[bad] = np.inf
-        D_var_rnoise[bad] = np.inf
+        D_var[bad] = 0
+        D_var_poisson[bad] = 0
+        D_var_rnoise[bad] = 0
 
         # Debugging
         # if x == 1024:

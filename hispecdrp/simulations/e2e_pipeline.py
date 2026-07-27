@@ -1324,12 +1324,20 @@ def apply_infinite_snr_rv_e2e_config(config: E2EConfig) -> E2EConfig:
                 config.template_filename,
             )
 
+    # Keep an explicit pipeline Stage-1 path (matched fiberflats / traces). Default
+    # to sim_hdf truth traces only when the caller has not chosen a source.
+    trace_src = (
+        config.stage1_trace_source
+        if config.stage1_trace_source == STAGE1_TRACE_SOURCE_PIPELINE
+        else STAGE1_TRACE_SOURCE_SIM_HDF
+    )
+
     return replace(
         config,
         infinite_snr_rv_validation=True,
         poisson_noise=False,
         convert_to_uint16=False,
-        stage1_trace_source=STAGE1_TRACE_SOURCE_SIM_HDF,
+        stage1_trace_source=trace_src,
         stellar_rv_mask_path=mask_path,
         make_preview_html=False,
     )
@@ -1338,7 +1346,7 @@ def apply_infinite_snr_rv_e2e_config(config: E2EConfig) -> E2EConfig:
 def merge_infinite_snr_stage1_prim_args(
     prim_args: dict | None,
     *,
-    extraction_aperture: int = 10,
+    extraction_aperture: int = 5,
 ) -> dict:
     import copy
 
