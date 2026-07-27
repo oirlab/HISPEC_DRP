@@ -5,6 +5,7 @@ from stcal.ramp_fitting.ramp_fit_class import RampData
 
 import multiprocessing as mp
 import ctypes
+from contextlib import contextmanager
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
 
@@ -18,6 +19,51 @@ import hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt as fitramp_cython
 from tqdm import tqdm
 
 __all__ = ['fit_ramps_jwst']
+
+
+@contextmanager
+def _stcal_likely_fit_allow_negative_rates():
+    """
+    Allow fitted / interim count rates to be negative in ``stcal`` likely_fit.
+
+    Photon-noise covariance still uses ``max(rate, 0)`` (variance cannot be
+    negative). The previous ``rate *= (rate > 0)`` pattern zeroed low-SNR /
+    negative guesses and made empty background look like a hard floor at 0
+    instead of a Gaussian around the true rate.
+    """
+    import stcal.ramp_fitting.likely_fit as lf
+
+    orig_init = lf.initial_count_rate_guess
+    orig_alphas = lf.compute_alphas_betas
+    orig_fit_ramps = lf.fit_ramps
+
+    def initial_count_rate_guess(diffs, diffs2use):
+        num = np.sum((diffs * diffs2use), axis=0)
+        den = np.sum(diffs2use, axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return num / den
+
+    def compute_alphas_betas(count_rate_guess, gain, rnoise, covar, rescale, diffs, dn_scale):
+        guess = np.maximum(np.asarray(count_rate_guess, dtype=np.float64), 0.0)
+        return orig_alphas(guess, gain, rnoise, covar, rescale, diffs, dn_scale)
+
+    def fit_ramps(*args, count_rate_guess=None, **kwargs):
+        # Callers (jump search / final fit) may pass clipped guesses; restore a
+        # non-negative *covariance* rate without forcing the solved countrate ≥ 0.
+        if count_rate_guess is not None:
+            count_rate_guess = np.maximum(np.asarray(count_rate_guess, dtype=np.float64), 0.0)
+        return orig_fit_ramps(*args, count_rate_guess=count_rate_guess, **kwargs)
+
+    lf.initial_count_rate_guess = initial_count_rate_guess
+    lf.compute_alphas_betas = compute_alphas_betas
+    lf.fit_ramps = fit_ramps
+    try:
+        yield
+    finally:
+        lf.initial_count_rate_guess = orig_init
+        lf.compute_alphas_betas = orig_alphas
+        lf.fit_ramps = orig_fit_ramps
+
 
 SATURATED_FLAG = DQ_FLAGS["SATURATED"]
 DO_NOT_USE_FLAG = DQ_FLAGS["DO_NOT_USE"]
@@ -83,15 +129,19 @@ def _fit_ramps_cython_row(indata: tuple) -> tuple:
     # todo: try to put covar in shared memory?
     covar = fitramp_Brandt.Covar(readtimes.astype(np.float64))
 
-    cguess = np.sum(diffs*diffs2use, axis=0)
-    cguess /= np.sum(diffs2use, axis=0)
-    cguess *= cguess > 0
+    # Mean difference as count-rate guess. Do NOT floor negatives to 0 — empty /
+    # low-SNR pixels must keep a signed guess so the solved rate is Gaussian
+    # about the true background (including negative rates). Photon noise in the
+    # Cython kernel uses max(cguess, 0) via the covariance construction below.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cguess = np.sum(diffs * diffs2use, axis=0) / np.sum(diffs2use, axis=0)
+    cguess_phnoise = np.maximum(cguess, 0.0)
 
     cython_out = fitramp_cython.fit_ramps_row(
         diffs, diffs2use,
         covar.alpha_phnoise, covar.beta_phnoise,
         covar.alpha_readnoise, covar.beta_readnoise,
-        readnoise_2d[0,:].astype(np.float64),gain_2d[0,:].astype(np.float64), cguess, n1, n0)
+        readnoise_2d[0,:].astype(np.float64),gain_2d[0,:].astype(np.float64), cguess_phnoise, n1, n0)
     logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np = cython_out
 
     var_poisson = np.full((1, nx),np.nan)
@@ -191,10 +241,11 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     if algorithm == 'LIKELY':
         if nframes < ramp_fit.likely_fit.LIKELY_MIN_NGROUPS:
             raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY algorithm requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
-        # Call directly to likely ramp fit code
-        image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
-            ramp_data, readnoise_2d, gain_2d
-        )
+        # Call directly to likely ramp fit code (allow signed / low-SNR rates)
+        with _stcal_likely_fit_allow_negative_rates():
+            image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
+                ramp_data, readnoise_2d, gain_2d
+            )
     elif algorithm == 'FIXSEN_C':
         # Call to C extension for FIXSEN slope fitting
         image_info, _, _ = ramp_fit.ols_fit.ols_slope_fitter(
