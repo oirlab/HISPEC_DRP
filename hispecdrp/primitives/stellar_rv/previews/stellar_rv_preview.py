@@ -209,10 +209,12 @@ _TEMPLATE_OVERLAY_SPECTRUM_HELP_HTML = (
 )
 
 # Plotly CCF scatter/residual traces: cap points to keep preview HTML small and write_html fast.
-PREVIEW_CCF_SCATTER_MAX_POINTS = 3500
+PREVIEW_CCF_SCATTER_MAX_POINTS = 200
+# Max CCF preview slots embedded per fiber (slot 0 = fiber mean). Extra order slots dominate HTML size.
+PREVIEW_CCF_MAX_PLOT_SLOTS = 1
 
 # RV vs λ: ``xref="paper"`` is the axes **inner** box (0–1), not the full figure. Anchor at ``x=1``
-# and shift right by this many pixels so “Derived” / “Plot key” sit just outside the frame in the margin.
+# and shift right by this many pixels so “Derived” sits just outside the frame in the margin.
 RV_SIDEBAR_XSHIFT_PX = 32
 
 # Preview HTML: wheel-zoom at cursor; no Plotly logo. RV figure: independent axes. CCF figure:
@@ -263,6 +265,7 @@ def _rv_sidebar_paper_xy(fig: go.Figure, row_1based: int, y_frac: float) -> tupl
 
 
 # Extra downward shift in normalized paper coordinates (smaller ``y`` = lower on the figure).
+# Retained for call-site compatibility; dropdown placement no longer uses this offset.
 _CCF_SLOT_DROPDOWN_EXTRA_DROP_PAPER = 0.10
 
 
@@ -275,29 +278,17 @@ def _ccf_slot_dropdown_paper_xy(
     """
     Paper ``(x, y)`` for the CCF slot ``updatemenus`` dropdown (``xref`` / ``yref``: ``paper``).
 
-    Matches the CCF panel legend’s horizontal placement (``legend["x"]``, ``xanchor="left"``).
-    Vertically, sits **below** the legend box when the legend overlaps this CCF subplot row;
-    otherwise in the **upper** part of the row (but not flush to the top) so each fiber’s control
-    stays in the same corner as the legend. A fixed extra drop moves the control lower than
-    the legacy placement.
+    Horizontally matches the CCF legend (``legend["x"]``, ``xanchor="left"``).
+    Vertically sits near the **top** of this fiber's CCF subplot row so the control
+    stays with its panel; the shared legend is placed lower on the figure so the two
+    do not overlap.
     """
-    legend_x = float(legend.get("x", 1.01))
-    legend_y = float(legend.get("y", 0.88))
-    leg_h = 0.09
-    gap = 0.032
-    # When the global legend does not overlap this row, place lower in the panel (still upper half).
-    top_inset_frac = 0.58
+    legend_x = float(legend.get("x", 1.02))
     yn = "yaxis" if int(ccf_row_1based) <= 1 else f"yaxis{int(ccf_row_1based)}"
     dom = getattr(fig_ccf.layout, yn).domain
     y0, y1 = float(dom[0]), float(dom[1])
-    leg_bottom = legend_y - leg_h
-    overlaps_row = (leg_bottom <= y1 + 1e-9) and (legend_y >= y0 - 1e-9)
-    if overlaps_row:
-        y = leg_bottom - gap
-        y = max(y0 + 0.02, min(y, y1 - 0.02))
-    else:
-        y = y0 + top_inset_frac * (y1 - y0)
-    y -= _CCF_SLOT_DROPDOWN_EXTRA_DROP_PAPER
+    # Near the top of this CCF row (leave a small inset below the subplot title).
+    y = y0 + 0.82 * (y1 - y0)
     y = max(y0 + 0.02, min(y, y1 - 0.02))
     return legend_x, y
 
@@ -490,26 +481,44 @@ def _downsample_ccf_for_plot(
 
 
 def _preview_ccf_velocity_range_m_s(primitive) -> tuple[float, float, float]:
-    """Same velocity extent as the stellar RV CCF run for previews and overlays (m/s).
+    """Velocity extent for CCF preview axes (m/s).
 
-    Uses the primitive’s **coarse** grid (``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse``)
-    when no center is set. When ``ccf_input_velocity`` is set, uses the centered uniform
-    window (``v_half_window`` at ``v_step_coarse``).
+    Matches stellar-RV defaults: ``±v_half_window`` about ``ccf_input_velocity``
+    when set, otherwise ``±v_half_window`` about 0 — **not** the ±500 km/s scout
+    grid and **not** a per-fiber scout-centered refined window (those can sit
+    hundreds of km/s from zero when auto-center fails).
     """
-    bvm, bvx, bvs = resolve_ccf_broad_grid_m_s(
+    _bvm, _bvx, bvs = resolve_ccf_broad_grid_m_s(
         getattr(primitive, "v_min_coarse", None),
         getattr(primitive, "v_max_coarse", None),
         getattr(primitive, "v_step_coarse", None),
     )
+    half = float(getattr(primitive, "v_half_window", 20000.0))
     vc = getattr(primitive, "ccf_input_velocity", None)
     if vc is None or not np.isfinite(float(vc)):
-        return bvm, bvx, bvs
+        return -half, +half, float(bvs)
     vg = build_centered_uniform_velocity_grid(
         float(vc),
-        float(getattr(primitive, "v_half_window", 20000.0)),
+        half,
         float(bvs),
     )
     return float(vg[0]), float(vg[-1]), float(effective_ccf_v_step_for_fit(vg))
+
+
+def _preview_max_plot_slots() -> int:
+    """How many CCF slots (mean + orders) to embed in the Plotly HTML preview."""
+    return _env_positive_int(
+        "HISPEC_DRP_PREVIEW_CCF_MAX_PLOT_SLOTS",
+        PREVIEW_CCF_MAX_PLOT_SLOTS,
+        floor=1,
+    )
+
+
+def _preview_slots_for_plot(slots: list) -> list:
+    """Truncate preview slots so HTML stays small (default: fiber-mean only)."""
+    if not slots:
+        return []
+    return list(slots[: _preview_max_plot_slots()])
 
 
 def _iterative_sigma_clip_ylim(
@@ -696,16 +705,14 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
         trace_indices.append(len(fig.data) - 1)
 
     def _final_rv_vertical_line() -> None:
+        # Pipeline final chunk RV is bisector-refined (``rv_r_m_s``), not the parabolic
+        # diagnostic vertex stored on ``rmeta["rv_refined_m_s"]``.
         rv_line = float(rv_r_m_s)
-        if isinstance(rmeta, dict) and rmeta.get("ok"):
-            rv_meta = rmeta.get("rv_refined_m_s")
-            if rv_meta is not None and math.isfinite(float(rv_meta)):
-                rv_line = float(rv_meta)
         rv_km = rv_line / 1000.0
         err_m = float(rmeta.get("rv_err_m_s", float("nan")))
-        v_label = f"Final refined RV = {rv_line:.2f} m/s"
+        v_label = f"Final RV (bisector) = {rv_line:.2f} m/s"
         if math.isfinite(err_m) and err_m > 0:
-            v_label += f" (σ={err_m * 100.0:.2f} cm/s)"
+            v_label += f" (σ={err_m:.2f} m/s)"
         fig.add_trace(
             go.Scatter(
                 x=[rv_km, rv_km],
@@ -896,13 +903,13 @@ def _line_mask_refine_ccf_add_plotly_traces(
     ylim_hi: float,
 ) -> list[int]:
     """
-    For ``ccf_line_mask``, overlay :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.refine_ccf_rv_coarse_grid_parabolic`
-    curves on the CCF panel (smoothed CCF ±1σ, local parabola, refined RV line). Refinement uses
-    the default pipeline behaviour: scan ``smooth_sigma_scale`` to minimize
-    ``|RV_refined − v_0|`` versus the Gaussian fit center (unless disabled in that function).
+    For ``ccf_line_mask``, overlay diagnostic refine curves on the CCF panel
+    (smoothed CCF ±1σ, local parabola samples) plus a vertical line at the
+    **pipeline** final RV (bisector after Gaussian fit).
 
-    When the slot carries ``line_mask_refine_rmeta`` from :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict`,
-    that result is reused so Plotly does not repeat the parabolic refinement.
+    Parabolic overlays are diagnostic only; they do not set the table RV.
+    When the slot carries ``line_mask_refine_rmeta``, that result is reused so
+    Plotly does not recompute the diagnostic curves.
 
     Always appends **five** traces (real overlays or empty placeholders) so dropdown indices stay aligned.
     """
@@ -918,12 +925,20 @@ def _line_mask_refine_ccf_add_plotly_traces(
 
     cached = sl.get("line_mask_refine_rmeta")
     gaussian = sl.get("gaussian_fit")
-    rv_slot = gaussian.get("rv") if isinstance(gaussian, dict) else None
+    bisector = sl.get("bisector_fit")
+    rv_slot = None
+    if isinstance(bisector, dict):
+        rv_bi = bisector.get("rv")
+        if rv_bi is not None and np.isfinite(float(rv_bi)):
+            rv_slot = float(rv_bi)
+    if rv_slot is None and isinstance(gaussian, dict):
+        rv_g = gaussian.get("rv")
+        if rv_g is not None and np.isfinite(float(rv_g)):
+            rv_slot = float(rv_g)
     if (
         isinstance(cached, dict)
         and cached.get("ok")
         and rv_slot is not None
-        and np.isfinite(float(rv_slot))
     ):
         rmeta_use = ensure_line_mask_lstsq_preview_plot_metadata(cached, vg, ccf)
         if rmeta_use is None:
@@ -970,10 +985,11 @@ def _line_mask_refine_ccf_add_plotly_traces(
                 _placeholder()
             return trace_indices
 
+        rv_line = float(rv_slot) if rv_slot is not None else float(rv_r)
         return _line_mask_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
-            rv_r_m_s=float(rv_r),
+            rv_r_m_s=rv_line,
             rmeta=rmeta,
             visible=visible,
             show_legend=show_legend,
@@ -994,18 +1010,7 @@ def _format_rv_value(v: float, *, kind: str) -> str:
 
     * ``mean_ms`` — signed pipeline mean RV (m/s).
     * ``sigma_ms`` — uncertainty in m/s.
-    * ``sigma_cm`` — uncertainty in cm/s (e.g. aggregate σ × 100).
     """
-    if kind == "sigma_cm":
-        if not np.isfinite(v) or v < 0:
-            return "—"
-        x = float(v)
-        ax = abs(x)
-        if ax >= 1000.0:
-            return f"{x:.2f} cm/s"
-        if ax >= 10.0:
-            return f"{x:.3f} cm/s"
-        return f"{x:.5f} cm/s"
     if not np.isfinite(v):
         return "—"
     a = float(v)
@@ -2183,7 +2188,7 @@ def _preview_gaussian_cache_and_slot_legends(
         _prim_algo_lm = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
         rv_agg_tbl, rv_agg_err_tbl, per_order_rv = pipeline_rv_by_fiber[fiber]
         v_step = float(detail["v_step"])
-        slots = detail["slots"]
+        slots = _preview_slots_for_plot(detail["slots"])
         slot_metadata[fiber] = []
         for sl in slots:
             sid = id(sl)
@@ -2251,7 +2256,7 @@ def _preview_gaussian_cache_and_slot_legends(
                 meta = "Mean · all ord"
                 if np.isfinite(rv_agg_tbl):
                     meta += (
-                        f"<br>⟨RV⟩ (RVCCFAVG): {rv_agg_tbl / 1000.0:.4f} km/s · "
+                        f"<br>⟨RV⟩ (RVCCFAVG): {rv_agg_tbl:.2f} m/s · "
                         f"σ={_format_rv_value(rv_agg_err_tbl, kind='sigma_ms')}"
                     )
                 _ce_mn = sl.get("ccf_err")
@@ -2285,19 +2290,19 @@ def _preview_gaussian_cache_and_slot_legends(
                 if chunk_tbl is not None:
                     rp, rpe = chunk_tbl
                     meta += (
-                        f"<br>RV (chunk, table): {rp / 1000.0:.4f} km/s · "
+                        f"<br>RV (chunk, table): {rp:.2f} m/s · "
                         f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
                     )
                 elif oo is not None and oo in per_order_rv:
                     rp, rpe = per_order_rv[oo]
                     if is_line_mask:
                         meta += (
-                            f"<br>RV (Gauss=table): {rp / 1000.0:.4f} km/s · "
+                            f"<br>RV (Gauss=table): {rp:.2f} m/s · "
                             f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
                         )
                     else:
                         meta += (
-                            f"<br>Pipe RVCCF: {rp / 1000.0:.4f} km/s · "
+                            f"<br>Pipe RVCCF: {rp:.2f} m/s · "
                             f"σ={_format_rv_value(rpe, kind='sigma_ms')}"
                         )
                 elif oo is not None:
@@ -2321,15 +2326,15 @@ def _preview_gaussian_cache_and_slot_legends(
                 if is_line_mask and sl.get("kind") != "mean":
                     meta += (
                         f"<br>Gaussian overlay (LSTSQ-centered): "
-                        f"center={v0 / 1000.0:.4f} km/s · σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                        f"center={v0:.2f} m/s · σ={sig:.2f} m/s · amp={amp:.3g}"
                     )
                     if abs(v0 - v0_lm) > 5.0 or abs(amp - amp_lm) > max(1e-38, 0.05 * abs(amp)):
                         meta += (
-                            f"<br><i>LM-only: v₀={v0_lm / 1000.0:.4f} km/s · "
-                            f"σ={sig_lm / 1000.0:.4f} km/s · amp={amp_lm:.3g}</i>"
+                            f"<br><i>LM-only: v₀={v0_lm:.2f} m/s · "
+                            f"σ={sig_lm:.2f} m/s · amp={amp_lm:.3g}</i>"
                         )
                     meta += (
-                        f"<br>RV (fit+refine, table): {v_report / 1000.0:.4f} km/s"
+                        f"<br>RV (bisector, table): {v_report:.2f} m/s"
                     )
                     tbl_rp: float | None = None
                     ct = _pipeline_rv_for_line_mask_preview_slot(tbl_rv, sl)
@@ -2348,13 +2353,13 @@ def _preview_gaussian_cache_and_slot_legends(
                 else:
                     if is_line_mask:
                         meta += (
-                            f"<br>RV (fit+refine)={v_report / 1000.0:.4f} km/s · "
-                            f"overlay σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                            f"<br>RV (bisector)={v_report:.2f} m/s · "
+                            f"overlay σ={sig:.2f} m/s · amp={amp:.3g}"
                         )
                     else:
                         meta += (
-                            f"<br>RV (fit+refine)={v_report / 1000.0:.4f} km/s · "
-                            f"LM σ={sig / 1000.0:.4f} km/s · amp={amp:.3g}"
+                            f"<br>RV (bisector)={v_report:.2f} m/s · "
+                            f"LM σ={sig:.2f} m/s · amp={amp:.3g}"
                         )
                     if sl.get("kind") == "mean" and np.isfinite(rv_agg_tbl):
                         dvp = v_report - rv_agg_tbl
@@ -2676,16 +2681,13 @@ def create_stellar_rv_preview(primitive) -> None:
         else:
             subplot_titles_rv.append(f"Fiber {fiber} — per chunk RV")
         subplot_titles_ccf.append(
-            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; line-mask parabolic refine; slot ↓)"
+            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; bisector RV; slot ↓)"
         )
         subplot_titles_ccf.append(f"Fiber {fiber} — Residual CCF")
 
-    v_spacing_rv = max(0.04, min(0.09, 1.4 / max(n_fib, 8)))
-    if n_fib > 1:
-        v_spacing_rv = min(v_spacing_rv, 1.0 / (n_fib - 1))
-    v_spacing_ccf = max(0.04, min(0.09, 1.4 / max(n_rows_ccf, 8)))
-    if n_rows_ccf > 1:
-        v_spacing_ccf = min(v_spacing_ccf, 1.0 / (n_rows_ccf - 1))
+    # Compact spacing: enough for subplot titles / axis labels, without large empty gaps.
+    v_spacing_rv = 0.12 if n_fib <= 3 else max(0.08, min(0.16, 0.40 / max(n_fib - 1, 1)))
+    v_spacing_ccf = 0.08 if n_rows_ccf <= 6 else max(0.05, min(0.11, 0.45 / max(n_rows_ccf - 1, 1)))
 
     fig_rv = make_subplots(
         rows=n_fib,
@@ -2711,10 +2713,11 @@ def create_stellar_rv_preview(primitive) -> None:
     rv_panel_y_title: dict[str, str] = {}
     rv_panel_y_range: dict[str, tuple[float, float]] = {}
     rv_sidebar_by_fiber: dict[str, str] = {}
-    rv_plot_legend_by_fiber: dict[str, str] = {}
     ccf_trace_indices: dict[str, list[list[int]]] = {}
     resid_trace_indices: dict[str, list[list[int]]] = {}
     resid_ylim_by_fiber: dict[str, tuple[float, float]] = {}
+    # Show CCF legend entries only once (first fiber with CCF data).
+    ccf_legend_fiber = fibers_with_ccf[0] if fibers_with_ccf else None
 
     for fi, fiber in enumerate(fibers_with_ccf):
         row_rv = fiber_row_map[fiber]["rv"]
@@ -2753,16 +2756,16 @@ def create_stellar_rv_preview(primitive) -> None:
                     )
                     if not np.isfinite(rv_agg_err):
                         rv_agg_err = np.nan
-                rv_mean_cm = rv_agg * 100.0
-                rv_mean_cm_r = round(rv_mean_cm, 1)
-                y_cm_off = rv * 100.0 - rv_mean_cm
-                err_y_cm = rv_err * 100.0
-                rv_pt_kms = rv / 1000.0
-                rv_err_pt_kms = rv_err / 1000.0
-                if rv_mean_cm_r < 0:
-                    y_title = f"RV (cm/s) + {abs(rv_mean_cm_r):.4e}"
+                rv_mean_ms = rv_agg
+                rv_mean_ms_r = round(rv_mean_ms, 3)
+                y_ms_off = rv - rv_mean_ms
+                err_y_ms = rv_err
+                rv_pt_ms = rv
+                rv_err_pt_ms = rv_err
+                if rv_mean_ms_r < 0:
+                    y_title = f"RV (m/s) + {abs(rv_mean_ms_r):.4e}"
                 else:
-                    y_title = f"RV (cm/s) − {rv_mean_cm_r:.4e}"
+                    y_title = f"RV (m/s) − {rv_mean_ms_r:.4e}"
                 rv_panel_y_title[fiber] = y_title
                 ord_lbl = np.where(order_col >= 0, order_col.astype(str), "—")
                 seg_line = _rvcc_hover_order_segment_line(
@@ -2771,8 +2774,8 @@ def create_stellar_rv_preview(primitive) -> None:
                 cd_rv = np.stack(
                     [
                         ord_lbl.astype(object),
-                        np.asarray(rv_pt_kms, dtype=np.float64),
-                        np.asarray(rv_err_pt_kms, dtype=np.float64),
+                        np.asarray(rv_pt_ms, dtype=np.float64),
+                        np.asarray(rv_err_pt_ms, dtype=np.float64),
                         np.asarray(seg_line, dtype=object),
                     ],
                     axis=1,
@@ -2780,17 +2783,17 @@ def create_stellar_rv_preview(primitive) -> None:
                 in_ok = inlier & np.isfinite(rv_err) & (rv_err > 0)
                 out_ok = ~inlier & np.isfinite(rv_err) & (rv_err > 0)
                 if np.any(in_ok):
-                    y_clip_src = y_cm_off[in_ok]
+                    y_clip_src = y_ms_off[in_ok]
                 else:
-                    y_clip_src = y_cm_off[np.isfinite(y_cm_off)]
+                    y_clip_src = y_ms_off[np.isfinite(y_ms_off)]
                 if y_clip_src.size:
                     rv_panel_y_range[fiber] = _iterative_sigma_clip_ylim(y_clip_src)
                 if np.any(in_ok):
                     fig_rv.add_trace(
                         go.Scatter(
                             x=wl[in_ok],
-                            y=y_cm_off[in_ok],
-                            error_y=dict(type="data", array=err_y_cm[in_ok], visible=True),
+                            y=y_ms_off[in_ok],
+                            error_y=dict(type="data", array=err_y_ms[in_ok], visible=True),
                             mode="markers",
                             name=f"Fiber {fiber} (inlier)",
                             showlegend=False,
@@ -2799,8 +2802,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             hovertemplate=(
                                 "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
-                                "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
+                                "RV (pipeline) = %{customdata[1]:.3f} ± %{customdata[2]:.3g} m/s<br>"
+                                "ΔRV vs ⟨RV⟩ = %{y:.4f} ± %{error_y.array:.4f} m/s<extra></extra>"
                             ),
                         ),
                         row=row_rv,
@@ -2810,8 +2813,8 @@ def create_stellar_rv_preview(primitive) -> None:
                     fig_rv.add_trace(
                         go.Scatter(
                             x=wl[out_ok],
-                            y=y_cm_off[out_ok],
-                            error_y=dict(type="data", array=err_y_cm[out_ok], visible=True),
+                            y=y_ms_off[out_ok],
+                            error_y=dict(type="data", array=err_y_ms[out_ok], visible=True),
                             mode="markers",
                             name=f"Fiber {fiber} (outlier)",
                             showlegend=False,
@@ -2820,8 +2823,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             hovertemplate=(
                                 "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
-                                "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
+                                "RV (pipeline) = %{customdata[1]:.3f} ± %{customdata[2]:.3g} m/s<br>"
+                                "ΔRV vs ⟨RV⟩ = %{y:.4f} ± %{error_y.array:.4f} m/s<extra></extra>"
                             ),
                         ),
                         row=row_rv,
@@ -2831,8 +2834,8 @@ def create_stellar_rv_preview(primitive) -> None:
                     fig_rv.add_trace(
                         go.Scatter(
                             x=wl,
-                            y=y_cm_off,
-                            error_y=dict(type="data", array=err_y_cm, visible=True),
+                            y=y_ms_off,
+                            error_y=dict(type="data", array=err_y_ms, visible=True),
                             mode="markers",
                             name=f"Fiber {fiber} chunks",
                             showlegend=False,
@@ -2841,8 +2844,8 @@ def create_stellar_rv_preview(primitive) -> None:
                             hovertemplate=(
                                 "%{customdata[3]}<br>"
                                 "λ = %{x:.5f} µm<br>"
-                                "RV (pipeline) = %{customdata[1]:.6f} ± %{customdata[2]:.6g} km/s<br>"
-                                "ΔRV vs ⟨RV⟩ = %{y:.2f} ± %{error_y.array:.2f} cm/s<extra></extra>"
+                                "RV (pipeline) = %{customdata[1]:.3f} ± %{customdata[2]:.3g} m/s<br>"
+                                "ΔRV vs ⟨RV⟩ = %{y:.4f} ± %{error_y.array:.4f} m/s<extra></extra>"
                             ),
                         ),
                         row=row_rv,
@@ -2853,8 +2856,7 @@ def create_stellar_rv_preview(primitive) -> None:
                 mean_line = f"⟨RV⟩ = {mean_ms_str}"
                 if np.isfinite(rv_agg_err):
                     leg = (
-                        f"{mean_line}<br>σ(⟨RV⟩) = {_format_rv_value(float(rv_agg_err), kind='sigma_ms')} "
-                        f"({_format_rv_value(float(rv_agg_err) * 100.0, kind='sigma_cm')})"
+                        f"{mean_line}<br>σ(⟨RV⟩) = {_format_rv_value(float(rv_agg_err), kind='sigma_ms')}"
                     )
                 else:
                     leg = f"{mean_line}<br>uncertainty = —"
@@ -2864,10 +2866,8 @@ def create_stellar_rv_preview(primitive) -> None:
                 if n_good > 0:
                     biases_m_s = rv_all[inlier_a] - rv_agg
                     rms_bias_m_s = float(np.sqrt(np.sum(biases_m_s**2) / n_good))
-                    rms_bias_cm_s = rms_bias_m_s * 100.0
                     leg += (
-                        f"<br>RMS(⟨RV⟩) = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')} "
-                        f"({_format_rv_value(rms_bias_cm_s, kind='sigma_cm')})"
+                        f"<br>RMS(⟨RV⟩) = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')}"
                     )
                 n_chunks_tbl = int(rv_all.size)
                 sb_lines = [
@@ -2878,17 +2878,14 @@ def create_stellar_rv_preview(primitive) -> None:
                 if np.isfinite(rv_agg_err):
                     sb_lines.append(
                         f"σ(⟨RV⟩) (aggregate uncertainty) = "
-                        f"{_format_rv_value(float(rv_agg_err), kind='sigma_ms')} "
-                        f"({_format_rv_value(float(rv_agg_err) * 100.0, kind='sigma_cm')})"
+                        f"{_format_rv_value(float(rv_agg_err), kind='sigma_ms')}"
                     )
                 else:
                     sb_lines.append("σ(⟨RV⟩) (aggregate uncertainty) = —")
                 if n_good > 0 and np.isfinite(rms_bias_m_s):
-                    rms_bias_cm_s2 = rms_bias_m_s * 100.0
                     sb_lines.append(
                         f"RMS scatter vs ⟨RV⟩ (inlier chunks) = "
-                        f"{_format_rv_value(rms_bias_m_s, kind='sigma_ms')} "
-                        f"({_format_rv_value(rms_bias_cm_s2, kind='sigma_cm')})"
+                        f"{_format_rv_value(rms_bias_m_s, kind='sigma_ms')}"
                     )
                     if n_good > 1:
                         std_c = float(np.std(rv_all[inlier_a], ddof=1))
@@ -2918,32 +2915,6 @@ def create_stellar_rv_preview(primitive) -> None:
                         f"{_format_rv_value(scatter_se, kind='sigma_ms')}"
                     )
                 rv_sidebar_by_fiber[fiber] = "<br>".join(sb_lines)
-                if np.any(in_ok):
-                    if collapsed_plot:
-                        _pk = (
-                            "<b>Plot key</b><br>"
-                            "Blue: one point per echelle order (RV = pipeline order-mean+refine; "
-                            "λ = mean of mask chunk centers)<br>"
-                        )
-                    else:
-                        _pk = (
-                            "<b>Plot key</b><br>"
-                            "Blue markers: inlier chunks (pipeline RV vs λ)<br>"
-                        )
-                    if np.any(out_ok):
-                        _pk += "Grey open circles: outlier chunks<br>"
-                    _pk += (
-                        "Red dashed: ΔRV = 0 vs ⟨RV⟩ (reference)<br>"
-                        "Red dotted: ±1σ(⟨RV⟩) on the cm/s offset axis"
-                    )
-                    rv_plot_legend_by_fiber[fiber] = _pk
-                else:
-                    rv_plot_legend_by_fiber[fiber] = (
-                        "<b>Plot key</b><br>"
-                        "Blue markers: per-chunk pipeline RV vs λ<br>"
-                        "Red dashed: ΔRV = 0 vs ⟨RV⟩ (reference)<br>"
-                        "Red dotted: ±1σ(⟨RV⟩) on the cm/s offset axis"
-                    )
                 fig_rv.add_trace(
                     go.Scatter(
                         x=x_range,
@@ -2957,9 +2928,9 @@ def create_stellar_rv_preview(primitive) -> None:
                     col=1,
                 )
                 if np.isfinite(rv_agg_err) and rv_agg_err > 0:
-                    sig_cm = float(rv_agg_err) * 100.0
-                    sig_cm_lbl = _format_rv_value(sig_cm, kind="sigma_cm")
-                    for y_val, label in [(sig_cm, f"+1σ ({sig_cm_lbl})"), (-sig_cm, f"-1σ ({sig_cm_lbl})")]:
+                    sig_ms = float(rv_agg_err)
+                    sig_ms_lbl = _format_rv_value(sig_ms, kind="sigma_ms")
+                    for y_val, label in [(sig_ms, f"+1σ ({sig_ms_lbl})"), (-sig_ms, f"-1σ ({sig_ms_lbl})")]:
                         fig_rv.add_trace(
                             go.Scatter(
                                 x=x_range,
@@ -2986,11 +2957,11 @@ def create_stellar_rv_preview(primitive) -> None:
             if not detail:
                 continue
             v_step = float(detail["v_step"])
-            slots = detail["slots"]
+            slots = _preview_slots_for_plot(detail["slots"])
             is_line_mask = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
             ccf_trace_indices[fiber] = []
-            # Shared y-axis for the whole CCF row: use all preview slots (mean + per-order
-            # chunks). Limits from slot 0 alone clip mask-line chunk CCFs and LSTSQ overlays
+            # Shared y-axis for the whole CCF row: use plotted preview slots (mean + optional
+            # order chunks). Limits from slot 0 alone clip mask-line chunk CCFs and LSTSQ overlays
             # when the mean CCF has much smaller dynamic range than individual chunks.
             _ccf_y_parts: list[np.ndarray] = []
             for sl0 in slots:
@@ -3012,17 +2983,19 @@ def create_stellar_rv_preview(primitive) -> None:
                 vg_plot, ccf_plot, _ = _downsample_ccf_for_plot(
                     vg, ccf, _ce, PREVIEW_CCF_SCATTER_MAX_POINTS
                 )
-                vg_km = vg_plot / 1000.0  # x-axis in km/s (plot subset)
+                vg_km = np.round(vg_plot / 1000.0, 4)  # x-axis in km/s (plot subset)
+                ccf_plot = np.round(ccf_plot, 5)
                 visible = si == 0
+                show_leg = fiber == ccf_legend_fiber and si == 0
                 ccf_band_trace_idx: list[int] = []
                 idx_data = len(fig_ccf.data)
                 ccf_scatter_kw: dict = dict(
                     x=vg_km,
                     y=ccf_plot,
-                    mode="markers",
+                    mode="lines",
                     name="CCF data",
-                    marker=dict(size=3, color="darkgreen"),
-                    showlegend=True,
+                    line=dict(width=1.2, color="darkgreen"),
+                    showlegend=show_leg,
                     visible=visible,
                 )
                 fig_ccf.add_trace(go.Scatter(**ccf_scatter_kw), row=row, col=1)
@@ -3070,7 +3043,7 @@ def create_stellar_rv_preview(primitive) -> None:
                             mode="lines",
                             name=_bg_legend,
                             line=dict(dash="dash", width=1.5, color="black"),
-                            showlegend=True,
+                            showlegend=show_leg,
                             visible=visible,
                         ),
                         row=row,
@@ -3118,7 +3091,7 @@ def create_stellar_rv_preview(primitive) -> None:
                             mode="lines",
                             name=_gtrace_name,
                             line=dict(width=2, color="crimson"),
-                            showlegend=True,
+                            showlegend=show_leg,
                             visible=visible,
                         ),
                         row=row,
@@ -3141,7 +3114,7 @@ def create_stellar_rv_preview(primitive) -> None:
                             mode="lines",
                             name="Gaussian RV (v₀)",
                             line=dict(width=1.5, color="black", dash="dash"),
-                            showlegend=True,
+                            showlegend=show_leg,
                             visible=visible,
                         ),
                         row=row,
@@ -3158,7 +3131,7 @@ def create_stellar_rv_preview(primitive) -> None:
                         params=params,
                         diag=diag,
                         visible=visible,
-                        show_legend=True,
+                        show_legend=show_leg,
                         ylim_lo=ccf_ylim_lo,
                         ylim_hi=ccf_ylim_hi,
                     ):
@@ -3171,7 +3144,7 @@ def create_stellar_rv_preview(primitive) -> None:
         detail = primitive._ccf_preview_by_fiber.get(fiber)
         if not detail:
             continue
-        slots = detail["slots"]
+        slots = _preview_slots_for_plot(detail["slots"])
         resid_trace_indices[fiber] = []
         is_line_mask_r = (getattr(primitive, "algorithm", None) or "").strip().lower() in STELLAR_RV_LINE_MASK_ALGORITHMS
         # Match CCF row: default y-range from the first slot, same padding rule as
@@ -3228,14 +3201,15 @@ def create_stellar_rv_preview(primitive) -> None:
             vg_res, residual_plot, _ = _downsample_ccf_for_plot(
                 vg, residual, None, PREVIEW_CCF_SCATTER_MAX_POINTS
             )
-            vg_km_res = vg_res / 1000.0
+            vg_km_res = np.round(vg_res / 1000.0, 4)
+            residual_plot = np.round(residual_plot, 5)
             r_slot_idx: list[int] = []
             resid_kw: dict = dict(
                 x=vg_km_res,
                 y=residual_plot,
-                mode="markers",
+                mode="lines",
                 name="Residual CCF",
-                marker=dict(size=3, color="darkslateblue"),
+                line=dict(width=1.2, color="darkslateblue"),
                 showlegend=False,
                 visible=visible,
             )
@@ -3253,35 +3227,17 @@ def create_stellar_rv_preview(primitive) -> None:
 
     n_traces = len(fig_ccf.data)
 
-    # CCF mean vs order slot — update visibility + CCF-panel annotation text.
-    # Build initial annotations (one per fiber, for CCF panel) — domain refs (x,y) are 0–1 in panel
+    # No per-panel CCF text overlays (they clutter the CCF curves). Slot metadata still
+    # drives the order-slot dropdown labels via ``updatemenus``.
     annotations: list[dict] = []
-    for fi, fiber in enumerate(fibers_with_ccf):
-        ccf_row = fiber_row_map[fiber]["ccf"]
-        xref, yref = _plotly_domain_axis_refs(ccf_row)
-        text = slot_metadata.get(fiber, [""])[0] if slot_metadata.get(fiber) else ""
-        annotations.append(
-            dict(
-                x=0.98,
-                y=0.98,
-                xref=xref,
-                yref=yref,
-                text=text,
-                showarrow=False,
-                xanchor="right",
-                yanchor="top",
-                font=dict(size=7, family="Arial, sans-serif"),
-                bgcolor="rgba(255,255,255,0.92)",
-                borderpad=2,
-            )
-        )
 
     # Shared with updatemenus so order-slot changes do not reset legend position / visibility.
+    # Keep the legend fully outside the subplot frames, below the top-row slot dropdown.
     ccf_legend_dict: dict = dict(
-        x=1.01,
+        x=1.02,
         xref="paper",
         xanchor="left",
-        y=0.88,
+        y=0.58,
         yref="paper",
         yanchor="top",
         bgcolor="rgba(255,255,255,0.92)",
@@ -3290,16 +3246,18 @@ def create_stellar_rv_preview(primitive) -> None:
         font=dict(size=8),
         tracegroupgap=4,
         itemwidth=30,
+        orientation="v",
     )
 
     updatemenus_ccf: list[dict] = []
     for fi, fiber in enumerate(fibers_with_ccf):
-        slots = primitive._ccf_preview_by_fiber.get(fiber, {}).get("slots", [])
+        slots = _preview_slots_for_plot(
+            primitive._ccf_preview_by_fiber.get(fiber, {}).get("slots", [])
+        )
         if not slots:
             continue
         ccf_indices = ccf_trace_indices.get(fiber, [])
         res_indices = resid_trace_indices.get(fiber, [])
-        meta_list = slot_metadata.get(fiber, [])
         buttons = []
         for si in range(len(slots)):
             sl = slots[si]
@@ -3326,9 +3284,6 @@ def create_stellar_rv_preview(primitive) -> None:
                     if slot_idx < len(res_indices):
                         for ti in res_indices[slot_idx]:
                             visible[ti] = False
-            new_annotations = [dict(a) for a in annotations]
-            if fi < len(new_annotations) and si < len(meta_list):
-                new_annotations[fi]["text"] = meta_list[si]
             buttons.append(
                 dict(
                     label=label,
@@ -3336,7 +3291,6 @@ def create_stellar_rv_preview(primitive) -> None:
                     args=[
                         {"visible": visible},
                         {
-                            "annotations": new_annotations,
                             "showlegend": True,
                             "legend": ccf_legend_dict,
                         },
@@ -3366,8 +3320,8 @@ def create_stellar_rv_preview(primitive) -> None:
             )
         )
 
-    rv_fig_w = 980
-    rv_fig_mr = 420
+    rv_fig_w = 720
+    rv_fig_mr = 260
     annotations_rv: list[dict] = []
     for fi, fiber in enumerate(fibers_with_ccf):
         r = fiber_row_map[fiber]["rv"]
@@ -3393,28 +3347,6 @@ def create_stellar_rv_preview(primitive) -> None:
                     align="left",
                 )
             )
-        leg_txt = rv_plot_legend_by_fiber.get(fiber, "")
-        if leg_txt and str(leg_txt).strip():
-            x_p_key, y_p_key = _rv_sidebar_paper_xy(fig_rv, r, 0.30)
-            annotations_rv.append(
-                dict(
-                    xref="paper",
-                    yref="paper",
-                    x=x_p_key,
-                    y=y_p_key,
-                    xshift=RV_SIDEBAR_XSHIFT_PX,
-                    text=leg_txt,
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="top",
-                    font=dict(size=10, family="Arial, sans-serif"),
-                    bgcolor="rgba(255,255,255,0.88)",
-                    bordercolor="rgba(0,0,0,0.12)",
-                    borderwidth=1,
-                    borderpad=5,
-                    align="left",
-                )
-            )
 
     algo = getattr(primitive, "algorithm", None) or "ccf_stellar_template"
     title_suffix = ""
@@ -3422,11 +3354,11 @@ def create_stellar_rv_preview(primitive) -> None:
         title_suffix = f" — {output_model.meta.filename}"
     title_unified = f"Stellar RV — unified preview — algorithm: {algo}{title_suffix}"
 
-    fig_h_rv = int(min(20000, 380 + max(0, n_fib - 1) * 118))
-    fig_h_ccf = int(min(20000, 380 + max(0, n_rows_ccf - 1) * 118))
+    fig_h_rv = int(min(20000, 200 + n_fib * 280))
+    fig_h_ccf = int(min(20000, 200 + n_rows_ccf * 160))
     # ``make_subplots(..., subplot_titles=...)`` stores titles as layout.annotations. Passing only
     # ``annotations_rv`` would patch those entries by index and replace the title with sidebar
-    # content; prepend the existing annotations so Derived / plot-key boxes are appended.
+    # content; prepend the existing annotations so Derived boxes are appended.
     rv_layout_ann: list[dict] = []
     _rv_la = getattr(fig_rv.layout, "annotations", None)
     if _rv_la:
@@ -3438,20 +3370,20 @@ def create_stellar_rv_preview(primitive) -> None:
         title_text=f"{title_unified} — RV vs λ",
         hovermode="closest",
         dragmode="zoom",
-        # Traces use showlegend=False; keep legend off so the right margin is for Derived / plot key.
+        # Traces use showlegend=False; keep legend off so the right margin is for Derived.
         showlegend=False,
-        margin=dict(l=70, r=rv_fig_mr, t=80, b=50),
+        margin=dict(l=70, r=rv_fig_mr, t=70, b=45),
         annotations=rv_layout_ann + annotations_rv,
     )
     fig_ccf.update_layout(
         height=fig_h_ccf,
-        width=980,
+        width=720,
         title_text=f"{title_unified} — CCF & residual",
         hovermode="closest",
         dragmode="zoom",
         showlegend=True,
         legend=ccf_legend_dict,
-        margin=dict(l=70, r=320, t=80, b=50),
+        margin=dict(l=70, r=280, t=70, b=45),
         annotations=list(annotations),
         updatemenus=updatemenus_ccf,
     )
@@ -3470,7 +3402,7 @@ def create_stellar_rv_preview(primitive) -> None:
         row_rv_ax = fiber_row_map[fiber]["rv"]
         fig_rv.update_xaxes(title_text="Wavelength (µm)", row=row_rv_ax, col=1)
         y_kwargs: dict = {
-            "title_text": rv_panel_y_title.get(fiber, "RV (cm/s) − ⟨RV⟩"),
+            "title_text": rv_panel_y_title.get(fiber, "RV (m/s) − ⟨RV⟩"),
         }
         if fiber in rv_panel_y_range:
             y_kwargs["range"] = list(rv_panel_y_range[fiber])
