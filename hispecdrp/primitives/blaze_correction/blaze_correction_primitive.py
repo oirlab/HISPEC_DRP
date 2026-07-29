@@ -21,6 +21,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
         'do_orders' : None,
         'remove_lamp_blackbody' : False,
         'normalize_for_stitching' : False,
+        'smooth_blaze' : False,
         'pixels_per_spline_knot' : 16,
         'output_model' : 'L2Model',
     }
@@ -76,10 +77,14 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                             np.zeros((n_orders, npx), dtype=np.uint32))
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
-                blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],
-                                              fiberflat_model.traces[int(fiber)]['spec_err'],
-                                              fiberflat_model.traces[int(fiber)]['spec_dq'],
-                                              order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
+                if self.smooth_blaze:
+                    blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],
+                                                fiberflat_model.traces[int(fiber)]['spec_err'],
+                                                fiberflat_model.traces[int(fiber)]['spec_dq'],
+                                                order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
+                    #TODO fix error for smoothed blaze
+                else:
+                    blaze_array = fiberflat_model.traces[int(fiber)]['spec']
                 blaze_std_array = fiberflat_model.traces[int(fiber)]['spec_err']
                 
                 # remove lamp blackbody from blaze array
