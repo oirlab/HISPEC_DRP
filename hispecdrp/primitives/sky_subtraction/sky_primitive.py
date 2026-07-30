@@ -90,31 +90,17 @@ class SkySubtractionPrimitive(BasePrimitive):
             spec_key = 'SPEC_UNCAL_' if isinstance(input_model, datamodels.level1.L1Model) else 'SPEC_'
 
             # get science/sky fiber numbers, sky fiber defaults to farthest fiber from tracking axis
-            sky_fib_dist = 0.
-            for fiber in range(1,4):
-                if input_model.meta.get(f'object_fiber{fiber}', '').upper() == 'SCIENCE' and self.sci_fiber == None:
-                    sci_fib_num = fiber
-                elif self.sci_fiber != None:
-                    sci_fib_num = self.sci_fiber
-                    logger.info(f'Science fiber manually set to fiber {sci_fib_num}')
-                fib_dist = input_model.meta.get(f'distance_fiber{fiber}')
-                if fib_dist > sky_fib_dist:
-                    sky_fib_num = fiber
-                    sky_fib_dist = fib_dist
-
-
-            if self.sky_fiber != None:
-                sky_fib_num = self.sky_fiber
-                logger.info(f'Sky fiber manually set to fiber {sky_fib_num}')
+            sci_fib_num, sky_fib_num = self._resolve_fibers(input_model, self.sci_fiber, self.sky_fiber)
 
             # get sky, warn if sky fiber seems unusually close or bright
             sky_spec = getattr(input_model, f'{spec_key}FIB{sky_fib_num}')
             sky_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sky_fib_num}')
             sky_wave = getattr(input_model, f"WAVE_FIB{sky_fib_num}")
-            if input_model.meta.get(f'distance_fiber{sky_fib_num}') < 1.0: #TODO check if warning distance is appropriate number
-                logger.warning(f"Sky fiber {sky_fib_num} is unusually close to the science fiber. Sky subtraction may be inaccurate.")
-            elif np.nanmedian(sky_spec) > 0.3:  # arbitrary threshold for "too bright" #TODO check brightness number with observed sky brightnesses
-                logger.warning(f"Sky fiber {sky_fib_num} seems too bright. Sky subtraction may be inaccurate.")
+            if input_model.meta.get(f'distance_fiber{sky_fib_num}') is not None:
+                if input_model.meta.get(f'distance_fiber{sky_fib_num}') < 1.0: #TODO check if warning distance is appropriate number
+                    logger.warning(f"Sky fiber {sky_fib_num} is unusually close to the tracking axis. Sky subtraction may be inaccurate.")
+                elif np.nanmedian(sky_spec) > 0.3:  # arbitrary threshold for "too bright" #TODO check brightness number with observed sky brightnesses
+                    logger.warning(f"Sky fiber {sky_fib_num} seems too bright. Sky subtraction may be inaccurate.")
 
             # get science spectrum
             sci_spec = getattr(input_model, f'{spec_key}FIB{sci_fib_num}')
@@ -202,28 +188,11 @@ class SkySubtractionPrimitive(BasePrimitive):
         else:
             output_models = output_model
 
-        # --- resolve sci/sky fiber numbers per model ---
-        def resolve_fibers(model, sci_fiber_override, sky_fiber_override):
-            sky_fib_dist = 0.
-            sci_fib_num  = None
-            sky_fib_num  = None
-            for fiber in range(1, 4):
-                if model.meta.get(f'object_fiber{fiber}', '').upper() == 'SCIENCE' and sci_fiber_override is None:
-                    sci_fib_num = fiber
-                elif sci_fiber_override is not None:
-                    sci_fib_num = sci_fiber_override
-                fib_dist = model.meta.get(f'distance_fiber{fiber}')
-                if fib_dist > sky_fib_dist:
-                    sky_fib_num  = fiber
-                    sky_fib_dist = fib_dist
-            if sky_fiber_override is not None:
-                sky_fib_num = sky_fiber_override
-            return sci_fib_num, sky_fib_num
 
         # Pre-compute per-model metadata so we can build traces in one pass
         model_meta = []
         for model in output_models:
-            sci_fib_num, sky_fib_num = resolve_fibers(model, self.sci_fiber, self.sky_fiber)
+            sci_fib_num, sky_fib_num = self._resolve_fibers(model, self.sci_fiber, self.sky_fiber)
             order_vec   = model.make_order_vec()
             filename    = model.meta.get('filename', f'Model {len(model_meta) + 1}')
             model_meta.append(dict(
@@ -401,3 +370,35 @@ class SkySubtractionPrimitive(BasePrimitive):
             'png':  output_path_png,
             'fig':  fig,
         }
+
+    def _resolve_fibers(self, model, sci_fiber_override=None, sky_fiber_override=None):
+        """Resolve science and sky fiber numbers from overrides or metadata."""
+        sci_fib_num = sci_fiber_override
+        if sci_fib_num is not None:
+            logger.info(f'Science fiber manually set to fiber {sci_fib_num}')
+        else:
+            for fiber in range(1, 4):
+                if model.meta.get(f'object_fiber{fiber}', '').upper() == 'SCIENCE':
+                    sci_fib_num = fiber
+                    break
+            if sci_fib_num is None:
+                sci_fib_num = 1
+                logger.info(f'Could not find SCIENCE keyword in fiber meta data, science fiber set to {sci_fib_num}')
+
+        sky_fib_num = sky_fiber_override
+        if sky_fib_num is not None:
+            logger.info(f'Sky fiber manually set to fiber {sky_fib_num}')
+        else:
+            sky_fib_dist = 0.
+            for fiber in range(1, 4):
+                fib_dist = model.meta.get(f'distance_fiber{fiber}')
+                if fib_dist is None:
+                    logger.info(f'Could not find distance_fiber keyword in meta data for fiber {fiber}')
+                elif fib_dist > sky_fib_dist:
+                    sky_fib_num = fiber
+                    sky_fib_dist = fib_dist
+            if sky_fib_num is None:
+                sky_fib_num = 3
+                logger.info(f'No distance_fiber keywords found in meta data for any fibers, sky fiber will be set to {sky_fib_num}.')
+
+        return sci_fib_num, sky_fib_num

@@ -61,6 +61,12 @@ def templates_data_dir() -> str:
     return os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
 
 
+def atmosphere_data_dir() -> str:
+    import hispecdrp
+
+    return os.path.join(os.path.dirname(hispecdrp.__file__), "data", "atmosphere")
+
+
 def ensure_output_directory(output_dir: str) -> str:
     """Create ``output_dir`` if needed and return its absolute path."""
     out = os.path.abspath(output_dir)

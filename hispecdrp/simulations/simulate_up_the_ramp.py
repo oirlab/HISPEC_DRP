@@ -27,6 +27,8 @@ from ..utils.spectral_templates_utils import (
     fetch_svo_2mass_filter,
     get_spectrum_path,
     load_btsettl_spectrum,
+    get_skybackground_path,
+    load_sky_spectrum,
 )
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
@@ -873,6 +875,7 @@ def create_ramp_and_calibrations(
     template_filename: str | None = None,
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
+    sky_filename: str | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -936,6 +939,8 @@ def create_ramp_and_calibrations(
     template_mag_ab, template_2mass_band : optional
         When building the default rate map from the bundled BT-Settl template, normalize
         to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, or ``'K'``).
+    sky_filename : string, optional
+        MK sky background filename to be used as sky background on sky fiber.
     **cal_kw
         Passed to :func:`create_simulated_calibration_models` when creating dummy calibrations.
 
@@ -992,12 +997,29 @@ def create_ramp_and_calibrations(
             wl = wl[sort_idx]
             flux = flux[sort_idx]
         for f in fibers:
-            if f in (1, 2, 3):
+            if sky_filename is None:
+                if f in (1, 2, 3):
+                    srm.set_fiber_spectrum(
+                        fiber_number=f,
+                        spectrum_wavelengths=wl,
+                        spectrum_flux=flux,
+                        continuous=True,
+                    )
+            else:
+                sky_template_path = get_skybackground_path(sky_filename,
+                                                           base_dir=e2e_support.atmosphere_data_dir())
+                sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
                 srm.set_fiber_spectrum(
-                    fiber_number=f,
+                    fiber_number=1,
                     spectrum_wavelengths=wl,
-                    spectrum_flux=flux,
-                    continuous=True,
+                    spectrum_flux=flux+np.interp(wl,sky_wl,sky_flux),
+                    continuous=True
+                )
+                srm.set_fiber_spectrum(
+                    fiber_number=3,
+                    spectrum_wavelengths=sky_wl,
+                    spectrum_flux=sky_flux,
+                    continuous=True
                 )
         if radial_velocity_km_s != 0.0:
             if not (-500.0 <= radial_velocity_km_s <= 500.0):
@@ -1100,6 +1122,7 @@ def create_ramp_from_spectrum(
     n_reads: int = 10,
     overwrite_ramp: bool = True,
     register_wavesol: bool = True,
+    sky_filename: str | None = None,
     **kwargs,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
     """
@@ -1145,6 +1168,8 @@ def create_ramp_from_spectrum(
     register_wavesol : bool, optional
         Register a simulated ``lfc_wavesol`` into ``KOA_CALIBRATION_CACHE`` for
         default Stage 1 selection. Default True.
+    sky_filename : string, optional
+        MK sky background filename to be used as sky background on sky fiber.
     **kwargs
         Forwarded to :func:`create_ramp_and_calibrations`.
 
@@ -1171,6 +1196,7 @@ def create_ramp_from_spectrum(
         sync_caldb_first=sync_caldb_first,
         n_reads=n_reads,
         overwrite_ramp=overwrite_ramp,
+        sky_filename=sky_filename,
         **kwargs,
     )
     if register_wavesol:
