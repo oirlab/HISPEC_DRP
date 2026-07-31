@@ -217,7 +217,8 @@ RVCCF_HDU = {
         'WAVELENGTH' : np.float64,  # chunk center wavelength (µm)
         'RESOLUTION' : np.float64,  # resolving power R = λ/Δλ
         'TELL_ABS' : np.float64,  # telluric absorption metric
-        'BIS' : np.float64,  # line bisector span (m/s)
+        'BIS' : np.float64,  # Queloz bisector inverse slope (m/s)
+        'BIS_ERR' : np.float64,  # uncertainty on BIS (m/s)
         'RV_ABS' : np.float64,  # absolute-frame RV (m/s)
         'RV_ABS_ERR' : np.float64,  # uncertainty on RV_ABS (m/s)
         'INLIER' : np.uint8,  # 1 = used in aggregate, 0 = rejected by median/MAD outlier

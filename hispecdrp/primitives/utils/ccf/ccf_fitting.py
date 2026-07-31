@@ -21,14 +21,12 @@ class CCFMetrics:
     Results of a CCF Gaussian fit plus bisector analysis.
 
     ``rv`` / ``rv_err`` come from the Gaussian line fit (peak location, width, and
-    amplitude). ``bis_rv`` / ``bis_rv_err`` are the **absolute** bisector radial
-    velocity from NEID-style weighted percentile cuts — the refined RV after the
-    Gaussian. ``bis_rv`` is the performance-weighted mean of cut midpoints;
-    ``bis_rv_err`` combines that cut-weighted formal σ with the Fisher σ on the
-    same CCF (geometric mean when both are finite). ``bis_shallow`` / ``bis_core``
-    (and ``bisector`` / ``bis_levels``) come from the Queloz et al. (2001)
-    bisector-inverse-slope construction; the BIS slope itself is
-    ``bis_shallow - bis_core`` when both are finite.
+    amplitude) and are the pipeline chunk / aggregate RV. ``bis_rv`` / ``bis_rv_err``
+    are the **absolute** bisector radial velocity from NEID-style weighted percentile
+    cuts (diagnostic only). ``bis`` / ``bis_err`` are the Queloz et al. (2001)
+    bisector-inverse-slope (``v_shallow - v_core``) and its uncertainty.
+    ``bis_shallow`` / ``bis_core`` (and ``bisector`` / ``bis_levels``) come from the
+    same Queloz construction.
     """
 
     contrast: float
@@ -41,6 +39,8 @@ class CCFMetrics:
     offset_err: float
     bis_rv: float | None
     bis_rv_err: float | None
+    bis: float | None = None
+    bis_err: float | None = None
     bis_shallow: float | None = None
     bis_shallow_err: float | None = None
     bis_core: float | None = None
@@ -80,6 +80,8 @@ class CCFMetrics:
             "offset_err": self.offset_err,
             "bis_rv": self.bis_rv,
             "bis_rv_err": self.bis_rv_err,
+            "bis": self.bis,
+            "bis_err": self.bis_err,
         }
 
 
@@ -243,13 +245,13 @@ def calc_ccf_metrics(
     Fit a Gaussian to a CCF and (by default) run full bisector analysis.
 
     Always computes the Gaussian peak (``rv``, ``fwhm``, ``contrast``, ``offset``) so
-    the CCF width and amplitude are available. When ``calc_bis`` is True, also:
+    the CCF width and amplitude are available; ``rv`` / ``rv_err`` are the pipeline
+    chunk RV. When ``calc_bis`` is True, also:
 
-    1. Queloz BIS construction → ``bis_shallow`` / ``bis_core`` / ``bisector`` /
-       ``bis_levels`` (activity / asymmetry diagnostics; BIS slope =
-       ``bis_shallow - bis_core``).
-    2. NEID-style weighted-percentile bisector RV → ``bis_rv`` / ``bis_rv_err``, the
-       **refined absolute RV** after the Gaussian (not the BIS slope).
+    1. Queloz BIS construction → ``bis`` / ``bis_err`` (slope ``v_shallow - v_core``),
+       plus ``bis_shallow`` / ``bis_core`` / ``bisector`` / ``bis_levels``.
+    2. NEID-style weighted-percentile bisector RV → ``bis_rv`` / ``bis_rv_err``
+       (absolute bisector RV diagnostic; not used as the pipeline final RV).
 
     Parameters
     ----------
@@ -334,6 +336,8 @@ def calc_ccf_metrics(
 
     bis_rv = None
     bis_rv_err = None
+    bis = None
+    bis_err = None
     bis_shallow = None
     bis_shallow_err = None
     bis_core = None
@@ -361,6 +365,10 @@ def calc_ccf_metrics(
             quant_shallow=bis_quant_shallow,
             quant_core=bis_quant_core,
         )
+        if math.isfinite(float(_bis_slope)):
+            bis = float(_bis_slope)
+        if math.isfinite(float(_bis_slope_err)):
+            bis_err = float(_bis_slope_err)
         # Absolute bisector RV (refined peak). Prefer the caller ``mu_guess`` when the
         # Gaussian center has wandered far: on broad, shallow mask CCFs an emission
         # Gaussian with a flat continuum often drifts by several km/s, and seeding
@@ -436,6 +444,17 @@ def calc_ccf_metrics(
         ):
             bis_rv = 0.5 * (float(bis_shallow) + float(bis_core))
 
+    if (
+        bis is None
+        and isinstance(bisector_diagnostics, dict)
+        and bisector_diagnostics.get("bis_m_s") is not None
+        and math.isfinite(float(bisector_diagnostics["bis_m_s"]))
+    ):
+        bis = float(bisector_diagnostics["bis_m_s"])
+        be = bisector_diagnostics.get("bis_err_m_s")
+        if be is not None and math.isfinite(float(be)):
+            bis_err = float(be)
+
     return CCFMetrics(
         contrast=fit_result.amplitude,
         contrast_err=fit_result.amplitude_err,
@@ -447,6 +466,8 @@ def calc_ccf_metrics(
         offset_err=fit_result.background_coeffs_err[0],
         bis_rv=bis_rv,
         bis_rv_err=bis_rv_err,
+        bis=bis,
+        bis_err=bis_err,
         bis_shallow=bis_shallow,
         bis_shallow_err=bis_shallow_err,
         bis_core=bis_core,

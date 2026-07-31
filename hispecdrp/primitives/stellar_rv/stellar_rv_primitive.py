@@ -207,9 +207,10 @@ class StellarRVPrimitive(BasePrimitive):
         **Default:** ``20000.0``. Half-width (m/s) of the centered uniform velocity window
         (±this value around ``ccf_input_velocity`` or the auto-scout center).
     ccf_parabolic_vertex_n_samples : int or None
-        **Deprecated (ignored for final RV).** Final chunk RVs use bisector refinement after
-        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`. Retained for backward-compatible
-        constructor kwargs only.
+        **Deprecated (ignored for final RV).** Final chunk RVs use the Gaussian fit from
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` /
+        :class:`~hispecdrp.primitives.utils.ccf.ccf_fitting.CCFMetrics`. Retained for
+        backward-compatible constructor kwargs only.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in

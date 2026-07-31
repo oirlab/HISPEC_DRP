@@ -42,13 +42,8 @@ logger = logging.getLogger(__name__)
 # mask-line prominence peak seed (coarse uniform grids alias without this step).
 _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S = 20_000.0
 
-# Bisector vs Gaussian acceptance: require |bis − gauss| ≤ max(frac×FWHM, abs floor).
-# The previous gate (max(3×FWHM, 5 km/s)) was far too loose for blend-asymmetric cores.
-_BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION = 0.25
-_BISECTOR_VS_GAUSS_MAX_ABS_M_S = 500.0
-
-# When Gaussian and/or bisector disagree with the discrete/parabolic CCF peak by more
-# than max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
+# When the Gaussian disagrees with the discrete/parabolic CCF peak by more than
+# max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
 # Keep this near ~1–2 grid steps so ~100 m/s wing-biased fits on a 50 m/s grid are caught.
 _FIT_VS_PEAK_DISAGREE_N_VSTEP = 1.5
 _FIT_VS_PEAK_DISAGREE_MIN_M_S = 50.0
@@ -202,8 +197,16 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
         # Prefer NEID cut diagnostics (cuts, bis_m_s, …) when the metrics fit retained them.
         if isinstance(metrics.bisector_diagnostics, dict):
             bdiag.update(metrics.bisector_diagnostics)
-        # Queloz BIS slope (v_shallow − v_core) when cut-based BIS is absent.
+        # Queloz BIS slope + error from CCFMetrics when cut-based BIS is absent.
         if (
+            (bdiag.get("bis_m_s") is None or not math.isfinite(float(bdiag.get("bis_m_s"))))
+            and metrics.bis is not None
+            and math.isfinite(float(metrics.bis))
+        ):
+            bdiag["bis_m_s"] = float(metrics.bis)
+            if metrics.bis_err is not None and math.isfinite(float(metrics.bis_err)):
+                bdiag["bis_err_m_s"] = float(metrics.bis_err)
+        elif (
             (bdiag.get("bis_m_s") is None or not math.isfinite(float(bdiag.get("bis_m_s"))))
             and metrics.bis_shallow is not None
             and metrics.bis_core is not None
@@ -223,7 +226,9 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
                         + float(metrics.bis_core_err) ** 2
                     )
                 )
+        if metrics.bis_shallow is not None and math.isfinite(float(metrics.bis_shallow)):
             bdiag["bis_shallow_m_s"] = float(metrics.bis_shallow)
+        if metrics.bis_core is not None and math.isfinite(float(metrics.bis_core)):
             bdiag["bis_core_m_s"] = float(metrics.bis_core)
         if metrics.bisector is not None:
             bdiag["bisector"] = np.asarray(metrics.bisector, dtype=np.float64)
@@ -301,37 +306,18 @@ def _pipeline_rv_from_metrics(
     ccf_raw: np.ndarray | None = None,
 ) -> tuple[float, float]:
     """
-    Chunk RV from :class:`CCFMetrics`, with asymmetric-core guards.
+    Chunk RV from :class:`CCFMetrics` (Gaussian), with asymmetric-core guards.
 
-    1. Prefer absolute bisector refine (``bis_rv``) only when it lies within a **tight**
-       gate of the Gaussian (``max(0.25×FWHM, 500 m/s)``).
-    2. If a CCF velocity grid is provided and the Gaussian and/or bisector disagree with
-       the **local** discrete/parabolic peak (anchored on the Gaussian, half-width
-       ``max(FWHM, 5×Δv, 1 km/s)``) by more than ``max(1.5×Δv, 50 m/s)``, fall back to
-       that peak RV. The local window avoids broad-grid alias peaks.
+    Uses the Gaussian ``rv`` / ``rv_err``. Absolute bisector refine (``bis_rv``) is
+    retained on the metrics object for diagnostics only. If a CCF velocity grid is
+    provided and the Gaussian disagrees with the **local** discrete/parabolic peak
+    (anchored on the Gaussian, half-width ``max(FWHM, 5×Δv, 1 km/s)``) by more than
+    ``max(1.5×Δv, 50 m/s)``, fall back to that peak RV. The local window avoids
+    broad-grid alias peaks.
     """
     rv = float(metrics.rv)
     err = float(metrics.rv_err)
     gauss_rv = rv
-    bis_rv: float | None = None
-    if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):
-        bis_rv = float(metrics.bis_rv)
-        bis_err = metrics.bis_rv_err
-        fwhm = float(metrics.fwhm) if metrics.fwhm is not None else float("nan")
-        bis_gate = max(
-            _BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION * fwhm
-            if np.isfinite(fwhm) and fwhm > 0.0
-            else 0.0,
-            _BISECTOR_VS_GAUSS_MAX_ABS_M_S,
-        )
-        if abs(bis_rv - gauss_rv) <= bis_gate:
-            rv = bis_rv
-            if (
-                bis_err is not None
-                and np.isfinite(float(bis_err))
-                and float(bis_err) > 0.0
-            ):
-                err = float(bis_err)
 
     if (
         vel_grid is not None
@@ -358,10 +344,7 @@ def _pipeline_rv_from_metrics(
                     disagree_thresh,
                     _FIT_VS_PEAK_DISAGREE_N_VSTEP * float(v_step),
                 )
-            disagree = abs(gauss_rv - peak_rv) > disagree_thresh
-            if bis_rv is not None and math.isfinite(bis_rv):
-                disagree = disagree or (abs(bis_rv - peak_rv) > disagree_thresh)
-            if disagree:
+            if abs(gauss_rv - peak_rv) > disagree_thresh:
                 rv = float(peak_rv)
                 if not (math.isfinite(err) and err > 0.0):
                     err = (
@@ -565,6 +548,8 @@ def rv_per_chunks_line_mask_spline(
     np.ndarray,
     np.ndarray | None,
     np.ndarray | None,
+    np.ndarray,
+    np.ndarray,
 ]:
     """
     Per-chunk line-mask RV via :func:`compute_ccf_spline` + :func:`calc_ccf_metrics`.
@@ -577,6 +562,9 @@ def rv_per_chunks_line_mask_spline(
     If none of those are set (broad scout with no input RV), membership is recomputed
     at each trial velocity — freezing at rest with :math:`F=0` for missing lines
     creates false CCF minima on wide grids.
+
+    Returns also include per-chunk Queloz ``bis`` / ``bis_err`` (m/s) from
+    :class:`~hispecdrp.primitives.utils.ccf.ccf_fitting.CCFMetrics`.
     """
     w = np.asarray(wave_um, dtype=np.float64).ravel()
     s = np.asarray(spec, dtype=np.float64).ravel()
@@ -587,10 +575,10 @@ def rv_per_chunks_line_mask_spline(
         z = np.array([], dtype=np.float64)
         zi = np.array([], dtype=np.int32)
         if not return_ccf:
-            return (z, z, z, v_grid_local, None, z, z, zi, None, None)
+            return (z, z, z, v_grid_local, None, z, z, zi, None, None, z, z)
         ccf_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         std_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
-        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out)
+        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out, z, z)
 
     if line_set_velocity_m_s is not None and math.isfinite(float(line_set_velocity_m_s)):
         v_line_set: float | None = float(line_set_velocity_m_s)
@@ -678,6 +666,8 @@ def rv_per_chunks_line_mask_spline(
     all_wl_lo: list[float] = []
     all_wl_hi: list[float] = []
     all_n_good: list[int] = []
+    all_bis: list[float] = []
+    all_bis_errs: list[float] = []
     all_ccf_rows: list[np.ndarray] = []
     all_ccf_preview_rows: list[np.ndarray] = []
     all_ccf_err_rows: list[np.ndarray] = []
@@ -782,12 +772,24 @@ def rv_per_chunks_line_mask_spline(
             -ccf_preview if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else ccf_preview.copy()
         )
 
+        bis_v = (
+            float(metrics.bis)
+            if metrics.bis is not None and math.isfinite(float(metrics.bis))
+            else float("nan")
+        )
+        bis_e = (
+            float(metrics.bis_err)
+            if metrics.bis_err is not None and math.isfinite(float(metrics.bis_err))
+            else float("nan")
+        )
         all_rvs.append(float(rv))
         all_rv_errs.append(float(rv_err))
         all_centers.append(float(wl_center))
         all_wl_lo.append(float(np.nanmin(w_c)))
         all_wl_hi.append(float(np.nanmax(w_c)))
         all_n_good.append(n_good)
+        all_bis.append(bis_v)
+        all_bis_errs.append(bis_e)
         if return_ccf:
             all_ccf_rows.append(ccf_stored)
             all_ccf_preview_rows.append(ccf_preview)
@@ -802,6 +804,8 @@ def rv_per_chunks_line_mask_spline(
     wl_lo_arr = np.asarray(all_wl_lo, dtype=np.float64)
     wl_hi_arr = np.asarray(all_wl_hi, dtype=np.float64)
     n_good_arr = np.asarray(all_n_good, dtype=np.int32)
+    bis_arr = np.asarray(all_bis, dtype=np.float64)
+    bis_err_arr = np.asarray(all_bis_errs, dtype=np.float64)
 
     if not return_ccf:
         return (
@@ -815,6 +819,8 @@ def rv_per_chunks_line_mask_spline(
             n_good_arr,
             None,
             None,
+            bis_arr,
+            bis_err_arr,
         )
 
     ccf_2d = np.vstack(all_ccf_rows)
@@ -831,4 +837,6 @@ def rv_per_chunks_line_mask_spline(
         n_good_arr,
         ccf_std_2d,
         ccf_preview_2d,
+        bis_arr,
+        bis_err_arr,
     )

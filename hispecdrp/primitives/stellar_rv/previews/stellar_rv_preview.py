@@ -10,7 +10,7 @@ There are **three** preview surfaces:
    ``*_mask_overlay_debug_fib*.html`` (initial overlay velocity: finite ``ccf_input_velocity`` if
    set, else ``0`` m/s; chunk dropdown uses ``restyle``). CCF slot dropdown aligns with the CCF
    legend (``x``). CCF panels overlay the Gaussian fit, bisector midpoints / wing chords when
-   ``bisector_fit`` is present, and the final bisector RV.
+   ``bisector_fit`` is present, and the final Gaussian RV.
 2. **Spectrum + CCF overlay debug HTML** (``write_mask_overlay_debug_pages`` /
    ``write_template_overlay_debug_pages``): one shared page implementation
    (:mod:`~hispecdrp.primitives.stellar_rv.previews.ccf_spectrum_overlay_debug_html` + embedded
@@ -696,7 +696,7 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     Build five line-mask refine overlay traces from ``rmeta`` (no parabolic solve).
 
     Slots: (0) smoothed ±1σ band, (1) smoothed CCF, (2–3) reserved placeholders
-    (formerly parabolic diagnostics; left empty), (4) final bisector RV line.
+    (formerly parabolic diagnostics; left empty), (4) final Gaussian RV line.
     When the slot carries ``line_mask_refine_rmeta``, that result is reused.
     """
     trace_indices: list[int] = []
@@ -710,15 +710,11 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
         trace_indices.append(len(fig.data) - 1)
 
     def _final_rv_vertical_line() -> None:
-        # Pipeline final chunk RV is bisector-refined (``rv_r_m_s``).
+        # Pipeline final chunk RV is the Gaussian fit (``rv_r_m_s``).
         rv_line = float(rv_r_m_s)
         rv_km = rv_line / 1000.0
         err_m = float(rmeta.get("rv_err_m_s", float("nan")))
-        if isinstance(bisector_fit, dict):
-            err_bi = bisector_fit.get("rv_err")
-            if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0:
-                err_m = float(err_bi)
-        v_label = f"Final RV (bisector) = {rv_line:.2f} m/s"
+        v_label = f"Final RV (Gaussian) = {rv_line:.2f} m/s"
         if math.isfinite(err_m) and err_m > 0:
             v_label += f" (σ={err_m:.2f} m/s)"
         bdiag = (
@@ -1002,7 +998,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
     """
     For ``ccf_line_mask``, overlay diagnostic refine curves on the CCF panel
     (smoothed CCF ±1σ when available) plus a vertical line at the **pipeline**
-    final RV (bisector after Gaussian fit).
+    final RV (Gaussian fit).
 
     When the slot carries ``line_mask_refine_rmeta``, that result is reused so
     Plotly does not recompute the diagnostic curves.
@@ -1024,14 +1020,22 @@ def _line_mask_refine_ccf_add_plotly_traces(
     gaussian = sl.get("gaussian_fit")
     bisector = sl.get("bisector_fit")
     rv_slot = None
-    if isinstance(bisector, dict):
-        rv_bi = bisector.get("rv")
-        if rv_bi is not None and np.isfinite(float(rv_bi)):
-            rv_slot = float(rv_bi)
-    if rv_slot is None and isinstance(gaussian, dict):
+    if isinstance(gaussian, dict):
         rv_g = gaussian.get("rv")
         if rv_g is not None and np.isfinite(float(rv_g)):
             rv_slot = float(rv_g)
+            cached_err = (
+                float(gaussian["rv_err"])
+                if gaussian.get("rv_err") is not None
+                and np.isfinite(float(gaussian["rv_err"]))
+                else float("nan")
+            )
+            if isinstance(cached, dict) and math.isfinite(cached_err):
+                cached = {**cached, "rv_err_m_s": cached_err}
+    if rv_slot is None and isinstance(bisector, dict):
+        rv_bi = bisector.get("rv")
+        if rv_bi is not None and np.isfinite(float(rv_bi)):
+            rv_slot = float(rv_bi)
     if (
         isinstance(cached, dict)
         and cached.get("ok")
@@ -3273,23 +3277,18 @@ def create_stellar_rv_preview(primitive) -> None:
                     )
                 ccf_band_trace_idx.append(idx_fit)
                 if (not is_line_mask) and params and diag.get("fit_ok"):
-                    # Prefer bisector-refined RV for the vertical marker when available.
-                    _bi_sl = sl.get("bisector_fit")
                     _rv_mark = float(params["v0"])
-                    _mark_name = "Gaussian RV (v₀)"
+                    _mark_name = f"Final RV (Gaussian) = {_rv_mark:.2f} m/s"
+                    _bi_sl = sl.get("bisector_fit")
                     if isinstance(_bi_sl, dict):
-                        _rv_bi = _bi_sl.get("rv")
-                        if _rv_bi is not None and math.isfinite(float(_rv_bi)):
-                            _rv_mark = float(_rv_bi)
-                            _mark_name = f"Final RV (bisector) = {_rv_mark:.2f} m/s"
-                            _bdiag_m = _bi_sl.get("diagnostics")
-                            if isinstance(_bdiag_m, dict):
-                                _bis_m = _bdiag_m.get("bis_m_s")
-                                _bis_e = _bdiag_m.get("bis_err_m_s")
-                                if _bis_m is not None and math.isfinite(float(_bis_m)):
-                                    _mark_name += f"<br>BIS = {float(_bis_m):.2f} m/s"
-                                    if _bis_e is not None and math.isfinite(float(_bis_e)):
-                                        _mark_name += f" (σ={float(_bis_e):.2f})"
+                        _bdiag_m = _bi_sl.get("diagnostics")
+                        if isinstance(_bdiag_m, dict):
+                            _bis_m = _bdiag_m.get("bis_m_s")
+                            _bis_e = _bdiag_m.get("bis_err_m_s")
+                            if _bis_m is not None and math.isfinite(float(_bis_m)):
+                                _mark_name += f"<br>BIS = {float(_bis_m):.2f} m/s"
+                                if _bis_e is not None and math.isfinite(float(_bis_e)):
+                                    _mark_name += f" (σ={float(_bis_e):.2f})"
                     v0_km = _rv_mark / 1000.0
                     idx_v0 = len(fig_ccf.data)
                     fig_ccf.add_trace(

@@ -1,11 +1,10 @@
-"""Tests for spline mask CCF RV selection (bisector gate + peak fallback)."""
+"""Tests for spline mask CCF RV selection (Gaussian + peak fallback)."""
 from __future__ import annotations
 
 import numpy as np
 
 from hispecdrp.primitives.utils.ccf.ccf_fitting import CCFMetrics
 from hispecdrp.primitives.utils.ccf.ccf_line_mask_spline import (
-    _BISECTOR_VS_GAUSS_MAX_ABS_M_S,
     _FIT_VS_PEAK_DISAGREE_MIN_M_S,
     _pipeline_rv_from_metrics,
 )
@@ -33,30 +32,29 @@ def _metrics(
     )
 
 
-def test_pipeline_rv_rejects_bisector_far_from_gaussian():
-    """Tight gate: |bis−gauss| above max(0.25×FWHM, 500 m/s) keeps the Gaussian."""
+def test_pipeline_rv_uses_gaussian_even_when_bisector_near():
+    """Reported chunk RV is the Gaussian; bisector is diagnostic only."""
     gauss = -110_000.0
-    fwhm = 4_000.0
-    gate = max(_BISECTOR_VS_GAUSS_MAX_ABS_M_S, 0.25 * fwhm)
-    bis = gauss + (gate + 200.0)
+    bis = gauss + 50.0
     rv, err = _pipeline_rv_from_metrics(
-        _metrics(rv=gauss, bis_rv=bis, fwhm=fwhm)
+        _metrics(rv=gauss, bis_rv=bis, bis_rv_err=3.0, fwhm=4_000.0)
     )
     assert abs(rv - gauss) < 1e-6
     assert err == 7.5
 
 
-def test_pipeline_rv_accepts_bisector_near_gaussian():
+def test_pipeline_rv_ignores_bisector_far_from_gaussian():
     gauss = -110_000.0
-    bis = gauss + 50.0
-    rv, _ = _pipeline_rv_from_metrics(
-        _metrics(rv=gauss, bis_rv=bis, bis_rv_err=3.0, fwhm=4_000.0)
+    bis = gauss + 5_000.0
+    rv, err = _pipeline_rv_from_metrics(
+        _metrics(rv=gauss, bis_rv=bis, fwhm=4_000.0)
     )
-    assert abs(rv - bis) < 1e-6
+    assert abs(rv - gauss) < 1e-6
+    assert err == 7.5
 
 
 def test_pipeline_rv_falls_back_to_peak_on_fit_disagreement():
-    """Biased Gaussian/bisector yield to the local discrete/parabolic CCF peak."""
+    """Biased Gaussian yields to the local discrete/parabolic CCF peak."""
     inj = -110_000.0
     v = np.arange(inj - 5_000.0, inj + 5_000.0 + 25.0, 50.0)
     stored = np.exp(-0.5 * ((v - inj) / 800.0) ** 2)
@@ -84,5 +82,5 @@ def test_pipeline_rv_ignores_distant_alias_peak():
         vel_grid=v,
         ccf_raw=raw,
     )
-    # Stay with Gaussian/bisector near the true core — do not fall back to alias.
+    # Stay with Gaussian near the true core — do not fall back to alias.
     assert abs(rv - inj) < 50.0
