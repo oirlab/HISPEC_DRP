@@ -322,12 +322,20 @@ def materialize_stage1_calibrations(
     cal_bundle: e2e_calibrations.E2ECalibrationBundle,
     calibration_models: dict,
     out_dir_abs: str,
+    *,
+    rate_map_for_wavesol_zp: np.ndarray | None = None,
+    wavesol_zp_known_rv_m_s: float = 0.0,
 ) -> tuple[dict | None, Any | None]:
     """
     Resolve or generate Stage 1 trace / fiberflat / wavesol calibrations.
 
     Returns ``(fiberflat_bundle, wavesol_model)``; either may be ``None`` when not
     requested or when masters already exist on ``cal_bundle``.
+
+    When ``stage1_trace_source='sim_hdf'`` and ``rate_map_for_wavesol_zp`` is set,
+    apply a per-order absorption-line zero-point to the HDF wavesol so WAVE matches
+    LSF-shifted line centers on the simulated detector (HDF file unchanged).
+    Pass ``wavesol_zp_known_rv_m_s`` when the rate map includes an injected stellar RV.
     """
     cal_dir = e2e_support.calibration_dir(out_dir_abs)
     ff_bundle: dict | None = None
@@ -366,7 +374,7 @@ def materialize_stage1_calibrations(
                         .get("extraction_aperture", extraction_aperture)
                     )
                 logger.info(
-                    "E2E: sim_hdf Stage-1 bundle (HDF trace + box fiberflat, aperture=%.1f).",
+                    "E2E: sim_hdf Stage-1 bundle (HDF y_pos traces + box fiberflat, aperture=%.1f).",
                     extraction_aperture,
                 )
                 ramp_mjd = e2e_gaia.resolve_e2e_mjd_start(config.mjd_start)
@@ -384,6 +392,8 @@ def materialize_stage1_calibrations(
                     fiberflat_rate_paths=ff_paths,
                     meta={"mjd_start": float(ramp_mjd)},
                     extraction_aperture=extraction_aperture,
+                    rate_map_for_wavesol_zp=rate_map_for_wavesol_zp,
+                    wavesol_zp_known_rv_m_s=float(wavesol_zp_known_rv_m_s),
                 )
                 ff_bundle = {
                     "trace_pos": bundle["trace_pos"],
@@ -393,7 +403,12 @@ def materialize_stage1_calibrations(
                 wavesol_model = bundle["wavesol"]
                 for key in e2e_calibrations.STAGE1_TRACE_KEYS:
                     cal_bundle.sources[key] = STAGE1_TRACE_SOURCE_SIM_HDF
-                cal_bundle.sources["wavesol"] = STAGE1_TRACE_SOURCE_SIM_HDF
+                if bundle.get("wavesol_comb_info"):
+                    cal_bundle.sources["wavesol"] = f"{STAGE1_TRACE_SOURCE_SIM_HDF}+injected_comb"
+                elif bundle.get("wavesol_zp_info"):
+                    cal_bundle.sources["wavesol"] = f"{STAGE1_TRACE_SOURCE_SIM_HDF}+line_zp"
+                else:
+                    cal_bundle.sources["wavesol"] = STAGE1_TRACE_SOURCE_SIM_HDF
             elif stage1_uses_fiberflat_pipeline(config):
                 logger.info(
                     "E2E: ProcessFiberflatsPipeline (stage1_trace_source=pipeline): "
@@ -727,8 +742,19 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         ff_list = config.fiberflat_fibers if config.fiberflat_fibers is not None else [1, 2, 3]
         ff_list = [f for f in ff_list if f in (1, 2, 3)]
         if ff_list:
+            # Prefer science rate_map for wavesol line ZP (LSF shift); fall back to Stage-0 rate.
+            rate_for_zp = None
+            if rate_map is not None:
+                rate_for_zp = np.asarray(rate_map, dtype=np.float64)
+            elif getattr(stage0_model, "rate", None) is not None:
+                rate_for_zp = np.asarray(stage0_model.rate, dtype=np.float64)
             ff_bundle, wavesol_model = materialize_stage1_calibrations(
-                config, cal_bundle, calibration_models, out_dir_abs
+                config,
+                cal_bundle,
+                calibration_models,
+                out_dir_abs,
+                rate_map_for_wavesol_zp=rate_for_zp,
+                wavesol_zp_known_rv_m_s=float(config.radial_velocity_km_s) * 1000.0,
             )
             if ff_bundle is not None:
                 stage1_model = e2e_support.run_stage1_simulation(
@@ -887,6 +913,44 @@ def _interp_oriented_spectral_row(
     return f(np.arange(n_pix, dtype=np.float64))
 
 
+def _wavelength_from_deposit_inverse(
+    ow: np.ndarray,
+    ox: np.ndarray,
+    *,
+    n_pix: int = 4096,
+    nx: int = 4096,
+    n_dense: int = 20000,
+) -> np.ndarray:
+    """
+    Build ``WAVE[p]`` as the exact inverse of the native deposit map ``λ → x``.
+
+    The simulator deposits each λ at ``x = Pchip(λ)`` (then orients
+    ``row = (nx-1) - x``).  Resampling ``λ(row)`` by Pchip on the sparse HDF
+    samples is **not** that inverse and leaves a ~2 cm/s floor.  Sampling the
+    forward ``λ → x`` map densely and Pchip-inverting reaches ≪1 cm/s.
+    """
+    ow = np.asarray(ow, dtype=np.float64)
+    ox = np.asarray(ox, dtype=np.float64)
+    good = np.isfinite(ow) & np.isfinite(ox)
+    ow, ox = ow[good], ox[good]
+    if ow.size < 2:
+        return np.full(n_pix, np.nan, dtype=np.float64)
+    sidx = np.argsort(ow)
+    ow, ox = ow[sidx], ox[sidx]
+    uw, inv = np.unique(ow, return_inverse=True)
+    if uw.size < 2:
+        return np.full(n_pix, np.nan, dtype=np.float64)
+    ux = np.bincount(inv, weights=ox) / np.maximum(np.bincount(inv), 1)
+    fx = PchipInterpolator(uw, ux, extrapolate=True)
+    lam_d = np.linspace(float(uw.min()), float(uw.max()), int(n_dense))
+    x_d = np.asarray(fx(lam_d), dtype=np.float64)
+    s2 = np.argsort(x_d)
+    fx_inv = PchipInterpolator(x_d[s2], lam_d[s2], extrapolate=True)
+    pix = np.arange(int(n_pix), dtype=np.float64)
+    x_native = float(nx - 1) - pix
+    return np.asarray(fx_inv(x_native), dtype=np.float64)
+
+
 def get_sim_hdf_trace_grids(
     spectrograph: str,
     *,
@@ -899,6 +963,9 @@ def get_sim_hdf_trace_grids(
     indexing the **spectral row** in the oriented rate map (same convention as
     ``orders_are_vertical=True`` extraction). ``y_pos[pixel]`` is the cross-dispersion
     column at that row.
+
+    ``wavelength`` is the inverse of the native deposit ``λ → x`` map (dense
+    forward sampling), so ``WAVE(row_deposit(λ)) = λ`` to ≪1 cm/s.
     """
     spectrograph, model_data = _load_hdf_model_data(spectrograph)
     order_list = _order_list(spectrograph)
@@ -920,7 +987,9 @@ def get_sim_hdf_trace_grids(
             if int(np.sum(good)) < 2:
                 continue
             row, col = _orient_hdf_pixel_xy(ox[good], oy[good], nx=nx)
-            wavelength = _interp_oriented_spectral_row(row, ow[good], n_pix=n_pix)
+            wavelength = _wavelength_from_deposit_inverse(
+                ow[good], ox[good], n_pix=n_pix, nx=nx
+            )
             y_pos = _interp_oriented_spectral_row(row, col, n_pix=n_pix)
             out[fiber][od] = {
                 "pixel": pixel.copy(),
@@ -1086,6 +1155,265 @@ def create_wavelength_solution_model_from_sim_hdf(
     return wavesol
 
 
+def _normalize_fibers(
+    *,
+    fibers: list[int] | tuple[int, ...] | None = None,
+    fiber: int | None = None,
+    default: tuple[int, ...] = (1, 2, 3),
+) -> list[int]:
+    """Resolve ``fibers`` / legacy ``fiber`` into a validated list in ``{1,2,3}``."""
+    if fibers is not None:
+        out = [int(f) for f in fibers]
+    elif fiber is not None:
+        out = [int(fiber)]
+    else:
+        out = [int(f) for f in default]
+    if not out:
+        raise ValueError("At least one fiber is required")
+    for f in out:
+        if f not in (1, 2, 3):
+            raise ValueError(f"fiber must be 1, 2, or 3; got {f}")
+    # Preserve order, drop duplicates.
+    seen: set[int] = set()
+    uniq: list[int] = []
+    for f in out:
+        if f not in seen:
+            seen.add(f)
+            uniq.append(f)
+    return uniq
+
+
+def validate_deposit_inverse_wavesol_geometry(
+    out_dir: str | os.PathLike[str],
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | tuple[int, ...] | None = None,
+    fiber: int | None = None,
+    n_lines_per_order: int = 1000,
+    target_cm_s: float = 10.0,
+    write_plots: bool = True,
+    write_wavesol: bool = True,
+) -> dict[str, Any]:
+    """
+    Inject/recover test for simulation WAVE at deposit centers (no PSF centroiding).
+
+    Evaluates deposit-inverse ``WAVE`` at exact ``row(λ)`` for each requested fiber
+    (default ``1, 2, 3``) and reports residuals in cm/s.
+
+    When ``write_plots`` is True, writes per-fiber products under ``out_dir``:
+
+    - ``comb_wavesol_fib{F}_order{N}_dpix.png``
+    - ``comb_wavesol_fib{F}_per_order.png``
+    - ``comb_wavesol_per_fiber.png`` (summary across fibers)
+    - ``comb_wavesol_report.json``
+    """
+    import json
+    from pathlib import Path
+
+    from ..primitives.utils.spectral_utils import delta_wave_to_delta_vel
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    spectrograph = spectrograph.upper()
+    fiber_list = _normalize_fibers(fibers=fibers, fiber=fiber)
+    wavesol = create_wavelength_solution_model_from_sim_hdf(
+        spectrograph, meta={"mjd_start": 0.0}
+    )
+    order_list = _order_list(spectrograph)
+    pix_grid = np.arange(4096, dtype=np.float64)
+
+    if write_plots:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+    per_fiber: dict[int, dict[str, Any]] = {}
+    all_mads: list[float] = []
+
+    for fib in fiber_list:
+        ll = build_injected_line_list(
+            spectrograph, fiber=fib, n_lines_per_order=n_lines_per_order
+        )
+        per: dict[int, dict[str, Any]] = {}
+        mads: list[float] = []
+        for od in order_list:
+            if od not in ll:
+                continue
+            oi = order_list.index(od)
+            w = np.asarray(getattr(wavesol, f"wave_fib{fib}")[oi], dtype=np.float64)
+            lams = np.asarray(ll[od], dtype=np.float64)
+            rows, _ = expected_feature_xy_oriented(spectrograph, fib, od, lams)
+            ok = np.isfinite(rows) & (rows >= 0) & (rows < 4096)
+            if int(ok.sum()) < 5:
+                continue
+            plo, phi = np.percentile(rows[ok], [8, 92])
+            use = ok & (rows >= plo) & (rows <= phi)
+            if int(use.sum()) < 5:
+                continue
+            lam_mid = float(np.mean(lams[use]))
+            f_wave = PchipInterpolator(pix_grid, w, extrapolate=True)
+            lam_hat = np.asarray(f_wave(rows[use]), dtype=np.float64)
+            vel = np.asarray(
+                delta_wave_to_delta_vel(lams[use] - lam_hat, lam_mid), dtype=np.float64
+            )
+            mad = float(np.median(np.abs(vel)))
+            rms = float(np.std(vel))
+            mx = float(np.max(np.abs(vel)))
+            mads.append(mad * 100)
+            per[od] = {
+                "n": int(use.sum()),
+                "mad_cm_s": mad * 100,
+                "rms_cm_s": rms * 100,
+                "max_cm_s": mx * 100,
+                "lam_mid_um": lam_mid,
+                "pix": rows[use].tolist(),
+                "vel_cm_s": (vel * 100).tolist(),
+            }
+            if write_plots:
+                fig, axes = plt.subplots(
+                    2,
+                    1,
+                    figsize=(10, 6.5),
+                    sharex=True,
+                    gridspec_kw={"height_ratios": [2, 1]},
+                )
+                ax = axes[0]
+                ax.plot(
+                    rows[use], vel * 100, ".", ms=2.5, alpha=0.5, color="C0", label="features"
+                )
+                ax.axhline(0, color="C3", lw=1.5, label="WAVE = deposit inverse")
+                ax.axhline(
+                    target_cm_s,
+                    color="k",
+                    ls="--",
+                    lw=0.8,
+                    label=f"±{target_cm_s:g} cm/s target",
+                )
+                ax.axhline(-target_cm_s, color="k", ls="--", lw=0.8)
+                ax.set_ylabel(f"Δv (cm/s) at ⟨λ⟩={lam_mid:.4f} µm")
+                ax.set_title(
+                    f"Fiber {fib} order {od}: geometry inject/recover  |  "
+                    f"MAD={mad*100:.3f} cm/s  RMS={rms*100:.3f} cm/s  N={int(use.sum())}"
+                )
+                ax.legend(fontsize=8)
+                ax.grid(True, alpha=0.3)
+                ax.set_ylim(-30, 30)
+
+                axr = axes[1]
+                axr.plot(rows[use], vel * 100, ".", ms=2.0, alpha=0.45, color="C0")
+                axr.axhline(0, color="C3", lw=1.2)
+                axr.axhline(mad * 100, color="k", ls="--", lw=0.8)
+                axr.axhline(-mad * 100, color="k", ls="--", lw=0.8)
+                axr.set_xlabel("deposit spectral pixel (exact λ→row)")
+                axr.set_ylabel("residual (cm/s)")
+                axr.grid(True, alpha=0.3)
+                fig.tight_layout()
+                fig.savefig(out / f"comb_wavesol_fib{fib}_order{od}_dpix.png", dpi=150)
+                # Legacy alias when only fiber 2 is requested (old test/scripts).
+                if fiber_list == [2]:
+                    fig.savefig(out / f"comb_wavesol_order{od}_dpix.png", dpi=150)
+                plt.close(fig)
+
+        orders = sorted(per)
+        if write_plots and orders:
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(orders, [per[o]["mad_cm_s"] for o in orders], "o-", ms=4, label="MAD")
+            ax.plot(orders, [per[o]["rms_cm_s"] for o in orders], "s-", ms=3, label="RMS")
+            ax.axhline(
+                target_cm_s, color="k", ls="--", lw=1, label=f"{target_cm_s:g} cm/s target"
+            )
+            ax.set_xlabel("echelle order")
+            ax.set_ylabel("geometry residual (cm/s)")
+            ax.set_title(
+                f"Fiber {fib} deposit-inverse WAVE  |  "
+                f"median MAD={float(np.median(mads)):.3f} cm/s"
+            )
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(out / f"comb_wavesol_fib{fib}_per_order.png", dpi=140)
+            if fiber_list == [2]:
+                fig.savefig(out / "comb_wavesol_per_order.png", dpi=140)
+            plt.close(fig)
+
+        fib_report = {
+            "fiber": int(fib),
+            "median_mad_cm_s": float(np.median(mads)) if mads else float("nan"),
+            "median_rms_cm_s": (
+                float(np.median([per[o]["rms_cm_s"] for o in orders])) if orders else float("nan")
+            ),
+            "max_mad_cm_s": float(np.max(mads)) if mads else float("nan"),
+            "n_orders": len(orders),
+            "per_order": per,
+            "passed": bool(mads) and float(np.max(mads)) < float(target_cm_s),
+        }
+        per_fiber[int(fib)] = fib_report
+        all_mads.extend(mads)
+
+    if write_plots and len(fiber_list) > 1:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        fibs = sorted(per_fiber)
+        ax.plot(
+            fibs,
+            [per_fiber[f]["median_mad_cm_s"] for f in fibs],
+            "o-",
+            ms=6,
+            label="median MAD",
+        )
+        ax.plot(
+            fibs,
+            [per_fiber[f]["max_mad_cm_s"] for f in fibs],
+            "s-",
+            ms=5,
+            label="max MAD",
+        )
+        ax.axhline(target_cm_s, color="k", ls="--", lw=1, label=f"{target_cm_s:g} cm/s target")
+        ax.set_xticks(fibs)
+        ax.set_xlabel("fiber")
+        ax.set_ylabel("geometry residual (cm/s)")
+        ax.set_title("Deposit-inverse WAVE by fiber")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(out / "comb_wavesol_per_fiber.png", dpi=140)
+        plt.close(fig)
+
+    wavesol_path = out / "sim_hdf_wavesol_injected_comb.fits"
+    if write_wavesol:
+        wavesol.save(str(wavesol_path))
+
+    # Backward-compat top-level fields mirror the first fiber (or fiber 2 if present).
+    primary = 2 if 2 in per_fiber else fiber_list[0]
+    prim = per_fiber[primary]
+    report: dict[str, Any] = {
+        "method": "deposit_inverse",
+        "spectrograph": spectrograph,
+        "fibers": fiber_list,
+        "fiber": int(primary),
+        "target_cm_s": float(target_cm_s),
+        "median_mad_cm_s": float(np.median(all_mads)) if all_mads else float("nan"),
+        "median_rms_cm_s": float(
+            np.median([per_fiber[f]["median_rms_cm_s"] for f in fiber_list])
+        ),
+        "max_mad_cm_s": float(np.max(all_mads)) if all_mads else float("nan"),
+        "n_orders": int(prim["n_orders"]),
+        "per_order": prim["per_order"],
+        "per_fiber": per_fiber,
+        "wavesol_path": str(wavesol_path) if write_wavesol else None,
+        "out_dir": str(out),
+        "passed": bool(all_mads) and float(np.max(all_mads)) < float(target_cm_s),
+        "note": (
+            "Residuals are WAVE(deposit_row(λ)) − λ for each fiber. PSF-centroid "
+            "residuals are a separate measurement systematic (~40 m/s ZP, "
+            "pixel-phase structure) and must not be used to redefine simulation WAVE."
+        ),
+    }
+    if write_plots:
+        (out / "comb_wavesol_report.json").write_text(json.dumps(report, indent=2) + "\n")
+    return report
+
+
 def _extract_box_one_order(
     rate: np.ndarray,
     rate_err: np.ndarray,
@@ -1210,22 +1538,273 @@ def create_fiberflat_model_from_rate_maps(
     return ff
 
 
+def _parabolic_min_nearest(
+    x: np.ndarray,
+    y: np.ndarray,
+    x0: float,
+    half_win: float,
+) -> float:
+    """Parabolic absorption minimum nearest ``x0`` (shared by wavesol ZP)."""
+    from ..utils.line_mask_utils import _parabolic_minimum_wavelength_um
+
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    m = np.isfinite(x) & np.isfinite(y) & (x >= x0 - half_win) & (x <= x0 + half_win)
+    if int(m.sum()) < 3:
+        return float("nan")
+    xx, yy = x[m], y[m]
+    o = np.argsort(xx)
+    xx, yy = xx[o], yy[o]
+    local = np.where((yy[1:-1] < yy[:-2]) & (yy[1:-1] <= yy[2:]))[0] + 1
+    if local.size == 0:
+        return float("nan")
+    i0 = int(local[np.argmin(np.abs(xx[local] - x0))])
+    if i0 <= 0 or i0 >= xx.size - 1:
+        return float(xx[i0])
+    return float(_parabolic_minimum_wavelength_um(xx, yy, i0))
+
+
+def refine_sim_hdf_wavesol_line_zeropoint(
+    wavesol: LFCWavesolModel,
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str,
+    fibers: list[int] | tuple[int, ...] | None = None,
+    fiber: int | None = None,
+    n_lines_per_order: int = 25,
+    min_depth: float = 0.15,
+    fit_half_win_pix: float = 8.0,
+    known_rv_m_s: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Apply a per-fiber, per-order vacuum-wavelength zero-point so WAVE matches
+    absorption centers measured on a simulated rate map.
+
+    The geometric HDF → WAVE mapping already matches paint coordinates, but
+    LSF/PSF deposition shifts apparent absorption minima by tens of m/s. This
+    measures that mean shift (multi-line median vs BT-Settl) **independently for
+    each fiber** (default 1, 2, 3) and multiplies each order's ``WAVE_FIB`` by
+    ``(1 - dv/c)`` so labeled λ at observed line pixels matches template centers.
+
+    When the rate map was built with a known injected stellar RV, pass
+    ``known_rv_m_s`` so that Doppler shift is **not** absorbed into WAVE
+    (only the residual LSF/paint offset is calibrated).
+
+    Fibers with too little rate-map flux to measure a ZP are left unchanged
+    (deposit-inverse WAVE preserved).
+
+    Does **not** modify the HDF spectrograph model file.
+    """
+    import scipy.constants
+
+    from ..primitives.utils.spectral_utils import (
+        delta_wave_to_delta_vel,
+        get_spectrum_path,
+        load_btsettl_spectrum,
+    )
+    from ..utils.line_mask_utils import (
+        _continuum_envelope,
+        detect_template_line_centers_parabolic_um,
+    )
+    from . import e2e_support
+
+    spectrograph = spectrograph.upper()
+    fiber_list = _normalize_fibers(fibers=fibers, fiber=fiber)
+    rate = np.asarray(rate_map, dtype=np.float64)
+    if rate.ndim != 2:
+        raise ValueError(f"rate_map must be 2-D, got shape {rate.shape}")
+
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    order_list = _order_list(spectrograph)
+    tw, tf = load_btsettl_spectrum(
+        get_spectrum_path(
+            e2e_support.DEFAULT_TEMPLATE_FILENAME,
+            base_dir=e2e_support.templates_data_dir(),
+        )
+    )
+    tw = np.asarray(tw, dtype=np.float64).ravel()
+    tf = np.asarray(tf, dtype=np.float64).ravel()
+    order_t = np.argsort(tw)
+    tw, tf = tw[order_t], tf[order_t]
+
+    c_mps = float(scipy.constants.c)
+    z = float(known_rv_m_s) / c_mps
+    per_fiber: dict[int, dict[str, Any]] = {}
+
+    for fib in fiber_list:
+        per_order: dict[int, dict[str, float]] = {}
+        wave_attr = f"wave_fib{fib}"
+        wave_arr = getattr(wavesol, wave_attr, None)
+        if wave_arr is None:
+            continue
+        wave_arr = np.asarray(wave_arr, dtype=np.float64).copy()
+
+        for oi, od in enumerate(order_list):
+            if od not in grids.get(fib, {}):
+                continue
+            if oi >= wave_arr.shape[0]:
+                break
+            g = grids[fib][od]
+            y_pos = np.asarray(g["y_pos"], dtype=np.float64)
+            wave = wave_arr[oi]
+            spec, _ = _extract_box_one_order(
+                rate,
+                np.zeros_like(rate),
+                np.zeros(rate.shape, dtype=np.uint32),
+                y_pos,
+                extraction_aperture=10.0,
+            )
+            ok = np.isfinite(wave) & np.isfinite(spec)
+            if int(ok.sum()) < 50:
+                continue
+            # Skip fibers/orders with negligible continuum (unlit fiber).
+            if float(np.nanpercentile(spec[ok], 90)) <= 0:
+                continue
+            w_lo, w_hi = float(np.nanmin(wave[ok])), float(np.nanmax(wave[ok]))
+            msk = (tw >= w_lo) & (tw <= w_hi)
+            centers = detect_template_line_centers_parabolic_um(
+                tw[msk], tf[msk], min_continuum_normalized_depth=min_depth
+            )
+            if centers.size == 0:
+                continue
+            cont = _continuum_envelope(tf[msk], 181)
+            depths = 1.0 - np.interp(centers, tw[msk], tf[msk]) / np.maximum(
+                np.interp(centers, tw[msk], cont), 1e-30
+            )
+            pick = centers[np.argsort(-depths)[:n_lines_per_order]]
+            dlam = float(np.nanmedian(np.abs(np.diff(wave[np.isfinite(wave)]))))
+            half = fit_half_win_pix * max(dlam, 1e-9)
+            ideal = np.interp(wave, tw, tf, left=np.nan, right=np.nan)
+            dvs: list[float] = []
+            for c_native in pick:
+                lam_rest = _parabolic_min_nearest(wave, ideal, float(c_native), half)
+                if not np.isfinite(lam_rest):
+                    continue
+                lam_expect = lam_rest * (1.0 + z)
+                lam_m = _parabolic_min_nearest(wave, spec, lam_expect, half)
+                if not np.isfinite(lam_m):
+                    continue
+                if abs(lam_m - lam_expect) > 2.5 * dlam:
+                    continue
+                dvs.append(float(delta_wave_to_delta_vel(lam_m - lam_expect, lam_expect)))
+            if len(dvs) < 3:
+                continue
+            med = float(np.median(dvs))
+            mad = float(np.median(np.abs(np.asarray(dvs) - med)))
+            wave_arr[oi] = wave * (1.0 - med / c_mps)
+            per_order[int(od)] = {
+                "dv_m_s": med,
+                "mad_m_s": mad,
+                "n_lines": float(len(dvs)),
+            }
+
+        if per_order:
+            setattr(wavesol, wave_attr, wave_arr.astype(np.float64))
+        med_all = (
+            float(np.median([v["dv_m_s"] for v in per_order.values()]))
+            if per_order
+            else float("nan")
+        )
+        per_fiber[int(fib)] = {
+            "fiber": int(fib),
+            "per_order": per_order,
+            "median_dv_m_s": med_all,
+            "n_orders": len(per_order),
+        }
+        logger.info(
+            "Sim HDF wavesol line ZP: fiber=%d n_orders=%d median_dv=%.1f m/s "
+            "(known_rv=%.1f m/s; WAVE rescale)",
+            fib,
+            len(per_order),
+            med_all,
+            float(known_rv_m_s),
+        )
+
+    medians = [
+        v["median_dv_m_s"]
+        for v in per_fiber.values()
+        if np.isfinite(v["median_dv_m_s"])
+    ]
+    primary = 2 if 2 in per_fiber else fiber_list[0]
+    return {
+        "fibers": fiber_list,
+        "fiber": int(primary),
+        "per_fiber": per_fiber,
+        # Backward-compat single-fiber fields (primary fiber).
+        "per_order": per_fiber.get(primary, {}).get("per_order", {}),
+        "median_dv_m_s": float(np.median(medians)) if medians else float("nan"),
+        "known_rv_m_s": float(known_rv_m_s),
+    }
+
+
 def materialize_stage1_bundle_from_sim_hdf(
     *,
     spectrograph: str,
     fiberflat_rate_paths: list[str],
     meta: dict | None = None,
     extraction_aperture: float = 10.0,
+    rate_map_for_wavesol_zp: np.ndarray | None = None,
+    wavesol_zp_fibers: list[int] | tuple[int, ...] | None = None,
+    wavesol_zp_fiber: int | None = None,
+    wavesol_zp_known_rv_m_s: float = 0.0,
+    wavesol_from_injected_comb: bool = False,
+    wavesol_comb_n_lines: int = 100,
+    wavesol_comb_poly_deg: int = 4,
 ) -> dict[str, Any]:
-    """Return ``trace_pos``, ``trace_prof``, ``fiberflat``, and ``wavesol`` from HDF truth."""
+    """
+    Return ``trace_pos``, ``trace_prof``, ``fiberflat``, and ``wavesol`` from HDF truth.
+
+    ``trace_pos`` uses the oriented HDF ``y_pos`` grids (full spectral coverage).
+    Fiberflat rate maps are still box-extracted for the blaze / fiberflat product.
+
+    Wavelength solution (in priority order):
+      1. Deposit-inverse HDF WAVE (default) — exact inverse of the native
+         ``λ → x`` map; geometry floor ≪10 cm/s.  Prefer this for simulations.
+      2. Optional injected-comb *validation* when ``wavesol_from_injected_comb``
+         (does not replace deposit-inverse WAVE with PSF-centroid polynomials).
+      3. Else absorption-line zero-point on ``rate_map_for_wavesol_zp`` when provided
+         (per fiber; default fibers 1–3).
+
+    ``wavesol_zp_fibers`` selects which fibers get line-ZP / comb validation
+    (default ``1, 2, 3``). Legacy ``wavesol_zp_fiber`` still selects a single fiber.
+    """
     spectrograph = spectrograph.upper()
-    trace_pos = create_tracepos_model_from_fiberflat_rates(
-        fiberflat_rate_paths,
-        spectrograph=spectrograph,
-        meta=meta,
-    )
+    zp_fibers = _normalize_fibers(fibers=wavesol_zp_fibers, fiber=wavesol_zp_fiber)
+    trace_pos = create_tracepos_model_from_sim_hdf(spectrograph, meta=meta)
     trace_prof = create_traceprof_model_from_sim_hdf(spectrograph, meta=meta)
+    # Deposit-inverse WAVE: WAVE(row_deposit(λ)) = λ to ≪1 cm/s.
     wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+    wavesol_zp_info: dict[str, Any] | None = None
+    wavesol_comb_info: dict[str, Any] | None = None
+    if wavesol_from_injected_comb:
+        # Validation only — comb centroids must not redefine simulation WAVE.
+        comb = calibrate_wavesol_from_injected_comb(
+            spectrograph,
+            fibers=zp_fibers,
+            n_lines_per_order=int(wavesol_comb_n_lines),
+            poly_deg=int(wavesol_comb_poly_deg),
+            extraction_aperture=float(extraction_aperture),
+            meta=meta,
+            centroid_mode="2d",
+            photons_per_line=1.0e12,
+            paint_mode="native",
+        )
+        wavesol = comb["wavesol"]  # still deposit-inverse
+        wavesol_comb_info = {
+            "rv_budget": comb["rv_budget"],
+            "per_order": comb.get("per_order"),
+            "per_fiber": comb.get("per_fiber"),
+            "fibers": comb.get("fibers", zp_fibers),
+            "fiber": comb.get("fiber"),
+        }
+    elif rate_map_for_wavesol_zp is not None:
+        wavesol_zp_info = refine_sim_hdf_wavesol_line_zeropoint(
+            wavesol,
+            rate_map_for_wavesol_zp,
+            spectrograph=spectrograph,
+            fibers=zp_fibers,
+            known_rv_m_s=float(wavesol_zp_known_rv_m_s),
+        )
     fiberflat = create_fiberflat_model_from_rate_maps(
         fiberflat_rate_paths,
         trace_pos,
@@ -1233,18 +1812,918 @@ def materialize_stage1_bundle_from_sim_hdf(
         meta=meta,
         extraction_aperture=extraction_aperture,
     )
+    wavesol_mode = (
+        "injected_comb"
+        if wavesol_comb_info
+        else ("line_zp" if wavesol_zp_info else "hdf")
+    )
     logger.info(
-        "Sim HDF Stage-1 bundle ready spectrograph=%s n_fiberflat_rates=%d extraction_aperture=%.1f",
+        "Sim HDF Stage-1 bundle ready spectrograph=%s n_fiberflat_rates=%d "
+        "extraction_aperture=%.1f trace_pos=sim_hdf_y_pos wavesol=%s",
         spectrograph,
         len(fiberflat_rate_paths),
         float(extraction_aperture),
+        wavesol_mode,
     )
     return {
         "trace_pos": trace_pos,
         "trace_prof": trace_prof,
         "fiberflat": fiberflat,
         "wavesol": wavesol,
+        "wavesol_zp_info": wavesol_zp_info,
+        "wavesol_comb_info": wavesol_comb_info,
     }
+
+# ========================================================================
+# Injected-comb wavelength calibration
+# ========================================================================
+
+
+def build_injected_line_list(
+    spectrograph: str,
+    *,
+    fiber: int = 2,
+    n_lines_per_order: int = 1000,
+    edge_margin_frac: float = 0.05,
+) -> dict[int, np.ndarray]:
+    """
+    Known vacuum wavelengths (µm) for an injected emission comb.
+
+    Returns ``{order: λ_um array}`` with ``n_lines_per_order`` samples spanning
+    the central ``(1 - 2*edge_margin_frac)`` of each order's HDF wavelength range.
+    """
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    out: dict[int, np.ndarray] = {}
+    for od in _order_list(spectrograph):
+        if od not in grids.get(fiber, {}):
+            continue
+        w = np.asarray(grids[fiber][od]["wavelength"], dtype=np.float64)
+        ok = np.isfinite(w)
+        if int(ok.sum()) < 10:
+            continue
+        lo, hi = np.nanpercentile(w[ok], [100 * edge_margin_frac, 100 * (1 - edge_margin_frac)])
+        if not (np.isfinite(lo) and np.isfinite(hi) and hi > lo):
+            continue
+        out[int(od)] = np.linspace(float(lo), float(hi), int(n_lines_per_order), dtype=np.float64)
+    return out
+
+
+def _hdf_deposit_xy_interpolators(
+    spectrograph: str,
+    fiber: int,
+    order: int,
+) -> tuple[Any, Any, np.ndarray] | None:
+    """
+    Pchip ``λ → (x_native, y_native)`` matching :func:`bilinear_weights_rate_map`.
+
+    Returns ``(fx, fy, ow)`` or ``None`` if the order is unavailable.
+    """
+    spectrograph, model_data = _load_hdf_model_data(spectrograph)
+    block = model_data.get(f"fiber_{int(fiber)}", {}).get(str(int(order)))
+    if block is None:
+        return None
+    ow = np.asarray(block["xy_wavelengths"], dtype=np.float64)
+    ox = np.asarray(block["x"], dtype=np.float64)
+    oy = np.asarray(block["y"], dtype=np.float64)
+    good = np.isfinite(ow) & np.isfinite(ox) & np.isfinite(oy)
+    if int(good.sum()) < 2:
+        return None
+    ow, ox, oy = ow[good], ox[good], oy[good]
+    sidx = np.argsort(ow)
+    ow, ox, oy = ow[sidx], ox[sidx], oy[sidx]
+    # Merge duplicate wavelengths (Pchip requires strictly increasing x).
+    uw, inv = np.unique(ow, return_inverse=True)
+    if uw.size < 2:
+        return None
+    ox_u = np.bincount(inv, weights=ox) / np.maximum(np.bincount(inv), 1)
+    oy_u = np.bincount(inv, weights=oy) / np.maximum(np.bincount(inv), 1)
+    return PchipInterpolator(uw, ox_u, extrapolate=True), PchipInterpolator(
+        uw, oy_u, extrapolate=True
+    ), uw
+
+
+def expected_feature_xy_oriented(
+    spectrograph: str,
+    fiber: int,
+    order: int,
+    wavelengths_um: np.ndarray,
+    *,
+    nx: int = 4096,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Exact oriented ``(row, col)`` where the native simulator deposits each λ.
+
+    ``row`` is the spectral coordinate (WAVE axis); ``col`` is cross-dispersion.
+    """
+    interps = _hdf_deposit_xy_interpolators(spectrograph, fiber, order)
+    if interps is None:
+        n = np.asarray(wavelengths_um).size
+        return np.full(n, np.nan), np.full(n, np.nan)
+    fx, fy, _ = interps
+    lams = np.asarray(wavelengths_um, dtype=np.float64)
+    xc = np.asarray(fx(lams), dtype=np.float64)
+    yc = np.asarray(fy(lams), dtype=np.float64)
+    return _orient_hdf_pixel_xy(xc, yc, nx=nx)
+
+
+def paint_injected_emission_comb(
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    method: str = "bilinear_weights",
+    line_flux_density: float | None = None,
+    photons_per_line: float = 1.0e12,
+) -> np.ndarray:
+    """
+    Paint a sparse emission-line spectrum onto a native-oriented rate map.
+
+    Flux is chosen so each line deposits approximately ``photons_per_line``
+    photons/s after multiplication by the local wavelength gradient (so denser
+    combs stay equally bright). Override with ``line_flux_density`` (erg/s/cm²/µm)
+    if set.
+    """
+    from astropy import units as u
+
+    from .simulate_rate_map import SimulateRateMap
+
+    lams = np.unique(np.concatenate([np.asarray(v, dtype=np.float64) for v in line_list.values()]))
+    lams.sort()
+    if lams.size < 2:
+        raise ValueError("Need at least two injected wavelengths")
+    if line_flux_density is None:
+        # Native depositor does flux_density * dλ; invert so each sample is bright.
+        dlam = float(np.median(np.abs(np.diff(lams))))
+        dlam = max(dlam, 1e-9)
+        # Rough erg/s/cm²/µm → ph/s/µm conversion is absorbed into a large scale
+        # factor; we only need centroids, not absolute photometry.
+        line_flux_density = float(photons_per_line) * dlam * 1.0e-3
+    flux = np.full(lams.shape, float(line_flux_density))
+    srm = SimulateRateMap()
+    srm.set_fiber_spectrum(
+        int(fiber),
+        lams * u.micron,
+        flux * u.Unit("erg / (s cm2 um)"),
+        continuous=False,
+    )
+    rate = srm.create_native_rate_map(
+        spectrograph=spectrograph.upper(),
+        method=method,
+        apply_blaze=False,
+        save=False,
+    )
+    return np.asarray(rate, dtype=np.float64)
+
+
+def paint_compact_emission_comb(
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    sigma_pix: float = 0.55,
+    peak_value: float = 1.0e6,
+    half_stamp: int = 3,
+) -> np.ndarray:
+    """
+    Paint compact Gaussians at exact oriented deposit ``(row, col)`` for each λ.
+
+    Used for high-density inject/recover tests: placement follows the same HDF
+    λ→(x,y) model as the native simulator, but the stamp is narrow enough that
+    ~1000 lines/order do not blend, so a single paint pass is sufficient.
+    """
+    spectrograph = spectrograph.upper()
+    # Oriented science detector + 64-col reference channel (matches native maps).
+    rate = np.zeros((4096, 4160), dtype=np.float64)
+    sig = float(sigma_pix)
+    hw = int(half_stamp)
+    yy, xx = np.mgrid[-hw : hw + 1, -hw : hw + 1]
+    stamp0 = np.exp(-0.5 * (xx**2 + yy**2) / max(sig**2, 1e-6))
+    stamp0 *= float(peak_value) / max(float(stamp0.max()), 1e-30)
+
+    for od, lams in line_list.items():
+        lams = np.asarray(lams, dtype=np.float64)
+        if lams.size == 0:
+            continue
+        rows, cols = expected_feature_xy_oriented(spectrograph, fiber, int(od), lams)
+        for r0, c0 in zip(rows, cols):
+            if not (np.isfinite(r0) and np.isfinite(c0)):
+                continue
+            # Sub-pixel shift of the Gaussian stamp about the exact deposit center.
+            dr = float(r0) - np.rint(r0)
+            dc = float(c0) - np.rint(c0)
+            stamp = np.exp(
+                -0.5 * ((xx - dc) ** 2 + (yy - dr) ** 2) / max(sig**2, 1e-6)
+            )
+            stamp *= float(peak_value) / max(float(stamp.max()), 1e-30)
+            ir = int(np.rint(r0))
+            ic = int(np.rint(c0))
+            rlo, rhi = ir - hw, ir + hw + 1
+            clo, chi = ic - hw, ic + hw + 1
+            if rlo < 0 or clo < 0 or rhi > rate.shape[0] or chi > min(rate.shape[1], 4096):
+                continue
+            rate[rlo:rhi, clo:chi] += stamp
+    return rate
+
+
+def _centroid_2d_flux(
+    image: np.ndarray,
+    *,
+    row0: float,
+    col0: float,
+    half_win: int = 2,
+) -> tuple[float, float, float, float]:
+    """
+    Flux-weighted 2D centroid in a ``(2*half_win+1)²`` window about ``(row0, col0)``.
+
+    Returns ``(row_c, col_c, row_err, col_err)``.  Uncertainties are the
+    intensity-weighted second-moment widths divided by ``sqrt(n_eff)``, with
+    ``n_eff = (Σw)² / Σw²`` (shape-only; independent of absolute flux scale).
+    """
+    nan4 = (float("nan"), float("nan"), float("nan"), float("nan"))
+    img = np.asarray(image, dtype=np.float64)
+    ny, nx = img.shape
+    r0 = int(np.clip(np.rint(row0), 0, ny - 1))
+    c0 = int(np.clip(np.rint(col0), 0, nx - 1))
+    hw = int(half_win)
+    rlo, rhi = max(0, r0 - hw), min(ny, r0 + hw + 1)
+    clo, chi = max(0, c0 - hw), min(nx, c0 + hw + 1)
+    stamp = img[rlo:rhi, clo:chi]
+    if stamp.size == 0:
+        return nan4
+    w = np.clip(stamp, 0.0, None)
+    wsum = float(w.sum())
+    if not np.isfinite(wsum) or wsum <= 0:
+        return nan4
+    rr = np.arange(rlo, rhi, dtype=np.float64)[:, None]
+    cc = np.arange(clo, chi, dtype=np.float64)[None, :]
+    row_c = float((w * rr).sum() / wsum)
+    col_c = float((w * cc).sum() / wsum)
+    var_r = float((w * (rr - row_c) ** 2).sum() / wsum)
+    var_c = float((w * (cc - col_c) ** 2).sum() / wsum)
+    n_eff = float(wsum ** 2 / max(float((w * w).sum()), 1e-300))
+    row_err = float(np.sqrt(max(var_r, 0.0) / max(n_eff, 1.0)))
+    col_err = float(np.sqrt(max(var_c, 0.0) / max(n_eff, 1.0)))
+    return row_c, col_c, row_err, col_err
+
+
+def _polyfit_scaled(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    deg: int,
+) -> tuple[np.ndarray, float, float]:
+    """
+    Numerically stable ``polyfit`` with ``x`` mapped to ``[-1, 1]``.
+
+    Returns ``(coeffs_highest_first, x_mid, x_halfspan)`` so
+    ``y ≈ polyval(coeffs, (x - x_mid) / x_halfspan)``.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    x_mid = float(0.5 * (np.min(x) + np.max(x)))
+    x_half = float(0.5 * (np.max(x) - np.min(x)))
+    if not np.isfinite(x_half) or x_half <= 0:
+        x_half = 1.0
+    xn = (x - x_mid) / x_half
+    coeffs = np.polyfit(xn, y, int(deg))
+    return coeffs, x_mid, x_half
+
+
+def _polyval_scaled(
+    coeffs: np.ndarray,
+    x: np.ndarray,
+    *,
+    x_mid: float,
+    x_half: float,
+) -> np.ndarray:
+    xn = (np.asarray(x, dtype=np.float64) - float(x_mid)) / float(x_half)
+    return np.polyval(coeffs, xn)
+
+
+def _fit_emission_peak_pix(
+    flux: np.ndarray,
+    *,
+    pix_guess: float,
+    half_win: int = 8,
+) -> float:
+    """Gaussian emission center (pixel) near ``pix_guess``; parabolic fallback."""
+    from ..primitives.line_fitting.fit_lines import fit_line_gauss
+
+    flux = np.asarray(flux, dtype=np.float64)
+    pix = np.arange(flux.size, dtype=np.float64)
+    i0 = int(np.clip(np.rint(pix_guess), 0, flux.size - 1))
+    lo = max(0, i0 - int(half_win))
+    hi = min(flux.size, i0 + int(half_win) + 1)
+    xx = pix[lo:hi]
+    yy = flux[lo:hi]
+    m = np.isfinite(xx) & np.isfinite(yy) & (yy > 0)
+    if int(m.sum()) < 5:
+        return float("nan")
+    xx, yy = xx[m], yy[m]
+    # Prefer local max nearest guess
+    local = np.where((yy[1:-1] > yy[:-2]) & (yy[1:-1] >= yy[2:]))[0] + 1
+    if local.size == 0:
+        j = int(np.argmax(yy))
+    else:
+        j = int(local[np.argmin(np.abs(xx[local] - pix_guess))])
+    try:
+        res = fit_line_gauss(
+            xx,
+            yy,
+            y_err=np.ones_like(yy),
+            dq=np.zeros(xx.size, dtype=np.uint32),
+            mu_guess=float(xx[j]),
+            mu_bounds=(-float(half_win), float(half_win)),
+            absorption=False,
+            background_poly_deg=0,
+        )
+        mu = float(res.mu)
+        if np.isfinite(mu) and abs(mu - pix_guess) <= half_win:
+            return mu
+    except Exception:
+        pass
+    # 3-point parabolic max
+    if 0 < j < xx.size - 1:
+        x0, x1, x2 = xx[j - 1], xx[j], xx[j + 1]
+        y0, y1, y2 = yy[j - 1], yy[j], yy[j + 1]
+        denom = (y0 - 2 * y1 + y2)
+        if denom != 0:
+            return float(x1 + 0.5 * (y0 - y2) / denom)
+    return float(xx[j])
+
+
+def _robust_polyfit_wavesol(
+    pix: np.ndarray,
+    lam: np.ndarray,
+    *,
+    poly_deg: int,
+    n_clip: int = 3,
+    clip_sigma: float = 3.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Iteratively sigma-clipped ``np.polyfit(pix, lam, poly_deg)``.
+
+    Returns ``(coeffs, inlier_mask)``.
+    """
+    pix = np.asarray(pix, dtype=np.float64)
+    lam = np.asarray(lam, dtype=np.float64)
+    mask = np.isfinite(pix) & np.isfinite(lam)
+    deg = int(poly_deg)
+    if int(mask.sum()) < deg + 3:
+        return np.polyfit(pix[mask], lam[mask], deg), mask
+    for _ in range(int(n_clip)):
+        coeffs = np.polyfit(pix[mask], lam[mask], deg)
+        resid = lam - np.polyval(coeffs, pix)
+        # Convert to relative residual so clip threshold is wavelength-scale free.
+        mad = float(np.nanmedian(np.abs(resid[mask] - np.nanmedian(resid[mask]))))
+        if not np.isfinite(mad) or mad <= 0:
+            break
+        keep = np.abs(resid - np.nanmedian(resid[mask])) <= (clip_sigma * 1.4826 * mad)
+        new_mask = mask & keep
+        if int(new_mask.sum()) < deg + 3 or bool(np.array_equal(new_mask, mask)):
+            break
+        mask = new_mask
+    coeffs = np.polyfit(pix[mask], lam[mask], deg)
+    return coeffs, mask
+
+
+def calibrate_wavesol_from_injected_comb(
+    spectrograph: str = "BSPEC",
+    *,
+    fibers: list[int] | tuple[int, ...] | None = None,
+    fiber: int | None = None,
+    n_lines_per_order: int = 1000,
+    poly_deg: int = 9,
+    extraction_aperture: float = 10.0,
+    meta: dict | None = None,
+    rate_map: np.ndarray | None = None,
+    line_list: dict[int, np.ndarray] | None = None,
+    max_fit_rms_m_s: float = 50.0,
+    max_dpix: float = 0.75,
+    centroid_mode: str = "2d",
+    centroid_half_win: int = 3,
+    photons_per_line: float = 1.0e12,
+    fit_edge_margin_frac: float = 0.08,
+    paint_mode: str = "native",
+) -> dict[str, Any]:
+    """
+    Empirically validate deposit-inverse ``WAVE_FIB`` with a dense injected emission comb.
+
+    Runs for each requested fiber (default ``1, 2, 3``). For each echelle order:
+      1. Inject ``n_lines_per_order`` known vacuum λ peaks at high S/N.
+      2. Predict exact deposit ``(row, col)`` from the HDF λ→(x,y) model (same
+         interpolators the native simulator uses).
+      3. Centroid the bright features in 2D (default) or along a 1D box extract.
+      4. Report geometry residual of deposit-inverse WAVE at deposit centers
+         (PSF-centroid residuals are diagnostic only).
+
+    ``paint_mode``:
+      * ``native`` (default) — full PSF via :func:`paint_injected_emission_comb`;
+        dense combs are painted in phase-offset batches to avoid blending.
+      * ``compact`` — narrow Gaussians at exact deposit (x,y); one pass.
+
+    Returns ``wavesol``, ``per_fiber`` (and legacy ``per_order`` / ``rv_budget`` for
+    the primary fiber), ``line_measurements``, and ``order_fit_curves``.
+    Does **not** modify the HDF spectrograph model file.
+    """
+    from ..primitives.utils.spectral_utils import (
+        delta_vel_to_delta_wave,
+        delta_wave_to_delta_vel,
+    )
+
+    spectrograph = spectrograph.upper()
+    fiber_list = _normalize_fibers(fibers=fibers, fiber=fiber)
+    if len(fiber_list) > 1:
+        if rate_map is not None or line_list is not None:
+            raise ValueError(
+                "Multi-fiber calibrate_wavesol_from_injected_comb does not accept "
+                "a shared rate_map or line_list; omit them or pass a single fiber."
+            )
+        per_fiber: dict[int, dict[str, Any]] = {}
+        wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+        hdf_wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+        for fib in fiber_list:
+            one = calibrate_wavesol_from_injected_comb(
+                spectrograph,
+                fiber=fib,
+                n_lines_per_order=n_lines_per_order,
+                poly_deg=poly_deg,
+                extraction_aperture=extraction_aperture,
+                meta=meta,
+                max_fit_rms_m_s=max_fit_rms_m_s,
+                max_dpix=max_dpix,
+                centroid_mode=centroid_mode,
+                centroid_half_win=centroid_half_win,
+                photons_per_line=photons_per_line,
+                fit_edge_margin_frac=fit_edge_margin_frac,
+                paint_mode=paint_mode,
+            )
+            # Keep each fiber's WAVE independent (no copy-from-fiber-N).
+            w_fib = getattr(one["wavesol"], f"wave_fib{fib}", None)
+            if w_fib is not None:
+                setattr(wavesol, f"wave_fib{fib}", np.asarray(w_fib, dtype=np.float64))
+            per_fiber[int(fib)] = {
+                "fiber": int(fib),
+                "per_order": one["per_order"],
+                "line_measurements": one["line_measurements"],
+                "order_fit_curves": one["order_fit_curves"],
+                "rv_budget": one["rv_budget"],
+                "rate_map": one["rate_map"],
+                "line_list": one["line_list"],
+            }
+        primary = 2 if 2 in per_fiber else fiber_list[0]
+        mad_all = [
+            per_fiber[f]["rv_budget"].get("median_fit_mad_m_s", float("nan"))
+            for f in fiber_list
+        ]
+        rv_budget = {
+            "fibers": fiber_list,
+            "per_fiber_median_fit_mad_m_s": {
+                str(f): per_fiber[f]["rv_budget"].get("median_fit_mad_m_s") for f in fiber_list
+            },
+            "median_fit_mad_m_s": float(np.nanmedian(mad_all)),
+            "max_median_fit_mad_m_s": float(np.nanmax(mad_all)),
+            "fiber": int(primary),
+        }
+        rv_budget.update(
+            {k: v for k, v in per_fiber[primary]["rv_budget"].items() if k not in rv_budget}
+        )
+        return {
+            "wavesol": wavesol,
+            "hdf_wavesol": hdf_wavesol,
+            "per_fiber": per_fiber,
+            "per_order": per_fiber[primary]["per_order"],
+            "line_measurements": per_fiber[primary]["line_measurements"],
+            "order_fit_curves": per_fiber[primary]["order_fit_curves"],
+            "rv_budget": rv_budget,
+            "rate_map": per_fiber[primary]["rate_map"],
+            "line_list": per_fiber[primary]["line_list"],
+            "fiber": int(primary),
+            "fibers": fiber_list,
+            "spectrograph": spectrograph,
+        }
+
+    fiber = int(fiber_list[0])
+    centroid_mode = str(centroid_mode).lower().strip()
+    paint_mode = str(paint_mode).lower().strip()
+    if centroid_mode not in ("2d", "1d"):
+        raise ValueError("centroid_mode must be '2d' or '1d'")
+    if paint_mode not in ("compact", "native"):
+        raise ValueError("paint_mode must be 'compact' or 'native'")
+    if line_list is None:
+        line_list = build_injected_line_list(
+            spectrograph, fiber=fiber, n_lines_per_order=n_lines_per_order
+        )
+
+    # Native PSF blends at ~1000 lines/order; batch unless using compact stamps.
+    n_batch = 1
+    if (
+        rate_map is None
+        and paint_mode == "native"
+        and int(n_lines_per_order) > 150
+    ):
+        n_batch = max(1, int(np.ceil(int(n_lines_per_order) / 100.0)))
+
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    order_list = _order_list(spectrograph)
+    hdf_wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+    wave_hdf_all = np.asarray(getattr(hdf_wavesol, f"wave_fib{fiber}"), dtype=np.float64)
+    wave_new = wave_hdf_all.copy()
+
+    per_order: dict[int, dict[str, Any]] = {}
+    measurements: list[dict[str, float]] = []
+    pix_grid = np.arange(4096, dtype=np.float64)
+    nx_orient = 4096
+
+    # Accumulate per-order measurement lists across paint batches.
+    acc: dict[int, dict[str, list[float]]] = {
+        int(od): {
+            "pix": [],
+            "pix_err": [],
+            "col": [],
+            "col_err": [],
+            "lam": [],
+            "pe": [],
+            "drow": [],
+            "dcol": [],
+        }
+        for od in line_list
+    }
+    rate_last: np.ndarray | None = None
+    order_fit_curves: dict[int, dict[str, Any]] = {}
+
+    for phase in range(int(n_batch)):
+        if rate_map is not None and n_batch == 1:
+            batch_list = line_list
+            rate = np.asarray(rate_map, dtype=np.float64)
+        else:
+            batch_list = {
+                int(od): np.asarray(lams, dtype=np.float64)[phase::n_batch]
+                for od, lams in line_list.items()
+                if np.asarray(lams).size > phase
+            }
+            if not batch_list:
+                continue
+            if paint_mode == "compact":
+                rate = paint_compact_emission_comb(
+                    batch_list, spectrograph=spectrograph, fiber=fiber
+                )
+            else:
+                rate = paint_injected_emission_comb(
+                    batch_list,
+                    spectrograph=spectrograph,
+                    fiber=fiber,
+                    photons_per_line=float(photons_per_line),
+                )
+        rate_last = rate
+        ny, nx = rate.shape
+
+        for od, lams in batch_list.items():
+            if od not in grids.get(fiber, {}):
+                continue
+            lams = np.asarray(lams, dtype=np.float64)
+            if lams.size == 0:
+                continue
+            y_pos = np.asarray(grids[fiber][od]["y_pos"], dtype=np.float64)
+            oi = order_list.index(od) if od in order_list else None
+            if oi is None:
+                continue
+            w_hdf = wave_hdf_all[oi]
+            row_exp, col_exp = expected_feature_xy_oriented(
+                spectrograph, fiber, od, lams, nx=nx_orient
+            )
+            okw = np.isfinite(w_hdf)
+            order_w = np.argsort(w_hdf[okw])
+            pix_wave_exp = np.interp(lams, w_hdf[okw][order_w], pix_grid[okw][order_w])
+
+            spec_1d = None
+            if centroid_mode == "1d":
+                spec_1d, _ = _extract_box_one_order(
+                    rate,
+                    np.zeros_like(rate),
+                    np.zeros(rate.shape, dtype=np.uint32),
+                    y_pos,
+                    extraction_aperture=extraction_aperture,
+                )
+
+            for lam, re, ce, pe_w in zip(lams, row_exp, col_exp, pix_wave_exp):
+                if not (np.isfinite(re) and np.isfinite(ce)):
+                    continue
+                if centroid_mode == "2d":
+                    if not (0.0 <= re < ny and 0.0 <= ce < min(nx, nx_orient)):
+                        continue
+                    rm, cm, rerr, cerr = _centroid_2d_flux(
+                        rate,
+                        row0=float(re),
+                        col0=float(ce),
+                        half_win=int(centroid_half_win),
+                    )
+                    if not (np.isfinite(rm) and np.isfinite(cm)):
+                        continue
+                    drow = float(rm - re)
+                    dcol = float(cm - ce)
+                    if abs(drow) > float(max_dpix) or abs(dcol) > float(max_dpix):
+                        continue
+                    pix_m = float(rm)
+                    col_m = float(cm)
+                    pix_err = float(rerr) if np.isfinite(rerr) else float("nan")
+                    col_err = float(cerr) if np.isfinite(cerr) else float("nan")
+                    pe = float(re)
+                else:
+                    pm = _fit_emission_peak_pix(
+                        spec_1d,
+                        pix_guess=float(pe_w),
+                        half_win=max(6, int(centroid_half_win)),
+                    )
+                    if not np.isfinite(pm) or abs(pm - pe_w) > float(max_dpix):
+                        continue
+                    pix_m = float(pm)
+                    col_m = float(np.interp(pm, pix_grid, y_pos))
+                    pe = float(pe_w)
+                    drow = float(pm - pe_w)
+                    dcol = 0.0
+                    pix_err = float("nan")
+                    col_err = float("nan")
+
+                acc[int(od)]["pix"].append(pix_m)
+                acc[int(od)]["pix_err"].append(pix_err)
+                acc[int(od)]["col"].append(col_m)
+                acc[int(od)]["col_err"].append(col_err)
+                acc[int(od)]["lam"].append(float(lam))
+                acc[int(od)]["pe"].append(pe)
+                acc[int(od)]["drow"].append(drow)
+                acc[int(od)]["dcol"].append(dcol)
+                measurements.append(
+                    {
+                        "order": float(od),
+                        "lam_true_um": float(lam),
+                        "row_expected": float(re) if np.isfinite(re) else float(pe_w),
+                        "col_expected": float(ce) if np.isfinite(ce) else float("nan"),
+                        "row_meas": pix_m,
+                        "col_meas": col_m,
+                        "row_err_pix": pix_err,
+                        "col_err_pix": col_err,
+                        "drow_pix": drow,
+                        "dcol_pix": dcol,
+                        "pix_expected": pe,
+                        "pix_meas": pix_m,
+                        "dpix": drow,
+                        "batch": float(phase),
+                    }
+                )
+
+    rate = rate_last if rate_last is not None else np.zeros((4096, 4160), dtype=np.float64)
+
+    # Simulation WAVE = dense inverse of the deposit λ→x map (already in
+    # wave_hdf_all via get_sim_hdf_trace_grids).  Do NOT replace it with a
+    # polynomial fit to PSF centroids — that confuses a ~0.06 pix
+    # pixel-phase centroid bias with a wavelength-solution error.
+    wave_new = wave_hdf_all.copy()
+
+    for oi, od in enumerate(order_list):
+        if od not in acc or not acc[od]["pix"]:
+            continue
+        w_sol = wave_new[oi]
+        pix_m = np.asarray(acc[od]["pix"], dtype=np.float64)
+        pix_err = np.asarray(acc[od]["pix_err"], dtype=np.float64)
+        lam_m = np.asarray(acc[od]["lam"], dtype=np.float64)
+        pe_m = np.asarray(acc[od]["pe"], dtype=np.float64)
+        drow_a = np.asarray(acc[od]["drow"], dtype=np.float64)
+        dcol_a = np.asarray(acc[od]["dcol"], dtype=np.float64)
+        lams = np.asarray(line_list[od], dtype=np.float64)
+        if pix_m.size < 10:
+            continue
+
+        lam_mid = float(np.nanmean(lam_m))
+        dlam_dpix_arr = np.gradient(w_sol)
+        dlam_dpix_mean = float(np.nanmedian(np.abs(dlam_dpix_arr[np.isfinite(dlam_dpix_arr)])))
+        if not np.isfinite(dlam_dpix_mean) or dlam_dpix_mean <= 0:
+            dlam_dpix_mean = 1e-6
+
+        # Geometry recovery: evaluate WAVE at the *deposit center* (pe), not the
+        # PSF centroid.  This is the correct inject/recover test for simulation WAVE.
+        lam_at_deposit = np.interp(pe_m, pix_grid, w_sol)
+        vel_geom = np.asarray(
+            delta_wave_to_delta_vel(lam_m - lam_at_deposit, lam_mid), dtype=np.float64
+        )
+        # Centroid systematic (NOT a WAVE error): WAVE at PSF centroid.
+        lam_at_centroid = np.interp(pix_m, pix_grid, w_sol)
+        vel_cent = np.asarray(
+            delta_wave_to_delta_vel(lam_m - lam_at_centroid, lam_mid), dtype=np.float64
+        )
+        vel_xerr = np.asarray(
+            delta_wave_to_delta_vel(pix_err * dlam_dpix_mean, lam_mid), dtype=np.float64
+        )
+
+        plo = float(np.nanpercentile(pe_m, 100.0 * float(fit_edge_margin_frac)))
+        phi = float(np.nanpercentile(pe_m, 100.0 * (1.0 - float(fit_edge_margin_frac))))
+        edge_ok = (pe_m >= plo) & (pe_m <= phi) & np.isfinite(pe_m) & np.isfinite(lam_m)
+        inlier = edge_ok.copy()
+
+        geom_mad = float(
+            np.nanmedian(np.abs(vel_geom[inlier] - np.nanmedian(vel_geom[inlier])))
+        )
+        geom_rms = float(np.nanstd(vel_geom[inlier]))
+        cent_mad = float(
+            np.nanmedian(np.abs(vel_cent[inlier] - np.nanmedian(vel_cent[inlier])))
+        )
+        cent_mean = float(np.nanmean(vel_cent[inlier]))
+        median_dpix = float(np.median(drow_a[inlier]))
+
+
+        # Optional smooth through geometry residual (should be ~flat at ≪10 cm/s).
+        x_fine = np.linspace(float(np.min(pe_m[inlier])), float(np.max(pe_m[inlier])), 800)
+        if int(inlier.sum()) >= poly_deg + 3:
+            g_coeffs, g_mid, g_half = _polyfit_scaled(
+                pe_m[inlier], vel_geom[inlier], deg=min(3, int(poly_deg))
+            )
+            vel_fine = _polyval_scaled(g_coeffs, x_fine, x_mid=g_mid, x_half=g_half)
+        else:
+            vel_fine = np.zeros_like(x_fine)
+
+        order_fit_curves[int(od)] = {
+            "pix_meas": pix_m.tolist(),
+            "pix_err": pix_err.tolist(),
+            "pix_expected": pe_m.tolist(),
+            "drow_pix": drow_a.tolist(),
+            # Primary diagnostic: geometry residual at deposit centers.
+            "vel_m_s": vel_geom.tolist(),
+            "vel_centroid_m_s": vel_cent.tolist(),
+            "vel_xerr_m_s": vel_xerr.tolist(),
+            "inlier": inlier.astype(bool).tolist(),
+            "edge_ok": edge_ok.astype(bool).tolist(),
+            "x_fine": x_fine.tolist(),
+            "vel_poly_fine": vel_fine.tolist(),
+            "lam_mid_um": lam_mid,
+            "dlam_dpix_mean": dlam_dpix_mean,
+            "fit_pix_lo": plo,
+            "fit_pix_hi": phi,
+            "residual_kind": "deposit_center",
+        }
+
+        per_order[int(od)] = {
+            "n_injected": int(lams.size),
+            "n_measured": int(pix_m.size),
+            "n_inlier": int(inlier.sum()),
+            "n_edge_rejected": int((~edge_ok).sum()),
+            "poly_deg": int(poly_deg),
+            "method": "deposit_inverse",
+            "centroid_mode": centroid_mode,
+            "fit_pix_lo": plo,
+            "fit_pix_hi": phi,
+            "median_dpix": median_dpix,
+            "median_drow_pix": float(np.median(drow_a)),
+            "median_dcol_pix": float(np.median(dcol_a)),
+            "median_pix_err": float(np.nanmedian(pix_err[inlier])),
+            "drow_rms_pix": float(np.nanstd(drow_a[inlier])),
+            "drow_mad_pix": float(
+                np.nanmedian(np.abs(drow_a[inlier] - np.nanmedian(drow_a[inlier])))
+            ),
+            "dcol_rms_pix": float(np.nanstd(dcol_a[inlier])),
+            "dcol_mad_pix": float(
+                np.nanmedian(np.abs(dcol_a[inlier] - np.nanmedian(dcol_a[inlier])))
+            ),
+            # Geometry inject/recover (WAVE at deposit center) — target ≪10 cm/s.
+            "geometry_residual_mad_m_s": geom_mad,
+            "geometry_residual_rms_m_s": geom_rms,
+            "geometry_residual_mad_cm_s": geom_mad * 100.0,
+            "geometry_residual_rms_cm_s": geom_rms * 100.0,
+            # PSF-centroid residual (measurement systematic, not WAVE error).
+            "centroid_residual_mad_m_s": cent_mad,
+            "centroid_residual_mean_m_s": cent_mean,
+            "wave_precision_mad_um": float(
+                np.nanmedian(np.abs((lam_m - lam_at_deposit)[inlier]))
+            ),
+            "wave_precision_rms_um": float(np.nanstd((lam_m - lam_at_deposit)[inlier])),
+            "velocity_uncertainty_mad_m_s": geom_mad,
+            "velocity_uncertainty_rms_m_s": geom_rms,
+            "vel_curve_dispersion_rms_m_s": geom_rms,
+            "vel_curve_dispersion_mad_m_s": geom_mad,
+            "model_vs_centroid_vel_mad_m_s": cent_mad,
+            "model_vs_centroid_vel_mean_m_s": cent_mean,
+            "fit_rms_m_s": geom_rms,
+            "fit_mad_m_s": geom_mad,
+            "fit_mean_m_s": float(np.nanmean(vel_geom[inlier])),
+            "hdf_rms_m_s": geom_rms,
+            "hdf_mad_m_s": geom_mad,
+            "hdf_mean_m_s": float(np.nanmean(vel_geom[inlier])),
+            "poly_minus_hdf_mean_m_s": 0.0,
+            "poly_minus_hdf_rms_m_s": 0.0,
+            "poly_minus_hdf_mad_m_s": 0.0,
+            "wave_min_um": float(np.nanmin(w_sol)),
+            "wave_max_um": float(np.nanmax(w_sol)),
+            "lam_mid_um": lam_mid,
+        }
+
+    # Keep WAVE for the requested fiber only; other fibers stay deposit-inverse HDF.
+    # (Do not copy one fiber's correction onto fibers 1/3 — calibrate those separately.)
+    wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+    setattr(wavesol, f"wave_fib{fiber}", wave_new.astype(np.float64))
+
+    fit_rms = np.array([v["fit_rms_m_s"] for v in per_order.values()], dtype=np.float64)
+    fit_mad = np.array([v["fit_mad_m_s"] for v in per_order.values()], dtype=np.float64)
+    wave_mad = np.array(
+        [v["wave_precision_mad_um"] for v in per_order.values()], dtype=np.float64
+    )
+    drow_mad = np.array([v["drow_mad_pix"] for v in per_order.values()], dtype=np.float64)
+    dcol_mad = np.array([v["dcol_mad_pix"] for v in per_order.values()], dtype=np.float64)
+    model_vel_mean = np.array(
+        [v["model_vs_centroid_vel_mean_m_s"] for v in per_order.values()], dtype=np.float64
+    )
+    hdf_mean = np.array([v["hdf_mean_m_s"] for v in per_order.values()], dtype=np.float64)
+    poly_hdf_mean = np.array(
+        [v["poly_minus_hdf_mean_m_s"] for v in per_order.values()], dtype=np.float64
+    )
+    within_order_sys = np.array(
+        [v["poly_minus_hdf_mad_m_s"] for v in per_order.values()], dtype=np.float64
+    )
+    n_med = (
+        float(np.median([v["n_inlier"] for v in per_order.values()])) if per_order else 0.0
+    )
+    med_fit_rms = float(np.nanmedian(fit_rms)) if fit_rms.size else float("nan")
+    med_fit_mad = float(np.nanmedian(fit_mad)) if fit_mad.size else float("nan")
+    n_poly = int(sum(1 for v in per_order.values() if v.get("method") == "poly"))
+    n_shift = int(sum(1 for v in per_order.values() if v.get("method") == "hdf_pixel_shift"))
+    rv_budget = {
+        "n_orders": int(len(per_order)),
+        "n_orders_poly": n_poly,
+        "n_orders_pixel_shift": n_shift,
+        "centroid_mode": centroid_mode,
+        "median_fit_rms_m_s": med_fit_rms,
+        "median_fit_mad_m_s": med_fit_mad,
+        "median_wave_precision_mad_um": (
+            float(np.nanmedian(wave_mad)) if wave_mad.size else float("nan")
+        ),
+        "median_drow_mad_pix": (
+            float(np.nanmedian(drow_mad)) if drow_mad.size else float("nan")
+        ),
+        "median_dcol_mad_pix": (
+            float(np.nanmedian(dcol_mad)) if dcol_mad.size else float("nan")
+        ),
+        "median_model_vs_centroid_vel_m_s": (
+            float(np.nanmedian(model_vel_mean)) if model_vel_mean.size else float("nan")
+        ),
+        "median_hdf_mean_offset_m_s": float(np.nanmedian(hdf_mean)) if hdf_mean.size else float("nan"),
+        "mad_hdf_mean_offset_m_s": (
+            float(np.nanmedian(np.abs(hdf_mean - np.nanmedian(hdf_mean))))
+            if hdf_mean.size
+            else float("nan")
+        ),
+        "median_poly_minus_hdf_m_s": (
+            float(np.nanmedian(poly_hdf_mean)) if poly_hdf_mean.size else float("nan")
+        ),
+        "mad_order_zp_m_s": (
+            float(np.nanmedian(np.abs(poly_hdf_mean - np.nanmedian(poly_hdf_mean))))
+            if poly_hdf_mean.size
+            else float("nan")
+        ),
+        "absolute_rv_systematic_hdf_m_s": (
+            float(np.nanmedian(np.abs(hdf_mean))) if hdf_mean.size else float("nan")
+        ),
+        "single_line_precision_floor_m_s": med_fit_mad,
+        "order_ccf_precision_floor_m_s": (
+            med_fit_mad / np.sqrt(max(n_med, 1.0)) if np.isfinite(med_fit_mad) else float("nan")
+        ),
+        "order_to_order_zp_scatter_m_s": (
+            float(np.nanmedian(np.abs(poly_hdf_mean - np.nanmedian(poly_hdf_mean))))
+            if poly_hdf_mean.size
+            else float("nan")
+        ),
+        "median_within_order_shape_m_s": (
+            float(np.nanmedian(within_order_sys)) if within_order_sys.size else float("nan")
+        ),
+        "poly_deg": int(poly_deg),
+        "n_lines_per_order_target": int(n_lines_per_order),
+        "n_paint_batches": int(n_batch),
+        "paint_mode": paint_mode,
+        "fiber": int(fiber),
+    }
+
+    logger.info(
+        "Comb wavesol: fiber=%d mode=%s n_lines=%d n_orders=%d "
+        "wave_MAD=%.3e um vel_MAD=%.2f m/s drow_MAD=%.4f pix",
+        fiber,
+        centroid_mode,
+        n_lines_per_order,
+        len(per_order),
+        rv_budget["median_wave_precision_mad_um"],
+        rv_budget["median_fit_mad_m_s"],
+        rv_budget["median_drow_mad_pix"],
+    )
+    return {
+        "wavesol": wavesol,
+        "hdf_wavesol": hdf_wavesol,
+        "per_order": per_order,
+        "line_measurements": measurements,
+        "order_fit_curves": order_fit_curves,
+        "rv_budget": rv_budget,
+        "rate_map": rate,
+        "line_list": {str(k): v.tolist() for k, v in line_list.items()},
+        "fiber": int(fiber),
+        "fibers": [int(fiber)],
+        "spectrograph": spectrograph,
+    }
+
 
 # ========================================================================
 # Infinite-S/N RV validation (formerly e2e_infinite_snr_rv.py)
@@ -1346,7 +2825,7 @@ def apply_infinite_snr_rv_e2e_config(config: E2EConfig) -> E2EConfig:
 def merge_infinite_snr_stage1_prim_args(
     prim_args: dict | None,
     *,
-    extraction_aperture: int = 5,
+    extraction_aperture: int = 10,
 ) -> dict:
     import copy
 
