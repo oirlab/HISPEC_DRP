@@ -18,8 +18,7 @@ Calibration alignment
 
 * **KOA fiberflat / trace masters** — products from an older instrument era may not match
   the current pyechelle HDF model. Default ``derive_stage1_trace_from_sim=True`` avoids
-  this. A simulation-matched fiber flat should be registered in KOA for production use
-  (see meeting notes in local ``test_data/HISPEC_MEETING_NOTES.md`` if present).
+  this. A simulation-matched fiber flat should be registered in KOA for production use.
 * **KOA download failures** — empty zip archives have been observed in development; E2E
   falls back to simulated stage-0 cals when fetch fails.
 

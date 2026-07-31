@@ -198,6 +198,37 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
     }
     bisector_fit: dict | None = None
     if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):
+        bdiag: dict = {"used_ccf_metrics": True}
+        # Prefer NEID cut diagnostics (cuts, bis_m_s, …) when the metrics fit retained them.
+        if isinstance(metrics.bisector_diagnostics, dict):
+            bdiag.update(metrics.bisector_diagnostics)
+        # Queloz BIS slope (v_shallow − v_core) when cut-based BIS is absent.
+        if (
+            (bdiag.get("bis_m_s") is None or not math.isfinite(float(bdiag.get("bis_m_s"))))
+            and metrics.bis_shallow is not None
+            and metrics.bis_core is not None
+            and math.isfinite(float(metrics.bis_shallow))
+            and math.isfinite(float(metrics.bis_core))
+        ):
+            bdiag["bis_m_s"] = float(metrics.bis_shallow) - float(metrics.bis_core)
+            if (
+                metrics.bis_shallow_err is not None
+                and metrics.bis_core_err is not None
+                and math.isfinite(float(metrics.bis_shallow_err))
+                and math.isfinite(float(metrics.bis_core_err))
+            ):
+                bdiag["bis_err_m_s"] = float(
+                    math.sqrt(
+                        float(metrics.bis_shallow_err) ** 2
+                        + float(metrics.bis_core_err) ** 2
+                    )
+                )
+            bdiag["bis_shallow_m_s"] = float(metrics.bis_shallow)
+            bdiag["bis_core_m_s"] = float(metrics.bis_core)
+        if metrics.bisector is not None:
+            bdiag["bisector"] = np.asarray(metrics.bisector, dtype=np.float64)
+        if metrics.bis_levels is not None:
+            bdiag["bis_levels"] = np.asarray(metrics.bis_levels, dtype=np.float64)
         bisector_fit = {
             "rv": float(metrics.bis_rv),
             "rv_err": (
@@ -207,7 +238,7 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
                 and float(metrics.bis_rv_err) > 0.0
                 else float("nan")
             ),
-            "diagnostics": {"used_ccf_metrics": True},
+            "diagnostics": bdiag,
         }
     return gaussian_fit, bisector_fit
 

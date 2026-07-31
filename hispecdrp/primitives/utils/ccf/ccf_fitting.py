@@ -49,6 +49,8 @@ class CCFMetrics:
     bisector: np.ndarray | None = None
     bis_quant_shallow: tuple[float, float] | None = None
     bis_quant_core: tuple[float, float] | None = None
+    # NEID-style ``fit_ccf_rv_bisector`` diagnostics (cuts, ``bis_m_s``, …) when available.
+    bisector_diagnostics: dict | None = None
 
     @property
     def sigma(self) -> float:
@@ -338,6 +340,7 @@ def calc_ccf_metrics(
     bis_core_err = None
     bis_levels = None
     bisector = None
+    bisector_diagnostics = None
 
     if calc_bis:
         # Queloz BIS: first return is the *slope* (v_shallow - v_core), not absolute RV.
@@ -375,14 +378,16 @@ def calc_ccf_metrics(
             and abs(bis_seed - mu_guess_v) > 2000.0
         ):
             bis_seed = mu_guess_v
-        rv_b, err_b = fit_ccf_rv_bisector(
+        rv_b, err_b, bisector_diagnostics = fit_ccf_rv_bisector(
             vel_grid,
             ccf,
             v_step,
             ccf_err=ccf_err_eff,
-            return_diagnostics=False,
+            return_diagnostics=True,
             gaussian_seed_mean_m_s=bis_seed,
         )
+        if not isinstance(bisector_diagnostics, dict):
+            bisector_diagnostics = None
         if math.isfinite(float(rv_b)):
             bis_rv = float(rv_b)
             cut_err = (
@@ -450,4 +455,5 @@ def calc_ccf_metrics(
         bisector=bisector,
         bis_quant_shallow=bis_quant_shallow,
         bis_quant_core=bis_quant_core,
+        bisector_diagnostics=bisector_diagnostics,
     )

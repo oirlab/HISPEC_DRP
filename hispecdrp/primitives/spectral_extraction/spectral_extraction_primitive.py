@@ -50,7 +50,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'specextract',
         'method' : 'box',
-        'extraction_aperture' : 3,
+        'extraction_aperture' : 10,
         'do_fibers' : None,
         'do_orders' : None,
         'pix_range' : None,

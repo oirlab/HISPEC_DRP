@@ -281,7 +281,7 @@ def run_stage1_simulation(
     wavesol_model: datamodels.DataModel | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
-    extraction_aperture: int = 5,
+    extraction_aperture: int = 10,
     do_orders: list | None = None,
     do_fibers: list[str] | None = None,
 ) -> datamodels.DataModel:

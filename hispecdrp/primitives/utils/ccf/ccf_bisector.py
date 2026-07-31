@@ -410,8 +410,14 @@ class CCFBisectorConfig:
     rv_percentile_lo, rv_percentile_hi : float
         Percentile range (0–100, relative to peak depth above baseline) over which
         bisector midpoints contribute to the RV estimate.
+    rv_n_percentile_cuts : int
+        Fixed number of evenly spaced percentile cuts between
+        ``rv_percentile_lo`` and ``rv_percentile_hi`` (inclusive). When ``>= 2``,
+        this overrides ``rv_percentile_step``. Default ``31`` samples the CCF
+        contrast densely for RV refinement.
     rv_percentile_step : float
-        Step between percentile cuts (percent).
+        Step between percentile cuts (percent). Used only when
+        ``rv_n_percentile_cuts < 2``.
     bis_top_lo, bis_top_hi : float
         Top section for bisector inverse slope (BIS), NEID default 60–90%.
     bis_bottom_lo, bis_bottom_hi : float
@@ -437,6 +443,7 @@ class CCFBisectorConfig:
 
     rv_percentile_lo: float = 10.0
     rv_percentile_hi: float = 90.0
+    rv_n_percentile_cuts: int = 31
     rv_percentile_step: float = 5.0
     bis_top_lo: float = 60.0
     bis_top_hi: float = 90.0
@@ -787,12 +794,18 @@ def fit_ccf_rv_bisector(
 
     p_lo = float(cfg.rv_percentile_lo)
     p_hi = float(cfg.rv_percentile_hi)
-    p_step = float(cfg.rv_percentile_step)
-    if p_step <= 0.0 or p_hi <= p_lo:
+    if p_hi <= p_lo:
         out = (float("nan"), float("nan"), {"ok": False, "message": "invalid percentile grid"})
         return out if return_diagnostics else (out[0], out[1])
-
-    percentiles = np.arange(p_lo, p_hi + 0.5 * p_step, p_step, dtype=np.float64)
+    n_fixed = int(cfg.rv_n_percentile_cuts)
+    if n_fixed >= 2:
+        percentiles = np.linspace(p_lo, p_hi, n_fixed, dtype=np.float64)
+    else:
+        p_step = float(cfg.rv_percentile_step)
+        if p_step <= 0.0:
+            out = (float("nan"), float("nan"), {"ok": False, "message": "invalid percentile grid"})
+            return out if return_diagnostics else (out[0], out[1])
+        percentiles = np.arange(p_lo, p_hi + 0.5 * p_step, p_step, dtype=np.float64)
     cuts: list[dict] = []
     for pct in percentiles:
         depth = float(pct) / 100.0
@@ -817,6 +830,7 @@ def fit_ccf_rv_bisector(
         # for strongly correlated percentile cuts and become unstable when a cut's
         # formal e_i collapses to the discretization floor.
         w_cut = w_perf
+        target = float(depth * peak_amp)
         cuts.append(
             {
                 "percentile": float(pct_out),
@@ -825,7 +839,9 @@ def fit_ccf_rv_bisector(
                 "v_left_m_s": float(v_left),
                 "v_right_m_s": float(v_right),
                 "weight": float(w_cut),
-                "target_flux": float(depth * peak_amp),
+                "target_flux": target,
+                # Absolute CCF value of the horizontal cut (for previews).
+                "ccf_level": float(baseline + sign * target),
             }
         )
 
