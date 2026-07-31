@@ -1991,7 +1991,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         n_chunks_total = 0
         for oi, _order in bench_orders:
             d_bad = (np.asarray(dq_2d[oi], dtype=np.uint32) & do_not_use) != 0
-            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng, _, _ = rv_per_chunks_line_mask(
+            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng, _, _, _, _ = rv_per_chunks_line_mask(
                 wave_2d[oi],
                 spec_2d[oi],
                 spec_err_2d[oi],
@@ -2234,7 +2234,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
         n_chunks_total = 0
         for oi, _order in bench_orders:
             d_bad = (np.asarray(dq_2d[oi], dtype=np.uint32) & do_not_use) != 0
-            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng, _, _ = rv_per_chunks_line_mask(
+            rvs_b, _errs_b, _centers_b, _v_grid_b, _ccf_b, _wlo, _whi, _ng, _, _, _, _ = rv_per_chunks_line_mask(
                 wave_2d[oi],
                 spec_2d[oi],
                 spec_err_2d[oi],
