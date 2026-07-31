@@ -625,11 +625,14 @@ def load_sky_spectrum(filepath: str, wl_min_um: float = 0.8, wl_max_um: float = 
 
     tele_diameter = 10*u.m
 
-    diffraction_limit = (sky_wl/tele_diameter.to(u.micron)*u.radian).to(u.arcsec)
-    solidangle = diffraction_limit**2 * 1.13
+    # calculation assuming fiber is size of diffraction limit
+    # diffraction_limit = (sky_wl/tele_diameter.to(u.micron)*u.radian).to(u.arcsec)
+    # solidangle = diffraction_limit**2 * 1.13
 
-    fwhm = (1.0*u.um/(10*u.m)).to(u.dimensionless_unscaled) * u.radian
-    solidangle = fwhm**2 * 1.13
+    # calculation based on HK fiber core size, telescope focal length
+    fiber_core = 5.5 * u.um
+    focal_length = 17.5*u.m
+    solidangle = ((fiber_core/focal_length).to(u.dimensionless_unscaled) * u.radian)**2
 
     sky_flux_ph = (sky_flux_ph*solidangle).to(
         u.photon / (u.s * u.nm * u.m**2)
