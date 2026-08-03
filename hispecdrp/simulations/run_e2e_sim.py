@@ -19,6 +19,9 @@ Stage 1 trace / fiberflat products (``mastercal-tracepos``, ``mastercal-tracepro
 * ``"pipeline"`` (default): simulate per-fiber fiberflat rate maps and run
   ``ProcessFiberflatsPipeline`` — KOA Stage 1 masters are not downloaded.
 * ``"koa"``: fetch/use KOA or local-cache master cals instead.
+* ``"sim_hdf"``: HDF-truth traces + wavesol. With ``wavesol_source="auto"``
+  (default), prefer the packaged line-ZP under ``hispecdrp/data/wavesol/``
+  (erases ~55 m/s PSF deposition bias for RV) without a runtime ZP step.
 """
 
 from __future__ import annotations

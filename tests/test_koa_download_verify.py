@@ -22,7 +22,7 @@ def test_ensure_calibration_on_disk_missing_raises(tmp_path):
 def test_ensure_calibration_on_disk_rejects_tiny_file(tmp_path):
     path = tmp_path / "tiny.fits"
     path.write_bytes(b"not-a-fits")
-    with pytest.raises(RuntimeError, match="only .* bytes"):
+    with pytest.raises(RuntimeError, match=r"too small \(\d+ bytes"):
         ensure_calibration_on_disk(str(path), expected_filename="tiny.fits")
 
 

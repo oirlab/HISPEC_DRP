@@ -185,6 +185,7 @@ def create_ramp(
     vertical: bool = True,
     flux_scaling: np.ndarray | None = None,
     flux_scaling_times: np.ndarray | None = None,
+    seed: int | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -235,6 +236,10 @@ def create_ramp(
         Timeseries of flux to model variability centered on unity (default: None). Should match length of flux_scaling_times.
     flux_scaling_times : np.ndarray or None, optional
         Times corresponding to flux_scaling array (seconds) (default: None).
+    seed : int or None, optional
+        RNG seed for Poisson / read / kTC / 1/f noise. When set, repeated calls
+        with the same inputs reproduce the same ramp (needed for a packaged WAVE
+        CCF bake to transfer across notebook runs). Default ``None`` (nondeterministic).
 
     Returns
     -------
@@ -250,6 +255,7 @@ def create_ramp(
         If any value in the output 'data' array is negative.
     """
     ny, nx = source.shape
+    rng_master = np.random.default_rng(seed)
 
     if gain is None:
         gain = 1.0
@@ -348,12 +354,10 @@ def create_ramp(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
-            # This is almost certainly not the best way to handle RNG seeds in multiprocessing,
-            # but it will at least ensure different seeds for each worker and I understand it.
-            myrandomseed = np.random.default_rng().integers(
-                low=0,
-                high=np.iinfo(np.uint32).max,
-                dtype=np.uint32
+            # Distinct per-block seeds; derived from ``seed`` when provided so the
+            # full ramp is reproducible across runs / process counts.
+            myrandomseed = int(
+                rng_master.integers(low=0, high=np.iinfo(np.uint32).max, dtype=np.uint32)
             )
 
             args = (block_start, block_end,
@@ -395,6 +399,9 @@ def create_ramp(
     else:
         data_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
         dq_raw_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint8)
+        # Seed the global Generator used by _create_ramp (np.random.*) for RN/kTC/Poisson.
+        if seed is not None:
+            np.random.seed(int(seed))
         _outputs = _create_ramp(
             data_np, dq_raw_np,
             source=source,

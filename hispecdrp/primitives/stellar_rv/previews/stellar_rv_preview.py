@@ -527,23 +527,38 @@ def _preview_slots_for_plot(slots: list) -> list:
 def _iterative_sigma_clip_ylim(
     y: np.ndarray,
     *,
+    y_err: np.ndarray | None = None,
     sigma: float = 3.0,
     max_iter: int = 5,
     pad_frac: float = 0.05,
 ) -> tuple[float, float]:
     """
     Default y-axis limits for RV scatter: iterative sigma clipping on finite values,
-    then symmetric-ish padding so the panel spans the \"good\" points.
+    then padding so the panel spans the \"good\" points.
+
+    When ``y_err`` is provided (same length as ``y``), limits expand to the full
+    extent of ``y ± y_err`` for the sigma-clipped inliers so per-chunk error bars
+    are not clipped by the axes. Flagged outliers should be omitted from ``y`` /
+    ``y_err`` by the caller.
     """
 
     v = np.asarray(y, dtype=np.float64).ravel()
-    v = v[np.isfinite(v)]
+    e = None if y_err is None else np.asarray(y_err, dtype=np.float64).ravel()
+    if e is not None and e.shape != v.shape:
+        raise ValueError("y_err must have the same shape as y")
+    finite = np.isfinite(v)
+    if e is not None:
+        finite = finite & np.isfinite(e) & (e >= 0)
+    v = v[finite]
+    if e is not None:
+        e = e[finite]
     if v.size == 0:
         return -1.0, 1.0
     if v.size == 1:
         m = float(v[0])
-        d = max(abs(m) * 1e-6, 1e-9)
-        return m - d, m + d
+        half = float(e[0]) if e is not None else max(abs(m) * 1e-6, 1e-9)
+        half = max(half, max(abs(m) * 1e-6, 1e-9))
+        return m - half, m + half
     mask = np.ones(v.shape[0], dtype=bool)
     for _ in range(max_iter):
         if np.sum(mask) < 2:
@@ -557,9 +572,15 @@ def _iterative_sigma_clip_ylim(
             break
         mask = new_m
     vf = v[mask]
+    ef = e[mask] if e is not None else None
     if vf.size == 0:
         vf = v
-    lo, hi = float(np.min(vf)), float(np.max(vf))
+        ef = e
+    if ef is not None and ef.size:
+        lo = float(np.min(vf - ef))
+        hi = float(np.max(vf + ef))
+    else:
+        lo, hi = float(np.min(vf)), float(np.max(vf))
     span = hi - lo
     pad = pad_frac * span if span > 0 else max(abs(lo) * pad_frac, 1e-6)
     return lo - pad, hi + pad
@@ -1773,7 +1794,7 @@ def collect_mask_overlay_payload_for_primitive(
         return None
 
     slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
-        getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
+        getattr(primitive, "_ccf_preview_by_fiber", {}).get(str(fiber))
         if (getattr(primitive, "algorithm", None) or "").strip().lower()
         in STELLAR_RV_LINE_MASK_ALGORITHMS
         else None
@@ -2012,7 +2033,7 @@ def collect_template_overlay_payload_for_primitive(
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
 
     slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
-        getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
+        getattr(primitive, "_ccf_preview_by_fiber", {}).get(str(fiber))
     )
 
     entries: list[dict] = []
@@ -2322,7 +2343,7 @@ def _preview_gaussian_cache_and_slot_legends(
     fit_slot_cache: dict[int, tuple] = {}
     slot_metadata: dict[str, list[str]] = {}
     for fiber in fibers_with_ccf:
-        detail = primitive._ccf_preview_by_fiber.get(fiber)
+        detail = primitive._ccf_preview_by_fiber.get(str(fiber))
         if not detail:
             slot_metadata[fiber] = []
             continue
@@ -2958,10 +2979,15 @@ def create_stellar_rv_preview(primitive) -> None:
                 out_ok = ~inlier & np.isfinite(rv_err) & (rv_err > 0)
                 if np.any(in_ok):
                     y_clip_src = y_ms_off[in_ok]
+                    err_clip_src = err_y_ms[in_ok]
                 else:
-                    y_clip_src = y_ms_off[np.isfinite(y_ms_off)]
+                    fin = np.isfinite(y_ms_off)
+                    y_clip_src = y_ms_off[fin]
+                    err_clip_src = err_y_ms[fin] if err_y_ms.size == y_ms_off.size else None
                 if y_clip_src.size:
-                    rv_panel_y_range[fiber] = _iterative_sigma_clip_ylim(y_clip_src)
+                    rv_panel_y_range[fiber] = _iterative_sigma_clip_ylim(
+                        y_clip_src, y_err=err_clip_src
+                    )
                 if np.any(in_ok):
                     fig_rv.add_trace(
                         go.Scatter(
@@ -3075,9 +3101,9 @@ def create_stellar_rv_preview(primitive) -> None:
                 sb_lines.append(
                     f"MAD = {_format_rv_value(mad_gate, kind='sigma_ms')} · "
                     f"cut = {_format_rv_value(thr_m_s, kind='sigma_ms')} "
-                    f"(×{osig:g})"
+                    f"(×{osig:g} · max(MAD, σᵢ))"
                 )
-                sb_lines.append(f"Outliers (MAD) = {int(np.sum(~inl_c))}")
+                sb_lines.append(f"Outliers (MAD+σ) = {int(np.sum(~inl_c))}")
                 if np.isfinite(sig_iv):
                     sb_lines.append(
                         f"σ_IV = {_format_rv_value(sig_iv, kind='sigma_ms')}"
@@ -3125,7 +3151,7 @@ def create_stellar_rv_preview(primitive) -> None:
         )
 
         if kind == "ccf":
-            detail = primitive._ccf_preview_by_fiber.get(fiber)
+            detail = primitive._ccf_preview_by_fiber.get(str(fiber))
             if not detail:
                 continue
             v_step = float(detail["v_step"])
@@ -3335,7 +3361,7 @@ def create_stellar_rv_preview(primitive) -> None:
             continue
 
         # resid — CCF data minus the same Gaussian model evaluated on the full velocity grid.
-        detail = primitive._ccf_preview_by_fiber.get(fiber)
+        detail = primitive._ccf_preview_by_fiber.get(str(fiber))
         if not detail:
             continue
         slots = _preview_slots_for_plot(detail["slots"])
@@ -3446,7 +3472,7 @@ def create_stellar_rv_preview(primitive) -> None:
     updatemenus_ccf: list[dict] = []
     for fi, fiber in enumerate(fibers_with_ccf):
         slots = _preview_slots_for_plot(
-            primitive._ccf_preview_by_fiber.get(fiber, {}).get("slots", [])
+            primitive._ccf_preview_by_fiber.get(str(fiber), {}).get("slots", [])
         )
         if not slots:
             continue

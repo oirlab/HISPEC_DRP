@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+from pathlib import Path
 
 import numpy as np
 
@@ -83,6 +84,117 @@ def fiberflat_rate_files_exist(
     return len(paths) > 0 and all(os.path.isfile(p) for p in paths)
 
 
+def get_sim_stage1_master_paths(output_dir: str, spectrograph: str) -> dict[str, str]:
+    """
+    Stable paths under ``<output_dir>/cals`` for cached sim-HDF Stage-1 masters.
+
+    These are written once by :func:`register_sim_stage1_calibrations` /
+    :func:`~hispecdrp.simulations.e2e_pipeline.prepare_pipeline_example_stage1`
+    and reused on later notebook / e2e runs.
+    """
+    prefix = "HB" if str(spectrograph).upper() == "BSPEC" else "HR"
+    cal = e2e_support.calibration_dir(output_dir)
+    return {
+        "trace_pos": os.path.join(cal, f"{prefix}.sim_hdf_tracepos.fits"),
+        "trace_prof": os.path.join(cal, f"{prefix}.sim_hdf_traceprof.fits"),
+        "fiberflat": os.path.join(cal, f"{prefix}.sim_hdf_fiberflat.fits"),
+        "meta": os.path.join(cal, f"{prefix}.sim_hdf_stage1.json"),
+    }
+
+
+def sim_stage1_masters_exist(
+    output_dir: str,
+    spectrograph: str,
+    fibers: list[int],
+    *,
+    extraction_aperture: float = 10.0,
+) -> bool:
+    """True when cached Stage-1 masters exist and cover the requested fibers."""
+    import json
+
+    paths = get_sim_stage1_master_paths(output_dir, spectrograph)
+    if not all(os.path.isfile(paths[k]) for k in ("trace_pos", "trace_prof", "fiberflat", "meta")):
+        return False
+    try:
+        meta = json.loads(open(paths["meta"], encoding="utf-8").read())
+    except Exception:
+        return False
+    if str(meta.get("spectrograph", "")).upper() != str(spectrograph).upper():
+        return False
+    cached_fibers = {int(f) for f in (meta.get("fibers") or [])}
+    if not set(int(f) for f in fibers).issubset(cached_fibers):
+        return False
+    try:
+        if abs(float(meta.get("extraction_aperture", 10.0)) - float(extraction_aperture)) > 1e-6:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def load_cached_sim_stage1_masters(
+    output_dir: str,
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+) -> dict[str, datamodels.DataModel]:
+    """Open cached sim-HDF Stage-1 masters from ``<output_dir>/cals``."""
+    from .sim_hdf_wavesol_packaging import load_packaged_sim_hdf_line_zp_wavesol
+
+    paths = get_sim_stage1_master_paths(output_dir, spectrograph)
+    wavesol_meta = {"spectrograph": str(spectrograph).upper()}
+    if meta:
+        wavesol_meta.update(meta)
+    return {
+        "trace_pos": datamodels.open(paths["trace_pos"]),
+        "trace_prof": datamodels.open(paths["trace_prof"]),
+        "fiberflat": datamodels.open(paths["fiberflat"]),
+        "wavesol": load_packaged_sim_hdf_line_zp_wavesol(
+            str(spectrograph).upper(), meta=wavesol_meta
+        ),
+        "cache_paths": paths,
+    }
+
+
+def save_sim_stage1_masters(
+    output_dir: str,
+    spectrograph: str,
+    *,
+    trace_pos: datamodels.DataModel,
+    trace_prof: datamodels.DataModel,
+    fiberflat: datamodels.DataModel,
+    fibers: list[int],
+    extraction_aperture: float = 10.0,
+) -> dict[str, str]:
+    """Persist Stage-1 masters under ``<output_dir>/cals`` for reuse."""
+    import json
+
+    paths = get_sim_stage1_master_paths(output_dir, spectrograph)
+    for key, model in (
+        ("trace_pos", trace_pos),
+        ("trace_prof", trace_prof),
+        ("fiberflat", fiberflat),
+    ):
+        model.save(filepath=paths[key])
+    with open(paths["meta"], "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "spectrograph": str(spectrograph).upper(),
+                "fibers": [int(f) for f in sorted(fibers)],
+                "extraction_aperture": float(extraction_aperture),
+            },
+            fh,
+            indent=2,
+        )
+        fh.write("\n")
+    logger.info(
+        "Cached sim-HDF Stage-1 masters under %s (fibers=%s).",
+        e2e_support.calibration_dir(output_dir),
+        sorted(int(f) for f in fibers),
+    )
+    return paths
+
+
 __all__ = [
     "create_simulated_calibration_models",
     "simulate_ramp_from_rate_map",
@@ -91,13 +203,18 @@ __all__ = [
     "create_dummy_fiberflat_rate_files",
     "get_expected_ramp_path",
     "get_expected_fiberflat_rate_paths",
+    "get_sim_stage1_master_paths",
     "ramp_file_exists",
     "fiberflat_rate_files_exist",
+    "sim_stage1_masters_exist",
+    "load_cached_sim_stage1_masters",
+    "save_sim_stage1_masters",
     "get_default_stage0_prim_args",
     "run_stage0_simulation",
     "run_fiberflat_pipeline",
     "create_wavelength_solution_model_from_sim",
     "register_sim_lfc_wavesol",
+    "register_sim_stage1_calibrations",
     "prepare_fiberflat_models",
     "get_fiberflat_prim_args",
 ]
@@ -166,15 +283,20 @@ def register_sim_lfc_wavesol(
     meta: dict | None = None,
     connect_remote: bool = False,
     origin: str = "LOCAL",
-    new_version: bool = False,
+    new_version: bool | None = None,
+    prefer_packaged_line_zp: bool = True,
 ) -> tuple[str, dict]:
     """
-    Build an HDF-based wavelength solution as ``LFCWavesolModel`` and register it in the local caldb.
+    Build a simulated ``LFCWavesolModel`` and register it in the local caldb.
 
-    The model uses ``cal_type='lfc_wavesol'``, so the default
-    :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector` used by
-    Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides. This
-    mirrors real-data processing where an LFC wavesol is already in the caldb.
+    Prefers the packaged sim-HDF **line-ZP** WAVE under ``hispecdrp/data/wavesol/``
+    when present (``prefer_packaged_line_zp=True``); otherwise falls back to the
+    geometric HDF deposit-inverse WAVE. The model uses ``cal_type='lfc_wavesol'``,
+    so Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides.
+
+    Packaged line-ZP registration defaults to ``new_version=True`` and tags
+    ``meta.note`` so :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector`
+    prefers it over a same-night geometric ``lfc_wavesol`` already in the cache.
 
     Parameters
     ----------
@@ -187,9 +309,12 @@ def register_sim_lfc_wavesol(
         Open a remote KOA connection when registering. Default False (local cache only).
     origin : str, optional
         Registration origin label. Default ``'LOCAL'``.
-    new_version : bool, optional
+    new_version : bool or None, optional
         Passed to :meth:`~hispecdrp.calibrations.hispec_store.HISPECCalibrationStore.register_calibration`.
-        Default False (reuse an existing version family when present).
+        ``None`` (default) uses ``True`` for packaged line-ZP and ``False`` for the
+        geometric fallback (reuse an existing version family when present).
+    prefer_packaged_line_zp : bool, optional
+        Use packaged line-ZP WAVE when the FITS product exists. Default True.
 
     Returns
     -------
@@ -197,12 +322,40 @@ def register_sim_lfc_wavesol(
         Local filepath and caldb record from registration.
     """
     from ..calibrations import HISPECCalibrationStore
+    from .sim_hdf_wavesol_packaging import (
+        load_packaged_sim_hdf_line_zp_wavesol,
+        packaged_sim_hdf_wavesol_path,
+    )
 
-    wavesol_model = create_wavelength_solution_model_from_sim(spectrograph, meta=meta)
+    spectrograph = str(spectrograph).upper()
+    packaged = packaged_sim_hdf_wavesol_path(spectrograph)
+    if prefer_packaged_line_zp and packaged.is_file():
+        wavesol_model = load_packaged_sim_hdf_line_zp_wavesol(spectrograph, meta=meta)
+        source = f"packaged_line_zp:{packaged.name}"
+        if new_version is None:
+            new_version = True
+    else:
+        wavesol_model = create_wavelength_solution_model_from_sim(spectrograph, meta=meta)
+        source = "hdf_deposit_inverse"
+        if new_version is None:
+            new_version = False
     with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
+        if prefer_packaged_line_zp and packaged.is_file():
+            existing = _existing_packaged_line_zp_wavesol(store, wavesol_model)
+            if existing is not None:
+                local_path, cal_record = existing
+                logger.info(
+                    "Reusing packaged LFC wavesol in caldb (spectrograph=%s, source=%s): %s",
+                    spectrograph,
+                    source,
+                    local_path,
+                )
+                return local_path, cal_record
         local_path, cal_record = store.register_calibration(
-            wavesol_model, origin=origin, new_version=new_version
+            wavesol_model, origin=origin, new_version=bool(new_version)
         )
+        if prefer_packaged_line_zp and packaged.is_file() and cal_record:
+            cal_record = _ensure_packaged_line_zp_note(store, cal_record)
     if local_path is None or not (cal_record or {}).get("filename"):
         raise RuntimeError(
             f"Failed to register simulated LFC wavesol for spectrograph={spectrograph!r}: "
@@ -210,11 +363,202 @@ def register_sim_lfc_wavesol(
             "The caldb row must have a non-null filename so Stage 1 set_wavesol can resolve it."
         )
     logger.info(
-        "Registered simulated LFC wavesol in caldb (spectrograph=%s): %s",
+        "Registered simulated LFC wavesol in caldb (spectrograph=%s, source=%s): %s",
         spectrograph,
+        source,
         local_path,
     )
     return local_path, cal_record
+
+
+def _ensure_packaged_line_zp_note(store, rec: dict) -> dict:
+    """Backfill ``note=sim_hdf_wavesol.line_zp`` on a caldb row when missing."""
+    from .sim_hdf_wavesol_packaging import (
+        PACKAGED_SIM_HDF_LINE_ZP_NOTE,
+        is_packaged_sim_hdf_line_zp_record,
+    )
+
+    if is_packaged_sim_hdf_line_zp_record(rec):
+        return rec
+    pk = rec.get("id")
+    if not pk:
+        return rec
+    try:
+        store.local_db.table.update(pk, {"note": PACKAGED_SIM_HDF_LINE_ZP_NOTE})
+        rec = dict(rec)
+        rec["note"] = PACKAGED_SIM_HDF_LINE_ZP_NOTE
+        logger.info(
+            "Tagged existing lfc_wavesol as packaged line-ZP (id=%s, filename=%s)",
+            pk,
+            rec.get("filename"),
+        )
+    except Exception as exc:
+        logger.warning("Could not backfill packaged line-ZP note on id=%s: %s", pk, exc)
+    return rec
+
+
+def _refresh_packaged_line_zp_cache_file(local_path: str, wavesol_model) -> None:
+    """Overwrite a stale KOA local WAVE FITS with current packaged bytes."""
+    from .sim_hdf_wavesol_packaging import packaged_sim_hdf_wavesol_path
+
+    spectrograph = str(getattr(getattr(wavesol_model, "meta", None), "spectrograph", "") or "").upper()
+    if spectrograph not in ("BSPEC", "RSPEC"):
+        # Infer from filename prefix (HB/HR) when meta is incomplete.
+        name = Path(local_path).name.upper()
+        spectrograph = "BSPEC" if name.startswith("HB.") else "RSPEC" if name.startswith("HR.") else ""
+    if spectrograph not in ("BSPEC", "RSPEC"):
+        return
+    packaged = packaged_sim_hdf_wavesol_path(spectrograph)
+    if not packaged.is_file():
+        return
+    dest = Path(local_path)
+    if not dest.is_file():
+        return
+    try:
+        src_bytes = packaged.read_bytes()
+        if dest.read_bytes() == src_bytes:
+            return
+        dest.write_bytes(src_bytes)
+        logger.info(
+            "Refreshed KOA packaged line-ZP WAVE cache from %s -> %s",
+            packaged.name,
+            dest.name,
+        )
+    except Exception as exc:
+        logger.warning("Could not refresh KOA packaged WAVE at %s: %s", dest, exc)
+
+
+def _existing_packaged_line_zp_wavesol(store, wavesol_model) -> tuple[str, dict] | None:
+    """Return an already-registered packaged line-ZP WAVE (by id, note, or family)."""
+    from .sim_hdf_wavesol_packaging import is_packaged_sim_hdf_line_zp_record
+
+    # Packaged FITS keeps a stable UUID; re-registration often hits mode='id' with
+    # a row that predates the note tag — treat that as the packaged product.
+    by_id = store.calibration_record_in_cache(wavesol_model, mode="id")
+    if by_id:
+        path, rec = store._existing_calibration_path_and_record(by_id)
+        if path and rec and rec.get("filename"):
+            _refresh_packaged_line_zp_cache_file(path, wavesol_model)
+            return path, _ensure_packaged_line_zp_note(store, rec)
+
+    existing = store.calibration_record_in_cache(wavesol_model, mode="version-family")
+    if not existing:
+        return None
+    rows = existing if isinstance(existing, list) else [existing]
+    for row in rows:
+        if not is_packaged_sim_hdf_line_zp_record(row):
+            continue
+        path, rec = store._existing_calibration_path_and_record(row)
+        if path and rec and rec.get("filename"):
+            _refresh_packaged_line_zp_cache_file(path, wavesol_model)
+            return path, rec
+    return None
+
+
+def _merge_ramp_meta_into_cal(model: datamodels.DataModel, ramp_meta, spectrograph: str) -> None:
+    """Copy selector keys from the science ramp onto a simulated Stage-1 cal model."""
+    meta = getattr(model, "meta", None)
+    if meta is None:
+        return
+    meta.spectrograph = str(spectrograph).upper()
+    if ramp_meta is None:
+        return
+    for key in ("instrument_name", "instrument_era", "mjd_start", "mjd_mid", "datetime_obs"):
+        val = getattr(ramp_meta, key, None)
+        if val is None and hasattr(ramp_meta, "get"):
+            val = ramp_meta.get(key)
+        if val is not None:
+            setattr(meta, key, val)
+    if getattr(meta, "instrument_era", None) is None:
+        meta.instrument_era = "0.0.1"
+    # Packaged line-ZP FITS ships with mjd_start=0 / 1858-11-17. Without syncing
+    # datetime_obs to the science MJD, registration writes HB.18581117… and the
+    # Stage-1 selector prefers a same-night geometric lfc_wavesol instead.
+    mjd = getattr(meta, "mjd_start", None)
+    if mjd is not None and getattr(meta, "datetime_obs", None) in (None, "", "1858-11-17T00:00:00.000"):
+        import astropy.time
+
+        meta.datetime_obs = astropy.time.Time(float(mjd), format="mjd", scale="utc").isot
+
+
+def register_sim_stage1_calibrations(
+    output_dir: str,
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | None = None,
+    ramp_meta=None,
+    connect_remote: bool = False,
+    origin: str = "LOCAL",
+    new_version: bool = False,
+    extraction_aperture: float = 10.0,
+    reuse_existing: bool = True,
+) -> dict:
+    """
+    Build and register sim-HDF ``tracepos``, ``traceprof``, ``fiberflat``, and
+    packaged line-ZP ``lfc_wavesol`` into the local KOA cache.
+
+    Until these products are published to remote KOA, Stage 1/2 can resolve them
+    via the default selectors (matching spectrograph / era / nearest MJD).
+
+    When ``reuse_existing`` is True (default), products already present under
+    ``<output_dir>/cals`` (Stage-1 masters and/or fiberflat rate frames) are
+    reused instead of re-simulating.
+    """
+    from ..calibrations import HISPECCalibrationStore
+    from .e2e_pipeline import prepare_pipeline_example_stage1
+
+    spectrograph = str(spectrograph).upper()
+    fibs = [int(f) for f in (fibers if fibers is not None else [2]) if int(f) in (1, 2, 3)]
+    if not fibs:
+        raise ValueError("fibers must include at least one of 1, 2, 3")
+    bundle = prepare_pipeline_example_stage1(
+        output_dir,
+        rate_map,
+        spectrograph=spectrograph,
+        fibers=fibs,
+        extraction_aperture=float(extraction_aperture),
+        reuse_existing=bool(reuse_existing),
+    )
+    registered: dict[str, tuple[str, dict]] = {}
+    with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
+        for key in ("trace_pos", "trace_prof", "fiberflat", "wavesol"):
+            model = bundle[key]
+            _merge_ramp_meta_into_cal(model, ramp_meta, spectrograph)
+            # Packaged line-ZP WAVE must bump past a same-night geometric
+            # lfc_wavesol (new_version=False would skip and keep the bad WAVE).
+            # Reuse an already-tagged packaged row to avoid version churn.
+            use_new_version = bool(new_version)
+            if key == "wavesol":
+                note = str(getattr(getattr(model, "meta", None), "note", "") or "")
+                if "sim_hdf_wavesol.line_zp" in note:
+                    existing = _existing_packaged_line_zp_wavesol(store, model)
+                    if existing is not None:
+                        registered[key] = existing
+                        logger.info(
+                            "Reusing simulated Stage-1 wavesol in caldb (spectrograph=%s): %s",
+                            spectrograph,
+                            existing[0],
+                        )
+                        continue
+                    use_new_version = True
+            local_path, cal_record = store.register_calibration(
+                model, origin=origin, new_version=use_new_version
+            )
+            if local_path is None or not (cal_record or {}).get("filename"):
+                raise RuntimeError(
+                    f"Failed to register simulated Stage-1 {key} for "
+                    f"spectrograph={spectrograph!r}: local_path={local_path!r}"
+                )
+            registered[key] = (local_path, cal_record)
+            logger.info(
+                "Registered simulated Stage-1 %s in caldb (spectrograph=%s): %s",
+                key,
+                spectrograph,
+                local_path,
+            )
+    bundle["registered"] = registered
+    return bundle
 
 
 def create_simulated_calibration_models(
@@ -364,6 +708,7 @@ def simulate_ramp_from_rate_map(
     kTC_noise: float = 50.0,
     mjd_start: float | None = None,
     target_meta: dict | None = None,
+    seed: int | None = None,
 ) -> datamodels.RampModel:
     """
     Simulate a ramp from a rate map (e-/s/pixel) using create_ramp and calibration models.
@@ -456,6 +801,7 @@ def simulate_ramp_from_rate_map(
         convert_to_uint16=convert_to_uint16,
         clip_ramps=clip_ramps,
         max_cores=max_cores,
+        seed=seed,
     )
 
     ramp_dict["meta"]["spectrograph"] = spectrograph
@@ -585,6 +931,7 @@ def create_dummy_fiberflat_rate_files(
     fiberflat_duplicate_single_reduction: bool = False,
     rate_map_method: str = "pyechelle",
     pyechelle_exposure_time_s: float = 300.0,
+    reuse_existing: bool = True,
 ) -> list[str]:
     """
     Create simulated fiber flat rate FITS files using the same Stage 0 path as the science ramp.
@@ -597,6 +944,9 @@ def create_dummy_fiberflat_rate_files(
 
     By default one rate FITS is written per fiber (``fiberflat_coadd_exposures=1``). Optional
     multi-exposure coadd inputs are supported when ``fiberflat_coadd_exposures`` > 1.
+
+    When ``reuse_existing`` is True (default), fibers whose expected rate FITS already
+    exist under ``<output_dir>/cals`` are skipped (no re-raytrace / UTR / Stage 0).
     """
     import astropy.units as u
     from astropy.modeling.models import BlackBody
@@ -607,6 +957,36 @@ def create_dummy_fiberflat_rate_files(
         fiberflat_filename = _fiberflat_rate_filename
     if fiberflat_coadd_exposures < 1:
         raise ValueError(f"fiberflat_coadd_exposures must be >= 1, got {fiberflat_coadd_exposures}")
+
+    pipeline_root = e2e_support.ensure_output_directory(output_dir)
+    out_dir_abs = e2e_support.calibration_dir(pipeline_root)
+    paths: list[str] = []
+    fibers_to_build: list[int] = []
+
+    for f in sorted(fibers):
+        if f not in (1, 2, 3):
+            continue
+        expected = [
+            os.path.join(out_dir_abs, fiberflat_filename(spectrograph, f, exposure))
+            for exposure in range(1, fiberflat_coadd_exposures + 1)
+        ]
+        if reuse_existing and all(os.path.isfile(p) for p in expected):
+            logger.info(
+                "Reusing existing fiberflat rate file(s) for fiber %s under %s.",
+                f,
+                out_dir_abs,
+            )
+            paths.extend(expected)
+            continue
+        fibers_to_build.append(f)
+
+    if not fibers_to_build:
+        return [
+            os.path.join(out_dir_abs, fiberflat_filename(spectrograph, f, exposure))
+            for f in sorted(fibers)
+            if f in (1, 2, 3)
+            for exposure in range(1, fiberflat_coadd_exposures + 1)
+        ]
 
     # Coarse BB grid; upsampled to R~3e5 when continuous=True (required for smooth native PRF maps).
     n_wl_flat = 5_000 if str(rate_map_method).strip().lower() == "pyechelle" else 10_000
@@ -619,13 +999,7 @@ def create_dummy_fiberflat_rate_files(
     # Convert per-Angstrom to per-micron: 1 micron = 1e4 AA => same flux density => multiply by 1e4
     flux_flat = (flat_scale * np.asarray(bb_lam_aa.value) * 1e4) * (u.erg / u.s / u.cm**2 / u.micron)
 
-    pipeline_root = e2e_support.ensure_output_directory(output_dir)
-    out_dir_abs = e2e_support.calibration_dir(pipeline_root)
-    paths: list[str] = []
-
-    for f in sorted(fibers):
-        if f not in (1, 2, 3):
-            continue
+    for f in fibers_to_build:
         logger.info(
             "Creating simulated fiber flat rate file(s) for fiber %s "
             "(rate_map_method=%s, coadd_exposures=%s, duplicate_single_reduction=%s).",
@@ -735,7 +1109,13 @@ def create_dummy_fiberflat_rate_files(
             )
             paths.append(_finalize_and_save(rate_model, exposure))
 
-    return paths
+    # Stable fiber/exposure order for callers (reuse + newly built).
+    return [
+        os.path.join(out_dir_abs, fiberflat_filename(spectrograph, f, exposure))
+        for f in sorted(fibers)
+        if f in (1, 2, 3)
+        for exposure in range(1, fiberflat_coadd_exposures + 1)
+    ]
 
 
 def run_stage0_simulation(
@@ -826,6 +1206,7 @@ def create_ramp_and_calibrations(
     template_filename: str | None = None,
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
+    seed: int | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -880,6 +1261,8 @@ def create_ramp_and_calibrations(
         Whether to add Poisson noise in create_ramp. Default is True.
     convert_to_uint16 : bool, optional
         Whether to convert ramp data to uint16. Default is True.
+    seed : int or None, optional
+        RNG seed for UTR noise (Poisson / read / kTC). ``None`` is nondeterministic.
     instrument_name, instrument_era, mjd_start, datetime_obs : optional
         Used when ``use_master_calibrations`` is True.
     connect_remote : bool, optional
@@ -944,13 +1327,15 @@ def create_ramp_and_calibrations(
             sort_idx = np.argsort(wl_val)
             wl = wl[sort_idx]
             flux = flux[sort_idx]
+        # Apply Doppler on the native template grid, then densify. Densify-before-RV
+        # plus a global linear rebuild used to downsample already-dense BSPEC lines.
         for f in fibers:
             if f in (1, 2, 3):
                 srm.set_fiber_spectrum(
                     fiber_number=f,
                     spectrum_wavelengths=wl,
                     spectrum_flux=flux,
-                    continuous=True,
+                    continuous=False,
                 )
         if radial_velocity_km_s != 0.0:
             if not (-500.0 <= radial_velocity_km_s <= 500.0):
@@ -965,6 +1350,29 @@ def create_ramp_and_calibrations(
             for f in fibers:
                 if f in (1, 2, 3):
                     srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
+        from .simulate_rate_map import (
+            _check_wavelength_sampling,
+            _upsample_spectrum,
+        )
+
+        for f in fibers:
+            if f not in (1, 2, 3) or f not in srm.fibers:
+                continue
+            fib = srm.fibers[f]
+            w_f = fib["wavelength"]
+            fl_f = fib["flux"]
+            if not _check_wavelength_sampling(w_f, min_resolution=3e5):
+                logger.info(
+                    "Densifying fiber=%s spectrum to R>=3e5 after Doppler "
+                    "(PCHIP, densify-only)",
+                    f,
+                )
+                w_f, fl_f = _upsample_spectrum(
+                    w_f, fl_f, desired_sampling_resolution=3e5
+                )
+                fib["wavelength"] = w_f
+                fib["flux"] = fl_f
+            fib["continuous"] = True
         rate_map = srm.create_native_rate_map(
             spectrograph=spectrograph, method="prf_convolution"
         )
@@ -1030,6 +1438,7 @@ def create_ramp_and_calibrations(
         convert_to_uint16=convert_to_uint16,
         mjd_start=mjd_start,
         target_meta=target_meta,
+        seed=seed,
     )
     if overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
@@ -1047,12 +1456,16 @@ def create_ramp_from_spectrum(
     spectrum_wavelengths=None,
     spectrum_flux=None,
     radial_velocity_km_s: float = 0.0,
+    barycentric_velocity_km_s: float | None = 0.0,
     use_master_calibrations: bool = True,
     connect_remote: bool = False,
     sync_caldb_first: bool = False,
     n_reads: int = 10,
     overwrite_ramp: bool = True,
     register_wavesol: bool = True,
+    register_stage1_sims: bool = True,
+    reuse_stage1_sims: bool = True,
+    seed: int | None = 0,
     **kwargs,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
     """
@@ -1064,9 +1477,21 @@ def create_ramp_from_spectrum(
     an up-the-ramp readout using master calibrations from ``KOA_CALIBRATION_CACHE``
     (when ``use_master_calibrations`` is True).
 
-    When ``register_wavesol`` is True (default), also builds an HDF-based
-    ``LFCWavesolModel`` and registers it in the local caldb as ``lfc_wavesol`` so
-    Stage 1 can use the default wavelength-solution selector (same as real data).
+    When ``register_stage1_sims`` is True (default), builds sim-HDF ``tracepos`` /
+    ``traceprof`` / ``fiberflat`` plus the packaged line-ZP ``lfc_wavesol`` and
+    registers them in the local caldb so Stage 1/2 default selectors resolve them
+    (until those products are available from remote KOA). With
+    ``reuse_stage1_sims=True`` (default), products already under
+    ``<output_dir>/cals`` are reused instead of re-simulating fiberflat rates.
+    When only ``register_wavesol`` is True, registers the packaged line-ZP WAVE alone.
+
+    The returned ``calibration_models`` dict always includes ``wavesol``: the
+    packaged sim-HDF **line-ZP** ``LFCWavesolModel`` (with baked CCF-order refine
+    when present). That product is registered into the local caldb with a
+    distinctive ``meta.note`` so Stage 1 ``set_wavesol`` selects it by default
+    even when a same-night geometric ``lfc_wavesol`` is also cached. When Stage-1
+    sims are registered, ``trace_pos``, ``trace_prof``, and ``fiberflat`` are
+    also attached to ``calibration_models``.
 
     Parameters
     ----------
@@ -1075,7 +1500,8 @@ def create_ramp_from_spectrum(
     spectrograph : str, optional
         ``'BSPEC'`` or ``'RSPEC'``. Default ``'BSPEC'``.
     fibers : list of int or None, optional
-        Fiber numbers to illuminate (1–3). Default ``[1, 2, 3]``.
+        Fiber numbers to illuminate (1–3). Default ``[2]`` (fiber-2 RV path until
+        packaged WAVE/masks are validated for fibers 1 and 3).
     template_filename : str or None, optional
         BT-Settl HDF5 filename under the package templates directory. Ignored when
         ``spectrum_wavelengths`` and ``spectrum_flux`` are provided. Default is the
@@ -1086,7 +1512,16 @@ def create_ramp_from_spectrum(
     spectrum_wavelengths, spectrum_flux : optional
         Custom 1D spectrum (with units). When both are set, the template is not loaded.
     radial_velocity_km_s : float, optional
-        Doppler shift applied before rate-map generation. Default 0.
+        Injected stellar radial velocity (km/s). When the packaged sim-HDF
+        line-ZP WAVE is available (default notebook path), the spectrum is
+        painted at RV=0 and this velocity is applied as ``WAVE × (1+z)`` on the
+        returned / Stage-1 ``wavesol``. Spectrum Doppler paint is used only when
+        that packaged WAVE is absent. Default 0.
+    barycentric_velocity_km_s : float or None, optional
+        Known barycentric Earth radial velocity for the simulated exposure (km/s).
+        Default ``0.0`` stamps ``meta.force_berv_m_s`` so Stage-2 barycorr writes
+        BERV=0 and is a no-op for the CCF. Pass ``None`` to leave BERV unset
+        (barycorrpy will require target coordinates).
     use_master_calibrations : bool, optional
         Fetch Stage-0 masters from the KOA local caldb. Default True.
     connect_remote, sync_caldb_first : bool, optional
@@ -1096,18 +1531,46 @@ def create_ramp_from_spectrum(
     overwrite_ramp : bool, optional
         Overwrite an existing ramp FITS under ``output_dir``. Default True.
     register_wavesol : bool, optional
-        Register a simulated ``lfc_wavesol`` into ``KOA_CALIBRATION_CACHE`` for
-        default Stage 1 selection. Default True.
+        Register a simulated ``lfc_wavesol`` (packaged line-ZP when available) when
+        ``register_stage1_sims`` is False. Default True.
+    register_stage1_sims : bool, optional
+        Register sim-HDF Stage-1 products (traces, fiberflat, packaged WAVE).
+        Default True. Implies WAVE registration.
+    reuse_stage1_sims : bool, optional
+        When True (default), reuse Stage-1 masters / fiberflat rate frames already
+        present under ``<output_dir>/cals``. Set False to force re-simulation.
+    seed : int or None, optional
+        UTR noise seed (default ``0``). Keep fixed so the packaged WAVE CCF bake
+        transfers across notebook re-runs; change only when intentionally drawing
+        a new noise realization.
     **kwargs
         Forwarded to :func:`create_ramp_and_calibrations`.
 
     Returns
     -------
     tuple
-        ``(ramp_model, calibration_models, rate_map)``.
+        ``(ramp_model, calibration_models, rate_map)``. ``calibration_models``
+        includes Stage-0 masters plus ``wavesol`` (packaged line-ZP) and, when
+        Stage-1 sims are built, ``trace_pos`` / ``trace_prof`` / ``fiberflat``.
     """
+    from .sim_hdf_wavesol_packaging import packaged_sim_hdf_wavesol_path
+
     if fibers is None:
-        fibers = [1, 2, 3]
+        fibers = [2]
+    target_meta = dict(kwargs.pop("target_meta", None) or {})
+    if barycentric_velocity_km_s is not None:
+        target_meta["force_berv_m_s"] = float(barycentric_velocity_km_s) * 1000.0
+
+    inject_rv_km_s = float(radial_velocity_km_s)
+    use_wave_inject = packaged_sim_hdf_wavesol_path(str(spectrograph).upper()).is_file()
+    paint_rv_km_s = 0.0 if use_wave_inject else inject_rv_km_s
+    if use_wave_inject and inject_rv_km_s != 0.0:
+        logger.info(
+            "Packaged line-ZP WAVE present: painting spectrum at RV=0 and "
+            "injecting radial_velocity_km_s=%.6f via WAVE×(1+z)",
+            inject_rv_km_s,
+        )
+
     ramp_model, calibration_models, rate_map = create_ramp_and_calibrations(
         rate_map=None,
         output_dir=output_dir,
@@ -1115,7 +1578,7 @@ def create_ramp_from_spectrum(
         fibers=fibers,
         spectrum_wavelengths=spectrum_wavelengths,
         spectrum_flux=spectrum_flux,
-        radial_velocity_km_s=radial_velocity_km_s,
+        radial_velocity_km_s=paint_rv_km_s,
         template_filename=template_filename,
         template_mag_ab=mag_ab,
         template_2mass_band=filter_band,
@@ -1124,25 +1587,121 @@ def create_ramp_from_spectrum(
         sync_caldb_first=sync_caldb_first,
         n_reads=n_reads,
         overwrite_ramp=overwrite_ramp,
+        target_meta=target_meta or None,
+        seed=seed,
         **kwargs,
     )
-    if register_wavesol:
-        wavesol_meta: dict = {"spectrograph": spectrograph.upper()}
-        ramp_meta = getattr(ramp_model, "meta", None)
-        if ramp_meta is not None:
-            for key in ("instrument_name", "instrument_era", "mjd_start"):
-                val = getattr(ramp_meta, key, None)
-                if val is None and hasattr(ramp_meta, "get"):
-                    val = ramp_meta.get(key)
-                if val is not None:
-                    wavesol_meta[key] = val
-        wavesol_meta.setdefault("instrument_era", kwargs.get("instrument_era", "0.0.1"))
+    ramp_meta = getattr(ramp_model, "meta", None)
+    wavesol_meta = _wavesol_meta_from_ramp(ramp_meta, spectrograph, kwargs.get("instrument_era", "0.0.1"))
+    if register_stage1_sims:
+        bundle = register_sim_stage1_calibrations(
+            output_dir,
+            rate_map,
+            spectrograph=spectrograph,
+            fibers=fibers,
+            ramp_meta=ramp_meta,
+            connect_remote=False,
+            reuse_existing=bool(reuse_stage1_sims),
+        )
+        for key in ("trace_pos", "trace_prof", "fiberflat", "wavesol"):
+            model = bundle.get(key)
+            if model is not None:
+                calibration_models[key] = model
+    elif register_wavesol:
         register_sim_lfc_wavesol(
             spectrograph,
             meta=wavesol_meta,
             connect_remote=False,
+            prefer_packaged_line_zp=True,
         )
+        calibration_models["wavesol"] = _load_pipeline_example_wavesol(
+            spectrograph, meta=wavesol_meta
+        )
+    else:
+        calibration_models["wavesol"] = _load_pipeline_example_wavesol(
+            spectrograph, meta=wavesol_meta
+        )
+    if use_wave_inject and inject_rv_km_s != 0.0 and calibration_models.get("wavesol") is not None:
+        _scale_wavesol_for_injected_rv(calibration_models["wavesol"], inject_rv_km_s)
     return ramp_model, calibration_models, rate_map
+
+
+def _wavesol_meta_from_ramp(ramp_meta, spectrograph: str, instrument_era: str = "0.0.1") -> dict:
+    """Selector-friendly meta for the packaged / registered sim WAVE."""
+    wavesol_meta: dict = {"spectrograph": str(spectrograph).upper()}
+    if ramp_meta is not None:
+        for key in ("instrument_name", "instrument_era", "mjd_start", "mjd_mid", "datetime_obs"):
+            val = getattr(ramp_meta, key, None)
+            if val is None and hasattr(ramp_meta, "get"):
+                val = ramp_meta.get(key)
+            if val is not None:
+                wavesol_meta[key] = val
+    wavesol_meta.setdefault("instrument_era", instrument_era)
+    mjd = wavesol_meta.get("mjd_start")
+    if mjd is not None and not wavesol_meta.get("datetime_obs"):
+        import astropy.time
+
+        wavesol_meta["datetime_obs"] = astropy.time.Time(
+            float(mjd), format="mjd", scale="utc"
+        ).isot
+    return wavesol_meta
+
+
+def _load_pipeline_example_wavesol(
+    spectrograph: str,
+    *,
+    meta: dict | None = None,
+):
+    """
+    Load the packaged sim-HDF line-ZP WAVE (preferred) or geometric HDF WAVE.
+    """
+    from .sim_hdf_wavesol_packaging import (
+        load_packaged_sim_hdf_line_zp_wavesol,
+        packaged_sim_hdf_wavesol_path,
+    )
+
+    spectrograph = str(spectrograph).upper()
+    packaged = packaged_sim_hdf_wavesol_path(spectrograph)
+    if packaged.is_file():
+        return load_packaged_sim_hdf_line_zp_wavesol(spectrograph, meta=meta)
+    return create_wavelength_solution_model_from_sim(spectrograph, meta=meta)
+
+
+def _scale_wavesol_for_injected_rv(wavesol_model, radial_velocity_km_s: float) -> None:
+    """
+    Doppler-scale ``WAVE_FIB*`` by ``(1 + v/c)`` for injected stellar RV.
+
+    Packaged line-ZP WAVE is closed-loop calibrated at RV=0 (absorption ZP + CCF
+    order refine). Spectrum Doppler paint does **not** transfer through that WAVE
+    (effective recovered RV is systematically low). Injecting via WAVE matches the
+    validated ``WAVE × (1+z)`` closed-loop path used in WAVE bake / RV tests.
+    """
+    import astropy.constants as const
+    import astropy.units as u
+
+    rv = float(radial_velocity_km_s)
+    if rv == 0.0:
+        return
+    factor = float((1.0 + (rv * u.km / u.s) / const.c).decompose().value)
+    for fiber in (1, 2, 3):
+        attr = f"wave_fib{fiber}"
+        wave = getattr(wavesol_model, attr, None)
+        if wave is None:
+            continue
+        setattr(wavesol_model, attr, np.asarray(wave, dtype=np.float64) * factor)
+    meta = getattr(wavesol_model, "meta", None)
+    if meta is not None:
+        try:
+            meta.injected_rv_km_s = rv
+            meta.injected_rv_via = "wavesol_scale"
+        except Exception:
+            pass
+    logger.info(
+        "Scaled packaged WAVE by (1+z) for injected radial_velocity_km_s=%.6f "
+        "(factor=%.12f); science spectrum painted at RV=0",
+        rv,
+        factor,
+    )
 
 
 

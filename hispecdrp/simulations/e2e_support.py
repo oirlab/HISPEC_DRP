@@ -351,7 +351,7 @@ def _init_e2e_primitive(prim_cls: type, prim_arg_dict: dict, output_dir: str | N
 def run_stage2_simulation(
     stage1_output: datamodels.DataModel,
     *,
-    fiberflat_model: datamodels.DataModel,
+    fiberflat_model: datamodels.DataModel | None = None,
     prim_args: dict | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
@@ -381,7 +381,7 @@ def run_stage2_simulation(
     model = stage1_output
     for prim_name, prim_cls in E2E_STAGE2_PRIMITIVES.items():
         prim = _init_e2e_primitive(prim_cls, prim_args.get(prim_name, {}), out_dir)
-        if prim_name == "blaze_corr":
+        if prim_name == "blaze_corr" and fiberflat_model is not None:
             prim.fiberflat = fiberflat_model
         model = prim.apply(model)
     return model

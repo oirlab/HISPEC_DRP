@@ -54,3 +54,26 @@ def test_combine_stellar_rv_prior_gate_recovers_fiber2_like_bimodal_aliases():
     assert np.sum(inlier) == good.size
     assert abs(rv_mean - true_ms) < 500.0
     assert rv_std > 1.0
+
+
+def test_error_aware_rejection_keeps_large_err_outside_mad():
+    """A chunk outside the MAD envelope but consistent with its σ must be kept."""
+    # Tight cluster → small MAD; offset point with large formal error covers the gap.
+    rvs = np.concatenate([np.linspace(-0.2, 0.2, 12), [8.0]])
+    errs = np.concatenate([np.full(12, 1.0), [5.0]])
+    _, _, inlier, _, _ = combine_stellar_rv_chunk_estimates(
+        rvs, errs, outlier_sigma=4.0, chunk_rv_max_abs_m_s=1.0e6
+    )
+    assert bool(inlier[-1])
+    assert int(np.sum(inlier)) == rvs.size
+
+
+def test_error_aware_rejection_drops_formal_outlier():
+    """A chunk outside both the MAD envelope and its formal σ must be rejected."""
+    rvs = np.concatenate([np.linspace(-0.2, 0.2, 12), [8.0]])
+    errs = np.concatenate([np.full(12, 1.0), [0.5]])
+    _, _, inlier, _, _ = combine_stellar_rv_chunk_estimates(
+        rvs, errs, outlier_sigma=4.0, chunk_rv_max_abs_m_s=1.0e6
+    )
+    assert not bool(inlier[-1])
+    assert int(np.sum(inlier)) == 12

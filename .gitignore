@@ -150,6 +150,8 @@ hispecdrp/_version.py
 
 # Skip all FITS files.
 *.fits
+# Packaged sim-HDF line-ZP WAVE (required for pipeline_example / Stage-1 sims).
+!hispecdrp/data/wavesol/*.sim_hdf_wavesol.line_zp.fits
 
 test_data/
 

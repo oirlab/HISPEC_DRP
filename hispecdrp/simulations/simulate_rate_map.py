@@ -928,8 +928,9 @@ def _check_wavelength_sampling(
 
     delta_wl = np.diff(wl)
     resolution = wl[:-1] / delta_wl
-
-    return bool(np.all(resolution >= min_resolution))
+    # Allow a small float margin: densify inserts at exact log-λ steps that can
+    # land ~0.5 below ``min_resolution`` from rounding (~2e-6 relative at R=3e5).
+    return bool(np.all(resolution >= float(min_resolution) * (1.0 - 1e-5)))
 
 
 def _upsample_spectrum(
@@ -938,22 +939,56 @@ def _upsample_spectrum(
     desired_sampling_resolution: float = 3e5
 ) -> tuple[Quantity, Quantity]:
     """
-    Upsample spectrum in log-wavelength space to reach desired resolution.
+    Densify undersampled regions to a minimum resolving power.
+
+    Preserves existing wavelength samples and only inserts new points where the
+    local resolving power falls below ``desired_sampling_resolution``.  A global
+    linear resample to fixed ``R`` is avoided: for BT-Settl in the BSPEC band the
+    native grid is already denser than ``R~3e5``, and a global rebuild would
+    *downsample* those lines (a cm/s–m/s systematic for small Doppler tests).
+
+    Inserted fluxes use PCHIP on the native samples (shape-preserving).
     """
+    wl = np.asarray(wavelengths, dtype=np.float64).ravel()
+    fl = np.asarray(flux, dtype=np.float64).ravel()
+    if wl.size < 2:
+        return wavelengths, flux
+    if not np.all(np.diff(wl) > 0.0):
+        raise ValueError("Wavelengths must be strictly increasing.")
 
-    dloglam = 1.0 / desired_sampling_resolution
+    min_R = float(desired_sampling_resolution)
+    out_wl: list[float] = [float(wl[0])]
+    for i in range(wl.size - 1):
+        w0 = float(wl[i])
+        w1 = float(wl[i + 1])
+        local_R = w0 / (w1 - w0) if w1 > w0 else np.inf
+        if local_R < min_R and np.isfinite(local_R) and w0 > 0.0:
+            dloglam = 1.0 / min_R
+            n_fill = int(np.floor(np.log(w1 / w0) / dloglam))
+            for k in range(1, n_fill + 1):
+                w_ins = w0 * np.exp(k * dloglam)
+                if w_ins < w1 * (1.0 - 1e-15):
+                    out_wl.append(float(w_ins))
+        out_wl.append(w1)
 
-    lmax = np.max(wavelengths)
-    lmin = np.min(wavelengths)
-    n_steps = int(np.floor(np.log(lmax / lmin) / dloglam)) + 1
+    new_wl = np.asarray(out_wl, dtype=np.float64)
+    if new_wl.size == wl.size:
+        return wavelengths, flux
 
-    new_wavelengths = (
-        lmin * np.exp(np.arange(n_steps) * dloglam)
+    interp = PchipInterpolator(wl, fl, extrapolate=False)
+    new_fl = np.asarray(interp(new_wl), dtype=np.float64)
+    # Exact natives (avoid tiny PCHIP roundoff on retained samples).
+    native_idx = np.searchsorted(new_wl, wl)
+    native_idx = np.clip(native_idx, 0, new_wl.size - 1)
+    match = np.abs(new_wl[native_idx] - wl) <= (
+        np.finfo(np.float64).eps * np.maximum(1.0, np.abs(wl))
     )
+    new_fl[native_idx[match]] = fl[match]
 
-    interp_func = interp1d(wavelengths, flux, kind="linear", fill_value=0.)
-    new_flux = interp_func(new_wavelengths) * flux.unit
-
+    wl_unit = getattr(wavelengths, "unit", None) or u.micron
+    fl_unit = getattr(flux, "unit", None)
+    new_wavelengths = new_wl * wl_unit
+    new_flux = new_fl * fl_unit if fl_unit is not None else new_fl
     return new_wavelengths, new_flux
 
 

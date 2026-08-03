@@ -225,33 +225,13 @@ def _sync_koa_store(
     if not missing:
         return
     logger.info("Downloading %d missing KOA calibration file(s).", len(missing))
-    failed: list[str] = []
     for i, rec in enumerate(missing, 1):
         filename = rec.get("filename", "?")
         try:
             local_path, _ = store.get_calibration(cal=rec)
-            # HISPECCalibrationStore.get_calibration already verifies on-disk.
-            logger.info(
-                "[%d/%d] Verified KOA cal: %s (%s bytes)",
-                i,
-                len(missing),
-                local_path or filename,
-                os.path.getsize(local_path) if local_path and os.path.isfile(local_path) else "?",
-            )
+            logger.info("[%d/%d] Downloaded KOA cal: %s", i, len(missing), local_path or filename)
         except Exception as e:
-            failed.append(str(filename))
             logger.warning("[%d/%d] Failed to download KOA cal %s: %s", i, len(missing), filename, e)
-    still_missing = store.get_missing_local_files() or []
-    if skip_cal_types:
-        still_missing = [r for r in still_missing if r.get("cal_type") not in set(skip_cal_types)]
-    if failed or still_missing:
-        names = [r.get("filename") or r.get("id") for r in still_missing]
-        raise RuntimeError(
-            f"KOA calibration download incomplete: {len(failed)} failed, "
-            f"{len(still_missing)} still missing ({names[:5]}). "
-            "Auth/metadata sync can succeed without FITS files on disk; "
-            "check KOA_CALIBRATION_CACHE writability and Keck calibrations API access."
-        )
 
 
 def _open_calibration_file(key: str, path: str) -> datamodels.CalibrationModel:
@@ -504,6 +484,20 @@ def log_stage1_trace_bundle_status(bundle: E2ECalibrationBundle) -> None:
         "generated on-the-fly by ProcessFiberflatsPipeline from dummy fiberflats.",
         missing,
     )
+
+
+def log_missing_stage1_trace_masters(bundle: E2ECalibrationBundle) -> None:
+    """Log which Stage 1 trace/fiberflat masters are still missing from KOA/config."""
+    if bundle.has_master_trace_bundle:
+        return
+    missing = [k for k in STAGE1_TRACE_KEYS if getattr(bundle, k) is None]
+    if missing:
+        logger.warning(
+            "KOA/config trace bundle incomplete (missing %s); dummy fiberflat "
+            "simulation and ProcessFiberflatsPipeline will run unless paths are "
+            "provided in calibration_config.",
+            missing,
+        )
 
 
 def complete_stage0_calibrations(

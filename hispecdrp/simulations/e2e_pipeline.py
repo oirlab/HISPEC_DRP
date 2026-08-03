@@ -100,6 +100,10 @@ class E2EConfig:
     template_mag_from_2mass: bool = True
     template_filename: str | None = None
     stellar_rv_mask_path: str | None = None
+    # Optional Stage-2 primitive overrides merged on top of defaults (e.g. stellar_rv
+    # ``v_step_coarse``, ``ccf_zb_from_barycorr``). Nested dicts are shallow-merged per
+    # primitive name.
+    stage2_prim_args: dict[str, Any] | None = None
     overwrite_ramp: bool = True
     make_preview_html: bool = True
     # Dummy fiberflat simulation (ProcessFiberflatsPipeline input)
@@ -132,6 +136,12 @@ class E2EConfig:
     # Infinite-S/N RV validation: noiseless rate maps, HDF-truth Stage-1 cals, high-precision RV.
     infinite_snr_rv_validation: bool = False
     infinite_snr_rv_assert: bool = False
+    # Sim-HDF WAVESOL source when ``stage1_trace_source="sim_hdf"``:
+    #   ``"auto"``             — packaged line-ZP if present, else runtime line-ZP, else HDF
+    #   ``"packaged_line_zp"`` — load ``hispecdrp/data/wavesol/*.sim_hdf_wavesol.line_zp.fits``
+    #   ``"hdf_line_zp"``      — runtime absorption ZP on the science rate map
+    #   ``"hdf"``              — deposit-inverse geometric WAVE only
+    wavesol_source: Literal["auto", "packaged_line_zp", "hdf_line_zp", "hdf"] = "auto"
 
 
 @dataclass
@@ -394,6 +404,7 @@ def materialize_stage1_calibrations(
                     extraction_aperture=extraction_aperture,
                     rate_map_for_wavesol_zp=rate_map_for_wavesol_zp,
                     wavesol_zp_known_rv_m_s=float(wavesol_zp_known_rv_m_s),
+                    wavesol_source=getattr(config, "wavesol_source", "auto") or "auto",
                 )
                 ff_bundle = {
                     "trace_pos": bundle["trace_pos"],
@@ -405,6 +416,8 @@ def materialize_stage1_calibrations(
                     cal_bundle.sources[key] = STAGE1_TRACE_SOURCE_SIM_HDF
                 if bundle.get("wavesol_comb_info"):
                     cal_bundle.sources["wavesol"] = f"{STAGE1_TRACE_SOURCE_SIM_HDF}+injected_comb"
+                elif (bundle.get("wavesol_zp_info") or {}).get("source") == "packaged_line_zp":
+                    cal_bundle.sources["wavesol"] = f"{STAGE1_TRACE_SOURCE_SIM_HDF}+packaged_line_zp"
                 elif bundle.get("wavesol_zp_info"):
                     cal_bundle.sources["wavesol"] = f"{STAGE1_TRACE_SOURCE_SIM_HDF}+line_zp"
                 else:
@@ -600,7 +613,9 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     gaia_target: e2e_gaia.E2EGaiaTarget | None = None
     injected_rv_km_s = config.radial_velocity_km_s
     doppler_rv_km_s = config.radial_velocity_km_s
-    target_meta: dict | None = None
+    # Non-Gaia sims are painted in the topocentric frame; stamp BERV=0 so Stage-2
+    # barycorr is a no-op (CCF zb from barycorr remains zero).
+    target_meta: dict | None = {"force_berv_m_s": 0.0}
     ramp_mjd_start = e2e_gaia.resolve_e2e_mjd_start(config.mjd_start)
     if config.use_gaia_target:
         exposure_mid_mjd = e2e_gaia.exposure_mid_mjd(
@@ -724,6 +739,19 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
 
         stage1_prim_args = merge_infinite_snr_stage1_prim_args(None)
         stage2_prim_args = merge_infinite_snr_stage2_prim_args(None)
+    elif config.stage2_prim_args:
+        import copy
+
+        # Merge overrides onto Stage-2 defaults so blaze/barycorr still run.
+        stage2_prim_args = e2e_support.get_default_stage2_prim_args(
+            max_cores=config.max_cores
+        )
+        for prim_name, overrides in config.stage2_prim_args.items():
+            stage2_prim_args.setdefault(prim_name, {})
+            if isinstance(overrides, dict):
+                stage2_prim_args[prim_name].update(copy.deepcopy(overrides))
+            else:
+                stage2_prim_args[prim_name] = overrides
     logger.info("E2E: Stage 0 (ramp → rate/slope).")
     stage0_model = run_stage0_simulation(
         ramp_model,
@@ -772,7 +800,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     if config.run_stage2 and stage1_model is not None and ff_bundle is not None:
         logger.info("E2E: Stage 2.")
         _rv_center_m_s: float | None = None
-        if gaia_target is not None and np.isfinite(float(injected_rv_km_s)):
+        if np.isfinite(float(injected_rv_km_s)):
             _rv_center_m_s = float(injected_rv_km_s) * 1000.0
             logger.info(
                 "E2E: stellar RV centered uniform grid ccf_input_velocity=%.3f m/s (%.4f km/s)",
@@ -847,6 +875,177 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         calibration_sources=dict(cal_bundle.sources),
         infinite_snr_rv_evaluation=infinite_snr_rv_evaluation,
     )
+
+
+def run_pipeline_example(
+    output_dir: str,
+    *,
+    fibers: list[int] | None = None,
+    spectrograph: str = "BSPEC",
+    template_filename: str = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5",
+    template_mag_ab: float = 3.05,
+) -> E2EResult:
+    """
+    Minimal-entry e2e run used by ``pipeline_example.ipynb``.
+
+    Uses sim-HDF Stage-1 products, the packaged line-ZP WAVE (including baked
+    CCF-order refine), and the e2erval mask so order-averaged stellar RV at
+    injected RV=0 reaches the demonstrated ≪10 cm/s performance. Only
+    ``output_dir`` and ``fibers`` are typically changed by notebook users.
+
+    Default brightness is AB=3.05 with Poisson noise and uint16 ramps: the
+    brightest level at the default 15.3 s integration that stays unsaturated
+    (AB=3 clips peak cores). Peak last-read DN sits near ~64k of 65535.
+    """
+    fibs = [int(f) for f in (fibers if fibers is not None else [2])]
+    fibs = [f for f in fibs if f in (1, 2, 3)]
+    if not fibs:
+        raise ValueError("fibers must include at least one of 1, 2, 3")
+
+    config = E2EConfig(
+        output_dir=str(output_dir),
+        spectrograph=str(spectrograph).upper(),
+        n_reads=10,
+        readtime=1.7,
+        max_cores=1,
+        fibers=fibs,
+        fiberflat_fibers=list(fibs),
+        stage1_trace_source="sim_hdf",
+        wavesol_source="packaged_line_zp",
+        use_master_calibrations=False,
+        connect_remote=False,
+        sync_caldb_first=False,
+        download_missing_koa=False,
+        use_gaia_target=False,
+        radial_velocity_km_s=0.0,
+        template_filename=template_filename,
+        template_mag_ab=float(template_mag_ab),
+        template_mag_from_2mass=False,
+        # Default stellar-RV mask is the packaged e2erval product.
+        stellar_rv_mask_path=None,
+        poisson_noise=True,
+        convert_to_uint16=True,
+        run_stage1=True,
+        run_stage2=True,
+        make_preview_html=True,
+        overwrite_ramp=True,
+        stage2_prim_args={
+            "stellar_rv": {
+                "do_fibers": list(fibs),
+                "ccf_input_velocity": 0.0,
+                "save_preview": True,
+                "preview_write_png": False,
+            },
+        },
+    )
+    return run_e2e_simulation(config)
+
+
+def prepare_pipeline_example_stage1(
+    output_dir: str,
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | None = None,
+    extraction_aperture: float = 10.0,
+    reuse_existing: bool = True,
+) -> dict[str, Any]:
+    """
+    Build sim-HDF Stage-1 products for ``pipeline_example.ipynb``.
+
+    Returns ``trace_pos``, ``trace_prof``, ``fiberflat``, and packaged line-ZP
+    ``wavesol`` so Stage 1/2 can use the demonstrated fiber-2 RV path instead of
+    a generic KOA wavelength solution.
+
+    With ``reuse_existing=True`` (default), loads Stage-1 masters from
+    ``<output_dir>/cals`` when present, otherwise reuses any existing fiberflat
+    rate frames there and only simulates missing fibers. Fresh products are
+    written back under ``cals/`` for the next call.
+    """
+    from .simulate_up_the_ramp import (
+        create_simulated_calibration_models,
+        load_cached_sim_stage1_masters,
+        save_sim_stage1_masters,
+        sim_stage1_masters_exist,
+    )
+
+    out_dir_abs = e2e_support.ensure_output_directory(output_dir)
+    fibs = [int(f) for f in (fibers if fibers is not None else [2]) if int(f) in (1, 2, 3)]
+    if not fibs:
+        raise ValueError("fibers must include at least one of 1, 2, 3")
+    spectrograph = str(spectrograph).upper()
+    rate = np.asarray(rate_map, dtype=np.float64)
+    if rate.ndim != 2:
+        raise ValueError(f"rate_map must be 2-D, got shape {rate.shape}")
+
+    ramp_mjd = e2e_gaia.resolve_e2e_mjd_start(None)
+    stage1_meta = {"mjd_start": float(ramp_mjd)}
+
+    if reuse_existing and sim_stage1_masters_exist(
+        out_dir_abs,
+        spectrograph,
+        fibs,
+        extraction_aperture=float(extraction_aperture),
+    ):
+        logger.info(
+            "Reusing cached sim-HDF Stage-1 masters under %s (fibers=%s).",
+            e2e_support.calibration_dir(out_dir_abs),
+            fibs,
+        )
+        cached = load_cached_sim_stage1_masters(
+            out_dir_abs, spectrograph, meta=stage1_meta
+        )
+        return {
+            "trace_pos": cached["trace_pos"],
+            "trace_prof": cached["trace_prof"],
+            "fiberflat": cached["fiberflat"],
+            "wavesol": cached["wavesol"],
+            "wavesol_zp_info": {"source": "cached_stage1_masters"},
+            "from_cache": True,
+        }
+
+    calibration_models = create_simulated_calibration_models(rate.shape)
+    stage0_prim_args = get_default_stage0_prim_args(max_cores=1)
+    # Use native PRF (same as science paint). pyechelle + continuous R~3e5
+    # continuum can hang for tens of minutes with no FITS progress.
+    ff_paths = create_dummy_fiberflat_rate_files(
+        fibs,
+        spectrograph,
+        out_dir_abs,
+        calibration_models,
+        readtime=1.7,
+        n_reads=10,
+        max_cores=1,
+        stage0_prim_args=stage0_prim_args,
+        reuse_existing=bool(reuse_existing),
+        rate_map_method="native",
+    )
+    bundle = materialize_stage1_bundle_from_sim_hdf(
+        spectrograph=spectrograph,
+        fiberflat_rate_paths=ff_paths,
+        meta=stage1_meta,
+        extraction_aperture=float(extraction_aperture),
+        rate_map_for_wavesol_zp=rate,
+        wavesol_source="packaged_line_zp",
+    )
+    save_sim_stage1_masters(
+        out_dir_abs,
+        spectrograph,
+        trace_pos=bundle["trace_pos"],
+        trace_prof=bundle["trace_prof"],
+        fiberflat=bundle["fiberflat"],
+        fibers=fibs,
+        extraction_aperture=float(extraction_aperture),
+    )
+    return {
+        "trace_pos": bundle["trace_pos"],
+        "trace_prof": bundle["trace_prof"],
+        "fiberflat": bundle["fiberflat"],
+        "wavesol": bundle["wavesol"],
+        "wavesol_zp_info": bundle.get("wavesol_zp_info"),
+        "from_cache": False,
+    }
+
 
 # ========================================================================
 # Sim-HDF Stage-1 calibrations (formerly sim_hdf_calibrations.py)
@@ -1534,6 +1733,11 @@ def create_fiberflat_model_from_rate_maps(
         setattr(ff, f"spec_var_rnoise_fib{fib}", np.zeros_like(spec_arr, dtype=np.float32))
         setattr(ff, f"spec_dq_fib{fib}", np.zeros(spec_arr.shape, dtype=np.uint32))
         setattr(ff, f"wave_fib{fib}", np.stack(wave_rows, axis=0).astype(np.float64))
+        setattr(ff.meta, f"object_fiber{fib}", "WHITELIGHT")
+
+    for f in (1, 2, 3):
+        if getattr(ff, f"spec_fib{f}", None) is None and getattr(ff.meta, f"object_fiber{f}", None) is None:
+            setattr(ff.meta, f"object_fiber{f}", "BLOCKED")
 
     return ff
 
@@ -1564,6 +1768,88 @@ def _parabolic_min_nearest(
     return float(_parabolic_minimum_wavelength_um(xx, yy, i0))
 
 
+def refine_sim_hdf_wavesol_from_ccf_order_rvs(
+    wavesol: LFCWavesolModel,
+    *,
+    fiber: int,
+    order_rvs_m_s: dict[int, float] | np.ndarray,
+    order_vec: np.ndarray | list[int] | None = None,
+    known_rv_m_s: float = 0.0,
+    spectrograph: str | None = None,
+) -> dict[str, Any]:
+    """
+    Apply a per-order Doppler scale so CCF order RVs land on ``known_rv_m_s``.
+
+    Line-centroid WAVE ZP removes the bulk PSF deposition shift, but the
+    line-mask CCF still sees order-dependent residuals (mask weighting / blends /
+    LSF). For a reference exposure at known injected RV this folds those
+    residuals into ``WAVE_FIB`` (data-model calibration, not a chromatic RV
+    fit at science time)::
+
+    ``order_rvs_m_s`` maps echelle order → measured CCF RV (m/s), or a length-N
+    array aligned with ``order_vec`` / ``wave_fib`` rows.
+    """
+    import scipy.constants
+
+    fib = int(fiber)
+    wave_attr = f"wave_fib{fib}"
+    wave_arr = getattr(wavesol, wave_attr, None)
+    if wave_arr is None:
+        raise ValueError(f"wavesol missing {wave_attr}")
+    wave_arr = np.asarray(wave_arr, dtype=np.float64).copy()
+    if order_vec is None:
+        if spectrograph is None:
+            raise ValueError("order_vec or spectrograph is required")
+        order_vec = np.asarray(_order_list(str(spectrograph).upper()), dtype=int)
+    else:
+        order_vec = np.asarray(order_vec, dtype=int).ravel()
+    if wave_arr.shape[0] != order_vec.size:
+        raise ValueError(
+            f"wave rows ({wave_arr.shape[0]}) != order_vec ({order_vec.size})"
+        )
+
+    if isinstance(order_rvs_m_s, dict):
+        rv_by_order = {int(k): float(v) for k, v in order_rvs_m_s.items()}
+    else:
+        rvs = np.asarray(order_rvs_m_s, dtype=np.float64).ravel()
+        if rvs.size != order_vec.size:
+            raise ValueError("order_rvs_m_s array must match order_vec length")
+        rv_by_order = {int(od): float(rv) for od, rv in zip(order_vec, rvs)}
+
+    c_mps = float(scipy.constants.c)
+    known = float(known_rv_m_s)
+    applied: dict[int, float] = {}
+    for oi, od in enumerate(order_vec):
+        if int(od) not in rv_by_order:
+            continue
+        rv = float(rv_by_order[int(od)])
+        if not np.isfinite(rv):
+            continue
+        # Residual vs truth absorbed into WAVE scale.
+        dv = rv - known
+        if not np.isfinite(dv) or abs(dv) < 1.0e-12:
+            applied[int(od)] = 0.0
+            continue
+        wave_arr[oi] = wave_arr[oi] * (1.0 - dv / c_mps)
+        applied[int(od)] = float(dv)
+
+    setattr(wavesol, wave_attr, wave_arr)
+    vals = list(applied.values())
+    return {
+        "fiber": fib,
+        "known_rv_m_s": known,
+        "n_orders": len(applied),
+        "median_dv_m_s": float(np.median(vals)) if vals else float("nan"),
+        "mad_dv_m_s": (
+            float(np.median(np.abs(np.asarray(vals) - np.median(vals))))
+            if vals
+            else float("nan")
+        ),
+        "per_order_dv_m_s": applied,
+        "method": "ccf_order_scale",
+    }
+
+
 def refine_sim_hdf_wavesol_line_zeropoint(
     wavesol: LFCWavesolModel,
     rate_map: np.ndarray,
@@ -1571,29 +1857,30 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     spectrograph: str,
     fibers: list[int] | tuple[int, ...] | None = None,
     fiber: int | None = None,
-    n_lines_per_order: int = 25,
+    n_lines_per_order: int = 40,
     min_depth: float = 0.15,
     fit_half_win_pix: float = 8.0,
     known_rv_m_s: float = 0.0,
+    poly_deg: int = 2,
 ) -> dict[str, Any]:
     """
-    Apply a per-fiber, per-order vacuum-wavelength zero-point so WAVE matches
-    absorption centers measured on a simulated rate map.
+    Apply a per-fiber, per-order absorption-line WAVE correction from a rate map.
 
-    The geometric HDF → WAVE mapping already matches paint coordinates, but
-    LSF/PSF deposition shifts apparent absorption minima by tens of m/s. This
-    measures that mean shift (multi-line median vs BT-Settl) **independently for
-    each fiber** (default 1, 2, 3) and multiplies each order's ``WAVE_FIB`` by
-    ``(1 - dv/c)`` so labeled λ at observed line pixels matches template centers.
+    The geometric HDF → WAVE mapping matches paint coordinates, but LSF/PSF
+    deposition shifts apparent absorption minima by tens of m/s (and can leave a
+    mild spectral-axis trend). For each fiber/order this measures line Δv vs
+    BT-Settl and corrects ``WAVE_FIB``:
 
-    When the rate map was built with a known injected stellar RV, pass
-    ``known_rv_m_s`` so that Doppler shift is **not** absorbed into WAVE
-    (only the residual LSF/paint offset is calibrated).
+    * ``poly_deg == 0`` — constant scale ``WAVE *= (1 - med/c)`` (legacy ZP).
+    * ``poly_deg >= 1`` — pixel-dependent Doppler scale
+      ``WAVE[p] *= (1 - dv_poly(p)/c)`` with ``dv_poly`` a degree-``poly_deg``
+      fit to line residuals (default 2).
 
-    Fibers with too little rate-map flux to measure a ZP are left unchanged
-    (deposit-inverse WAVE preserved).
+    When the rate map includes a known injected stellar RV, pass
+    ``known_rv_m_s`` so that Doppler shift is **not** absorbed into WAVE.
 
-    Does **not** modify the HDF spectrograph model file.
+    Fibers with too little rate-map flux are left unchanged. Does **not** modify
+    the HDF spectrograph model file.
     """
     import scipy.constants
 
@@ -1613,6 +1900,9 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     rate = np.asarray(rate_map, dtype=np.float64)
     if rate.ndim != 2:
         raise ValueError(f"rate_map must be 2-D, got shape {rate.shape}")
+    poly_deg = int(poly_deg)
+    if poly_deg < 0 or poly_deg > 3:
+        raise ValueError(f"poly_deg must be 0..3; got {poly_deg}")
 
     grids = get_sim_hdf_trace_grids(spectrograph)
     order_list = _order_list(spectrograph)
@@ -1632,7 +1922,7 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     per_fiber: dict[int, dict[str, Any]] = {}
 
     for fib in fiber_list:
-        per_order: dict[int, dict[str, float]] = {}
+        per_order: dict[int, dict[str, Any]] = {}
         wave_attr = f"wave_fib{fib}"
         wave_arr = getattr(wavesol, wave_attr, None)
         if wave_arr is None:
@@ -1675,6 +1965,8 @@ def refine_sim_hdf_wavesol_line_zeropoint(
             dlam = float(np.nanmedian(np.abs(np.diff(wave[np.isfinite(wave)]))))
             half = fit_half_win_pix * max(dlam, 1e-9)
             ideal = np.interp(wave, tw, tf, left=np.nan, right=np.nan)
+            pix = np.arange(wave.size, dtype=np.float64)
+            pix_lines: list[float] = []
             dvs: list[float] = []
             for c_native in pick:
                 lam_rest = _parabolic_min_nearest(wave, ideal, float(c_native), half)
@@ -1686,37 +1978,75 @@ def refine_sim_hdf_wavesol_line_zeropoint(
                     continue
                 if abs(lam_m - lam_expect) > 2.5 * dlam:
                     continue
-                dvs.append(float(delta_wave_to_delta_vel(lam_m - lam_expect, lam_expect)))
+                # Pixel of the expected line on the current WAVE grid.
+                p_exp = float(np.interp(lam_expect, wave[ok], pix[ok]))
+                dv = float(delta_wave_to_delta_vel(lam_m - lam_expect, lam_expect))
+                pix_lines.append(p_exp)
+                dvs.append(dv)
             if len(dvs) < 3:
                 continue
-            med = float(np.median(dvs))
-            mad = float(np.median(np.abs(np.asarray(dvs) - med)))
-            wave_arr[oi] = wave * (1.0 - med / c_mps)
-            per_order[int(od)] = {
+            dvs_a = np.asarray(dvs, dtype=np.float64)
+            pix_a = np.asarray(pix_lines, dtype=np.float64)
+            med = float(np.median(dvs_a))
+            mad = float(np.median(np.abs(dvs_a - med)))
+            # MAD clip before polyfit / scale.
+            if mad > 0:
+                keep = np.abs(dvs_a - med) <= 4.0 * 1.4826 * mad
+            else:
+                keep = np.ones(dvs_a.shape, dtype=bool)
+            if int(keep.sum()) < 3:
+                keep = np.ones(dvs_a.shape, dtype=bool)
+            dvs_k = dvs_a[keep]
+            pix_k = pix_a[keep]
+            med = float(np.median(dvs_k))
+            mad = float(np.median(np.abs(dvs_k - med)))
+            deg_use = min(poly_deg, max(0, int(dvs_k.size) - 2))
+            order_info: dict[str, Any] = {
                 "dv_m_s": med,
                 "mad_m_s": mad,
-                "n_lines": float(len(dvs)),
+                "n_lines": float(len(dvs_k)),
+                "poly_deg": int(deg_use),
             }
+            if deg_use <= 0:
+                wave_arr[oi] = wave * (1.0 - med / c_mps)
+                order_info["poly_coeffs"] = [med]
+            else:
+                coeffs, x_mid, x_half = _polyfit_scaled(pix_k, dvs_k, deg=deg_use)
+                dv_pix = _polyval_scaled(coeffs, pix, x_mid=x_mid, x_half=x_half)
+                wave_arr[oi] = wave * (1.0 - dv_pix / c_mps)
+                order_info["poly_coeffs"] = [float(c) for c in coeffs]
+                order_info["poly_x_mid"] = float(x_mid)
+                order_info["poly_x_half"] = float(x_half)
+                # Report residual after poly (should be ~0 median).
+                resid = dvs_k - _polyval_scaled(coeffs, pix_k, x_mid=x_mid, x_half=x_half)
+                order_info["dv_m_s"] = float(np.median(resid))
+                order_info["mad_m_s"] = float(np.median(np.abs(resid - np.median(resid))))
+                order_info["scale_dv_m_s"] = med
+            per_order[int(od)] = order_info
 
         if per_order:
             setattr(wavesol, wave_attr, wave_arr.astype(np.float64))
-        med_all = (
-            float(np.median([v["dv_m_s"] for v in per_order.values()]))
-            if per_order
-            else float("nan")
-        )
+        # Prefer scale_dv when present (poly residual medians are ~0 by construction).
+        scale_vals = [
+            float(v.get("scale_dv_m_s", v["dv_m_s"]))
+            for v in per_order.values()
+            if np.isfinite(float(v.get("scale_dv_m_s", v["dv_m_s"])))
+        ]
+        med_all = float(np.median(scale_vals)) if scale_vals else float("nan")
         per_fiber[int(fib)] = {
             "fiber": int(fib),
             "per_order": per_order,
             "median_dv_m_s": med_all,
             "n_orders": len(per_order),
+            "poly_deg": int(poly_deg),
         }
         logger.info(
-            "Sim HDF wavesol line ZP: fiber=%d n_orders=%d median_dv=%.1f m/s "
-            "(known_rv=%.1f m/s; WAVE rescale)",
+            "Sim HDF wavesol line ZP: fiber=%d n_orders=%d median_scale_dv=%.1f m/s "
+            "poly_deg=%d (known_rv=%.1f m/s)",
             fib,
             len(per_order),
             med_all,
+            int(poly_deg),
             float(known_rv_m_s),
         )
 
@@ -1734,6 +2064,7 @@ def refine_sim_hdf_wavesol_line_zeropoint(
         "per_order": per_fiber.get(primary, {}).get("per_order", {}),
         "median_dv_m_s": float(np.median(medians)) if medians else float("nan"),
         "known_rv_m_s": float(known_rv_m_s),
+        "poly_deg": int(poly_deg),
     }
 
 
@@ -1750,6 +2081,7 @@ def materialize_stage1_bundle_from_sim_hdf(
     wavesol_from_injected_comb: bool = False,
     wavesol_comb_n_lines: int = 100,
     wavesol_comb_poly_deg: int = 4,
+    wavesol_source: Literal["auto", "packaged_line_zp", "hdf_line_zp", "hdf"] = "auto",
 ) -> dict[str, Any]:
     """
     Return ``trace_pos``, ``trace_prof``, ``fiberflat``, and ``wavesol`` from HDF truth.
@@ -1757,25 +2089,31 @@ def materialize_stage1_bundle_from_sim_hdf(
     ``trace_pos`` uses the oriented HDF ``y_pos`` grids (full spectral coverage).
     Fiberflat rate maps are still box-extracted for the blaze / fiberflat product.
 
-    Wavelength solution (in priority order):
-      1. Deposit-inverse HDF WAVE (default) — exact inverse of the native
-         ``λ → x`` map; geometry floor ≪10 cm/s.  Prefer this for simulations.
-      2. Optional injected-comb *validation* when ``wavesol_from_injected_comb``
-         (does not replace deposit-inverse WAVE with PSF-centroid polynomials).
-      3. Else absorption-line zero-point on ``rate_map_for_wavesol_zp`` when provided
-         (per fiber; default fibers 1–3).
+    Wavelength solution (see ``wavesol_source``):
+      * ``packaged_line_zp`` — prebuilt FITS under ``hispecdrp/data/wavesol/``
+        (deposit-inverse + absorption line ZP; preferred for RV e2e).
+      * ``hdf_line_zp`` — runtime ZP on ``rate_map_for_wavesol_zp``.
+      * ``hdf`` — deposit-inverse geometric WAVE only.
+      * ``auto`` — packaged if present, else runtime line-ZP, else HDF.
+      * ``wavesol_from_injected_comb`` — validation only (deposit-inverse kept).
 
     ``wavesol_zp_fibers`` selects which fibers get line-ZP / comb validation
     (default ``1, 2, 3``). Legacy ``wavesol_zp_fiber`` still selects a single fiber.
     """
+    from .sim_hdf_wavesol_packaging import (
+        load_packaged_sim_hdf_line_zp_wavesol,
+        packaged_sim_hdf_wavesol_path,
+    )
+
     spectrograph = spectrograph.upper()
     zp_fibers = _normalize_fibers(fibers=wavesol_zp_fibers, fiber=wavesol_zp_fiber)
     trace_pos = create_tracepos_model_from_sim_hdf(spectrograph, meta=meta)
     trace_prof = create_traceprof_model_from_sim_hdf(spectrograph, meta=meta)
-    # Deposit-inverse WAVE: WAVE(row_deposit(λ)) = λ to ≪1 cm/s.
-    wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
     wavesol_zp_info: dict[str, Any] | None = None
     wavesol_comb_info: dict[str, Any] | None = None
+    packaged_path = packaged_sim_hdf_wavesol_path(spectrograph)
+    src = str(wavesol_source or "auto").lower()
+
     if wavesol_from_injected_comb:
         # Validation only — comb centroids must not redefine simulation WAVE.
         comb = calibrate_wavesol_from_injected_comb(
@@ -1797,7 +2135,31 @@ def materialize_stage1_bundle_from_sim_hdf(
             "fibers": comb.get("fibers", zp_fibers),
             "fiber": comb.get("fiber"),
         }
-    elif rate_map_for_wavesol_zp is not None:
+    elif src == "packaged_line_zp" or (src == "auto" and packaged_path.is_file()):
+        wavesol = load_packaged_sim_hdf_line_zp_wavesol(spectrograph, meta=meta)
+        wavesol_zp_info = {
+            "source": "packaged_line_zp",
+            "path": str(packaged_path),
+            "median_dv_m_s": float("nan"),
+        }
+        meta_json = packaged_path.with_suffix(".json")
+        if meta_json.is_file():
+            try:
+                import json as _json
+
+                side = _json.loads(meta_json.read_text())
+                wavesol_zp_info["median_dv_m_s"] = side.get("median_dv_m_s")
+                wavesol_zp_info["sidecar"] = side
+            except Exception:
+                pass
+        logger.info(
+            "Sim HDF wavesol: using packaged line-ZP %s (median_dv=%s m/s)",
+            packaged_path,
+            wavesol_zp_info.get("median_dv_m_s"),
+        )
+    elif src in ("hdf_line_zp", "auto") and rate_map_for_wavesol_zp is not None:
+        # Deposit-inverse WAVE + runtime absorption ZP.
+        wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
         wavesol_zp_info = refine_sim_hdf_wavesol_line_zeropoint(
             wavesol,
             rate_map_for_wavesol_zp,
@@ -1805,6 +2167,14 @@ def materialize_stage1_bundle_from_sim_hdf(
             fibers=zp_fibers,
             known_rv_m_s=float(wavesol_zp_known_rv_m_s),
         )
+    elif src == "packaged_line_zp":
+        raise FileNotFoundError(
+            f"wavesol_source='packaged_line_zp' but missing {packaged_path}. "
+            "Regenerate with hispecdrp/data/wavesol/regenerate_sim_hdf_line_zp_wavesol.py"
+        )
+    else:
+        wavesol = create_wavelength_solution_model_from_sim_hdf(spectrograph, meta=meta)
+
     fiberflat = create_fiberflat_model_from_rate_maps(
         fiberflat_rate_paths,
         trace_pos,
@@ -1812,11 +2182,14 @@ def materialize_stage1_bundle_from_sim_hdf(
         meta=meta,
         extraction_aperture=extraction_aperture,
     )
-    wavesol_mode = (
-        "injected_comb"
-        if wavesol_comb_info
-        else ("line_zp" if wavesol_zp_info else "hdf")
-    )
+    if wavesol_comb_info:
+        wavesol_mode = "injected_comb"
+    elif wavesol_zp_info and wavesol_zp_info.get("source") == "packaged_line_zp":
+        wavesol_mode = "packaged_line_zp"
+    elif wavesol_zp_info:
+        wavesol_mode = "line_zp"
+    else:
+        wavesol_mode = "hdf"
     logger.info(
         "Sim HDF Stage-1 bundle ready spectrograph=%s n_fiberflat_rates=%d "
         "extraction_aperture=%.1f trace_pos=sim_hdf_y_pos wavesol=%s",

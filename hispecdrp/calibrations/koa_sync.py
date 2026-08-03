@@ -21,6 +21,7 @@ def verify_koa_calibrations(
     sync_remote: bool = True,
     download_missing: bool = True,
     require_complete: bool = True,
+    ignore_missing_cal_types: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """
     Sync KOA catalog metadata and download missing calibration files for one spectrograph.
@@ -47,22 +48,37 @@ def verify_koa_calibrations(
     require_complete : bool, optional
         If True (default), raise ``RuntimeError`` when any download fails or files
         remain missing after the pass. Set False to only return the summary.
+    ignore_missing_cal_types : list of str or None, optional
+        Calibration types that may be absent from the cache without failing
+        ``require_complete`` (and are skipped for download attempts). Useful for
+        simulation notebooks that register a packaged ``lfc_wavesol`` instead of
+        the remote geometric product. Example: ``["lfc_wavesol"]``.
 
     Returns
     -------
     dict
         Summary with keys ``spectrograph``, ``n_records``, ``cal_types``,
         ``n_missing``, ``n_downloaded``, ``n_failed``, ``downloaded``, ``failed``,
-        ``verified_paths``, ``still_missing``.
+        ``verified_paths``, ``still_missing``, ``ignored_missing``.
     """
     spec = str(spectrograph).strip().upper()
     if spec not in ("BSPEC", "RSPEC"):
         raise ValueError(f"spectrograph must be BSPEC or RSPEC, got {spectrograph!r}")
 
+    ignore_types = {
+        str(t).strip().lower()
+        for t in (ignore_missing_cal_types or ())
+        if str(t).strip()
+    }
+
+    def _ignored(rec: dict) -> bool:
+        return str(rec.get("cal_type", "")).strip().lower() in ignore_types
+
     downloaded: list[str] = []
     verified_paths: list[str] = []
     failed: list[dict[str, str]] = []
     still_missing: list[str] = []
+    ignored_missing: list[str] = []
 
     with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
         if sync_remote:
@@ -81,11 +97,25 @@ def verify_koa_calibrations(
 
         missing: list[dict] = []
         if download_missing:
-            missing = [
+            missing_all = [
                 r
                 for r in (store.get_missing_local_files() or [])
                 if str(r.get("spectrograph", "")).upper() == spec
             ]
+            ignored_missing = [
+                str(r.get("filename") or r.get("id") or "?")
+                for r in missing_all
+                if _ignored(r)
+            ]
+            missing = [r for r in missing_all if not _ignored(r)]
+            if ignored_missing:
+                logger.info(
+                    "Ignoring %d missing %s calibration(s) of type(s) %s: %s",
+                    len(ignored_missing),
+                    spec,
+                    sorted(ignore_types),
+                    ignored_missing[:5],
+                )
             if missing:
                 logger.info(
                     "Found %d %s calibration file(s) in the local DB but missing from "
@@ -125,10 +155,20 @@ def verify_koa_calibrations(
                     )
 
             # Re-scan so we catch zip-basename mismatches and silent no-ops.
+            still_missing_recs = [
+                r
+                for r in (store.get_missing_local_files() or [])
+                if str(r.get("spectrograph", "")).upper() == spec and not _ignored(r)
+            ]
             still_missing = [
                 str(r.get("filename") or r.get("id") or "?")
+                for r in still_missing_recs
+            ]
+            # Refresh ignored list from the full re-scan.
+            ignored_missing = [
+                str(r.get("filename") or r.get("id") or "?")
                 for r in (store.get_missing_local_files() or [])
-                if str(r.get("spectrograph", "")).upper() == spec
+                if str(r.get("spectrograph", "")).upper() == spec and _ignored(r)
             ]
 
         rows = store.local_db.query() or []
@@ -148,16 +188,18 @@ def verify_koa_calibrations(
         "failed": failed,
         "verified_paths": verified_paths,
         "still_missing": still_missing,
+        "ignored_missing": ignored_missing,
     }
     logger.info(
         "%s caldb: %d record(s); downloaded %d/%d missing file(s) (%d failed); "
-        "still_missing=%d; types=%s",
+        "still_missing=%d; ignored_missing=%d; types=%s",
         spec,
         summary["n_records"],
         summary["n_downloaded"],
         summary["n_missing"],
         summary["n_failed"],
         len(still_missing),
+        len(ignored_missing),
         summary["cal_types"],
     )
     if require_complete and (failed or still_missing):

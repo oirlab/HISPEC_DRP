@@ -55,6 +55,30 @@ def test_calc_barycorr(tmp_path, datadir):
     assert -30_000 < berv_out < 30_000
 
 
+def test_force_berv_m_s_skips_barycorrpy():
+    """Simulated exposures can stamp BERV exactly without calling barycorrpy."""
+    mjd_utc = 60577.0
+    meta = {
+        "target_name": "sim_rv0",
+        "force_berv_m_s": 0.0,
+        "mjd_mid": mjd_utc,
+    }
+    input_model = datamodels.L2Model(meta=meta)
+    num_orders = len(input_model.make_order_vec())
+    npix = 64
+    input_model.spec_fib1 = np.zeros((num_orders, npix), dtype=np.float64)
+    input_model.spec_err_fib1 = np.ones((num_orders, npix), dtype=np.float64)
+    input_model.spec_dq_fib1 = np.zeros((num_orders, npix), dtype=np.uint32)
+    input_model.mid_time_fib1 = np.full((num_orders, npix), mjd_utc, dtype=np.float64)
+
+    output_model = BarycenterCorrectionPrimitive().apply(input_model)
+    bc_table = output_model.barycorr_fib1
+    assert bc_table is not None
+    assert float(bc_table["BERV"][0]) == 0.0
+    assert float(bc_table["MJDUTC"][0]) == mjd_utc
+    assert float(bc_table["MBJD"][0]) == mjd_utc
+
+
 def test_berv_m_s_to_ccf_zb_units():
     from hispecdrp.primitives.barycenter_correction.barycenter_corr import (
         berv_m_s_to_ccf_zb,

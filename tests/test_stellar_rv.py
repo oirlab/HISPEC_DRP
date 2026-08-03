@@ -186,7 +186,6 @@ from hispecdrp.primitives.utils.ccf.ccf_utils import (
     rv_per_chunks_line_mask,
 )
 from hispecdrp.utils.line_mask_utils import (
-    DEFAULT_PACKAGED_LINE_MASK_BASENAME,
     MaskLines,
     package_data_masks_dir,
     packaged_default_line_mask_path,
@@ -233,10 +232,11 @@ _BTSETTL_WL_RANGE_UM = (0.95, 1.4)
 _DEFAULT_BSPEC_BTSETTL_CCF_LINE_MASK_ORDER = 139
 # lte049 + polynomial L2 (same construction as line-mask smoke scripts)
 _BTSETTL_LTE049_POLY_COEFS = np.array([0.0001, -0.001, 0.01, 0.05, 1.0])
-# Fixed lte049 BT-Settl template + paired **delta** mask (same basename as
-# :data:`hispecdrp.utils.line_mask_utils.DEFAULT_PACKAGED_LINE_MASK_BASENAME`).
+# Fixed lte049 BT-Settl template + paired depth-weighted **delta** mask.
+# Keep this on the classic ``*.delta.mas`` product (not ``e2erval`` / packaged default):
+# these unit tests calibrate chunk counts and RV recovery on that mask.
 LTE049_BTSETTL_SPEC_H5 = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
-LTE049_BTSETTL_MASK_MAS = DEFAULT_PACKAGED_LINE_MASK_BASENAME
+LTE049_BTSETTL_MASK_MAS = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"
 
 # ``ccf_parabolic_vertex_n_samples`` (odd, LSTSQ parabolic vertex on the mask CCF).
 # Offline sweep: ``python tests/_scan_btsettl_parabolic_vertex_n_samples.py`` on the default
@@ -270,7 +270,10 @@ def _lte049_btsettl_spec_h5_path() -> str:
 
 def _lte049_btsettl_paired_mask_path() -> str:
     """Packaged lte049 template-derived **delta** line mask (``ccf_line_mask`` tests)."""
-    return packaged_default_line_mask_path()
+    path = package_data_masks_dir() / LTE049_BTSETTL_MASK_MAS
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing packaged BT-Settl delta mask: {path}")
+    return str(path)
 
 
 def _lte049_btsettl_paired_mask_path_tophat() -> str:

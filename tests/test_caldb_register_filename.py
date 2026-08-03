@@ -99,3 +99,73 @@ def test_create_wavelength_solution_model_from_sim_has_expected_cal_type(caldb_c
     )
     assert model.meta.cal_type == "lfc_wavesol"
     assert getattr(model, "wave_fib1", None) is not None
+
+
+def test_filter_version_latest_handles_none_and_str(caldb_cache):
+    """LATEST must not crash when the version family mixes None and string versions."""
+    from hispecdrp.calibrations.selectors import WavelengthSolutionSelector
+
+    sel = WavelengthSolutionSelector()
+    rows = [
+        {"cal_version": None, "filename": "geo.fits"},
+        {"cal_version": "001", "filename": "local.fits"},
+        {"cal_version": None, "filename": "geo2.fits"},
+    ]
+    chosen = sel._filter_version(rows, cal_version="LATEST")
+    assert len(chosen) == 1
+    assert chosen[0]["filename"] == "local.fits"
+
+
+def test_packaged_line_zp_preferred_over_geometric_lfc_wavesol(caldb_cache):
+    """Stage-1 selector must pick packaged line-ZP even if geometric is closer/first."""
+    from hispecdrp.calibrations.selectors import WavelengthSolutionSelector
+    from hispecdrp.simulations.sim_hdf_wavesol_packaging import (
+        PACKAGED_SIM_HDF_LINE_ZP_NOTE,
+        load_packaged_sim_hdf_line_zp_wavesol,
+        packaged_sim_hdf_wavesol_path,
+    )
+
+    if not packaged_sim_hdf_wavesol_path("BSPEC").is_file():
+        pytest.skip("packaged BSPEC line-ZP WAVE not present")
+
+    meta = {
+        "spectrograph": "BSPEC",
+        "instrument_era": "0.0.1",
+        "mjd_start": 60577.0,
+        "datetime_obs": astropy.time.Time(60577.0, format="mjd", scale="utc").isot,
+    }
+    # Geometric competitor registered first (same night / version family).
+    geometric = create_wavelength_solution_model_from_sim("BSPEC", meta=meta)
+    with HISPECCalibrationStore(connect_remote=False, sync_on_init=False) as store:
+        geo_path, geo_rec = store.register_calibration(
+            geometric, origin="LOCAL", new_version=True
+        )
+    assert geo_path and geo_rec.get("filename")
+    assert PACKAGED_SIM_HDF_LINE_ZP_NOTE not in str(geo_rec.get("note") or "")
+
+    pack_path, pack_rec = register_sim_lfc_wavesol(
+        "BSPEC", meta=meta, origin="LOCAL"
+    )
+    assert pack_path and pack_rec.get("filename")
+    assert PACKAGED_SIM_HDF_LINE_ZP_NOTE in str(pack_rec.get("note") or "")
+    assert pack_rec["filename"] != geo_rec["filename"]
+
+    query_meta = datamodels.RampModel(meta=dict(meta)).meta
+    with HISPECCalibrationStore(connect_remote=False, sync_on_init=False) as store:
+        resolved_path, resolved_rec = store.select_and_get_calibration(
+            query_meta, WavelengthSolutionSelector()
+        )
+    assert resolved_path is not None and os.path.isfile(resolved_path)
+    assert resolved_rec["filename"] == pack_rec["filename"]
+    assert PACKAGED_SIM_HDF_LINE_ZP_NOTE in str(resolved_rec.get("note") or "")
+
+    # Content must match the packaged arrays, not the geometric deposit-inverse.
+    packaged = load_packaged_sim_hdf_line_zp_wavesol("BSPEC")
+    resolved = datamodels.open(resolved_path)
+    import numpy as np
+
+    pack_w = np.asarray(packaged.wave_fib2, float)
+    got_w = np.asarray(resolved.wave_fib2, float)
+    ok = np.isfinite(pack_w) & np.isfinite(got_w)
+    dv = (got_w[ok] - pack_w[ok]) / pack_w[ok] * 2.99792458e8
+    assert abs(float(np.median(dv))) < 1.0
