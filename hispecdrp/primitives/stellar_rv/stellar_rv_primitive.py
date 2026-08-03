@@ -273,6 +273,7 @@ class StellarRVPrimitive(BasePrimitive):
         "template_wavelength": None,
         "template_flux": None,
         # --- Mask line list & mask-only analysis (ccf_line_mask): mask_* ---
+        # None → hispecdrp/data/masks packaged default (e2erval) via resolve_mask_path.
         "mask_path": None,
         "mask_wavelength": None,
         "mask_weight": None,
