@@ -23,7 +23,7 @@ def test_simulate_rate_map():
     fiber_1_wavelengths = np.arange(0.9, 2.5, 2.5e-6) * u.micron
     fiber_1_flux = np.ones_like(fiber_1_wavelengths.value) * 1e-14 * u.erg / u.s / u.cm**2 / u.micron
     fiber_23_wavelengths = np.arange(0.9, 2.5, 2.5e-3) * u.micron
-    fiber_23_flux = np.ones_like(fiber_23_wavelengths.value) * 1e-15 * u.erg / u.s / u.cm**2 / u.micron
+    fiber_23_flux = np.ones_like(fiber_23_wavelengths.value) * 1e-15 * u.erg / u.s 
 
     srm.set_fiber_spectrum(fiber_number=1, spectrum_wavelengths=fiber_1_wavelengths, spectrum_flux=fiber_1_flux, continuous=True)
     srm.set_fiber_spectrum(fiber_number=2, spectrum_wavelengths=fiber_23_wavelengths, spectrum_flux=fiber_23_flux, continuous=False)
