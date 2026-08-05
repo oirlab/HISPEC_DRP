@@ -82,9 +82,22 @@ def extract_spectrum_optimal(
             pix_range = (0, nx - 1)
             npix = nx
 
+    # Mock / sim L0s may omit optional companion arrays.
+    data_dtype = np.asarray(input_data).dtype
+    if input_err is None:
+        input_err = np.zeros((ny, nx), dtype=data_dtype)
+    if input_var_rnoise is None:
+        input_var_rnoise = np.zeros((ny, nx), dtype=data_dtype)
+    if input_var_poisson is None:
+        input_var_poisson = np.zeros((ny, nx), dtype=data_dtype)
+    if input_dq is None:
+        input_dq = np.zeros((ny, nx), dtype=np.uint32)
+    if input_mid_time is None:
+        input_mid_time = np.zeros((ny, nx), dtype=np.float64)
+
     # Default outputs
     if spec_output is None:
-        spec_output = np.full(npix, np.nan, dtype=input_data.dtype)
+        spec_output = np.full(npix, np.nan, dtype=data_dtype)
     if err_output is None:
         err_output = np.full(npix, np.nan, dtype=input_err.dtype)
     if var_rnoise_output is None:

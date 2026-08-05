@@ -1239,9 +1239,10 @@ def create_ramp_and_calibrations(
         spectrum_wavelengths to use an input spectrum.
     radial_velocity_km_s : float, optional
         Radial velocity in km/s to apply to the input spectrum before generating
-        the rate map (Doppler shift). Must be in the range -500 to 500. Applied
-        via SimulateRateMap.apply_radial_velocity before create_native_rate_map.
-        Default is 0.0.
+        the rate map (Doppler shift). Must be in the range -500 to 500. The
+        template is densified first, then shifted via
+        ``SimulateRateMap.apply_radial_velocity`` (``λ × (1+z)``) before
+        ``create_native_rate_map``. Default is 0.0.
     output_dir : str, optional
         Directory for saving the rate map when building the default rate map
         (when ``rate_map`` is None). Default is ".".
@@ -1327,8 +1328,9 @@ def create_ramp_and_calibrations(
             sort_idx = np.argsort(wl_val)
             wl = wl[sort_idx]
             flux = flux[sort_idx]
-        # Apply Doppler on the native template grid, then densify. Densify-before-RV
-        # plus a global linear rebuild used to downsample already-dense BSPEC lines.
+        # Densify the native template once, then Doppler-shift that densified
+        # grid (λ × (1+z)). Keep densify-only PCHIP (no global linear rebuild),
+        # which previously downsampled already-dense BSPEC BT-Settl lines.
         for f in fibers:
             if f in (1, 2, 3):
                 srm.set_fiber_spectrum(
@@ -1337,19 +1339,6 @@ def create_ramp_and_calibrations(
                     spectrum_flux=flux,
                     continuous=False,
                 )
-        if radial_velocity_km_s != 0.0:
-            if not (-500.0 <= radial_velocity_km_s <= 500.0):
-                raise ValueError(
-                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
-                )
-            rv_quantity = radial_velocity_km_s * u.km / u.s
-            logger.info(
-                "Applying template Doppler shift (topocentric) radial_velocity_km_s=%.6f",
-                float(radial_velocity_km_s),
-            )
-            for f in fibers:
-                if f in (1, 2, 3):
-                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
         from .simulate_rate_map import (
             _check_wavelength_sampling,
             _upsample_spectrum,
@@ -1363,7 +1352,7 @@ def create_ramp_and_calibrations(
             fl_f = fib["flux"]
             if not _check_wavelength_sampling(w_f, min_resolution=3e5):
                 logger.info(
-                    "Densifying fiber=%s spectrum to R>=3e5 after Doppler "
+                    "Densifying fiber=%s spectrum to R>=3e5 before Doppler "
                     "(PCHIP, densify-only)",
                     f,
                 )
@@ -1373,6 +1362,20 @@ def create_ramp_and_calibrations(
                 fib["wavelength"] = w_f
                 fib["flux"] = fl_f
             fib["continuous"] = True
+        if radial_velocity_km_s != 0.0:
+            if not (-500.0 <= radial_velocity_km_s <= 500.0):
+                raise ValueError(
+                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
+                )
+            rv_quantity = radial_velocity_km_s * u.km / u.s
+            logger.info(
+                "Applying densified-template Doppler shift (topocentric) "
+                "radial_velocity_km_s=%.6f",
+                float(radial_velocity_km_s),
+            )
+            for f in fibers:
+                if f in (1, 2, 3):
+                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
         rate_map = srm.create_native_rate_map(
             spectrograph=spectrograph, method="prf_convolution"
         )
@@ -1457,6 +1460,7 @@ def create_ramp_from_spectrum(
     spectrum_flux=None,
     radial_velocity_km_s: float = 0.0,
     barycentric_velocity_km_s: float | None = 0.0,
+    inject_rv_via: str = "spectrum",
     use_master_calibrations: bool = True,
     connect_remote: bool = False,
     sync_caldb_first: bool = False,
@@ -1493,6 +1497,12 @@ def create_ramp_from_spectrum(
     sims are registered, ``trace_pos``, ``trace_prof``, and ``fiberflat`` are
     also attached to ``calibration_models``.
 
+    By default (``inject_rv_via='spectrum'``), stellar RV is applied physically:
+    densify the 1D template, Doppler-shift that densified spectrum
+    (``λ × (1+z)``), paint with ZEMAX, and attach the **unscaled** packaged WAVE
+    for every injected RV. Pass ``inject_rv_via='wavesol'`` to keep the older
+    closed-loop path (paint at RV=0, scale WAVE by ``(1+z)``) for comparison.
+
     Parameters
     ----------
     output_dir : str
@@ -1512,16 +1522,18 @@ def create_ramp_from_spectrum(
     spectrum_wavelengths, spectrum_flux : optional
         Custom 1D spectrum (with units). When both are set, the template is not loaded.
     radial_velocity_km_s : float, optional
-        Injected stellar radial velocity (km/s). When the packaged sim-HDF
-        line-ZP WAVE is available (default notebook path), the spectrum is
-        painted at RV=0 and this velocity is applied as ``WAVE × (1+z)`` on the
-        returned / Stage-1 ``wavesol``. Spectrum Doppler paint is used only when
-        that packaged WAVE is absent. Default 0.
+        Injected stellar radial velocity (km/s). Interpretation depends on
+        ``inject_rv_via`` (see below). Default 0.
     barycentric_velocity_km_s : float or None, optional
         Known barycentric Earth radial velocity for the simulated exposure (km/s).
         Default ``0.0`` stamps ``meta.force_berv_m_s`` so Stage-2 barycorr writes
         BERV=0 and is a no-op for the CCF. Pass ``None`` to leave BERV unset
         (barycorrpy will require target coordinates).
+    inject_rv_via : {'spectrum', 'wavesol'}, optional
+        How to realize ``radial_velocity_km_s``. ``'spectrum'`` (default): densify
+        then Doppler-paint the 1D template; WAVE stays at the packaged line-ZP
+        bake (RV=0 wavelengths). ``'wavesol'``: paint at RV=0 and scale the
+        returned / Stage-1 WAVE by ``(1+z)`` (legacy closed-loop path).
     use_master_calibrations : bool, optional
         Fetch Stage-0 masters from the KOA local caldb. Default True.
     connect_remote, sync_caldb_first : bool, optional
@@ -1553,21 +1565,30 @@ def create_ramp_from_spectrum(
         includes Stage-0 masters plus ``wavesol`` (packaged line-ZP) and, when
         Stage-1 sims are built, ``trace_pos`` / ``trace_prof`` / ``fiberflat``.
     """
-    from .sim_hdf_wavesol_packaging import packaged_sim_hdf_wavesol_path
-
     if fibers is None:
         fibers = [2]
     target_meta = dict(kwargs.pop("target_meta", None) or {})
     if barycentric_velocity_km_s is not None:
         target_meta["force_berv_m_s"] = float(barycentric_velocity_km_s) * 1000.0
 
+    inject_mode = str(inject_rv_via or "spectrum").strip().lower()
+    if inject_mode not in ("spectrum", "wavesol"):
+        raise ValueError(
+            f"inject_rv_via must be 'spectrum' or 'wavesol', got {inject_rv_via!r}"
+        )
     inject_rv_km_s = float(radial_velocity_km_s)
-    use_wave_inject = packaged_sim_hdf_wavesol_path(str(spectrograph).upper()).is_file()
+    use_wave_inject = inject_mode == "wavesol"
     paint_rv_km_s = 0.0 if use_wave_inject else inject_rv_km_s
     if use_wave_inject and inject_rv_km_s != 0.0:
         logger.info(
-            "Packaged line-ZP WAVE present: painting spectrum at RV=0 and "
+            "inject_rv_via='wavesol': painting spectrum at RV=0 and "
             "injecting radial_velocity_km_s=%.6f via WAVE×(1+z)",
+            inject_rv_km_s,
+        )
+    elif inject_rv_km_s != 0.0:
+        logger.info(
+            "inject_rv_via='spectrum': densify→Doppler-paint "
+            "radial_velocity_km_s=%.6f; WAVE left at packaged line-ZP bake",
             inject_rv_km_s,
         )
 
@@ -1623,6 +1644,14 @@ def create_ramp_from_spectrum(
         )
     if use_wave_inject and inject_rv_km_s != 0.0 and calibration_models.get("wavesol") is not None:
         _scale_wavesol_for_injected_rv(calibration_models["wavesol"], inject_rv_km_s)
+    elif calibration_models.get("wavesol") is not None:
+        meta = getattr(calibration_models["wavesol"], "meta", None)
+        if meta is not None:
+            try:
+                meta.injected_rv_km_s = inject_rv_km_s
+                meta.injected_rv_via = "spectrum"
+            except Exception:
+                pass
     return ramp_model, calibration_models, rate_map
 
 

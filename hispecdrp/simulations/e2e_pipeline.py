@@ -2398,6 +2398,169 @@ def paint_compact_emission_comb(
     return rate
 
 
+# ZEMAX / SimulateRateMap continuous spectra are densified to this resolving
+# power when undersampled (PCHIP).  Build SEDs at ≥ this R so painting never
+# interpolates the input — but note R=3e5 is only ~1.4 samples per FWHM for a
+# 2.25-pix Gaussian on BSPEC, so line-profile invariance needs denser sampling.
+ZEMAX_MIN_SAMPLING_RESOLUTION = 3.0e5
+
+
+def build_gaussian_lfc_sed(
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    fwhm_pix: float = 2.25,
+    amplitude: float = 1.0e3,
+    sampling_resolution: float = 1.2e6,
+    n_sigma_pad: float = 8.0,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    """
+    Analytic sum of Gaussians on a constant-R (log-λ) wavelength grid.
+
+    Line σ is ``fwhm_pix`` converted with the local deposit-inverse ``dλ/dpix``.
+    Evaluate the SED on the target grid directly — do **not** densify a coarse
+    SED with PCHIP (that clips peaks and shifts centroids).
+
+    Returns ``(wavelength_um, flux_density, info)`` with ``info`` containing
+    ``sampling_resolution``, ``n_samples``, and ``samples_per_fwhm``.
+    """
+    from .simulate_rate_map import _check_wavelength_sampling
+    from astropy import units as u
+
+    grids = get_sim_hdf_trace_grids(spectrograph.upper())
+    if int(fiber) not in grids:
+        raise KeyError(f"No HDF grids for fiber {fiber}")
+    profiles: list[tuple[float, float, float]] = []
+    for od, lams in line_list.items():
+        if int(od) not in grids[int(fiber)]:
+            continue
+        w = np.asarray(grids[int(fiber)][int(od)]["wavelength"], dtype=np.float64)
+        ok = np.isfinite(w)
+        if int(ok.sum()) < 2:
+            continue
+        dlam = float(np.nanmedian(np.abs(np.diff(w[ok]))))
+        if not np.isfinite(dlam) or dlam <= 0.0:
+            continue
+        sig = (float(fwhm_pix) * dlam) / 2.354820045
+        for lam0 in np.asarray(lams, dtype=np.float64):
+            if np.isfinite(lam0):
+                profiles.append((float(lam0), float(sig), float(amplitude)))
+    if not profiles:
+        raise ValueError("No valid Gaussian profiles to build SED")
+
+    sig_max = max(s for _, s, _ in profiles)
+    lo = min(l for l, _, _ in profiles) - float(n_sigma_pad) * sig_max
+    hi = max(l for l, _, _ in profiles) + float(n_sigma_pad) * sig_max
+    if lo <= 0.0:
+        lo = min(l for l, _, _ in profiles) * 0.99
+    R = float(sampling_resolution)
+    n = int(np.ceil(np.log(hi / lo) * R)) + 1
+    grid = lo * np.exp(np.arange(n, dtype=np.float64) / R)
+    flux = np.zeros_like(grid)
+    for lam0, sig, amp in profiles:
+        i0 = int(np.searchsorted(grid, lam0 - 6.0 * sig))
+        i1 = int(np.searchsorted(grid, lam0 + 6.0 * sig))
+        if i1 > i0:
+            x = grid[i0:i1]
+            flux[i0:i1] += amp * np.exp(-0.5 * ((x - lam0) / sig) ** 2)
+
+    fwhm_um = float(np.median([s * 2.354820045 for _, s, _ in profiles]))
+    lam_mid = float(np.median([l for l, _, _ in profiles]))
+    spp = fwhm_um / (lam_mid / R) if lam_mid > 0.0 else float("nan")
+    if not _check_wavelength_sampling(grid * u.micron, min_resolution=ZEMAX_MIN_SAMPLING_RESOLUTION):
+        raise ValueError(
+            f"Built SED at R={R:.3e} fails ZEMAX min sampling "
+            f"R={ZEMAX_MIN_SAMPLING_RESOLUTION:.3e}; increase sampling_resolution."
+        )
+    info = {
+        "sampling_resolution": R,
+        "n_samples": float(grid.size),
+        "samples_per_fwhm": float(spp),
+        "n_lines": float(len(profiles)),
+        "fwhm_um_median": fwhm_um,
+        "lam_mid_um": lam_mid,
+    }
+    return grid, flux, info
+
+
+def paint_continuous_gaussian_comb(
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    fwhm_pix: float = 2.25,
+    amplitude: float = 1.0e3,
+    sampling_resolution: float = 1.2e6,
+    method: str = "prf_convolution",
+    apply_blaze: bool = True,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """
+    Paint an analytic Gaussian LFC via ZEMAX continuous ``prf_convolution``.
+
+    Builds the SED at ``sampling_resolution`` (≥ ``ZEMAX_MIN_SAMPLING_RESOLUTION``)
+    so ``set_fiber_spectrum(..., continuous=True)`` does **not** PCHIP-upsample.
+    Returns ``(rate, meta)`` where ``meta`` records sampling checks and SED size.
+    """
+    from astropy import units as u
+
+    from .simulate_rate_map import (
+        SimulateRateMap,
+        _check_wavelength_sampling,
+    )
+
+    wl, fl, sed_info = build_gaussian_lfc_sed(
+        line_list,
+        spectrograph=spectrograph,
+        fiber=fiber,
+        fwhm_pix=fwhm_pix,
+        amplitude=amplitude,
+        sampling_resolution=sampling_resolution,
+    )
+    ok = _check_wavelength_sampling(
+        wl * u.micron, min_resolution=ZEMAX_MIN_SAMPLING_RESOLUTION
+    )
+    if not ok:
+        raise RuntimeError("SED failed ZEMAX sampling check before paint")
+
+    srm = SimulateRateMap()
+    srm.set_fiber_spectrum(
+        int(fiber),
+        wl * u.micron,
+        fl * u.Unit("erg / (s cm2 um)"),
+        continuous=True,
+    )
+    stored_wl = np.asarray(srm.fibers[int(fiber)]["wavelength"], dtype=np.float64)
+    no_internal_upsample = int(stored_wl.size) == int(wl.size)
+    if not no_internal_upsample:
+        raise RuntimeError(
+            f"ZEMAX upsampled SED ({wl.size} → {stored_wl.size}); "
+            f"raise sampling_resolution (got {sampling_resolution:.3e})."
+        )
+
+    rate = np.asarray(
+        srm.create_native_rate_map(
+            spectrograph=spectrograph.upper(),
+            method=method,
+            apply_blaze=apply_blaze,
+            save=False,
+        ),
+        dtype=np.float64,
+    )
+    meta: dict[str, Any] = {
+        **sed_info,
+        "zemax_min_resolution": float(ZEMAX_MIN_SAMPLING_RESOLUTION),
+        "passed_zemax_sampling_check": True,
+        "no_internal_upsample": True,
+        "stored_n_samples": float(stored_wl.size),
+        "paint_method": str(method),
+        "apply_blaze": bool(apply_blaze),
+        "wavelength_um": wl,
+        "flux": fl,
+    }
+    return rate, meta
+
+
 def _centroid_2d_flux(
     image: np.ndarray,
     *,
