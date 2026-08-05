@@ -319,6 +319,10 @@ class SimulateRateMap:
                         inv_w[i] = wmax
                     elif xmin < x < xmax:
                         inv_w[i] = brentq(lambda w: fx(w) - x, wmin, wmax)
+                    elif x < xmin:
+                        inv_w[i] = wmin
+                    elif x > xmax:
+                        inv_w[i] = wmax
 
                 self.wavelength_solution[fiber][int(od)] = {
                     "pixel": np.arange(4096),
