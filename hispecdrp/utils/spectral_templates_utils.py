@@ -76,6 +76,8 @@ __all__ = [
     "load_btsettl_spectrum",
     "load_template_from_path",
     "resolve_stellar_template_to_log_micron",
+    "get_skybackground_path",
+    "load_sky_spectrum",
 ]
 
 

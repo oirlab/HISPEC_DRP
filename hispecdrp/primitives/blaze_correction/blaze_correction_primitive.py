@@ -92,10 +92,13 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                             np.zeros((n_orders, npx), dtype=np.uint32))
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
-                blaze_array = get_smooth_blaze(ff_trace['spec'],
-                                              ff_trace['spec_err'],
-                                              ff_trace['spec_dq'],
-                                              order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
+                if self.smooth_blaze:
+                    blaze_array = get_smooth_blaze(ff_trace['spec'],
+                                                ff_trace['spec_err'],
+                                                ff_trace['spec_dq'],
+                                                order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
+                else:
+                    blaze_array = ff_trace['spec']
                 blaze_std_array = ff_trace['spec_err']
                 
                 # remove lamp blackbody from blaze array

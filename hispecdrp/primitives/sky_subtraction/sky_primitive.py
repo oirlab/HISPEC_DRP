@@ -130,8 +130,12 @@ class SkySubtractionPrimitive(BasePrimitive):
                     continue
 
                 # get relative transmission ratio from science/sky from fiberflat calibration
-                fiberflat_sky_spec_interp = np.interp(fiberflat_sci_wave[order], fiberflat_sky_wave[order], fiberflat_sky_spec[order])
-                fiberflat_ratio = fiberflat_sci_spec[order] / fiberflat_sky_spec_interp
+                if fiberflat_sky_spec is None or fiberflat_sci_spec is None:
+                    logger.warning(f"Fiberflat calibration missing for science or sky fiber for order {order_vec[order]}. Sky subtraction may be inaccurate.")
+                    fiberflat_ratio = 1.0
+                else:
+                    fiberflat_sky_spec_interp = np.interp(fiberflat_sci_wave[order], fiberflat_sky_wave[order], fiberflat_sky_spec[order])
+                    fiberflat_ratio = fiberflat_sci_spec[order] / fiberflat_sky_spec_interp
 
 
                 sky_spec_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec[order])
