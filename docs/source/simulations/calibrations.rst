@@ -40,7 +40,7 @@ instrument era may **not** match the pyechelle HDF model used by
 YAML configuration
 ------------------
 
-Example: ``hispecdrp/simulations/e2e_calibrations.example.yaml``
+Example: ``docs/source/simulations/e2e_calibrations.example.yaml``
 
 .. code-block:: yaml
 
@@ -92,7 +92,7 @@ Populating the KOA cache
 
    .. code-block:: bash
 
-      python -m hispecdrp.simulations.run_caldb --sync --download
+      python -m hispecdrp.calibrations.run_caldb --sync --download
 
 4. Match ``instrument_era``, ``spectrograph``, and ``mjd_start`` to your simulated epoch
 

@@ -3,7 +3,7 @@ from ... import datamodels
 import logging
 
 import numpy as np
-from ...utils.math import solve_chebyshev2d_ols
+from ..utils.array_utils import solve_chebyshev2d_ols
 
 logger = logging.getLogger(__name__)
 

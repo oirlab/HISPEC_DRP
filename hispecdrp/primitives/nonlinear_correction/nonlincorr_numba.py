@@ -1,5 +1,5 @@
 from numba import njit, prange
-from ...utils.math import polyval1d
+from ..utils.array_utils import polyval1d
 import numpy as np
 from ...datamodels.dqflags import DQ_FLAGS
 from ...utils.parallelization_utils import numba_thread_scope

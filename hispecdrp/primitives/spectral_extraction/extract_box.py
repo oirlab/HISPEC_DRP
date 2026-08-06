@@ -1,6 +1,6 @@
 from numba import njit
 import numpy as np
-from ...utils.math import any_sc
+from ..utils.array_utils import any_sc
 from ...datamodels.dqflags import DQ_FLAGS
 import matplotlib.pyplot as plt
 from .extraction_utils import get_extraction_window
@@ -76,8 +76,22 @@ def extract_spectrum_box(
             pix_range = (0, nx - 1)
             npix = nx
 
+    # Mock / sim L0s may omit optional companion arrays — fill zeros so dtype
+    # access and the numba kernel never see None.
+    data_dtype = np.asarray(input_data).dtype
+    if input_err is None:
+        input_err = np.zeros((ny, nx), dtype=data_dtype)
+    if input_var_rnoise is None:
+        input_var_rnoise = np.zeros((ny, nx), dtype=data_dtype)
+    if input_var_poisson is None:
+        input_var_poisson = np.zeros((ny, nx), dtype=data_dtype)
+    if input_dq is None:
+        input_dq = np.zeros((ny, nx), dtype=np.uint32)
+    if input_mid_time is None:
+        input_mid_time = np.zeros((ny, nx), dtype=np.float64)
+
     if spec_output is None:
-        spec_output = np.full(npix, np.nan, dtype=input_data.dtype)
+        spec_output = np.full(npix, np.nan, dtype=data_dtype)
     if err_output is None:
         err_output = np.full(npix, np.nan, dtype=input_err.dtype)
     if var_rnoise_output is None:
@@ -168,8 +182,8 @@ def _extract_box_numba(
             D_var_rnoise = input_var_rnoise[window_inds, x].copy()
             D_dq = input_dq[window_inds, x]
 
-        # Mask bad pixels
-        M = (D_dq & DO_NOT_USE) == 0
+        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate / variance (NaN err → NaN var)
+        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D) & np.isfinite(D_var)
         bad = np.where(~M)[0]
         n_good = len(M) - len(bad)
         if n_good == 0:
@@ -180,11 +194,12 @@ def _extract_box_numba(
             dq_output[x] = DO_NOT_USE
             continue
 
-        # Set bad pixels to zero / inf
+        # Zero bad pixels (M already excludes them). Use 0 not inf for variances:
+        # ``M * inf`` is NaN and would poison the error sum.
         D[bad] = 0
-        D_var[bad] = np.inf
-        D_var_poisson[bad] = np.inf
-        D_var_rnoise[bad] = np.inf
+        D_var[bad] = 0
+        D_var_poisson[bad] = 0
+        D_var_rnoise[bad] = 0
 
         # Debugging
         # if x == 1024:

@@ -49,11 +49,6 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def default_simulation_output_dir() -> str:
-    """Absolute path to ``test_data/`` at the repository root."""
-    return str(repository_root() / "test_data")
-
-
 def templates_data_dir() -> str:
     """Bundled BT-Settl templates under ``hispecdrp/data/templates``."""
     import hispecdrp
@@ -225,7 +220,6 @@ def apply_max_cores_to_stage0_prim_args(prim_args: dict, max_cores: int) -> dict
         out.setdefault(name, {})["max_cores"] = max_cores
     return out
 
-
 def apply_max_cores_to_stage1_prim_args(prim_args: dict, max_cores: int) -> dict:
     out = copy.deepcopy(prim_args)
     for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
@@ -234,9 +228,19 @@ def apply_max_cores_to_stage1_prim_args(prim_args: dict, max_cores: int) -> dict
         out.setdefault(name, {})["max_cores"] = max_cores
     return out
 
+def apply_max_cores_to_stage2_prim_args(prim_args: dict, max_cores: int) -> dict:
+    out = copy.deepcopy(prim_args)
+    for name, cls in E2E_STAGE2_PRIMITIVES.items():
+        if "max_cores" not in getattr(cls, "ARGUMENTS", {}):
+            continue
+        out.setdefault(name, {})["max_cores"] = max_cores
+    return out
 
 def get_default_stage1_prim_args(*, max_cores: int | None = None) -> dict:
-    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`."""
+    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`.
+
+    Optional ``max_cores`` is written into each primitive's args when provided.
+    """
     _skip = frozenset({"input", "output_path", "output_dir"})
     out: dict[str, dict] = {}
     for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
@@ -247,17 +251,11 @@ def get_default_stage1_prim_args(*, max_cores: int | None = None) -> dict:
     return out
 
 
-def apply_max_cores_to_stage2_prim_args(prim_args: dict, max_cores: int) -> dict:
-    out = copy.deepcopy(prim_args)
-    for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
-        if "max_cores" not in cls.ARGUMENTS:
-            continue
-        out.setdefault(name, {})["max_cores"] = max_cores
-    return out
-
-
 def get_default_stage2_prim_args(*, max_cores: int | None = None) -> dict:
-    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`."""
+    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
+
+    Optional ``max_cores`` is written into each primitive's args when provided.
+    """
     _skip = frozenset({"input", "output_path", "output_dir"})
     out: dict[str, dict] = {}
     for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
@@ -353,7 +351,7 @@ def _init_e2e_primitive(prim_cls: type, prim_arg_dict: dict, output_dir: str | N
 def run_stage2_simulation(
     stage1_output: datamodels.DataModel,
     *,
-    fiberflat_model: datamodels.DataModel,
+    fiberflat_model: datamodels.DataModel | None = None,
     prim_args: dict | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
@@ -383,7 +381,7 @@ def run_stage2_simulation(
     model = stage1_output
     for prim_name, prim_cls in E2E_STAGE2_PRIMITIVES.items():
         prim = _init_e2e_primitive(prim_cls, prim_args.get(prim_name, {}), out_dir)
-        if prim_name == "blaze_corr":
+        if prim_name == "blaze_corr" and fiberflat_model is not None:
             prim.fiberflat = fiberflat_model
         model = prim.apply(model)
     return model

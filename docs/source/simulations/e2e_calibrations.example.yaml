@@ -3,7 +3,7 @@
 # Resolution order per product: explicit path below → KOA store → simulated fallback.
 #
 # Stage 1 trace / fiberflat (trace_pos, trace_prof, fiberflat):
-#   E2EConfig.stage1_trace_source = "pipeline" (default in run_e2e_sim.py):
+#   E2EConfig.stage1_trace_source = "pipeline" (default in run_e2e_sim):
 #     simulate per-fiber fiberflat rate maps + ProcessFiberflatsPipeline; skip KOA Stage 1.
 #   E2EConfig.stage1_trace_source = "koa":
 #     fetch mastercal-tracepos / traceprof / fiberflat from KOA or local cache.

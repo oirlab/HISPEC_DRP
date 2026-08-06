@@ -29,7 +29,7 @@ Below is an example using the native DRP simulator to create a rate map for a fl
 
     import numpy as np
     import astropy.units as u
-    import benchmarks as simulations
+    import hispecdrp.simulations as simulations
 
     srm = simulations.SimulateRateMap()
 

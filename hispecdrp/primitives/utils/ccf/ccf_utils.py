@@ -51,6 +51,7 @@ from .ccf_rv_content import doppler_shift_from_barycenter
 from .ccf_bisector import (
     CCFBisectorConfig,
     _refine_ccf_rv_bisector_after_gaussian_fit,
+    calc_bisector_inverse_slope,
     fit_ccf_rv_bisector,
 )
 from .ccf_parabolic import (
@@ -632,6 +633,8 @@ def build_rvccf_chunk_supplement(
     v_max: float,
     v_step: float,
     ccf_2d: np.ndarray,
+    bis: np.ndarray | None = None,
+    bis_err: np.ndarray | None = None,
 ) -> Table:
     """
     Supplement table with raw CCF(v) per chunk (columns merged into ``RVCCF_FIB*``).
@@ -640,12 +643,35 @@ def build_rvccf_chunk_supplement(
     ----------
     ccf_2d : np.ndarray
         Shape ``(n_chunk, n_vel)``; row ``i`` is the CCF for chunk ``i``.
+    bis, bis_err : np.ndarray or None
+        Optional per-chunk Queloz BIS and uncertainty (m/s). When omitted, columns
+        are filled with NaN.
     """
     n = int(ccf_2d.shape[0]) if ccf_2d.ndim >= 2 else 0
     if n == 0:
         return Table(
-            names=["CHUNK_ID", "N_GOOD", "V_MIN", "V_MAX", "V_STEP", "N_VEL", "CCF"],
-            dtype=[np.int32, np.int32, np.float64, np.float64, np.float64, np.int32, object],
+            names=[
+                "CHUNK_ID",
+                "N_GOOD",
+                "V_MIN",
+                "V_MAX",
+                "V_STEP",
+                "N_VEL",
+                "CCF",
+                "BIS",
+                "BIS_ERR",
+            ],
+            dtype=[
+                np.int32,
+                np.int32,
+                np.float64,
+                np.float64,
+                np.float64,
+                np.int32,
+                object,
+                np.float64,
+                np.float64,
+            ],
         )
     if len(chunk_id) != n or len(n_good) != n:
         raise ValueError("build_rvccf_chunk_supplement: chunk_id / n_good length mismatch vs ccf_2d")
@@ -656,6 +682,18 @@ def build_rvccf_chunk_supplement(
     v_min_f = float(v_min)
     v_max_f = float(v_max)
     v_step_f = float(v_step)
+    if bis is None:
+        bis_a = np.full(n, np.nan, dtype=np.float64)
+    else:
+        bis_a = np.asarray(bis, dtype=np.float64).ravel()
+        if bis_a.size != n:
+            raise ValueError("build_rvccf_chunk_supplement: bis length mismatch vs ccf_2d")
+    if bis_err is None:
+        bis_err_a = np.full(n, np.nan, dtype=np.float64)
+    else:
+        bis_err_a = np.asarray(bis_err, dtype=np.float64).ravel()
+        if bis_err_a.size != n:
+            raise ValueError("build_rvccf_chunk_supplement: bis_err length mismatch vs ccf_2d")
     return Table(
         {
             "CHUNK_ID": np.asarray(chunk_id, dtype=np.int32).ravel(),
@@ -665,6 +703,8 @@ def build_rvccf_chunk_supplement(
             "V_STEP": np.full(n, v_step_f, dtype=np.float64),
             "N_VEL": np.full(n, n_vel, dtype=np.int32),
             "CCF": ccf_col,
+            "BIS": bis_a,
+            "BIS_ERR": bis_err_a,
         }
     )
 
@@ -689,7 +729,8 @@ def assemble_rvccf_fib_table(
     berv = np.zeros(n, dtype=np.float64)
     res = np.full(n, np.nan, dtype=np.float64)
     tell_abs = np.zeros(n, dtype=np.float64)
-    bis = np.zeros(n, dtype=np.float64)
+    bis = np.full(n, np.nan, dtype=np.float64)
+    bis_err = np.full(n, np.nan, dtype=np.float64)
     rv_abs = np.zeros(n, dtype=np.float64)
     rv_abs_err = np.zeros(n, dtype=np.float64)
     order_col = np.asarray(orders, dtype=np.int64).ravel()
@@ -728,6 +769,10 @@ def assemble_rvccf_fib_table(
                 ccf_col[i] = np.array([], dtype=RVCCF_CCF_ELEM_DTYPE)
             else:
                 ccf_col[i] = np.asarray(raw, dtype=RVCCF_CCF_ELEM_DTYPE).ravel()
+        if "BIS" in supplement.colnames:
+            bis = np.asarray(supplement["BIS"], dtype=np.float64).ravel()
+        if "BIS_ERR" in supplement.colnames:
+            bis_err = np.asarray(supplement["BIS_ERR"], dtype=np.float64).ravel()
 
     return Table(
         {
@@ -740,6 +785,7 @@ def assemble_rvccf_fib_table(
             "RESOLUTION": res,
             "TELL_ABS": tell_abs,
             "BIS": bis,
+            "BIS_ERR": bis_err,
             "RV_ABS": rv_abs,
             "RV_ABS_ERR": rv_abs_err,
             "INLIER": inlier_u8,
@@ -2059,10 +2105,10 @@ def _ccf_rv_from_ccf(
     ccf_parabolic_vertex_n_samples: int | None = None,
     ccf_bisector_config: CCFBisectorConfig | None = None,
 ) -> tuple[float, float]:
-    """Gaussian fit to CCF; bisector refine for final RV; else grid peak / HWHM.
+    """Gaussian fit to CCF for final RV; else grid peak / HWHM.
 
-    ``ccf_parabolic_vertex_n_samples`` is retained for API compatibility but no longer
-    selects the final RV (bisector is used instead when the Gaussian fit succeeds).
+    ``ccf_parabolic_vertex_n_samples`` and ``ccf_bisector_config`` are retained for
+    API compatibility. Bisector refine is not used for the reported RV.
     """
     ccf = np.asarray(ccf, dtype=np.float64)
     n_vel = len(ccf)
@@ -2090,21 +2136,6 @@ def _ccf_rv_from_ccf(
         vel_span_m_s_per_pixel=vsp,
         return_params=True,
     )
-    if np.isfinite(rv_fit):
-        rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
-            v_grid,
-            ccf,
-            float(v_step),
-            ccf_err=None,
-            config=ccf_bisector_config,
-            gaussian_seed_mean_m_s=float(rv_fit),
-        )
-        if rv_bi is not None and math.isfinite(float(rv_bi)):
-            err_out = float(err_fit) if np.isfinite(err_fit) else float("nan")
-            if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0.0:
-                err_out = float(err_bi)
-            return float(rv_bi), float(err_out)
-
     if np.isfinite(rv_fit) and np.isfinite(err_fit) and err_fit > 0.0:
         return float(rv_fit), float(err_fit)
 
@@ -5194,10 +5225,10 @@ def rv_per_chunks_line_mask(
         z = np.array([], dtype=np.float64)
         zi = np.array([], dtype=np.int32)
         if not return_ccf:
-            return (z, z, z, v_grid_local, None, z, z, zi, None, None)
+            return (z, z, z, v_grid_local, None, z, z, zi, None, None, z, z)
         ccf_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         std_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
-        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out)
+        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out, z, z)
 
     vr_lo = float(v_min_m_s)
     vr_hi = float(v_max_m_s)
@@ -5498,9 +5529,9 @@ def rv_per_chunks_line_mask(
             if sig_h is not None and math.isfinite(float(sig_h)) and float(sig_h) > 0.0:
                 rv_err_rows[i] = float(sig_h)
 
-    # Prefer Gaussian + bisector refine (same stack as order-mean RV when
-    # ``n_chunks_order == 1`` and CCF preview slots). Keep Numba RV/σ when the fitter
-    # path does not succeed.
+    # Prefer Gaussian refine (same stack as order-mean RV when ``n_chunks_order == 1``
+    # and CCF preview slots). Keep Numba RV/σ when the fitter path does not succeed.
+    # Bisector refine is diagnostic only (Queloz BIS / BIS_ERR per chunk).
     line_window_fit_ccf = bool(window_line_by_line)
     v_seed = (
         float(line_mask_line_chunk_v_center_m_s)
@@ -5508,6 +5539,8 @@ def rv_per_chunks_line_mask(
         and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
         else None
     )
+    bis_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
+    bis_err_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
     for i in range(n_chunk_valid):
         rv_nb = float(rv_rows[i])
         if not np.isfinite(rv_nb):
@@ -5552,18 +5585,20 @@ def rv_per_chunks_line_mask(
             and float(err_g) > 0.0
         ):
             continue
-        rv_bi, err_bi, _bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
-            vg_cc,
-            y_stored,
-            v_step_floor,
-            ccf_err=e_row,
-            gaussian_seed_mean_m_s=float(rv_g),
-        )
-        if rv_bi is not None and math.isfinite(float(rv_bi)):
-            rv_rows[i] = float(rv_bi)
-            if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0.0:
-                rv_err_rows[i] = float(err_bi)
+        rv_rows[i] = float(rv_g)
+        rv_err_rows[i] = float(err_g)
+        e_bis = e_row if e_row is not None else np.ones_like(y_stored)
+        try:
+            bis_v, bis_e, *_rest = calc_bisector_inverse_slope(vg_cc, y_stored, e_bis)
+            if math.isfinite(float(bis_v)):
+                bis_rows[i] = float(bis_v)
+            if math.isfinite(float(bis_e)):
+                bis_err_rows[i] = float(bis_e)
+        except Exception:
+            pass
 
+    all_bis: list[float] = []
+    all_bis_errs: list[float] = []
     for i in range(n_chunk_valid):
         rv = float(rv_rows[i])
         rv_err = float(rv_err_rows[i])
@@ -5575,6 +5610,8 @@ def rv_per_chunks_line_mask(
         all_wl_lo.append(float(wl_lo_arr[i]))
         all_wl_hi.append(float(wl_hi_arr[i]))
         all_n_good_out.append(int(n_good_arr[i]))
+        all_bis.append(float(bis_rows[i]))
+        all_bis_errs.append(float(bis_err_rows[i]))
         if return_ccf:
             all_ccf_rows.append(-ccf_rows[i] if int(flip_rows[i]) == 1 else ccf_rows[i].copy())
             pu = ccf_preview_unflipped
@@ -5591,6 +5628,8 @@ def rv_per_chunks_line_mask(
     wl_lo_out = np.asarray(all_wl_lo, dtype=np.float64)
     wl_hi_out = np.asarray(all_wl_hi, dtype=np.float64)
     n_good_out = np.asarray(all_n_good_out, dtype=np.int32)
+    bis_arr = np.asarray(all_bis, dtype=np.float64)
+    bis_err_arr = np.asarray(all_bis_errs, dtype=np.float64)
     if return_ccf:
         ccf_2d = np.vstack(all_ccf_rows).astype(np.float64) if all_ccf_rows else np.empty((0, len(v_grid)))
         ccf_preview_2d = (
@@ -5616,6 +5655,8 @@ def rv_per_chunks_line_mask(
         n_good_out,
         ccf_std_2d,
         ccf_preview_2d,
+        bis_arr,
+        bis_err_arr,
     )
 
 
@@ -5901,6 +5942,8 @@ def run_ccf_line_mask_for_fiber(
 
     rvccf_rows_accum: list[np.ndarray] = []
     rvccf_n_good_accum: list[int] = []
+    rvccf_bis_accum: list[float] = []
+    rvccf_bis_err_accum: list[float] = []
 
     # Fiber-level auto-center scout (multi-order): estimate CCF peak on the first valid
     # echelle row, then reuse the centered uniform velocity grid for every order on this fiber.
@@ -5952,6 +5995,8 @@ def run_ccf_line_mask_for_fiber(
                 _ng_sc,
                 _std_sc,
                 _ccf_preview_sc,
+                _bis_sc,
+                _bis_err_sc,
             ) = _scout
             if int(_rvs_sc.size) <= 0:
                 continue
@@ -6053,6 +6098,8 @@ def run_ccf_line_mask_for_fiber(
                 _ng_sc,
                 _std_sc,
                 _ccf_preview_sc,
+                _bis_sc,
+                _bis_err_sc,
             ) = scout
             if int(_rvs_sc.size) > 0:
                 vg_sc = np.asarray(v_grid_sc, dtype=np.float64)
@@ -6095,6 +6142,8 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
+                bis_o,
+                bis_err_o,
             ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
@@ -6122,6 +6171,8 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
+                bis_o,
+                bis_err_o,
             ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
@@ -6149,6 +6200,8 @@ def run_ccf_line_mask_for_fiber(
                 ng_o,
                 _ccf_std_2d,
                 ccf_preview_2d,
+                bis_o,
+                bis_err_o,
             ) = rv_per_chunks_line_mask_spline(
                 w,
                 s,
@@ -6176,6 +6229,10 @@ def run_ccf_line_mask_for_fiber(
                 for ii in range(int(rvs_o.size)):
                     rvccf_rows_accum.append(np.asarray(ccf_2d[ii], dtype=np.float64))
                     rvccf_n_good_accum.append(int(ng_o[ii]))
+                    bv = float(bis_o[ii]) if ii < int(bis_o.size) else float("nan")
+                    be = float(bis_err_o[ii]) if ii < int(bis_err_o.size) else float("nan")
+                    rvccf_bis_accum.append(bv)
+                    rvccf_bis_err_accum.append(be)
 
                 v_now = np.asarray(v_grid_o, dtype=np.float64)
                 # Stack chunk CCF rows for order-mean RV (same basis as chunk RV / RVCCF HDU).
@@ -6425,6 +6482,8 @@ def run_ccf_line_mask_for_fiber(
             v_max=pv_max,
             v_step=pv_step,
             ccf_2d=np.stack(rvccf_rows_accum, axis=0),
+            bis=np.asarray(rvccf_bis_accum, dtype=np.float64),
+            bis_err=np.asarray(rvccf_bis_err_accum, dtype=np.float64),
         )
     else:
         rvccf_tbl = build_rvccf_chunk_supplement(

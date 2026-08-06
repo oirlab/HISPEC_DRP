@@ -25,16 +25,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
 DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
 
-logger = logging.getLogger(__name__)
-
-# Default output filenames for saved products
-DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
-DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
 from numba import njit
 
 from scipy.interpolate import interp1d
 from scipy.interpolate import PchipInterpolator
 from scipy.interpolate import RegularGridInterpolator
+from scipy.optimize import brentq
 from scipy.signal import fftconvolve
 
 import astropy.units as u
@@ -43,12 +39,6 @@ from astropy.units import Quantity
 from astropy.io import fits
 import astropy.utils.data
 
-__all__ = [
-    "DEFAULT_RATE_MAP_FILENAME",
-    "DEFAULT_PYECHELLE_FILENAME",
-    "SimulateRateMap",
-    "read_pyechelle_hdf",
-]
 __all__ = [
     "DEFAULT_RATE_MAP_FILENAME",
     "DEFAULT_PYECHELLE_FILENAME",
@@ -135,7 +125,15 @@ class SimulateRateMap:
     ) -> None:
         """Assign spectral input to a fiber.
 
-        spectrum_flux is assumed to a flux density per unit of wavelength"""
+        If continuous=True, spectrum_flux is assumed to be a flux density per unit of
+        wavelength (e.g. erg/s/cm^2/micron), sampled at spectrum_wavelengths.
+
+        If continuous=False, spectrum_wavelengths is treated as a list of discrete line
+        centers and spectrum_flux must instead be a RATE per line (NOT a density),
+        given as either a photon count rate (e.g. u.ph / u.s) or an energy/radiant-power
+        rate (e.g. u.erg / u.s, u.W). Energy-rate line fluxes are converted to a photon
+        count rate downstream using each line's wavelength (E_photon = h*c/wavelength).
+        No telescope-area conversion is applied to line fluxes downstream."""
 
         if fiber_number not in (1, 2, 3):
             raise ValueError('Fiber must be 1, 2, or 3!')
@@ -185,7 +183,7 @@ class SimulateRateMap:
 
         Throughput should be applied AFTER any radial velocity shifts"""
 
-        warnings.warn("Throughput application is in development and may not reflect true HISPEC throughput.", UserWarning)
+        logger.warning("Throughput application is in development and may not reflect true HISPEC throughput.", UserWarning)
 
         mode = mode.upper()
         if mode not in ("NGS", "LGS"):
@@ -295,25 +293,40 @@ class SimulateRateMap:
                 ow = ow[good]
                 if ox.size < 2:
                     raise ValueError(f"Not enough valid samples for fiber {fiber} order {od} wavelength solution.")
+                if len(np.unique(ow)) != len(ow):
+                    logger.warning(f"Duplicate wavelength values found for fiber {fiber} order {od}. This order will be skipped.")
+                    continue
 
-                # Sort by x
-                sidx = np.argsort(ox)
-                oxs = ox[sidx]
-                ows = ow[sidx]
+                fx = PchipInterpolator(ow, ox, extrapolate=True)
 
-                # Merge duplicates in x by averaging wavelength at the same pixel
-                ux, inv = np.unique(oxs, return_inverse=True)
-                if ux.size < 2:
-                    raise ValueError(f"Not enough unique x samples for fiber {fiber} order {od} wavelength solution.")
-                wsum = np.bincount(inv, weights=ows)
-                wcnt = np.bincount(inv)
-                uow = wsum / np.maximum(wcnt, 1)
+                # PchipInterpolator is not invertible, so we need to find the inverse mapping by root-finding.
+                wmin, wmax = np.nanmin(ow), np.nanmax(ow)
+                xmin = fx(wmin)
+                xmax = fx(wmax)
 
-                fx = PchipInterpolator(ux, uow, extrapolate=True)
+                # Ensure increasing order
+                if xmin > xmax:
+                    xmin, xmax = xmax, xmin
+                    wmin, wmax = wmax, wmin
+
+                targets = np.arange(4096)
+                inv_w = np.full_like(targets, np.nan, dtype=float)
+
+                for i, x in enumerate(targets):
+                    if np.isclose(x, xmin):
+                        inv_w[i] = wmin
+                    elif np.isclose(x, xmax):
+                        inv_w[i] = wmax
+                    elif xmin < x < xmax:
+                        inv_w[i] = brentq(lambda w: fx(w) - x, wmin, wmax)
+                    elif x < xmin:
+                        inv_w[i] = wmin
+                    elif x > xmax:
+                        inv_w[i] = wmax
 
                 self.wavelength_solution[fiber][int(od)] = {
                     "pixel": np.arange(4096),
-                    "wavelength": fx(np.arange(4096))[::-1] # reversed to account for mirrored hdf file
+                    "wavelength": inv_w[::-1] # reverse to match detector orientation
                 }
 
         return self.wavelength_solution
@@ -390,7 +403,9 @@ class SimulateRateMap:
                     file_path=csv_path,
                     list_like=not self.fibers[fiber]["continuous"],
                     wavelength_units="micron",
-                    flux_units="ph/s/micron",
+                    flux_units=(
+                        "ph/s/micron" if self.fibers[fiber]["continuous"] else "ph/s"
+                    ),
                 )
             )
         sim.set_sources(fiber_sources)
@@ -495,14 +510,26 @@ class SimulateRateMap:
                     del model_data[fiber_key][key]
 
             wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
-            tmp_flux = (
-                self.fibers[fiber]["flux"] *
-                np.pi * (self.telescope_primary_diameter ** 2) / 4
-            )
-            flux = tmp_flux.to(
-                u.ph / u.s / u.micron,
-                equivalencies=u.spectral_density(wavelength),
-            )
+            continuous = self.fibers[fiber]["continuous"]
+
+            if continuous:
+                tmp_flux = (
+                    self.fibers[fiber]["flux"] *
+                    np.pi * (self.telescope_primary_diameter ** 2) / 4
+                )
+                flux = tmp_flux.to(
+                    u.ph / u.s / u.micron,
+                    equivalencies=u.spectral_density(wavelength),
+                )
+            else:
+                # Line lists are already a photon count RATE (or energy RATE),
+                # not a density, so no telescope-area collecting-area scaling
+                # or spectral-density (per-wavelength) conversion is applied.
+                # Energy-rate fluxes are converted to a photon rate per line
+                # using each line's wavelength.
+                flux = _line_flux_to_photon_rate(
+                    self.fibers[fiber]["flux"], wavelength
+                )
 
             if method == "bilinear_weights":
                 self.rate_map = bilinear_weights_rate_map(
@@ -513,7 +540,8 @@ class SimulateRateMap:
                     pixelsize=pixelsize,
                     apply_blaze=apply_blaze,
                     blaze_angle=blaze_angle,
-                    groove_spacing=groove_spacing
+                    groove_spacing=groove_spacing,
+                    continuous=continuous
                 )
             else:
                 self.rate_map = psf_prf_convolution_rate_map(
@@ -524,7 +552,8 @@ class SimulateRateMap:
                     pixelsize=pixelsize,
                     apply_blaze=apply_blaze,
                     blaze_angle=blaze_angle,
-                    groove_spacing=groove_spacing
+                    groove_spacing=groove_spacing,
+                    continuous=continuous
                 )
 
             rate_map_array[i, :, :] = self.rate_map
@@ -554,18 +583,31 @@ class SimulateRateMap:
         fiber: int
     ) -> str:
         """Write fiber's wavelength + flux into a CSV formatted for pyechelle.
-        
-        CSV spectra are in units of photons/s/micron."""
+
+        CSV spectra are in units of photons/s/micron for continuous spectra,
+        or photons/s per line for line lists (continuous=False). Line-list
+        flux may be supplied as a photon count rate or an energy rate; it is
+        converted to a photon count rate before being written out."""
 
         wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
-        tmp_flux = (
-            self.fibers[fiber]["flux"] *
-            np.pi * (self.telescope_primary_diameter ** 2) / 4
-        )
-        flux = tmp_flux.to(
-            u.ph / u.s / u.micron,
-            equivalencies=u.spectral_density(wavelength),
-        )
+
+        if self.fibers[fiber]["continuous"]:
+            tmp_flux = (
+                self.fibers[fiber]["flux"] *
+                np.pi * (self.telescope_primary_diameter ** 2) / 4
+            )
+            flux = tmp_flux.to(
+                u.ph / u.s / u.micron,
+                equivalencies=u.spectral_density(wavelength),
+            )
+        else:
+            # Line lists are already a photon count RATE (or energy RATE),
+            # not a flux density, so no telescope-area or spectral-density
+            # conversion is applied. Energy-rate fluxes are converted to a
+            # photon rate per line using each line's wavelength.
+            flux = _line_flux_to_photon_rate(
+                self.fibers[fiber]["flux"], wavelength
+            )
 
         arr = np.column_stack(
             [wavelength.value, flux.value]
@@ -614,7 +656,8 @@ def bilinear_weights_rate_map(
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
-    groove_spacing: Quantity = None
+    groove_spacing: Quantity = None,
+    continuous: bool = True
 ) -> np.ndarray[np.float64]:
     """
     Simulate detector rate map (photons/s/pixel) by depositing
@@ -625,7 +668,10 @@ def bilinear_weights_rate_map(
     wave : Quantity
         Input wavelengths corresponding to flux samples.
     flux : Quantity
-        Flux array with photon rate density (photons/s/unit wavelength).
+        Flux array. If continuous=True, this is a photon rate density
+        (photons/s/unit wavelength) and is integrated over each wavelength bin.
+        If continuous=False, this is a photon count RATE (photons/s) per discrete
+        line and is used directly, with no bin-width integration.
     orders : dict
         Nested structure containing wavelength trace and PSF stamps for orders. 
         Top level keys are order numbers (str).
@@ -633,6 +679,11 @@ def bilinear_weights_rate_map(
         Detector (ny, nx) pixel size, default = (4096, 4160).
     pixelsize : float, optional
         Pixel size in microns (affects oversampling), default = 10.
+    continuous : bool, optional
+        If True (default), flux is treated as a wavelength density and multiplied
+        by the local wavelength bin width to get photons/s. If False, flux is
+        treated as an already-integrated photon rate (photons/s) per discrete line,
+        e.g. for injecting unresolved emission lines. Default is True.
 
     Returns
     -------
@@ -663,7 +714,6 @@ def bilinear_weights_rate_map(
 
         xc_arr = fx(order_wave)
         yc_arr = fy(order_wave)
-        dws = np.gradient(order_wave)
 
         # apply blaze efficiency if requested
         if apply_blaze and blaze_angle is not None and groove_spacing is not None:
@@ -677,10 +727,22 @@ def bilinear_weights_rate_map(
             )
             order_flux *= blaze_eff
 
-        for i in range(len(order_wave) - 1):
+        if continuous:
+            # order_flux is a photon rate DENSITY (photons/s/micron); integrate
+            # over each local wavelength bin to get a photon rate (photons/s).
+            dws = np.gradient(order_wave)
+            photons_per_s_arr = order_flux * dws
+            # last sample has no trailing bin to integrate over in this scheme
+            n_samples = len(order_wave) - 1
+        else:
+            # order_flux is already a photon RATE (photons/s) per discrete line;
+            # use it directly, and inject every line (don't drop the last one).
+            photons_per_s_arr = order_flux
+            n_samples = len(order_wave)
+
+        for i in range(n_samples):
             lam0 = order_wave[i]
-            dw = dws[i]
-            photons_per_s = order_flux[i] * dw
+            photons_per_s = photons_per_s_arr[i]
 
             if photons_per_s.value <= 0:
                 continue
@@ -774,7 +836,8 @@ def psf_prf_convolution_rate_map(
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
     blaze_angle: Quantity = None,
-    groove_spacing: Quantity = None
+    groove_spacing: Quantity = None,
+    continuous: bool = True
 ) -> np.ndarray[np.float64]:
     """
     Generate a detector rate map by convolving oversampled PSFs with
@@ -786,7 +849,10 @@ def psf_prf_convolution_rate_map(
     wave : Quantity
         Input wavelength samples.
     flux : Quantity
-        Flux samples expressed as photon-rate density.
+        Flux samples. If continuous=True, expressed as a photon rate density
+        (photons/s/unit wavelength) and integrated over each wavelength bin.
+        If continuous=False, expressed as a photon count RATE (photons/s) per
+        discrete line and used directly, with no bin-width integration.
     orders : dict
         Nested dictionary containing trace coordinates and PSF stamps.
         Top level keys are order numbers (str).
@@ -800,6 +866,11 @@ def psf_prf_convolution_rate_map(
         Blaze angle of the echelle grating. Required if apply_blaze is True.
     groove_spacing : Quantity, optional
         Groove spacing of the echelle grating. Required if apply_blaze is True.
+    continuous : bool, optional
+        If True (default), flux is treated as a wavelength density and multiplied
+        by the local wavelength bin width to get photons/s. If False, flux is
+        treated as an already-integrated photon rate (photons/s) per discrete line,
+        e.g. for injecting unresolved emission lines. Default is True.
 
     Returns
     -------
@@ -859,8 +930,15 @@ def psf_prf_convolution_rate_map(
         subpixel_dx = xc_arr - xc_floor_arr
         subpixel_dy = yc_arr - yc_floor_arr
 
-        dws = np.gradient(order_wave)
-        photons_per_s = order_flux * dws
+        if continuous:
+            # order_flux is a photon rate DENSITY (photons/s/micron); integrate
+            # over each local wavelength bin to get a photon rate (photons/s).
+            dws = np.gradient(order_wave)
+            photons_per_s = order_flux * dws
+        else:
+            # order_flux is already a photon RATE (photons/s) per discrete line;
+            # use it directly, with no bin-width integration.
+            photons_per_s = order_flux
 
         psf_height, psf_width = psf_eff_list[0].shape
         x_psf_eff = np.arange(psf_width) - psf_width // 2
@@ -876,7 +954,10 @@ def psf_prf_convolution_rate_map(
         pixel_ys = (np.arange(max_pixels_y) - (max_pixels_y) // 2) * oversample
 
 
-        for i in range(len(order_wave) - 1):
+        # continuous: last sample has no trailing bin to integrate over in this
+        # scheme, so it is skipped. line list: every discrete line is injected.
+        n_samples = len(order_wave) - 1 if continuous else len(order_wave)
+        for i in range(n_samples):
             # Get x,y grid to interpolate the effective psf on
             pixels_xs_shifted = pixel_xs - subpixel_dx[i] * oversample
             pixels_ys_shifted = pixel_ys - subpixel_dy[i] * oversample
@@ -924,6 +1005,47 @@ def psf_prf_convolution_rate_map(
     return det
 
 
+def _line_flux_to_photon_rate(flux: Quantity, wavelength: Quantity) -> Quantity:
+    """Convert a per-line flux (already a RATE, not a density) to a photon
+    count rate (photons/s).
+
+    Used for continuous=False (line list) spectra, where each flux value is
+    assumed to already be integrated over the (unresolved) line rather than
+    a density that needs to be multiplied by a wavelength bin width.
+
+    Accepts flux given either as:
+      - a photon count rate, e.g. u.ph / u.s, or
+      - an energy/radiant-power rate, e.g. u.erg / u.s, u.W.
+    Energy-rate fluxes are converted to a photon rate using each line's
+    photon energy, E_photon = h * c / wavelength, since photon energy is
+    wavelength-dependent.
+
+    Parameters
+    ----------
+    flux : Quantity
+        Per-line flux, as a photon count rate or an energy rate.
+    wavelength : Quantity
+        Wavelength of each line (broadcastable against flux), used to
+        convert energy-rate fluxes to a photon count rate.
+
+    Returns
+    -------
+    Quantity
+        Flux converted to a photon count rate (u.ph / u.s).
+    """
+    if flux.unit.is_equivalent(u.ph / u.s):
+        return flux.to(u.ph / u.s)
+    elif flux.unit.is_equivalent(u.erg / u.s):
+        photon_energy = (const.h * const.c / wavelength).to(u.erg)
+        return (flux.to(u.erg / u.s) / photon_energy).value * (u.ph / u.s)
+    else:
+        raise ValueError(
+            f"Unsupported flux unit '{flux.unit}' for continuous=False. "
+            "Line-list flux must be given as a photon count rate "
+            "(e.g. ph/s) or an energy rate (e.g. erg/s, W)."
+        )
+
+
 def _check_wavelength_sampling(
     wavelengths: Quantity,
     min_resolution: float = 3e5
@@ -939,8 +1061,9 @@ def _check_wavelength_sampling(
 
     delta_wl = np.diff(wl)
     resolution = wl[:-1] / delta_wl
-
-    return bool(np.all(resolution >= min_resolution))
+    # Allow a small float margin: densify inserts at exact log-λ steps that can
+    # land ~0.5 below ``min_resolution`` from rounding (~2e-6 relative at R=3e5).
+    return bool(np.all(resolution >= float(min_resolution) * (1.0 - 1e-5)))
 
 
 def _upsample_spectrum(
@@ -949,22 +1072,56 @@ def _upsample_spectrum(
     desired_sampling_resolution: float = 3e5
 ) -> tuple[Quantity, Quantity]:
     """
-    Upsample spectrum in log-wavelength space to reach desired resolution.
+    Densify undersampled regions to a minimum resolving power.
+
+    Preserves existing wavelength samples and only inserts new points where the
+    local resolving power falls below ``desired_sampling_resolution``.  A global
+    linear resample to fixed ``R`` is avoided: for BT-Settl in the BSPEC band the
+    native grid is already denser than ``R~3e5``, and a global rebuild would
+    *downsample* those lines (a cm/s–m/s systematic for small Doppler tests).
+
+    Inserted fluxes use PCHIP on the native samples (shape-preserving).
     """
+    wl = np.asarray(wavelengths, dtype=np.float64).ravel()
+    fl = np.asarray(flux, dtype=np.float64).ravel()
+    if wl.size < 2:
+        return wavelengths, flux
+    if not np.all(np.diff(wl) > 0.0):
+        raise ValueError("Wavelengths must be strictly increasing.")
 
-    dloglam = 1.0 / desired_sampling_resolution
+    min_R = float(desired_sampling_resolution)
+    out_wl: list[float] = [float(wl[0])]
+    for i in range(wl.size - 1):
+        w0 = float(wl[i])
+        w1 = float(wl[i + 1])
+        local_R = w0 / (w1 - w0) if w1 > w0 else np.inf
+        if local_R < min_R and np.isfinite(local_R) and w0 > 0.0:
+            dloglam = 1.0 / min_R
+            n_fill = int(np.floor(np.log(w1 / w0) / dloglam))
+            for k in range(1, n_fill + 1):
+                w_ins = w0 * np.exp(k * dloglam)
+                if w_ins < w1 * (1.0 - 1e-15):
+                    out_wl.append(float(w_ins))
+        out_wl.append(w1)
 
-    lmax = np.max(wavelengths)
-    lmin = np.min(wavelengths)
-    n_steps = int(np.floor(np.log(lmax / lmin) / dloglam)) + 1
+    new_wl = np.asarray(out_wl, dtype=np.float64)
+    if new_wl.size == wl.size:
+        return wavelengths, flux
 
-    new_wavelengths = (
-        lmin * np.exp(np.arange(n_steps) * dloglam)
+    interp = PchipInterpolator(wl, fl, extrapolate=False)
+    new_fl = np.asarray(interp(new_wl), dtype=np.float64)
+    # Exact natives (avoid tiny PCHIP roundoff on retained samples).
+    native_idx = np.searchsorted(new_wl, wl)
+    native_idx = np.clip(native_idx, 0, new_wl.size - 1)
+    match = np.abs(new_wl[native_idx] - wl) <= (
+        np.finfo(np.float64).eps * np.maximum(1.0, np.abs(wl))
     )
+    new_fl[native_idx[match]] = fl[match]
 
-    interp_func = interp1d(wavelengths, flux, kind="linear", fill_value=0.)
-    new_flux = interp_func(new_wavelengths) * flux.unit
-
+    wl_unit = getattr(wavelengths, "unit", None) or u.micron
+    fl_unit = getattr(flux, "unit", None)
+    new_wavelengths = new_wl * wl_unit
+    new_flux = new_fl * fl_unit if fl_unit is not None else new_fl
     return new_wavelengths, new_flux
 
 

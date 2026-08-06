@@ -36,5 +36,7 @@ jobs:
       run: |
           pip install .[test]
     - name: Run tests
+      # pyproject.toml addopts ignores optional/slow modules (stage1, LFC,
+      # wavesol geometry, …). Do not pass paths that would re-enable them.
       run: |
           pytest

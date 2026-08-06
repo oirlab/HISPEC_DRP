@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy.optimize
 from numba import njit
-from hispecdrp.utils.math import polyval1d
+from hispecdrp.primitives.utils.array_utils import polyval1d
 
 
 import logging

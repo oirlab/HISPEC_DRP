@@ -328,7 +328,17 @@ def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> '
         model.meta.target_gaia_id is not None
         and any(getattr(model.meta, p) is None for p in gaia_props)
     ):
+        # A catalog lookup that exhausts every VizieR mirror returns None. Leave the
+        # target metadata unset in that case so an offline session still yields a usable
+        # model instead of failing model construction.
         gaia_data = get_stellar_data_gaia_from_source_id(model.meta.target_gaia_id)
+        if gaia_data is None:
+            logger.warning(
+                "Gaia DR3 lookup failed for target_gaia_id=%s; leaving target metadata unset.",
+                model.meta.target_gaia_id,
+            )
+            return model
+
         model.meta.set_default('target_gaia_epoch', gaia_data['ref_epoch'])
         model.meta.set_default('target_gaia_px', gaia_data['parallax'])
         model.meta.set_default('target_gaia_ra', gaia_data['ra'])
@@ -341,10 +351,18 @@ def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> '
 
         if model.meta.target_2mass_id is None:
             tmass_data = get_2mass_from_gaia(model.meta.target_gaia_id)
+            if tmass_data is None:
+                logger.warning(
+                    "2MASS lookup failed for target_gaia_id=%s; leaving 2MASS metadata unset.",
+                    model.meta.target_gaia_id,
+                )
+                return model
             model.meta.set_default('target_2mass_id', tmass_data['twomass_id'])
             model.meta.set_default('target_2mass_mag_j', tmass_data['j_m'])
             model.meta.set_default('target_2mass_mag_h', tmass_data['h_m'])
             model.meta.set_default('target_2mass_mag_ks', tmass_data['ks_m'])
+
+    return model
 
 def get_instrument_alias(instrument_name : str, spectrograph : str | None = None) -> str:
     """

@@ -4,7 +4,7 @@ import numpy as np
 from numba import njit
 import scipy.signal
 from typing import Sequence
-from ...utils.math import median_filter_2d, nanmedian_axis0_ignore_empty_columns
+from ..utils.array_utils import median_filter_2d, nanmedian_axis0_ignore_empty_columns
 import matplotlib.pyplot as plt
 
 import plotly.graph_objects as go

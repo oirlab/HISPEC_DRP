@@ -20,14 +20,14 @@ authentication.
 
 from __future__ import annotations
 
-# Allow running as script: python hispecdrp/simulations/run_caldb.py (relative imports need package context)
+# Allow running as script: python hispecdrp/calibrations/run_caldb.py (relative imports need package context)
 if __name__ == "__main__" and __package__ is None:
     import sys
     import os
     _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if _root not in sys.path:
         sys.path.insert(0, _root)
-    __package__ = "hispecdrp.simulations"
+    __package__ = "hispecdrp.calibrations"
 
 import argparse
 import logging
@@ -35,8 +35,8 @@ import os
 import sys
 
 from .. import datamodels
-from ..utils.logging import LogConfig, ROOT_LOGGER
-from ..calibrations import (
+from ..utils.logging import ROOT_LOGGER, setup_default_logging
+from . import (
     HISPECCalibrationStore,
     DQSelector,
     SaturationSelector,
@@ -366,14 +366,46 @@ def run(
                         logger.info("  ... and %d more.", len(missing) - 10)
                 else:
                     # Download each missing calibration (get_calibration downloads if not cached)
+                    n_ok = 0
+                    n_fail = 0
                     for i, rec in enumerate(missing, 1):
                         cal_id = rec.get("id")
                         filename = rec.get("filename", "?")
                         try:
                             local_path, _ = store.get_calibration(cal=rec)
-                            logger.info("[%d/%d] Downloaded: %s -> %s", i, len(missing), filename, local_path)
+                            size = (
+                                os.path.getsize(local_path)
+                                if local_path and os.path.isfile(local_path)
+                                else None
+                            )
+                            logger.info(
+                                "[%d/%d] Verified: %s -> %s (%s bytes)",
+                                i,
+                                len(missing),
+                                filename,
+                                local_path,
+                                size,
+                            )
+                            n_ok += 1
                         except Exception as e:
-                            logger.warning("[%d/%d] Failed to get calibration %s: %s", i, len(missing), filename, e)
+                            n_fail += 1
+                            logger.warning(
+                                "[%d/%d] Failed to get calibration %s: %s",
+                                i,
+                                len(missing),
+                                filename,
+                                e,
+                            )
+                    still = store.get_missing_local_files() or []
+                    if cal_type is not None:
+                        still = [m for m in still if m.get("cal_type") == cal_type]
+                    if n_fail or still:
+                        raise RuntimeError(
+                            f"KOA download incomplete: {n_ok} verified, {n_fail} failed, "
+                            f"{len(still)} still missing from cache. "
+                            "Metadata sync is not enough — FITS files must exist under "
+                            "KOA_CALIBRATION_CACHE."
+                        )
 
         # Add any files currently in the local cache that are not yet in the cal DB
         if not dry_run:
@@ -392,16 +424,16 @@ def main() -> None:
     """
     Parse command-line arguments and run the calibration DB sync.
 
-    Configures logging via :class:`hispecdrp.utils.logging.LogConfig`, then calls
+    Configures logging via :func:`hispecdrp.utils.logging.setup_default_logging`, then calls
     :func:`run` with the parsed options. See the script help (e.g.
-    ``python -m hispecdrp.simulations.run_caldb --help``) for available arguments.
+    ``python -m hispecdrp.calibrations.run_caldb --help``) for available arguments.
 
     Returns
     -------
     None
     """
-    config = LogConfig(level=logging.INFO, enable_stdout=True, enable_file=False)
-    config.apply([ROOT_LOGGER, __name__])
+    setup_default_logging()
+    logging.getLogger(ROOT_LOGGER).setLevel(logging.INFO)
     parser = argparse.ArgumentParser(
         description="Sync HISPEC calibration DB from KOA and download missing calibration files.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

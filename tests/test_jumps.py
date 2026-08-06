@@ -1,5 +1,5 @@
 from hispecdrp import datamodels
-import benchmarks as simulations
+from hispecdrp.simulations import create_ramp
 from hispecdrp import jump_detection_difference
 from hispecdrp import jump_detection_jwst
 import numpy as np
@@ -17,7 +17,7 @@ def test_jumps(tmp_path, datadir):
     gain_data = np.ones((ny, nx), dtype=np.float32) * gain_val
     read_noise_data = np.ones((ny, nx), dtype=np.float32) * read_noise_val
 
-    ramp_data = simulations.create_ramp(
+    ramp_data = create_ramp(
         source, readtime=1.0, n_reads=16,
         gain=gain_val, flat = 1, dark = 0, bias = 1000,
         kTC_noise = 50, read_noise=read_noise_val, poisson_noise=True, convert_to_uint16 = True,

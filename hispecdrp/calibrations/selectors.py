@@ -155,12 +155,19 @@ class HISPECCalibrationSelector(CalibrationSelector):
         if isinstance(cal_version, str):
             cal_version = cal_version.upper()
 
-        # Extract all versions
+        # Extract all versions. Remote / legacy rows may have cal_version=None;
+        # treat missing versions as older than any explicit string so LATEST /
+        # rollback comparisons never mix str and NoneType.
         versions = [row['cal_version'] for row in rows]
+
+        def _version_sort_key(v):
+            if v is None:
+                return (0, "")
+            return (1, str(v))
 
         # If None, pick latest version
         if cal_version in (None, "ANY", "LATEST"):
-            vmax = max(versions)
+            vmax = max(versions, key=_version_sort_key)
             return [row for row, v in zip(rows, versions) if v == vmax]
         
         # If specific version provided, filter by that version
@@ -178,7 +185,7 @@ class HISPECCalibrationSelector(CalibrationSelector):
             and cal_version[1:].isdigit()
         ):
             n = int(cal_version)
-            unique_versions = sorted(set(versions), reverse=True)
+            unique_versions = sorted(set(versions), key=_version_sort_key, reverse=True)
             if -n > len(unique_versions):
                 return []  # Not enough versions available
             target_version = unique_versions[-n]
@@ -189,7 +196,7 @@ class HISPECCalibrationSelector(CalibrationSelector):
             and cal_version < 0
         ):
             n = cal_version
-            unique_versions = sorted(set(versions), reverse=True)
+            unique_versions = sorted(set(versions), key=_version_sort_key, reverse=True)
             if -n > len(unique_versions):
                 return []  # Not enough versions available
             target_version = unique_versions[-n]
@@ -487,6 +494,13 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
         return list(rows)
             
 class FiberFlatSelector(HISPECCalibrationSelector):
+    """
+    Selector for fiber-flat calibration files.
+
+    Prefers flats whose ``object_fiber{N}`` is ``WHITELIGHT`` for every science
+    fiber on the input (``object_fiber{N} == SCIENCE``), so a fiber-2-only flat
+    is not chosen for a fiber-1 / fiber-3 exposure on the same night.
+    """
 
     def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
         rows = db.rows_where(
@@ -505,6 +519,48 @@ class FiberFlatSelector(HISPECCalibrationSelector):
         )
 
         return list(rows)
+
+    @staticmethod
+    def _science_fibers_from_input(input) -> list[int]:
+        """
+        Resolve SCIENCE fibers from a DataModel or bare ``meta``.
+
+        ``HISPECCalibrationStore.select_and_get_calibration`` passes
+        ``input.meta`` into ``selector.select``, so ``input`` is often already a
+        ``MetaModel`` (no nested ``.meta``).
+        """
+        src = getattr(input, "meta", None)
+        if src is None:
+            src = input
+        fibers: list[int] = []
+        for fib in (1, 2, 3):
+            key = f"object_fiber{fib}"
+            val = getattr(src, key, None)
+            if val is None and hasattr(src, "get"):
+                try:
+                    val = src.get(key)
+                except Exception:
+                    val = None
+            if str(val or "").upper() == "SCIENCE":
+                fibers.append(fib)
+        return fibers
+
+    def select_best(self, input, candidates : list[dict] | dict, **kwargs) -> dict | None:
+        rows = candidates if isinstance(candidates, list) else [candidates]
+        science_fibers = self._science_fibers_from_input(input)
+        if science_fibers:
+            preferred = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if all(
+                    str(row.get(f"object_fiber{fib}") or "").upper() == "WHITELIGHT"
+                    for fib in science_fibers
+                ):
+                    preferred.append(row)
+            if preferred:
+                return super().select_best(input, preferred, **kwargs)
+        return super().select_best(input, candidates, **kwargs)
 
 class DetectorFlatSelector(HISPECCalibrationSelector):
     """
@@ -581,6 +637,9 @@ class WavelengthSolutionSelector(HISPECCalibrationSelector):
     - Match instrument era
     - Match spectrograph
     - Closest in observation time
+    - Prefer packaged sim-HDF line-ZP WAVE (``meta.note`` /
+      ``sim_hdf_wavesol.line_zp``) when present among candidates, so simulation
+      Stage 1 does not silently pick a competing geometric ``lfc_wavesol``
 
     Parameters
     ----------
@@ -609,6 +668,21 @@ class WavelengthSolutionSelector(HISPECCalibrationSelector):
         )
 
         return list(rows)
+
+    def select_best(self, input, candidates : list[dict] | dict, **kwargs) -> dict | None:
+        """Prefer packaged sim-HDF line-ZP WAVE when it is among the candidates."""
+        if isinstance(candidates, list) and candidates:
+            # Keep this string match local (no simulations import) to avoid cycles.
+            tag = "sim_hdf_wavesol.line_zp"
+            preferred = [
+                c
+                for c in candidates
+                if tag in str(c.get("note") or "")
+                or tag in str(c.get("filename") or "")
+            ]
+            if preferred:
+                return super().select_best(input, preferred, **kwargs)
+        return super().select_best(input, candidates, **kwargs)
 
 class ReferenceEtalonSelector(HISPECCalibrationSelector):
     """

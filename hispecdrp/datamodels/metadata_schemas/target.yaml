@@ -221,3 +221,10 @@ properties:
     fits_keyword: TMAGKS
     type: number
     merge_rule: first
+
+  force_berv_m_s:
+    title: "Forced barycentric Earth radial velocity (simulations)"
+    fits_keyword: FBERV
+    type: number
+    unit: m/s
+    merge_rule: first

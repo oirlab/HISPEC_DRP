@@ -2,12 +2,16 @@ import numpy as np
 import multiprocessing as mp
 import ctypes
 from tqdm import tqdm
-from .utils import add_refchan_ramp
 
 from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
 
-__all__ = ['create_ramp','generate_1overf_noise','compute_psd','generate_1overf_noise_map','compute_channel_psds','generate_1overf_noise_integrated','utr_variable_rate_cube']
+__all__ = [
+    "create_ramp",
+    "generate_1overf_noise",
+    "generate_1overf_noise_map",
+    "utr_variable_rate_cube",
+]
 
 # np.random.poisson(lam) fails when lam is too large; use normal approximation above this
 _POISSON_LAM_MAX = 1e8
@@ -181,6 +185,7 @@ def create_ramp(
     vertical: bool = True,
     flux_scaling: np.ndarray | None = None,
     flux_scaling_times: np.ndarray | None = None,
+    seed: int | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Simulate a detector up-the-ramp (UTR) readout sequence for a given source image.
@@ -231,6 +236,10 @@ def create_ramp(
         Timeseries of flux to model variability centered on unity (default: None). Should match length of flux_scaling_times.
     flux_scaling_times : np.ndarray or None, optional
         Times corresponding to flux_scaling array (seconds) (default: None).
+    seed : int or None, optional
+        RNG seed for Poisson / read / kTC / 1/f noise. When set, repeated calls
+        with the same inputs reproduce the same ramp (needed for a packaged WAVE
+        CCF bake to transfer across notebook runs). Default ``None`` (nondeterministic).
 
     Returns
     -------
@@ -246,6 +255,7 @@ def create_ramp(
         If any value in the output 'data' array is negative.
     """
     ny, nx = source.shape
+    rng_master = np.random.default_rng(seed)
 
     if gain is None:
         gain = 1.0
@@ -344,12 +354,10 @@ def create_ramp(
         for block_start in range(0, ny, block_size):
             block_end = min(block_start + block_size, ny)
 
-            # This is almost certainly not the best way to handle RNG seeds in multiprocessing,
-            # but it will at least ensure different seeds for each worker and I understand it.
-            myrandomseed = np.random.default_rng().integers(
-                low=0,
-                high=np.iinfo(np.uint32).max,
-                dtype=np.uint32
+            # Distinct per-block seeds; derived from ``seed`` when provided so the
+            # full ramp is reproducible across runs / process counts.
+            myrandomseed = int(
+                rng_master.integers(low=0, high=np.iinfo(np.uint32).max, dtype=np.uint32)
             )
 
             args = (block_start, block_end,
@@ -391,6 +399,9 @@ def create_ramp(
     else:
         data_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.float32)
         dq_raw_np = np.zeros(shape=(n_reads, source.shape[0], source.shape[1]), dtype=np.uint8)
+        # Seed the global Generator used by _create_ramp (np.random.*) for RN/kTC/Poisson.
+        if seed is not None:
+            np.random.seed(int(seed))
         _outputs = _create_ramp(
             data_np, dq_raw_np,
             source=source,
@@ -589,227 +600,6 @@ def generate_1overf_noise(n, dt=1.0, std=1.0, seed=None, return_time=False):
         return noise, t
 
     return noise
-
-
-def generate_1overf_noise_integrated(
-    n,
-    dt=1.0,
-    readtime=1.0,
-    std=1.0,
-    seed=None,
-    return_time=False,
-    mode="same",
-):
-    """
-    Generate a 1/f (pink) noise time series sampled at dt and convolved with a
-    top-hat (boxcar) kernel of width `readtime` to emulate finite integration time.
-
-    Conceptually, this produces a *time-averaged* version of the underlying 1/f noise:
-    y(t) = (1/readtime) Integral_{t-readtime/2}^{t+readtime/2} x(u) du
-    when using a centered boxcar and `mode="same"`.
-
-    Notes
-    -----
-    Generated from ChatGPT.
-
-    Parameters
-    ----------
-    n : int
-        Number of samples in the output time series (sampled at dt).
-    dt : float, optional
-        Time sampling interval of the generated series. Should satisfy dt << readtime
-        for a good approximation of continuous-time integration.
-    readtime : float, optional
-        Integration time (width of the top-hat) in the same time units as dt.
-    std : float, optional
-        Desired standard deviation of the *final (convolved)* output time series.
-    seed : int or None, optional
-        Random seed for reproducibility.
-    return_time : bool, optional
-        If True, also return the time sampling vector.
-    mode : {"same","full","valid"}, optional
-        Convolution mode passed to np.convolve. Default "same" returns length n.
-
-    Returns
-    -------
-    noise_int : ndarray
-        The convolved (time-averaged) 1/f noise series. Length depends on `mode`
-        ("same" -> n).
-    t : ndarray, optional
-        Time vector corresponding to the returned samples (returned if return_time=True).
-
-    Notes
-    -----
-    - The top-hat kernel is *normalized* (sum=1), so it implements a moving average
-      over approximately `readtime`.
-    - The output is normalized to have standard deviation `std` *after* convolution.
-    - Edge behavior depends on `mode`. For "same", the result uses the implicit
-      zero-padding behavior of np.convolve; if you want different boundary handling
-      (reflect/nearest), you can pad manually before convolution.
-    """
-    if n <= 0:
-        raise ValueError("n must be a positive integer.")
-    if dt <= 0:
-        raise ValueError("dt must be > 0.")
-    if readtime <= 0:
-        raise ValueError("readtime must be > 0.")
-    if mode not in ("same", "full", "valid"):
-        raise ValueError('mode must be one of {"same","full","valid"}.')
-
-    # Generate underlying 1/f noise at fine sampling dt
-    base = generate_1overf_noise(n, dt=dt, std=1.0, seed=seed, return_time=False)
-
-    # Top-hat kernel width in samples (at least 1)
-    w = int(np.round(readtime / dt))
-    w = max(w, 1)
-
-    # Normalized boxcar (moving average) kernel
-    kernel = np.ones(w, dtype=float) / w
-
-    # Convolve to emulate finite integration time
-    noise_int = np.convolve(base, kernel, mode=mode)
-
-    # Normalize to requested std (after convolution)
-    noise_int -= np.mean(noise_int)
-    sigma = np.std(noise_int)
-    if sigma > 0:
-        noise_int *= std / sigma
-    else:
-        # Extremely unlikely, but keep behavior defined
-        noise_int[:] = 0.0
-
-    if return_time:
-        # Time vector must match output length (depends on convolution mode)
-        if mode == "same":
-            t = np.arange(n) * dt
-        elif mode == "full":
-            t = np.arange(n + w - 1) * dt
-        else:  # "valid"
-            t = np.arange(max(n - w + 1, 0)) * dt
-        return noise_int, t
-
-    noise_int = np.clip(noise_int,0,None)
-    return noise_int
-
-
-def compute_psd(x, dt=1.0, detrend=False, onesided=True):
-    """
-    Compute the power spectral density (PSD) of a time series using an FFT
-    periodogram.
-
-    Notes: generated from ChatGPT
-
-    Parameters
-    ----------
-    x : array_like, shape (n,)
-        Input time series.
-    dt : float, optional
-        Time sampling interval.
-    detrend : bool, optional
-        If True, subtract the mean before computing the PSD.
-    onesided : bool, optional
-        If True, return the one-sided PSD (recommended for real signals).
-
-    Returns
-    -------
-    freqs : ndarray
-        Fourier frequencies.
-    psd : ndarray
-        Power spectral density corresponding to `freqs`.
-    """
-    x = np.asarray(x)
-    n = x.size
-
-    if detrend:
-        x = x - np.mean(x)
-
-    # FFT
-    fft = np.fft.rfft(x) if onesided else np.fft.fft(x)
-
-    # Frequency axis
-    freqs = np.fft.rfftfreq(n, d=dt) if onesided else np.fft.fftfreq(n, d=dt)
-
-    # Periodogram normalization
-    psd = (np.abs(fft) ** 2) * (dt / n)
-
-    # One-sided correction (except DC and Nyquist)
-    if onesided and n % 2 == 0:
-        psd[1:-1] *= 2.0
-    elif onesided:
-        psd[1:] *= 2.0
-
-    return freqs, psd
-
-
-def compute_channel_psds(cube, n_channels=1, vertical=True, clock_rate=1.0,detrend=False, onesided=True):
-    """
-    Compute one power spectral density (PSD) per readout channel from a 3D
-    up-the-ramp datacube by flattening each channel into a 1D readout-ordered
-    time series.
-
-    This implementation effectively assumes that no signal is present in the data other than noise.
-
-    For each readout channel, the data are reshaped into a single 1D array
-    using NumPy's default (C-order) memory layout, such that the ordering of
-    samples matches the implicit readout order used when generating channel-
-    correlated 1/f noise. The PSD of this 1D sequence is then computed using
-    `compute_psd`.
-
-    Parameters
-    ----------
-    cube : ndarray, shape (n_reads, ny, nx)
-        Up-the-ramp datacube.
-    n_channels : int, optional
-        Number of detector readout channels. The detector dimension
-        corresponding to the channel direction must be divisible by
-        `n_channels`.
-    vertical : bool, optional
-        If True, channels are assumed to be vertical stripes along the x
-        dimension. If False, channels are assumed to be horizontal stripes
-        along the y dimension.
-    clock_rate : float, optional
-        Clock rate in Hz (samples per second).
-    detrend : bool, optional
-        If True, subtract the mean of each channel time series before
-        computing the PSD.
-    onesided : bool, optional
-        If True, compute a one-sided PSD appropriate for real-valued data.
-
-    Returns
-    -------
-    freqs : ndarray
-        Fourier frequency grid corresponding to the PSD.
-    psd_channels : ndarray, shape (n_channels, n_freq)
-        Power spectral density for each readout channel, computed from the
-        flattened channel data.
-    """
-    if cube.ndim != 3:
-        raise ValueError("cube must have shape (n_reads, ny, nx).")
-
-    if n_channels < 1:
-        raise ValueError("n_channels must be >= 1.")
-
-    if vertical:
-        _cube = cube
-    else:
-        _cube = cube.transpose(0, 2, 1)
-
-    n_reads, ny, nx = _cube.shape
-    if nx % n_channels != 0:
-        raise ValueError("Dimensions is not divisible by n_channels.")
-    nx_chan = nx // n_channels
-
-    psd_channels = []
-    for ic in range(n_channels):
-        x0 = ic * nx_chan
-        x1 = (ic + 1) * nx_chan
-        chan = _cube[:, :, x0:x1]
-
-        freqs, psd_chan = compute_psd(chan.ravel(), dt=1/clock_rate, detrend=detrend, onesided=onesided)
-
-        psd_channels.append(psd_chan)
-
-    return freqs, np.asarray(psd_channels)
 
 
 def utr_variable_rate_cube(

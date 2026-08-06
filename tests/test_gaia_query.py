@@ -1,8 +1,15 @@
+import subprocess
+import sys
+
+import pytest
+from astropy.table import Table
+
 from hispecdrp.primitives.utils import (
     get_stellar_data_gaia_by_coordinates,
     get_stellar_data_gaia_from_source_id,
     get_2mass_from_gaia,
 )
+from hispecdrp.primitives.utils import gaia_query
 from hispecdrp import datamodels
 
 # HD 189733
@@ -91,3 +98,156 @@ def test_gaia_to_2mass_fallback_path():
 
     twomass_id = result["twomass_id"]
     assert twomass_id == source_params["source_id_2mass"]
+
+
+# --- VizieR mirror-fallback layer (offline; no network) ----------------------------
+
+def _fake_vizier_class(attempts, ok_servers, table=None):
+    """Build a stand-in ``Vizier`` class recording each server it is constructed for.
+
+    Servers in *ok_servers* return *table*; all others raise, so tests can pin down
+    exactly which mirrors were tried and in what order.
+    """
+    result_table = Table({"Source": [1]}) if table is None else table
+
+    class FakeVizier:
+        def __init__(self, columns=None, column_filters=None, vizier_server=None,
+                     timeout=None):
+            self.server = vizier_server
+            self.columns = columns
+            self.column_filters = column_filters
+            self.timeout = timeout
+            self.ROW_LIMIT = None
+            attempts.append({"server": vizier_server, "timeout": timeout,
+                             "columns": columns, "column_filters": column_filters})
+
+        @staticmethod
+        def clear_cache():
+            attempts.append({"server": "<clear_cache>", "timeout": None,
+                             "columns": None, "column_filters": None})
+
+        def _respond(self):
+            if self.server not in ok_servers:
+                raise RuntimeError(f"mirror {self.server} down")
+            return [result_table]
+
+        def query_region(self, center, radius=None, catalog=None):
+            return self._respond()
+
+        def query_constraints(self, catalog=None, **constraints):
+            return self._respond()
+
+    return FakeVizier
+
+
+def _servers_tried(attempts):
+    return [a["server"] for a in attempts if a["server"] != "<clear_cache>"]
+
+
+def test_query_vizier_falls_through_failing_mirrors(monkeypatch):
+    mirrors = ["bad1.example", "bad2.example", "good.example", "unused.example"]
+    monkeypatch.setattr(gaia_query, "VIZIER_MIRRORS", mirrors)
+    monkeypatch.delenv("HISPEC_DRP_VIZIER_MIRRORS", raising=False)
+    attempts = []
+    monkeypatch.setattr(
+        gaia_query, "_vizier_class",
+        lambda: _fake_vizier_class(attempts, {"good.example"}),
+    )
+
+    table = gaia_query.query_vizier(
+        catalog="I/355/gaiadr3", constraints={"Source": "==1"}
+    )
+
+    assert table is not None
+    # Stops at the first working mirror, without touching the ones after it.
+    assert _servers_tried(attempts) == ["bad1.example", "bad2.example", "good.example"]
+
+
+def test_query_vizier_retries_full_mirror_list(monkeypatch):
+    monkeypatch.setattr(gaia_query, "VIZIER_MIRRORS", ["a.example", "b.example"])
+    monkeypatch.delenv("HISPEC_DRP_VIZIER_MIRRORS", raising=False)
+    attempts = []
+    monkeypatch.setattr(
+        gaia_query, "_vizier_class", lambda: _fake_vizier_class(attempts, set())
+    )
+
+    table = gaia_query.query_vizier(
+        catalog="II/246", constraints={"2MASS": "==x"}, max_rounds=3
+    )
+
+    assert table is None
+    assert _servers_tried(attempts) == ["a.example", "b.example"] * 3
+
+
+def test_query_vizier_clears_cache_before_querying(monkeypatch):
+    monkeypatch.setattr(gaia_query, "VIZIER_MIRRORS", ["a.example"])
+    monkeypatch.delenv("HISPEC_DRP_VIZIER_MIRRORS", raising=False)
+    attempts = []
+    monkeypatch.setattr(
+        gaia_query, "_vizier_class",
+        lambda: _fake_vizier_class(attempts, {"a.example"}),
+    )
+
+    gaia_query.query_vizier(catalog="II/246", constraints={"2MASS": "==x"})
+
+    assert attempts[0]["server"] == "<clear_cache>"
+
+
+def test_query_vizier_applies_timeout(monkeypatch):
+    monkeypatch.setattr(gaia_query, "VIZIER_MIRRORS", ["a.example"])
+    monkeypatch.delenv("HISPEC_DRP_VIZIER_MIRRORS", raising=False)
+    monkeypatch.setenv("HISPEC_DRP_VIZIER_TIMEOUT", "7.5")
+    attempts = []
+    monkeypatch.setattr(
+        gaia_query, "_vizier_class",
+        lambda: _fake_vizier_class(attempts, {"a.example"}),
+    )
+
+    gaia_query.query_vizier(catalog="II/246", constraints={"2MASS": "==x"})
+
+    assert [a["timeout"] for a in attempts if a["server"] == "a.example"] == [7.5]
+
+
+def test_vizier_mirrors_env_override(monkeypatch):
+    monkeypatch.setenv("HISPEC_DRP_VIZIER_MIRRORS", "local.mirror, other.mirror ")
+    assert gaia_query.vizier_mirrors() == ["local.mirror", "other.mirror"]
+
+    monkeypatch.setenv("HISPEC_DRP_VIZIER_MIRRORS", "   ")
+    assert gaia_query.vizier_mirrors() == list(gaia_query.VIZIER_MIRRORS)
+
+
+def test_vizier_timeout_env_override(monkeypatch):
+    monkeypatch.delenv("HISPEC_DRP_VIZIER_TIMEOUT", raising=False)
+    assert gaia_query.vizier_timeout() == gaia_query.VIZIER_TIMEOUT_DEFAULT
+
+    monkeypatch.setenv("HISPEC_DRP_VIZIER_TIMEOUT", "12")
+    assert gaia_query.vizier_timeout() == 12.0
+
+    # Invalid / non-positive values fall back to the default rather than disabling it.
+    for bad in ("not-a-number", "-5", "0"):
+        monkeypatch.setenv("HISPEC_DRP_VIZIER_TIMEOUT", bad)
+        assert gaia_query.vizier_timeout() == gaia_query.VIZIER_TIMEOUT_DEFAULT
+
+
+def test_query_vizier_rejects_ambiguous_arguments():
+    with pytest.raises(ValueError):
+        gaia_query.query_vizier(catalog="II/246")
+    with pytest.raises(ValueError):
+        gaia_query.query_vizier(
+            catalog="II/246", center=object(), radius_deg=1.0,
+            constraints={"2MASS": "==x"},
+        )
+    with pytest.raises(ValueError):
+        gaia_query.query_vizier(catalog="II/246", center=object())
+
+
+def test_importing_hispecdrp_does_not_import_astroquery_vizier():
+    """``astroquery.vizier`` must stay lazy: importing it can hang (issue #201)."""
+    code = (
+        "import sys, hispecdrp; "
+        "print('astroquery.vizier' in sys.modules)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip().endswith("False")
