@@ -40,18 +40,27 @@ logger = logging.getLogger(__name__)
 
 # Half-width (m/s) of the local velocity window for :func:`calc_ccf_metrics` after the
 # mask-line prominence peak seed (coarse uniform grids alias without this step).
+# Alias troughs inside this window are handled by prior-aware recentering /
+# ``_pipeline_rv_from_metrics`` peak anchoring rather than by shrinking this cut.
 _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S = 20_000.0
 
-# Bisector vs Gaussian acceptance: require |bis − gauss| ≤ max(frac×FWHM, abs floor).
-# The previous gate (max(3×FWHM, 5 km/s)) was far too loose for blend-asymmetric cores.
-_BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION = 0.25
-_BISECTOR_VS_GAUSS_MAX_ABS_M_S = 500.0
-
-# When Gaussian and/or bisector disagree with the discrete/parabolic CCF peak by more
-# than max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
+# When the Gaussian disagrees with the discrete/parabolic CCF peak by more than
+# max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
 # Keep this near ~1–2 grid steps so ~100 m/s wing-biased fits on a 50 m/s grid are caught.
 _FIT_VS_PEAK_DISAGREE_N_VSTEP = 1.5
 _FIT_VS_PEAK_DISAGREE_MIN_M_S = 50.0
+
+# If the prominence seed / Gaussian is farther than this from ``gaussian_seed_mean_m_s``
+# (typically ``ccf_input_velocity``), prefer a competitive local peak near the prior
+# as the metrics window center / peak-anchor (multimodal / alias guard).
+# Must sit below dense-mask alias offsets (~280–480 m/s on BSPEC 117/145).
+_ALIAS_PRIOR_RECENTER_GATE_M_S = 200.0
+# Half-width for prior-local peak search / peak-anchor recovery. Keep this tighter
+# than those same aliases; a FWHM-scale window re-admits the trough that stole the fit.
+_ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S = 250.0
+# Prior-local peak must reach at least this fraction of the prominence-peak amplitude
+# (stored peak-up convention) before we recenter away from prominence.
+_ALIAS_PRIOR_MIN_DEPTH_FRAC = 0.90
 
 
 def _line_mask_spline_peak_index(v_grid: np.ndarray, ccf_raw: np.ndarray) -> int:
@@ -115,6 +124,100 @@ def line_mask_scout_center_m_s(
     return float("nan")
 
 
+def _stored_corr_strength_in_window(
+    vel_grid: np.ndarray,
+    ccf_stored: np.ndarray,
+    *,
+    anchor_m_s: float,
+    half_width_m_s: float,
+) -> float:
+    """
+    Correlation-peak strength in ``[anchor±half_width]`` (larger = stronger), or NaN.
+
+    For :data:`LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`, stored series are often entirely
+    negative and the alignment is a trough — use ``-min(stored)``. Otherwise use
+    ``max(stored)`` (peak-up).
+    """
+    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
+    ys = np.asarray(ccf_stored, dtype=np.float64).ravel()
+    if vg.size < 1 or ys.size != vg.size:
+        return float("nan")
+    hw = float(half_width_m_s)
+    anc = float(anchor_m_s)
+    m = (vg >= anc - hw) & (vg <= anc + hw) & np.isfinite(vg) & np.isfinite(ys)
+    if not np.any(m):
+        return float("nan")
+    if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW:
+        return float(-np.nanmin(ys[m]))
+    return float(np.nanmax(ys[m]))
+
+
+def _resolve_spline_mask_metrics_center_m_s(
+    vel_grid: np.ndarray,
+    ccf_stored: np.ndarray,
+    *,
+    prominence_center_m_s: float,
+    prior_m_s: float | None,
+) -> float:
+    """
+    Metrics-window center: prominence peak, optionally recentered near ``prior_m_s``.
+
+    When the prominence seed lies farther than :data:`_ALIAS_PRIOR_RECENTER_GATE_M_S`
+    from a finite prior (usually ``ccf_input_velocity``) and a local peak near that
+    prior reaches at least :data:`_ALIAS_PRIOR_MIN_DEPTH_FRAC` of the prominence
+    amplitude, return the prior-local peak so the Gaussian does not lock onto a
+    deeper alias trough.
+    """
+    v_prom = float(prominence_center_m_s)
+    if prior_m_s is None or not math.isfinite(float(prior_m_s)):
+        return v_prom
+    prior = float(prior_m_s)
+    if not math.isfinite(v_prom):
+        return prior
+    if abs(v_prom - prior) <= float(_ALIAS_PRIOR_RECENTER_GATE_M_S):
+        return v_prom
+
+    search_hw = float(_ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S)
+    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
+    ys = np.asarray(ccf_stored, dtype=np.float64).ravel()
+    m_prior = (
+        (vg >= prior - search_hw)
+        & (vg <= prior + search_hw)
+        & np.isfinite(vg)
+        & np.isfinite(ys)
+    )
+    if int(np.count_nonzero(m_prior)) < 3:
+        return v_prom
+    # Peak-up disc max on stored; for negated-from-raw troughs, search on -stored.
+    y_peak = -ys if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else ys
+    v_prior = float(
+        _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg[m_prior], y_peak[m_prior])
+    )
+    if not math.isfinite(v_prior):
+        return v_prom
+
+    str_prom = _stored_corr_strength_in_window(
+        vg,
+        ys,
+        anchor_m_s=v_prom,
+        half_width_m_s=search_hw,
+    )
+    str_prior = _stored_corr_strength_in_window(
+        vg,
+        ys,
+        anchor_m_s=v_prior,
+        half_width_m_s=search_hw,
+    )
+    if (
+        math.isfinite(str_prom)
+        and math.isfinite(str_prior)
+        and str_prom > 0.0
+        and (str_prior / str_prom) >= float(_ALIAS_PRIOR_MIN_DEPTH_FRAC)
+    ):
+        return v_prior
+    return v_prom
+
+
 def _fit_spline_mask_ccf_metrics(
     vel_grid: np.ndarray,
     ccf_raw: np.ndarray,
@@ -126,11 +229,10 @@ def _fit_spline_mask_ccf_metrics(
     """
     Fit :class:`CCFMetrics` on a spline mask CCF with mask-line peak seeding.
 
-    Uses a local velocity window around the prominence peak so coarse-grid alias
-    minima do not dominate the Gaussian fit. An optional ``gaussian_seed_mean_m_s``
-    (scout RV) is forwarded as ``mu_guess`` for the Gaussian/bisector only;
-    it must **not** recenter the metrics window — a scout-centered cut can
-    undersample the blue wing relative to the prominence window.
+    Uses a local velocity window around the prominence peak (optionally recentered
+    toward ``gaussian_seed_mean_m_s`` when a competitive prior-local peak exists)
+    so coarse-grid alias minima do not dominate the Gaussian fit. The seed is also
+    forwarded as ``mu_guess`` for the Gaussian/bisector.
     """
     vg = np.asarray(vel_grid, dtype=np.float64).ravel()
     raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
@@ -145,9 +247,21 @@ def _fit_spline_mask_ccf_metrics(
     i_peak = _line_mask_spline_peak_index(vg, raw)
     if i_peak < 0 or i_peak >= vg.size:
         v_sub = _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored)
-        v_center = float(v_sub) if math.isfinite(float(v_sub)) else float(vg[int(np.nanargmax(stored))])
+        v_prom = float(v_sub) if math.isfinite(float(v_sub)) else float(vg[int(np.nanargmax(stored))])
     else:
-        v_center = float(vg[i_peak])
+        v_prom = float(vg[i_peak])
+    prior = (
+        float(gaussian_seed_mean_m_s)
+        if gaussian_seed_mean_m_s is not None
+        and math.isfinite(float(gaussian_seed_mean_m_s))
+        else None
+    )
+    v_center = _resolve_spline_mask_metrics_center_m_s(
+        vg,
+        stored,
+        prominence_center_m_s=v_prom,
+        prior_m_s=prior,
+    )
     if fit_half_width_m_s is None or not math.isfinite(float(fit_half_width_m_s)) or float(fit_half_width_m_s) <= 0.0:
         hw = _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S
     else:
@@ -162,13 +276,7 @@ def _fit_spline_mask_ccf_metrics(
         pix_size=None,
         absorption=not LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
         calc_bis=True,
-        # Forward scout center only as a fit seed, not as the window center.
-        mu_guess=(
-            float(gaussian_seed_mean_m_s)
-            if gaussian_seed_mean_m_s is not None
-            and math.isfinite(float(gaussian_seed_mean_m_s))
-            else None
-        ),
+        mu_guess=prior,
     )
 
 
@@ -198,6 +306,47 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
     }
     bisector_fit: dict | None = None
     if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):
+        bdiag: dict = {"used_ccf_metrics": True}
+        # Prefer NEID cut diagnostics (cuts, bis_m_s, …) when the metrics fit retained them.
+        if isinstance(metrics.bisector_diagnostics, dict):
+            bdiag.update(metrics.bisector_diagnostics)
+        # Queloz BIS slope + error from CCFMetrics when cut-based BIS is absent.
+        if (
+            (bdiag.get("bis_m_s") is None or not math.isfinite(float(bdiag.get("bis_m_s"))))
+            and metrics.bis is not None
+            and math.isfinite(float(metrics.bis))
+        ):
+            bdiag["bis_m_s"] = float(metrics.bis)
+            if metrics.bis_err is not None and math.isfinite(float(metrics.bis_err)):
+                bdiag["bis_err_m_s"] = float(metrics.bis_err)
+        elif (
+            (bdiag.get("bis_m_s") is None or not math.isfinite(float(bdiag.get("bis_m_s"))))
+            and metrics.bis_shallow is not None
+            and metrics.bis_core is not None
+            and math.isfinite(float(metrics.bis_shallow))
+            and math.isfinite(float(metrics.bis_core))
+        ):
+            bdiag["bis_m_s"] = float(metrics.bis_shallow) - float(metrics.bis_core)
+            if (
+                metrics.bis_shallow_err is not None
+                and metrics.bis_core_err is not None
+                and math.isfinite(float(metrics.bis_shallow_err))
+                and math.isfinite(float(metrics.bis_core_err))
+            ):
+                bdiag["bis_err_m_s"] = float(
+                    math.sqrt(
+                        float(metrics.bis_shallow_err) ** 2
+                        + float(metrics.bis_core_err) ** 2
+                    )
+                )
+        if metrics.bis_shallow is not None and math.isfinite(float(metrics.bis_shallow)):
+            bdiag["bis_shallow_m_s"] = float(metrics.bis_shallow)
+        if metrics.bis_core is not None and math.isfinite(float(metrics.bis_core)):
+            bdiag["bis_core_m_s"] = float(metrics.bis_core)
+        if metrics.bisector is not None:
+            bdiag["bisector"] = np.asarray(metrics.bisector, dtype=np.float64)
+        if metrics.bis_levels is not None:
+            bdiag["bis_levels"] = np.asarray(metrics.bis_levels, dtype=np.float64)
         bisector_fit = {
             "rv": float(metrics.bis_rv),
             "rv_err": (
@@ -207,7 +356,7 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
                 and float(metrics.bis_rv_err) > 0.0
                 else float("nan")
             ),
-            "diagnostics": {"used_ccf_metrics": True},
+            "diagnostics": bdiag,
         }
     return gaussian_fit, bisector_fit
 
@@ -268,39 +417,32 @@ def _pipeline_rv_from_metrics(
     *,
     vel_grid: np.ndarray | None = None,
     ccf_raw: np.ndarray | None = None,
+    peak_anchor_m_s: float | None = None,
 ) -> tuple[float, float]:
     """
-    Chunk RV from :class:`CCFMetrics`, with asymmetric-core guards.
+    Chunk RV from :class:`CCFMetrics` (Gaussian), with asymmetric-core guards.
 
-    1. Prefer absolute bisector refine (``bis_rv``) only when it lies within a **tight**
-       gate of the Gaussian (``max(0.25×FWHM, 500 m/s)``).
-    2. If a CCF velocity grid is provided and the Gaussian and/or bisector disagree with
-       the **local** discrete/parabolic peak (anchored on the Gaussian, half-width
-       ``max(FWHM, 5×Δv, 1 km/s)``) by more than ``max(1.5×Δv, 50 m/s)``, fall back to
-       that peak RV. The local window avoids broad-grid alias peaks.
+    Uses the Gaussian ``rv`` / ``rv_err``. Absolute bisector refine (``bis_rv``) is
+    retained on the metrics object for diagnostics only. If a CCF velocity grid is
+    provided and the Gaussian disagrees with the **local** discrete/parabolic peak
+    (anchored on the Gaussian, half-width ``max(FWHM, 5×Δv, 1 km/s)``) by more than
+    ``max(1.5×Δv, 50 m/s)``, fall back to that peak RV. The local window avoids
+    broad-grid alias peaks.
+
+    When ``peak_anchor_m_s`` (typically ``ccf_input_velocity``) is set and the
+    Gaussian has wandered farther than :data:`_ALIAS_PRIOR_RECENTER_GATE_M_S` from
+    it, the discrete-peak guard is anchored on the prior instead so an alias-locked
+    Gaussian cannot self-confirm via a peak search around the wrong trough.
+
+    Peak fallback is also refused when a finite prior is available and the candidate
+    peak lands farther than that gate from the prior (unless this was a prior-anchored
+    recovery that pulled the peak *closer* to the prior than the Gaussian). This
+    stops FWHM-wide peak searches from swapping a near-prior shoulder fit for a
+    deeper alias (e.g. BSPEC order 117).
     """
     rv = float(metrics.rv)
     err = float(metrics.rv_err)
     gauss_rv = rv
-    bis_rv: float | None = None
-    if metrics.bis_rv is not None and np.isfinite(float(metrics.bis_rv)):
-        bis_rv = float(metrics.bis_rv)
-        bis_err = metrics.bis_rv_err
-        fwhm = float(metrics.fwhm) if metrics.fwhm is not None else float("nan")
-        bis_gate = max(
-            _BISECTOR_VS_GAUSS_MAX_FWHM_FRACTION * fwhm
-            if np.isfinite(fwhm) and fwhm > 0.0
-            else 0.0,
-            _BISECTOR_VS_GAUSS_MAX_ABS_M_S,
-        )
-        if abs(bis_rv - gauss_rv) <= bis_gate:
-            rv = bis_rv
-            if (
-                bis_err is not None
-                and np.isfinite(float(bis_err))
-                and float(bis_err) > 0.0
-            ):
-                err = float(bis_err)
 
     if (
         vel_grid is not None
@@ -314,10 +456,26 @@ def _pipeline_rv_from_metrics(
             peak_hw = max(peak_hw, float(fwhm))
         if math.isfinite(v_step) and v_step > 0.0:
             peak_hw = max(peak_hw, 5.0 * float(v_step))
+        anchor = gauss_rv
+        prior_anchored = False
+        prior = (
+            float(peak_anchor_m_s)
+            if peak_anchor_m_s is not None and math.isfinite(float(peak_anchor_m_s))
+            else None
+        )
+        if (
+            prior is not None
+            and abs(gauss_rv - prior) > float(_ALIAS_PRIOR_RECENTER_GATE_M_S)
+        ):
+            # Keep this window tight: FWHM-inflated half-widths re-admit the alias
+            # trough that stole the Gaussian (e.g. BSPEC order 145 at ~+480 m/s).
+            anchor = prior
+            peak_hw = float(_ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S)
+            prior_anchored = True
         peak_rv = _line_mask_ccf_peak_rv_m_s(
             vel_grid,
             ccf_raw,
-            anchor_m_s=gauss_rv,
+            anchor_m_s=anchor,
             half_width_m_s=peak_hw,
         )
         if math.isfinite(peak_rv):
@@ -327,17 +485,26 @@ def _pipeline_rv_from_metrics(
                     disagree_thresh,
                     _FIT_VS_PEAK_DISAGREE_N_VSTEP * float(v_step),
                 )
-            disagree = abs(gauss_rv - peak_rv) > disagree_thresh
-            if bis_rv is not None and math.isfinite(bis_rv):
-                disagree = disagree or (abs(bis_rv - peak_rv) > disagree_thresh)
-            if disagree:
-                rv = float(peak_rv)
-                if not (math.isfinite(err) and err > 0.0):
-                    err = (
-                        0.15 * float(v_step)
-                        if math.isfinite(v_step) and v_step > 0.0
-                        else 1.0
-                    )
+            if abs(gauss_rv - peak_rv) > disagree_thresh:
+                take_peak = True
+                if prior is not None:
+                    d_peak = abs(float(peak_rv) - prior)
+                    d_gauss = abs(gauss_rv - prior)
+                    gate = float(_ALIAS_PRIOR_RECENTER_GATE_M_S)
+                    if prior_anchored:
+                        # Recovery must move toward the prior, not along an alias wing.
+                        take_peak = d_peak < d_gauss
+                    elif d_peak > gate:
+                        take_peak = False
+                if take_peak:
+                    rv = float(peak_rv)
+                    # Alias recovery (or missing Gaussian σ): use a grid-scale floor.
+                    if prior_anchored or not (math.isfinite(err) and err > 0.0):
+                        err = (
+                            0.15 * float(v_step)
+                            if math.isfinite(v_step) and v_step > 0.0
+                            else 1.0
+                        )
     return rv, err
 
 
@@ -389,10 +556,17 @@ def fit_line_mask_order_mean_rv_spline(
         if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW
         else np.asarray(ccf_mean_stored, dtype=np.float64).ravel()
     )
+    prior = (
+        float(gaussian_seed_mean_m_s)
+        if gaussian_seed_mean_m_s is not None
+        and math.isfinite(float(gaussian_seed_mean_m_s))
+        else None
+    )
     rv, err = _pipeline_rv_from_metrics(
         metrics,
         vel_grid=vel_grid,
         ccf_raw=raw,
+        peak_anchor_m_s=prior,
     )
     ok = (
         np.isfinite(rv)
@@ -534,6 +708,8 @@ def rv_per_chunks_line_mask_spline(
     np.ndarray,
     np.ndarray | None,
     np.ndarray | None,
+    np.ndarray,
+    np.ndarray,
 ]:
     """
     Per-chunk line-mask RV via :func:`compute_ccf_spline` + :func:`calc_ccf_metrics`.
@@ -546,6 +722,9 @@ def rv_per_chunks_line_mask_spline(
     If none of those are set (broad scout with no input RV), membership is recomputed
     at each trial velocity — freezing at rest with :math:`F=0` for missing lines
     creates false CCF minima on wide grids.
+
+    Returns also include per-chunk Queloz ``bis`` / ``bis_err`` (m/s) from
+    :class:`~hispecdrp.primitives.utils.ccf.ccf_fitting.CCFMetrics`.
     """
     w = np.asarray(wave_um, dtype=np.float64).ravel()
     s = np.asarray(spec, dtype=np.float64).ravel()
@@ -556,10 +735,10 @@ def rv_per_chunks_line_mask_spline(
         z = np.array([], dtype=np.float64)
         zi = np.array([], dtype=np.int32)
         if not return_ccf:
-            return (z, z, z, v_grid_local, None, z, z, zi, None, None)
+            return (z, z, z, v_grid_local, None, z, z, zi, None, None, z, z)
         ccf_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
         std_out = np.empty((0, len(v_grid_local)), dtype=np.float64)
-        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out)
+        return (z, z, z, v_grid_local, ccf_out, z, z, zi, std_out, ccf_out, z, z)
 
     if line_set_velocity_m_s is not None and math.isfinite(float(line_set_velocity_m_s)):
         v_line_set: float | None = float(line_set_velocity_m_s)
@@ -647,6 +826,8 @@ def rv_per_chunks_line_mask_spline(
     all_wl_lo: list[float] = []
     all_wl_hi: list[float] = []
     all_n_good: list[int] = []
+    all_bis: list[float] = []
+    all_bis_errs: list[float] = []
     all_ccf_rows: list[np.ndarray] = []
     all_ccf_preview_rows: list[np.ndarray] = []
     all_ccf_err_rows: list[np.ndarray] = []
@@ -721,27 +902,29 @@ def rv_per_chunks_line_mask_spline(
         if not np.any(np.isfinite(ccf_raw)):
             continue
 
+        seed_m_s = (
+            float(gaussian_seed_mean_m_s)
+            if gaussian_seed_mean_m_s is not None
+            and math.isfinite(float(gaussian_seed_mean_m_s))
+            else (
+                float(line_mask_line_chunk_v_center_m_s)
+                if line_mask_line_chunk_v_center_m_s is not None
+                and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
+                else None
+            )
+        )
         metrics = _fit_spline_mask_ccf_metrics(
             vel_grid,
             ccf_raw,
             ccf_err,
             fit_half_width_m_s=metrics_fit_half_width_m_s,
-            gaussian_seed_mean_m_s=(
-                float(gaussian_seed_mean_m_s)
-                if gaussian_seed_mean_m_s is not None
-                and math.isfinite(float(gaussian_seed_mean_m_s))
-                else (
-                    float(line_mask_line_chunk_v_center_m_s)
-                    if line_mask_line_chunk_v_center_m_s is not None
-                    and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
-                    else None
-                )
-            ),
+            gaussian_seed_mean_m_s=seed_m_s,
         )
         rv, rv_err = _pipeline_rv_from_metrics(
             metrics,
             vel_grid=vel_grid,
             ccf_raw=ccf_raw,
+            peak_anchor_m_s=seed_m_s,
         )
         if not (np.isfinite(rv) and np.isfinite(rv_err) and float(rv_err) > 0.0):
             continue
@@ -751,12 +934,24 @@ def rv_per_chunks_line_mask_spline(
             -ccf_preview if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else ccf_preview.copy()
         )
 
+        bis_v = (
+            float(metrics.bis)
+            if metrics.bis is not None and math.isfinite(float(metrics.bis))
+            else float("nan")
+        )
+        bis_e = (
+            float(metrics.bis_err)
+            if metrics.bis_err is not None and math.isfinite(float(metrics.bis_err))
+            else float("nan")
+        )
         all_rvs.append(float(rv))
         all_rv_errs.append(float(rv_err))
         all_centers.append(float(wl_center))
         all_wl_lo.append(float(np.nanmin(w_c)))
         all_wl_hi.append(float(np.nanmax(w_c)))
         all_n_good.append(n_good)
+        all_bis.append(bis_v)
+        all_bis_errs.append(bis_e)
         if return_ccf:
             all_ccf_rows.append(ccf_stored)
             all_ccf_preview_rows.append(ccf_preview)
@@ -771,6 +966,8 @@ def rv_per_chunks_line_mask_spline(
     wl_lo_arr = np.asarray(all_wl_lo, dtype=np.float64)
     wl_hi_arr = np.asarray(all_wl_hi, dtype=np.float64)
     n_good_arr = np.asarray(all_n_good, dtype=np.int32)
+    bis_arr = np.asarray(all_bis, dtype=np.float64)
+    bis_err_arr = np.asarray(all_bis_errs, dtype=np.float64)
 
     if not return_ccf:
         return (
@@ -784,6 +981,8 @@ def rv_per_chunks_line_mask_spline(
             n_good_arr,
             None,
             None,
+            bis_arr,
+            bis_err_arr,
         )
 
     ccf_2d = np.vstack(all_ccf_rows)
@@ -800,4 +999,6 @@ def rv_per_chunks_line_mask_spline(
         n_good_arr,
         ccf_std_2d,
         ccf_preview_2d,
+        bis_arr,
+        bis_err_arr,
     )

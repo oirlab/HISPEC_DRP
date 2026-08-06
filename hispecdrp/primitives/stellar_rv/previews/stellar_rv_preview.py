@@ -9,8 +9,8 @@ There are **three** preview surfaces:
    mask-overlay payload, the top row is the same spectrum/mask content as the standalone
    ``*_mask_overlay_debug_fib*.html`` (initial overlay velocity: finite ``ccf_input_velocity`` if
    set, else ``0`` m/s; chunk dropdown uses ``restyle``). CCF slot dropdown aligns with the CCF
-   legend (``x``), below the legend box
-   per fiber (with extra vertical offset so it sits lower in the panel); slot metadata annotations stay in each CCF panel.
+   legend (``x``). CCF panels overlay the Gaussian fit, bisector midpoints / wing chords when
+   ``bisector_fit`` is present, and the final Gaussian RV.
 2. **Spectrum + CCF overlay debug HTML** (``write_mask_overlay_debug_pages`` /
    ``write_template_overlay_debug_pages``): one shared page implementation
    (:mod:`~hispecdrp.primitives.stellar_rv.previews.ccf_spectrum_overlay_debug_html` + embedded
@@ -215,7 +215,10 @@ PREVIEW_CCF_MAX_PLOT_SLOTS = 1
 
 # RV vs λ: ``xref="paper"`` is the axes **inner** box (0–1), not the full figure. Anchor at ``x=1``
 # and shift right by this many pixels so “Derived” sits just outside the frame in the margin.
-RV_SIDEBAR_XSHIFT_PX = 32
+RV_SIDEBAR_XSHIFT_PX = 28
+# Figure width / right margin must leave room for the Derived sidebar (long labels were clipped).
+RV_FIG_WIDTH = 820
+RV_FIG_MARGIN_RIGHT = 340
 
 # Preview HTML: wheel-zoom at cursor; no Plotly logo. RV figure: independent axes. CCF figure:
 # CCF and residual rows share velocity zoom/pan via ``matches`` on the residual x-axis.
@@ -524,23 +527,38 @@ def _preview_slots_for_plot(slots: list) -> list:
 def _iterative_sigma_clip_ylim(
     y: np.ndarray,
     *,
+    y_err: np.ndarray | None = None,
     sigma: float = 3.0,
     max_iter: int = 5,
     pad_frac: float = 0.05,
 ) -> tuple[float, float]:
     """
     Default y-axis limits for RV scatter: iterative sigma clipping on finite values,
-    then symmetric-ish padding so the panel spans the \"good\" points.
+    then padding so the panel spans the \"good\" points.
+
+    When ``y_err`` is provided (same length as ``y``), limits expand to the full
+    extent of ``y ± y_err`` for the sigma-clipped inliers so per-chunk error bars
+    are not clipped by the axes. Flagged outliers should be omitted from ``y`` /
+    ``y_err`` by the caller.
     """
 
     v = np.asarray(y, dtype=np.float64).ravel()
-    v = v[np.isfinite(v)]
+    e = None if y_err is None else np.asarray(y_err, dtype=np.float64).ravel()
+    if e is not None and e.shape != v.shape:
+        raise ValueError("y_err must have the same shape as y")
+    finite = np.isfinite(v)
+    if e is not None:
+        finite = finite & np.isfinite(e) & (e >= 0)
+    v = v[finite]
+    if e is not None:
+        e = e[finite]
     if v.size == 0:
         return -1.0, 1.0
     if v.size == 1:
         m = float(v[0])
-        d = max(abs(m) * 1e-6, 1e-9)
-        return m - d, m + d
+        half = float(e[0]) if e is not None else max(abs(m) * 1e-6, 1e-9)
+        half = max(half, max(abs(m) * 1e-6, 1e-9))
+        return m - half, m + half
     mask = np.ones(v.shape[0], dtype=bool)
     for _ in range(max_iter):
         if np.sum(mask) < 2:
@@ -554,9 +572,15 @@ def _iterative_sigma_clip_ylim(
             break
         mask = new_m
     vf = v[mask]
+    ef = e[mask] if e is not None else None
     if vf.size == 0:
         vf = v
-    lo, hi = float(np.min(vf)), float(np.max(vf))
+        ef = e
+    if ef is not None and ef.size:
+        lo = float(np.min(vf - ef))
+        hi = float(np.max(vf + ef))
+    else:
+        lo, hi = float(np.min(vf)), float(np.max(vf))
     span = hi - lo
     pad = pad_frac * span if span > 0 else max(abs(lo) * pad_frac, 1e-6)
     return lo - pad, hi + pad
@@ -687,12 +711,14 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     show_legend: bool,
     ylim_lo: float,
     ylim_hi: float,
+    bisector_fit: dict | None = None,
 ) -> list[int]:
     """
-    Build the five line-mask refine overlay traces from ``rmeta`` (no second parabolic solve).
+    Build five line-mask refine overlay traces from ``rmeta`` (no parabolic solve).
 
-    Used when :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.finalize_ccf_preview_dict` already
-    ran refinement and stored ``line_mask_refine_rmeta`` on the slot.
+    Slots: (0) smoothed ±1σ band, (1) smoothed CCF, (2–3) reserved placeholders
+    (formerly parabolic diagnostics; left empty), (4) final Gaussian RV line.
+    When the slot carries ``line_mask_refine_rmeta``, that result is reused.
     """
     trace_indices: list[int] = []
 
@@ -705,14 +731,25 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
         trace_indices.append(len(fig.data) - 1)
 
     def _final_rv_vertical_line() -> None:
-        # Pipeline final chunk RV is bisector-refined (``rv_r_m_s``), not the parabolic
-        # diagnostic vertex stored on ``rmeta["rv_refined_m_s"]``.
+        # Pipeline final chunk RV is the Gaussian fit (``rv_r_m_s``).
         rv_line = float(rv_r_m_s)
         rv_km = rv_line / 1000.0
         err_m = float(rmeta.get("rv_err_m_s", float("nan")))
-        v_label = f"Final RV (bisector) = {rv_line:.2f} m/s"
+        v_label = f"Final RV (Gaussian) = {rv_line:.2f} m/s"
         if math.isfinite(err_m) and err_m > 0:
             v_label += f" (σ={err_m:.2f} m/s)"
+        bdiag = (
+            bisector_fit.get("diagnostics")
+            if isinstance(bisector_fit, dict)
+            else None
+        )
+        if isinstance(bdiag, dict):
+            bis_m = bdiag.get("bis_m_s")
+            bis_e = bdiag.get("bis_err_m_s")
+            if bis_m is not None and math.isfinite(float(bis_m)):
+                v_label += f"<br>BIS = {float(bis_m):.2f} m/s"
+                if bis_e is not None and math.isfinite(float(bis_e)):
+                    v_label += f" (σ={float(bis_e):.2f})"
         fig.add_trace(
             go.Scatter(
                 x=[rv_km, rv_km],
@@ -721,7 +758,7 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
                 name=v_label,
                 line=dict(width=1.5, color="black", dash="dash"),
                 legendgroup="line_mask_refine",
-                showlegend=False,
+                showlegend=show_legend,
                 visible=visible,
             ),
             row=row,
@@ -730,67 +767,13 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
         trace_indices.append(len(fig.data) - 1)
 
     if not rmeta.get("ok"):
-        for _ in range(5):
+        for _ in range(4):
             _placeholder()
+        _final_rv_vertical_line()
         return trace_indices
 
-    # Without coarse-grid Gaussian-smooth refine metadata: LSTSQ path may still carry
-    # ``refine_parabola_*`` / ``lstsq_parabola_*`` from :func:`refine_ccf_rv_line_mask_lstsq_from_stored`.
+    # No smoothed refine curve: keep placeholders for slots 0–3, then final RV.
     if "refine_curve_v_m_s" not in rmeta:
-        if (
-            rmeta.get("refine_method") == "line_mask_lstsq_parabolic_vertex"
-            and rmeta.get("refine_parabola_v_dense_m_s") is not None
-            and rmeta.get("lstsq_parabola_v_samples_m_s") is not None
-        ):
-            for _ in range(2):
-                _placeholder()
-            vd = np.asarray(rmeta["refine_parabola_v_dense_m_s"], dtype=np.float64) / 1000.0
-            zd = np.asarray(rmeta["refine_parabola_ccf_dense"], dtype=np.float64)
-            if vd.size > 1 and zd.size == vd.size:
-                fig.add_trace(
-                    go.Scatter(
-                        x=vd,
-                        y=zd,
-                        mode="lines",
-                        name="Parabolic fit (LSTSQ on CCF)",
-                        line=dict(width=2.5, color="rgb(204, 51, 102)", dash="dash"),
-                        legendgroup="line_mask_refine",
-                        showlegend=show_legend,
-                        visible=visible,
-                    ),
-                    row=row,
-                    col=1,
-                )
-                trace_indices.append(len(fig.data) - 1)
-            else:
-                _placeholder()
-            vs_m = np.asarray(rmeta["lstsq_parabola_v_samples_m_s"], dtype=np.float64)
-            zs = np.asarray(rmeta["lstsq_parabola_ccf_plot_samples"], dtype=np.float64)
-            if vs_m.size > 0 and zs.size == vs_m.size:
-                fig.add_trace(
-                    go.Scatter(
-                        x=vs_m / 1000.0,
-                        y=zs,
-                        mode="markers",
-                        name="Parabolic samples (LSTSQ window, CCF)",
-                        marker=dict(
-                            size=14,
-                            color="rgb(204, 51, 102)",
-                            symbol="diamond",
-                            line=dict(width=1.5, color="white"),
-                        ),
-                        legendgroup="line_mask_refine",
-                        showlegend=show_legend,
-                        visible=visible,
-                    ),
-                    row=row,
-                    col=1,
-                )
-                trace_indices.append(len(fig.data) - 1)
-            else:
-                _placeholder()
-            _final_rv_vertical_line()
-            return trace_indices
         for _ in range(4):
             _placeholder()
         _final_rv_vertical_line()
@@ -838,53 +821,184 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     )
     trace_indices.append(len(fig.data) - 1)
 
-    vd = np.asarray(rmeta["refine_parabola_v_dense_m_s"], dtype=np.float64) / 1000.0
-    zd = np.asarray(rmeta["refine_parabola_ccf_dense"], dtype=np.float64)
-    if vd.size > 1 and zd.size == vd.size:
-        fig.add_trace(
-            go.Scatter(
-                x=vd,
-                y=zd,
-                mode="lines",
-                name="Parabolic fit (Gaussian-smoothed CCF)",
-                line=dict(width=2.5, color="rgb(204, 51, 102)", dash="dash"),
-                legendgroup="line_mask_refine",
-                showlegend=show_legend,
-                visible=visible,
-            ),
-            row=row,
-            col=1,
-        )
-        trace_indices.append(len(fig.data) - 1)
-    else:
-        _placeholder()
-
-    v_lo = float(rmeta.get("parabola_v_lo_m_s", float("nan")))
-    v_mid = float(rmeta.get("parabola_v_mid_m_s", float("nan")))
-    v_hi = float(rmeta.get("parabola_v_hi_m_s", float("nan")))
-    zl = float(rmeta.get("parabola_ccf_smoothed_lo", float("nan")))
-    zm = float(rmeta.get("parabola_ccf_smoothed_mid", float("nan")))
-    zh = float(rmeta.get("parabola_ccf_smoothed_hi", float("nan")))
-    if all(math.isfinite(x) for x in (v_lo, v_mid, v_hi, zl, zm, zh)):
-        fig.add_trace(
-            go.Scatter(
-                x=np.asarray([v_lo, v_mid, v_hi], dtype=np.float64) / 1000.0,
-                y=np.asarray([zl, zm, zh], dtype=np.float64),
-                mode="markers",
-                name="Parabolic samples (3-point, smoothed CCF)",
-                marker=dict(size=13, color="rgb(204, 51, 102)", symbol="diamond"),
-                legendgroup="line_mask_refine",
-                showlegend=show_legend,
-                visible=visible,
-            ),
-            row=row,
-            col=1,
-        )
-        trace_indices.append(len(fig.data) - 1)
-    else:
+    # Slots 2–3: formerly parabolic fit/samples — omitted (pipeline RV is bisector).
+    for _ in range(2):
         _placeholder()
 
     _final_rv_vertical_line()
+    return trace_indices
+
+
+def _bisector_preview_plotly_traces(
+    fig: go.Figure,
+    row: int,
+    *,
+    sl: dict,
+    vg: np.ndarray,
+    ccf: np.ndarray,
+    visible: bool,
+    show_legend: bool,
+) -> list[int]:
+    """
+    Overlay bisector cut midpoints (and optional wing chords) from ``sl["bisector_fit"]``.
+
+    Falls back to the Queloz ``bisector`` / ``bis_levels`` curve when NEID percentile
+    cuts are absent. Always appends **two** traces (real or empty placeholders) so
+    CCF slot dropdown indices stay aligned across slots.
+    """
+    trace_indices: list[int] = []
+
+    def _placeholder() -> None:
+        fig.add_trace(
+            go.Scatter(x=[], y=[], showlegend=False, visible=visible, hoverinfo="skip"),
+            row=row,
+            col=1,
+        )
+        trace_indices.append(len(fig.data) - 1)
+
+    bi = sl.get("bisector_fit")
+    if not isinstance(bi, dict):
+        _placeholder()
+        _placeholder()
+        return trace_indices
+    bdiag = bi.get("diagnostics") if isinstance(bi.get("diagnostics"), dict) else {}
+    if not isinstance(bdiag, dict):
+        bdiag = {}
+    cuts = bdiag.get("cuts")
+    vg_a = np.asarray(vg, dtype=np.float64).ravel()
+    ccf_a = np.asarray(ccf, dtype=np.float64).ravel()
+    v_mids: list[float] = []
+    y_mids: list[float] = []
+    v_chords_x: list[float] = []
+    y_chords: list[float] = []
+
+    if cuts:
+        base = bdiag.get("baseline")
+        peak_amp = bdiag.get("peak_amplitude")
+        for cut in cuts:
+            if not isinstance(cut, dict):
+                continue
+            vm = cut.get("v_mid_m_s")
+            if vm is None or not math.isfinite(float(vm)):
+                continue
+            vm_f = float(vm)
+            # Horizontal cut level in CCF units (not CCF(v_mid), which sits near the peak).
+            y_c = cut.get("ccf_level")
+            if y_c is None or not math.isfinite(float(y_c)):
+                tf = cut.get("target_flux")
+                if (
+                    tf is not None
+                    and base is not None
+                    and math.isfinite(float(tf))
+                    and math.isfinite(float(base))
+                    and peak_amp is not None
+                    and math.isfinite(float(peak_amp))
+                    and float(peak_amp) > 0
+                ):
+                    # Infer emission (+) vs absorption (−) from peak vs baseline.
+                    sign = 1.0
+                    if ccf_a.size and math.isfinite(float(np.nanmax(ccf_a))):
+                        if float(np.nanmax(ccf_a)) < float(base):
+                            sign = -1.0
+                    y_c = float(base) + sign * float(tf)
+                elif vg_a.size >= 2 and ccf_a.size == vg_a.size:
+                    y_c = float(np.interp(vm_f, vg_a, ccf_a))
+                else:
+                    y_c = float("nan")
+            else:
+                y_c = float(y_c)
+            v_mids.append(vm_f / 1000.0)
+            y_mids.append(y_c)
+            vl = cut.get("v_left_m_s")
+            vr = cut.get("v_right_m_s")
+            if (
+                vl is not None
+                and vr is not None
+                and math.isfinite(float(vl))
+                and math.isfinite(float(vr))
+                and math.isfinite(y_c)
+            ):
+                # Horizontal chord spanning the full CCF width at this depth.
+                v_chords_x.extend([float(vl) / 1000.0, float(vr) / 1000.0, float("nan")])
+                y_chords.extend([y_c, y_c, float("nan")])
+    else:
+        # Queloz inverse-slope curve: absolute midpoint velocities (levels unused for y).
+        bis_curve = bdiag.get("bisector")
+        if bis_curve is not None:
+            vc = np.asarray(bis_curve, dtype=np.float64).ravel()
+            if vc.size >= 2 and vg_a.size >= 2 and ccf_a.size == vg_a.size:
+                for vm in vc:
+                    if not math.isfinite(float(vm)):
+                        continue
+                    vm_f = float(vm)
+                    v_mids.append(vm_f / 1000.0)
+                    y_mids.append(float(np.interp(vm_f, vg_a, ccf_a)))
+
+    bis_m = bdiag.get("bis_m_s")
+    bis_e = bdiag.get("bis_err_m_s")
+    n_cuts = bdiag.get("n_cuts")
+    if n_cuts is None and cuts:
+        n_cuts = len(cuts)
+    mid_name = "Bisector midpoints"
+    if n_cuts is not None:
+        mid_name = f"Bisector midpoints (n={int(n_cuts)}"
+        if bis_m is not None and math.isfinite(float(bis_m)):
+            mid_name += f", BIS={float(bis_m):.2f} m/s"
+            if bis_e is not None and math.isfinite(float(bis_e)):
+                mid_name += f" ± {float(bis_e):.2f}"
+        mid_name += ")"
+    elif bis_m is not None and math.isfinite(float(bis_m)):
+        mid_name = f"Bisector midpoints (BIS={float(bis_m):.2f} m/s"
+        if bis_e is not None and math.isfinite(float(bis_e)):
+            mid_name += f" ± {float(bis_e):.2f}"
+        mid_name += ")"
+
+    if v_mids and any(math.isfinite(y) for y in y_mids):
+        fig.add_trace(
+            go.Scatter(
+                x=np.asarray(v_mids, dtype=np.float64),
+                y=np.asarray(y_mids, dtype=np.float64),
+                mode="markers+lines",
+                name=mid_name,
+                marker=dict(
+                    size=7,
+                    color="rgb(230, 159, 0)",
+                    symbol="circle",
+                    line=dict(width=0.8, color="rgb(80, 50, 0)"),
+                ),
+                line=dict(width=2.0, color="rgba(230, 159, 0, 0.90)"),
+                legendgroup="bisector",
+                showlegend=show_legend,
+                visible=visible,
+            ),
+            row=row,
+            col=1,
+        )
+        trace_indices.append(len(fig.data) - 1)
+    else:
+        _placeholder()
+
+    if v_chords_x and any(math.isfinite(y) for y in y_chords):
+        fig.add_trace(
+            go.Scatter(
+                x=np.asarray(v_chords_x, dtype=np.float64),
+                y=np.asarray(y_chords, dtype=np.float64),
+                mode="lines+markers",
+                name="Bisector wing chords",
+                marker=dict(size=4, color="rgba(230, 159, 0, 0.55)", symbol="circle-open"),
+                line=dict(width=1.2, color="rgba(230, 159, 0, 0.55)"),
+                legendgroup="bisector",
+                showlegend=show_legend,
+                visible=visible,
+                hoverinfo="skip",
+            ),
+            row=row,
+            col=1,
+        )
+        trace_indices.append(len(fig.data) - 1)
+    else:
+        _placeholder()
+
     return trace_indices
 
 
@@ -904,14 +1018,14 @@ def _line_mask_refine_ccf_add_plotly_traces(
 ) -> list[int]:
     """
     For ``ccf_line_mask``, overlay diagnostic refine curves on the CCF panel
-    (smoothed CCF ±1σ, local parabola samples) plus a vertical line at the
-    **pipeline** final RV (bisector after Gaussian fit).
+    (smoothed CCF ±1σ when available) plus a vertical line at the **pipeline**
+    final RV (Gaussian fit).
 
-    Parabolic overlays are diagnostic only; they do not set the table RV.
     When the slot carries ``line_mask_refine_rmeta``, that result is reused so
     Plotly does not recompute the diagnostic curves.
 
-    Always appends **five** traces (real overlays or empty placeholders) so dropdown indices stay aligned.
+    Always appends **five** refine traces (real overlays or empty placeholders),
+    then **two** bisector traces, so dropdown indices stay aligned.
     """
     trace_indices: list[int] = []
 
@@ -927,14 +1041,22 @@ def _line_mask_refine_ccf_add_plotly_traces(
     gaussian = sl.get("gaussian_fit")
     bisector = sl.get("bisector_fit")
     rv_slot = None
-    if isinstance(bisector, dict):
-        rv_bi = bisector.get("rv")
-        if rv_bi is not None and np.isfinite(float(rv_bi)):
-            rv_slot = float(rv_bi)
-    if rv_slot is None and isinstance(gaussian, dict):
+    if isinstance(gaussian, dict):
         rv_g = gaussian.get("rv")
         if rv_g is not None and np.isfinite(float(rv_g)):
             rv_slot = float(rv_g)
+            cached_err = (
+                float(gaussian["rv_err"])
+                if gaussian.get("rv_err") is not None
+                and np.isfinite(float(gaussian["rv_err"]))
+                else float("nan")
+            )
+            if isinstance(cached, dict) and math.isfinite(cached_err):
+                cached = {**cached, "rv_err_m_s": cached_err}
+    if rv_slot is None and isinstance(bisector, dict):
+        rv_bi = bisector.get("rv")
+        if rv_bi is not None and np.isfinite(float(rv_bi)):
+            rv_slot = float(rv_bi)
     if (
         isinstance(cached, dict)
         and cached.get("ok")
@@ -943,7 +1065,7 @@ def _line_mask_refine_ccf_add_plotly_traces(
         rmeta_use = ensure_line_mask_lstsq_preview_plot_metadata(cached, vg, ccf)
         if rmeta_use is None:
             rmeta_use = cached
-        return _line_mask_refine_plotly_traces_from_cached_rmeta(
+        refine_idx = _line_mask_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
             rv_r_m_s=float(rv_slot),
@@ -952,7 +1074,18 @@ def _line_mask_refine_ccf_add_plotly_traces(
             show_legend=show_legend,
             ylim_lo=ylim_lo,
             ylim_hi=ylim_hi,
+            bisector_fit=bisector if isinstance(bisector, dict) else None,
         )
+        bis_idx = _bisector_preview_plotly_traces(
+            fig,
+            row,
+            sl=sl,
+            vg=vg,
+            ccf=ccf,
+            visible=visible,
+            show_legend=show_legend,
+        )
+        return refine_idx + bis_idx
 
     try:
         v_step_eff = float(effective_ccf_v_step_for_fit(vg))
@@ -983,10 +1116,19 @@ def _line_mask_refine_ccf_add_plotly_traces(
         if not rmeta.get("ok"):
             for _ in range(5):
                 _placeholder()
-            return trace_indices
+            bis_idx = _bisector_preview_plotly_traces(
+                fig,
+                row,
+                sl=sl,
+                vg=vg,
+                ccf=ccf,
+                visible=visible,
+                show_legend=show_legend,
+            )
+            return trace_indices + bis_idx
 
         rv_line = float(rv_slot) if rv_slot is not None else float(rv_r)
-        return _line_mask_refine_plotly_traces_from_cached_rmeta(
+        refine_idx = _line_mask_refine_plotly_traces_from_cached_rmeta(
             fig,
             row,
             rv_r_m_s=rv_line,
@@ -995,13 +1137,33 @@ def _line_mask_refine_ccf_add_plotly_traces(
             show_legend=show_legend,
             ylim_lo=ylim_lo,
             ylim_hi=ylim_hi,
+            bisector_fit=bisector if isinstance(bisector, dict) else None,
         )
+        bis_idx = _bisector_preview_plotly_traces(
+            fig,
+            row,
+            sl=sl,
+            vg=vg,
+            ccf=ccf,
+            visible=visible,
+            show_legend=show_legend,
+        )
+        return refine_idx + bis_idx
 
     except Exception as e:
         logger.debug("mask-line preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
         while len(trace_indices) < 5:
             _placeholder()
-        return trace_indices
+        bis_idx = _bisector_preview_plotly_traces(
+            fig,
+            row,
+            sl=sl,
+            vg=vg,
+            ccf=ccf,
+            visible=visible,
+            show_legend=show_legend,
+        )
+        return trace_indices + bis_idx
 
 
 def _format_rv_value(v: float, *, kind: str) -> str:
@@ -1632,7 +1794,7 @@ def collect_mask_overlay_payload_for_primitive(
         return None
 
     slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
-        getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
+        getattr(primitive, "_ccf_preview_by_fiber", {}).get(str(fiber))
         if (getattr(primitive, "algorithm", None) or "").strip().lower()
         in STELLAR_RV_LINE_MASK_ALGORITHMS
         else None
@@ -1871,7 +2033,7 @@ def collect_template_overlay_payload_for_primitive(
     do_not_use = int(DQ_FLAGS.get("DO_NOT_USE", 1))
 
     slot_by_oc = _slot_by_order_chunk_from_line_mask_preview(
-        getattr(primitive, "_ccf_preview_by_fiber", {}).get(fiber)
+        getattr(primitive, "_ccf_preview_by_fiber", {}).get(str(fiber))
     )
 
     entries: list[dict] = []
@@ -2181,7 +2343,7 @@ def _preview_gaussian_cache_and_slot_legends(
     fit_slot_cache: dict[int, tuple] = {}
     slot_metadata: dict[str, list[str]] = {}
     for fiber in fibers_with_ccf:
-        detail = primitive._ccf_preview_by_fiber.get(fiber)
+        detail = primitive._ccf_preview_by_fiber.get(str(fiber))
         if not detail:
             slot_metadata[fiber] = []
             continue
@@ -2336,6 +2498,22 @@ def _preview_gaussian_cache_and_slot_legends(
                     meta += (
                         f"<br>RV (bisector, table): {v_report:.2f} m/s"
                     )
+                    _bdiag = (
+                        bisector.get("diagnostics")
+                        if isinstance(bisector, dict)
+                        else None
+                    )
+                    if isinstance(_bdiag, dict):
+                        _bis = _bdiag.get("bis_m_s")
+                        _bis_e = _bdiag.get("bis_err_m_s")
+                        _ncuts = _bdiag.get("n_cuts")
+                        if _bis is not None and math.isfinite(float(_bis)):
+                            _bis_s = f"<br>BIS = {float(_bis):.2f} m/s"
+                            if _bis_e is not None and math.isfinite(float(_bis_e)):
+                                _bis_s += f" (σ={float(_bis_e):.2f})"
+                            if _ncuts is not None:
+                                _bis_s += f" · n_cuts={int(_ncuts)}"
+                            meta += _bis_s
                     tbl_rp: float | None = None
                     ct = _pipeline_rv_for_line_mask_preview_slot(tbl_rv, sl)
                     if ct is not None:
@@ -2361,6 +2539,19 @@ def _preview_gaussian_cache_and_slot_legends(
                             f"<br>RV (bisector)={v_report:.2f} m/s · "
                             f"LM σ={sig:.2f} m/s · amp={amp:.3g}"
                         )
+                    _bdiag2 = (
+                        bisector.get("diagnostics")
+                        if isinstance(bisector, dict)
+                        else None
+                    )
+                    if isinstance(_bdiag2, dict):
+                        _bis2 = _bdiag2.get("bis_m_s")
+                        _bis_e2 = _bdiag2.get("bis_err_m_s")
+                        if _bis2 is not None and math.isfinite(float(_bis2)):
+                            _bs = f"<br>BIS = {float(_bis2):.2f} m/s"
+                            if _bis_e2 is not None and math.isfinite(float(_bis_e2)):
+                                _bs += f" (σ={float(_bis_e2):.2f})"
+                            meta += _bs
                     if sl.get("kind") == "mean" and np.isfinite(rv_agg_tbl):
                         dvp = v_report - rv_agg_tbl
                         if np.isfinite(dvp) and abs(dvp) > 250.0:
@@ -2436,8 +2627,12 @@ def _preview_export_combined_html(
         "<!DOCTYPE html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         f"<title>{esc_title}</title>\n"
+        # Keep RV Derived sidebar fully visible (do not clip right margin).
         "<style>body{margin:0;font-family:system-ui,sans-serif;}"
-        "hr{border:none;border-top:1px solid #ccc;margin:0;}</style>\n"
+        "hr{border:none;border-top:1px solid #ccc;margin:0;}"
+        ".js-plotly-plot,.plotly-graph-div{overflow:visible !important;}"
+        f".plotly-graph-div:first-of-type{{min-width:{int(RV_FIG_WIDTH)}px;}}"
+        "</style>\n"
         "</head><body>\n"
         f'<p style="margin:12px 16px 4px;font-size:14px;">{esc_title}</p>\n'
         f"{div_rv}<hr>\n{div_ccf}\n"
@@ -2681,7 +2876,7 @@ def create_stellar_rv_preview(primitive) -> None:
         else:
             subplot_titles_rv.append(f"Fiber {fiber} — per chunk RV")
         subplot_titles_ccf.append(
-            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; bisector RV; slot ↓)"
+            f"Fiber {fiber} — CCF vs RV (±σ_CCF; Gauss; bisector)"
         )
         subplot_titles_ccf.append(f"Fiber {fiber} — Residual CCF")
 
@@ -2784,10 +2979,15 @@ def create_stellar_rv_preview(primitive) -> None:
                 out_ok = ~inlier & np.isfinite(rv_err) & (rv_err > 0)
                 if np.any(in_ok):
                     y_clip_src = y_ms_off[in_ok]
+                    err_clip_src = err_y_ms[in_ok]
                 else:
-                    y_clip_src = y_ms_off[np.isfinite(y_ms_off)]
+                    fin = np.isfinite(y_ms_off)
+                    y_clip_src = y_ms_off[fin]
+                    err_clip_src = err_y_ms[fin] if err_y_ms.size == y_ms_off.size else None
                 if y_clip_src.size:
-                    rv_panel_y_range[fiber] = _iterative_sigma_clip_ylim(y_clip_src)
+                    rv_panel_y_range[fiber] = _iterative_sigma_clip_ylim(
+                        y_clip_src, y_err=err_clip_src
+                    )
                 if np.any(in_ok):
                     fig_rv.add_trace(
                         go.Scatter(
@@ -2870,29 +3070,28 @@ def create_stellar_rv_preview(primitive) -> None:
                         f"<br>RMS(⟨RV⟩) = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')}"
                     )
                 n_chunks_tbl = int(rv_all.size)
+                # Compact labels so the right-hand Derived box fits in the figure margin.
                 sb_lines = [
-                    f"<b>Derived - fiber {fiber}</b>",
-                    f"Chunks in RVCCF table: {n_chunks_tbl} · Inlier: {n_good}",
+                    f"<b>Derived · fib {fiber}</b>",
+                    f"Chunks {n_chunks_tbl} · inliers {n_good}",
                     f"⟨RV⟩ = {mean_ms_str}",
                 ]
                 if np.isfinite(rv_agg_err):
                     sb_lines.append(
-                        f"σ(⟨RV⟩) (aggregate uncertainty) = "
-                        f"{_format_rv_value(float(rv_agg_err), kind='sigma_ms')}"
+                        f"σ(⟨RV⟩) = {_format_rv_value(float(rv_agg_err), kind='sigma_ms')}"
                     )
                 else:
-                    sb_lines.append("σ(⟨RV⟩) (aggregate uncertainty) = —")
+                    sb_lines.append("σ(⟨RV⟩) = —")
                 if n_good > 0 and np.isfinite(rms_bias_m_s):
                     sb_lines.append(
-                        f"RMS scatter vs ⟨RV⟩ (inlier chunks) = "
-                        f"{_format_rv_value(rms_bias_m_s, kind='sigma_ms')}"
+                        f"RMS vs ⟨RV⟩ = {_format_rv_value(rms_bias_m_s, kind='sigma_ms')}"
                     )
                     if n_good > 1:
                         std_c = float(np.std(rv_all[inlier_a], ddof=1))
                         if np.isfinite(std_c):
-                            sb_lines.append(f"Std (inlier RV, sample) = {std_c:.2f} m/s")
+                            sb_lines.append(f"Std (inliers) = {std_c:.2f} m/s")
                 else:
-                    sb_lines.append("RMS scatter vs ⟨RV⟩ (inlier chunks) = —")
+                    sb_lines.append("RMS vs ⟨RV⟩ = —")
                 osig = float(getattr(primitive, "outlier_sigma", 4.0))
                 _, _, mad_gate = combine_rvs_median_mad(rv_all, rv_err_all, osig)
                 _, _, inl_c, sig_iv, scatter_se = combine_rv_estimates_median_mad_weighted(
@@ -2900,19 +3099,18 @@ def create_stellar_rv_preview(primitive) -> None:
                 )
                 thr_m_s = osig * mad_gate if np.isfinite(mad_gate) else float("nan")
                 sb_lines.append(
-                    f"MAD (chunk RVs, for gate) = {_format_rv_value(mad_gate, kind='sigma_ms')} · "
-                    f"cut = σ×MAD = {_format_rv_value(thr_m_s, kind='sigma_ms')} (σ={osig:g})"
+                    f"MAD = {_format_rv_value(mad_gate, kind='sigma_ms')} · "
+                    f"cut = {_format_rv_value(thr_m_s, kind='sigma_ms')} "
+                    f"(×{osig:g} · max(MAD, σᵢ))"
                 )
-                sb_lines.append(f"Chunks flagged outlier (MAD gate): {int(np.sum(~inl_c))}")
+                sb_lines.append(f"Outliers (MAD+σ) = {int(np.sum(~inl_c))}")
                 if np.isfinite(sig_iv):
                     sb_lines.append(
-                        f"σ_IV (inverse-variance SE, inliers) = "
-                        f"{_format_rv_value(sig_iv, kind='sigma_ms')}"
+                        f"σ_IV = {_format_rv_value(sig_iv, kind='sigma_ms')}"
                     )
                 if np.isfinite(scatter_se):
                     sb_lines.append(
-                        f"scatter_SE (MAD of inlier RVs / √N) = "
-                        f"{_format_rv_value(scatter_se, kind='sigma_ms')}"
+                        f"scatter_SE = {_format_rv_value(scatter_se, kind='sigma_ms')}"
                     )
                 rv_sidebar_by_fiber[fiber] = "<br>".join(sb_lines)
                 fig_rv.add_trace(
@@ -2953,7 +3151,7 @@ def create_stellar_rv_preview(primitive) -> None:
         )
 
         if kind == "ccf":
-            detail = primitive._ccf_preview_by_fiber.get(fiber)
+            detail = primitive._ccf_preview_by_fiber.get(str(fiber))
             if not detail:
                 continue
             v_step = float(detail["v_step"])
@@ -3105,14 +3303,26 @@ def create_stellar_rv_preview(primitive) -> None:
                     )
                 ccf_band_trace_idx.append(idx_fit)
                 if (not is_line_mask) and params and diag.get("fit_ok"):
-                    v0_km = float(params["v0"]) / 1000.0
+                    _rv_mark = float(params["v0"])
+                    _mark_name = f"Final RV (Gaussian) = {_rv_mark:.2f} m/s"
+                    _bi_sl = sl.get("bisector_fit")
+                    if isinstance(_bi_sl, dict):
+                        _bdiag_m = _bi_sl.get("diagnostics")
+                        if isinstance(_bdiag_m, dict):
+                            _bis_m = _bdiag_m.get("bis_m_s")
+                            _bis_e = _bdiag_m.get("bis_err_m_s")
+                            if _bis_m is not None and math.isfinite(float(_bis_m)):
+                                _mark_name += f"<br>BIS = {float(_bis_m):.2f} m/s"
+                                if _bis_e is not None and math.isfinite(float(_bis_e)):
+                                    _mark_name += f" (σ={float(_bis_e):.2f})"
+                    v0_km = _rv_mark / 1000.0
                     idx_v0 = len(fig_ccf.data)
                     fig_ccf.add_trace(
                         go.Scatter(
                             x=[v0_km, v0_km],
                             y=[ccf_ylim_lo, ccf_ylim_hi],
                             mode="lines",
-                            name="Gaussian RV (v₀)",
+                            name=_mark_name,
                             line=dict(width=1.5, color="black", dash="dash"),
                             showlegend=show_leg,
                             visible=visible,
@@ -3121,6 +3331,16 @@ def create_stellar_rv_preview(primitive) -> None:
                         col=1,
                     )
                     ccf_band_trace_idx.append(idx_v0)
+                    for ti in _bisector_preview_plotly_traces(
+                        fig_ccf,
+                        row,
+                        sl=sl,
+                        vg=vg,
+                        ccf=ccf,
+                        visible=visible,
+                        show_legend=show_leg,
+                    ):
+                        ccf_band_trace_idx.append(ti)
                 if is_line_mask:
                     for ti in _line_mask_refine_ccf_add_plotly_traces(
                         fig_ccf,
@@ -3141,7 +3361,7 @@ def create_stellar_rv_preview(primitive) -> None:
             continue
 
         # resid — CCF data minus the same Gaussian model evaluated on the full velocity grid.
-        detail = primitive._ccf_preview_by_fiber.get(fiber)
+        detail = primitive._ccf_preview_by_fiber.get(str(fiber))
         if not detail:
             continue
         slots = _preview_slots_for_plot(detail["slots"])
@@ -3252,7 +3472,7 @@ def create_stellar_rv_preview(primitive) -> None:
     updatemenus_ccf: list[dict] = []
     for fi, fiber in enumerate(fibers_with_ccf):
         slots = _preview_slots_for_plot(
-            primitive._ccf_preview_by_fiber.get(fiber, {}).get("slots", [])
+            primitive._ccf_preview_by_fiber.get(str(fiber), {}).get("slots", [])
         )
         if not slots:
             continue
@@ -3320,8 +3540,8 @@ def create_stellar_rv_preview(primitive) -> None:
             )
         )
 
-    rv_fig_w = 720
-    rv_fig_mr = 260
+    rv_fig_w = int(RV_FIG_WIDTH)
+    rv_fig_mr = int(RV_FIG_MARGIN_RIGHT)
     annotations_rv: list[dict] = []
     for fi, fiber in enumerate(fibers_with_ccf):
         r = fiber_row_map[fiber]["rv"]
@@ -3339,11 +3559,11 @@ def create_stellar_rv_preview(primitive) -> None:
                     showarrow=False,
                     xanchor="left",
                     yanchor="top",
-                    font=dict(size=11, family="Arial, sans-serif"),
+                    font=dict(size=10, family="Arial, sans-serif"),
                     bgcolor="rgba(255,255,255,0.92)",
                     bordercolor="rgba(0,0,0,0.15)",
                     borderwidth=1,
-                    borderpad=6,
+                    borderpad=5,
                     align="left",
                 )
             )

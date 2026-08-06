@@ -8,6 +8,9 @@ from scipy.ndimage import median_filter, gaussian_filter
 from astropy.stats import mad_std
 
 from ...calibrations import FiberFlatSelector
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['BlazeCorrectionPrimitive']
 
@@ -62,7 +65,19 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             order_vec = input_model.make_order_vec()
             n_orders = len(order_vec)
 
+            n_blazed = 0
             for fiber in do_fibers:
+                ff_trace = fiberflat_model.traces.get(int(fiber)) if hasattr(fiberflat_model, "traces") else None
+                ff_spec = None if ff_trace is None else ff_trace.get("spec")
+                if ff_spec is None:
+                    logger.warning(
+                        "Skipping blaze for fiber %s: fiberflat has no SPEC_FIB%s "
+                        "(restrict do_fibers or use a fiberflat covering this fiber).",
+                        fiber,
+                        fiber,
+                    )
+                    continue
+
                 npx = getattr(input_model, f'SPEC_UNCAL_FIB{fiber}').shape[1]
                 if getattr(output_model, f'SPEC_FIB{fiber}') is None:
                     setattr(output_model, f'SPEC_FIB{fiber}', 
@@ -77,15 +92,11 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                             np.zeros((n_orders, npx), dtype=np.uint32))
 
                 # get aray of smoothed blaze values for this fiber and all orders in do_orders
-                if self.smooth_blaze:
-                    blaze_array = get_smooth_blaze(fiberflat_model.traces[int(fiber)]['spec'],
-                                                fiberflat_model.traces[int(fiber)]['spec_err'],
-                                                fiberflat_model.traces[int(fiber)]['spec_dq'],
-                                                order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
-                    #TODO fix error for smoothed blaze
-                else:
-                    blaze_array = fiberflat_model.traces[int(fiber)]['spec']
-                blaze_std_array = fiberflat_model.traces[int(fiber)]['spec_err']
+                blaze_array = get_smooth_blaze(ff_trace['spec'],
+                                              ff_trace['spec_err'],
+                                              ff_trace['spec_dq'],
+                                              order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
+                blaze_std_array = ff_trace['spec_err']
                 
                 # remove lamp blackbody from blaze array
                 if self.remove_lamp_blackbody:
@@ -97,7 +108,7 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                     # only necessary if stitching
                     blaze_array, blaze_std_array = normalize_blaze_array(blaze_array, 
                                                                 blaze_std_array,  
-                                                                fiberflat_model.traces[int(fiber)]['wave'], 
+                                                                ff_trace['wave'], 
                                                                 order_vec, do_orders)
                 else:
                     blaze_norm = np.nanmax(blaze_array, axis=1)[:, np.newaxis]
@@ -108,11 +119,19 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                 apply_blaze_array(output_model, blaze_array, blaze_std_array,
                                 fiber, order_vec, do_orders,
                                 pixels_per_spline_knot=self.pixels_per_spline_knot)
+                n_blazed += 1
                 
                 if isinstance(output, list):
                     output.append(output_model)
                 else:
                     output = output_model
+
+            if n_blazed == 0:
+                raise ValueError(
+                    "Blaze correction found no fibers with fiberflat SPEC data. "
+                    f"Requested do_fibers={do_fibers}; fiberflat fibers with data: "
+                    f"{sorted(f for f, t in fiberflat_model.traces.items() if t.get('spec') is not None)}."
+                )
 
         return dict(output=output)
     

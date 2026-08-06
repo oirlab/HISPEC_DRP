@@ -21,6 +21,7 @@ from hispecdrp.utils.line_mask_utils import (
     _continuum_normalized_d2_flux_dlam2_at_um,
     _local_min_continuum_normalized_flux_um,
     _segment_mean_continuum_normalized_depth_um,
+    build_ccfopt_line_mask_from_template_and_seed,
     build_line_mask_from_template,
     compare_line_center_lists_um,
     detect_template_line_centers_gradient_um,
@@ -33,6 +34,7 @@ from hispecdrp.utils.line_mask_utils import (
     read_mask_generation_meta,
     restrict_mask_to_chunk,
 )
+from hispecdrp.utils.physical_constants import C_M_S
 
 
 def _lte049_tophat_mas_for_width_calibration() -> str | None:
@@ -347,3 +349,52 @@ def test_gradient_and_parabolic_centers_agree_on_smooth_minimum():
     assert para.size >= 1 and grad.size >= 1
     assert abs(float(np.min(para)) - 1.0) < 2e-4
     assert abs(float(np.min(grad)) - 1.0) < 2e-4
+
+
+def test_build_ccfopt_line_mask_recovers_offset_center(tmp_path):
+    """CCF-opt refine should pull a biased seed toward the true absorption core."""
+    true_lam = 1.50
+    # Seed offset by ~1 km/s so the optimizer has a clear gradient to follow.
+    seed_dv_m_s = 1000.0
+    seed_lam = true_lam * (1.0 + seed_dv_m_s / C_M_S)
+    # Dense sampling (~0.5 km/s) so the CCF spline resolves the core.
+    dlam = true_lam * 500.0 / C_M_S
+    wave = np.arange(true_lam - 0.02, true_lam + 0.02 + 0.5 * dlam, dlam)
+    sigma = true_lam * 1500.0 / C_M_S
+    flux = 1.0 - 0.6 * np.exp(-0.5 * ((wave - true_lam) / sigma) ** 2)
+
+    seed_path = tmp_path / "seed.delta.mas"
+    MaskLines.from_delta_centers_um(
+        np.array([seed_lam]),
+        np.array([1.0]),
+        metadata={"template_path": str(tmp_path / "synthetic.h5")},
+    ).save(output_path=str(seed_path))
+
+    out_path = tmp_path / "synthetic.ccfopt.delta.mas"
+    path, entries = build_ccfopt_line_mask_from_template_and_seed(
+        str(tmp_path / "synthetic.h5"),
+        str(seed_path),
+        wave_um=wave,
+        flux=flux,
+        wl_min_um=1.4,
+        wl_max_um=1.6,
+        spectrum_window_half_um=0.015,
+        search_half_m_s=2000.0,
+        coarse_step_m_s=200.0,
+        fine_half_m_s=250.0,
+        fine_step_m_s=25.0,
+        rv_gate_m_s=3000.0,
+        output_path=str(out_path),
+        masks_directory=str(tmp_path),
+    )
+    assert Path(path).is_file()
+    assert len(entries) == 1
+    assert abs(float(np.sum([e.weight for e in entries])) - 1.0) < 1e-9
+    recovered = entries[0].wavelength_nm * 1.0e-3
+    # Closer to truth than the biased seed, and within ~one fine-search half-width.
+    assert abs(recovered - true_lam) < abs(seed_lam - true_lam)
+    assert abs(recovered - true_lam) / true_lam * C_M_S < 500.0
+    meta = read_mask_generation_meta(path)
+    assert meta is not None
+    assert meta.get("mask_weight_definition") == "abs_gaussian_ccf_contrast"
+    assert Path(path).name.endswith(".ccfopt.delta.mas")

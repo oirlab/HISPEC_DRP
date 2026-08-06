@@ -82,13 +82,13 @@ inspect `f.attrs.keys()` if you need more.
 comparison to HISPEC L2 data (vacuum wavelength solution) or to masks documented in
 vacuum nanometres, convert **air → vacuum** before or during use.
 
-In HISPEC DRP, :func:`hispecdrp.utils.spectral_templates_utils.load_btsettl_spectrum` does
+In HISPEC DRP, :func:`hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum` does
 this by default (`wavelengths_are_air=True`): Angstrom → nanometre (air), then
-:func:`hispecdrp.utils.spectral_templates_utils.air_wavelength_nm_to_vacuum_nm` (Edlé /
+:func:`hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm` (Edlé /
 standard dispersion; same Cauchy-style form as used elsewhere in the package), then to
 **vacuum microns** for template CCF. The inverse mapping (vacuum nm → air nm), e.g. to
 compare HISPEC vacuum λ to archive air tables, is
-:func:`hispecdrp.utils.spectral_templates_utils.vacuum_wavelength_nm_to_air_nm`.
+:func:`hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm`.
 
 If you read the HDF5 yourself:
 

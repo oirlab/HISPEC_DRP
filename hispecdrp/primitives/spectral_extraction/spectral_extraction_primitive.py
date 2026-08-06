@@ -50,7 +50,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
     ARGUMENTS = {
         'suffix' : 'specextract',
         'method' : 'box',
-        'extraction_aperture' : 3,
+        'extraction_aperture' : 10,
         'do_fibers' : None,
         'do_orders' : None,
         'pix_range' : None,
@@ -105,7 +105,17 @@ class SpectralExtractionPrimitive(BasePrimitive):
             order_vec = input_model.make_order_vec()
             n_orders = len(order_vec)
 
-            # Initialize output arrays for all fibers if not already set
+            # Initialize output arrays for all fibers if not already set.
+            # Mock / sim L0s may omit mid_time (or dq); fall back to safe dtypes.
+            dq_dtype = (
+                input_model.dq.dtype
+                if getattr(input_model, "dq", None) is not None
+                else np.uint32
+            )
+            mid_time = getattr(input_model, "mid_time", None)
+            mid_time_dtype = (
+                mid_time.dtype if mid_time is not None else np.float64
+            )
             for fiber in do_fibers:
                 if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
                     setattr(
@@ -125,11 +135,11 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     )
                     setattr(
                         output_model, f'SPEC_DQ_FIB{fiber}',
-                        np.zeros((n_orders, npix), dtype=input_model.dq.dtype)
+                        np.zeros((n_orders, npix), dtype=dq_dtype)
                     )
                     setattr(
                         output_model, f'MID_TIME_FIB{fiber}',
-                        np.full((n_orders, npix), np.nan, dtype=input_model.mid_time.dtype)
+                        np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
                     )
 
             # Dispatch to extraction method

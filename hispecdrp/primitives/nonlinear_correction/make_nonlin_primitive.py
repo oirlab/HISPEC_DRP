@@ -5,7 +5,7 @@ from ...calibrations import GainSelector, ReadNoiseSelector, SaturationSelector,
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence
-from ...utils.math import get_err_from_posterior
+from ..utils.stats import get_err_from_posterior
 from ...datamodels.dqflags import DQ_FLAGS
 import logging
 

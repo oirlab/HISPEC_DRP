@@ -279,22 +279,26 @@ def fit_ramps(diffs, Cov, sig, countrateguess=None, diffs2use=None,
             countrateguess = np.sum((diffs*diffs2use)[1:], axis=0)/np.sum(diffs2use[1:], axis=0)
         else:
             countrateguess = np.sum((diffs*diffs2use), axis=0)/np.sum(diffs2use, axis=0)
-        countrateguess *= countrateguess > 0
+        # Photon-noise covariance cannot use a negative rate; the fitted
+        # countrate itself remains free to be negative (Gaussian background).
+        countrateguess_ph = np.maximum(countrateguess, 0)
+    else:
+        countrateguess_ph = np.maximum(countrateguess, 0)
 
     # Elements of the covariance matrix
 
     if len(Cov.alpha_phnoise.shape) == 1:
-        alpha_phnoise = countrateguess*Cov.alpha_phnoise[:, np.newaxis]
+        alpha_phnoise = countrateguess_ph*Cov.alpha_phnoise[:, np.newaxis]
         alpha_readnoise = sig**2*Cov.alpha_readnoise[:, np.newaxis]
         alpha = alpha_phnoise + alpha_readnoise
-        beta_phnoise = countrateguess*Cov.beta_phnoise[:, np.newaxis]
+        beta_phnoise = countrateguess_ph*Cov.beta_phnoise[:, np.newaxis]
         beta_readnoise = sig**2*Cov.beta_readnoise[:, np.newaxis]
         beta = beta_phnoise + beta_readnoise
     else:
-        alpha_phnoise = countrateguess*Cov.alpha_phnoise
+        alpha_phnoise = countrateguess_ph*Cov.alpha_phnoise
         alpha_readnoise = sig**2*Cov.alpha_readnoise
         alpha = alpha_phnoise + alpha_readnoise
-        beta_phnoise = countrateguess*Cov.beta_phnoise
+        beta_phnoise = countrateguess_ph*Cov.beta_phnoise
         beta_readnoise = sig**2*Cov.beta_readnoise
         beta = beta_phnoise + beta_readnoise
         
@@ -606,7 +610,8 @@ def mask_jumps(diffs, Cov, sig, threshold_oneomit=20.25,
     # reasonably close to correct is important.
     
     countrateguess = np.median(d, axis=0)[np.newaxis, :]
-    countrateguess *= countrateguess > 0
+    # Keep signed median for diagnostics; photon noise uses non-negative rate.
+    countrateguess = np.maximum(countrateguess, 0)
 
     # boolean arrays to be used later
     recheck = np.ones(d.shape[1]) == 1

@@ -3,7 +3,7 @@ from ... import datamodels
 
 from .fit_lines import fit_lines_gauss
 from .find_lines import find_emission_lines
-from ...utils.math import delta_pix_to_delta_wave
+from ..utils.spectral_utils import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants

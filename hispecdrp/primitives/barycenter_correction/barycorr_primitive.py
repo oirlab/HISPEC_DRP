@@ -21,25 +21,22 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
     """
     Primitive to calculate the barycenter corrections for the input data.
 
+    When ``meta.force_berv_m_s`` is a finite value (simulations), that BERV is
+    written for every processed fiber and ``barycorrpy`` is skipped.
+
     Parameters
     ----------
     input : str or L0Model
-        Input file path or data model to process. Currently, this is expected
-        to be a level 0 (rate map) data product.
+        Input file path or data model to process.
     suffix : str or None, optional
         Suffix to append to the output filename. Default is ``'barycorr'``.
     max_cores : int, optional
         Maximum number of CPU cores to use for Numba parallel processing. Default is 1.
 
-    Calibrations
-    ------------
-    dark : DarkModel
-        - selector: :class:`~hispecdrp.calibrations.selectors.DarkSelector`
-
     Returns
     -------
     output
-        The barycenter-corrected data model with updated error and data quality arrays.
+        The data model with per-fiber ``barycorr_fib*`` tables.
     """
     ARGUMENTS = {
         'suffix' : 'barycorr',
@@ -56,6 +53,14 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
         # Observatory
         telescope = input_model.meta.telescope
 
+        force_berv = getattr(input_model.meta, "force_berv_m_s", None)
+        try:
+            force_berv = float(force_berv) if force_berv is not None else None
+        except (TypeError, ValueError):
+            force_berv = None
+        if force_berv is not None and not np.isfinite(force_berv):
+            force_berv = None
+
         # Solar RVs?
         if self.solar is None:
             target_name = getattr(input_model.meta, "target_name", None) or ""
@@ -63,7 +68,12 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
         else:
             solar = bool(self.solar)
 
-        if solar:
+        if force_berv is not None:
+            logger.info(
+                "Using forced BERV = %.6f m/s (meta.force_berv_m_s); skipping barycorrpy.",
+                force_berv,
+            )
+        elif solar:
             logger.info("Calculating SOLAR barycenter corrections...")
         else:
             logger.info("Calculating barycenter corrections...")
@@ -76,14 +86,6 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
 
         # Observatory
         for fiber in range(1, input_model.num_fibers + 1):
-
-            # Init bc table for this fiber
-            bc_table = getattr(output_model, 'barycorr_fib{fiber}', None)
-            if bc_table is None:
-                bc_table = Table(
-                    names=['MJDUTC', 'MBJD', 'BERV'],
-                    dtype=[np.float64, np.float64, np.float64],
-                )
 
             # Mid points in UTC for this fiber
             mjd_utcs = getattr(input_model, f'mid_time_fib{fiber}', None)
@@ -124,21 +126,24 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
                     continue
 
             # Calculate corrections
-            if solar:
+            if force_berv is not None:
+                mbjd, vel_bc = mjd_mean, float(force_berv)
+            elif solar:
                 mbjds, vel_bcs = calc_solar_barycenter_corrections(
                     mjd_mean,
                     observatory=telescope,
                 )
+                mbjd, vel_bc = mbjds[0], vel_bcs[0]
             else:
                 mbjds, vel_bcs = calc_barycenter_corrections(
                     mjd_mean,
                     star_data,
                     observatory=telescope,
                 )
+                mbjd, vel_bc = mbjds[0], vel_bcs[0]
 
             # NOTE: For now, only single value until utility in
             # per-order corrections is needed and validated
-            mbjd, vel_bc = mbjds[0], vel_bcs[0]
             bc_table = Table(
                 {
                     'MJDUTC' : [mjd_mean],

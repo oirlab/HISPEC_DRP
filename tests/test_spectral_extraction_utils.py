@@ -50,3 +50,35 @@ def test_extract_box_survives_extrapolated_trace_positions():
     assert result["spec"].shape == (ny,)
     assert np.all(np.isfinite(result["spec"][:20]))
     assert np.all(np.isnan(result["spec"][20:40]))
+
+
+def test_extract_box_excludes_nonfinite_rate_and_err():
+    """Pixels with NaN rate or rate_err must not enter the box sum (same as DO_NOT_USE)."""
+    ny, nx = 8, 32
+    data = np.ones((ny, nx), dtype=np.float32)
+    err = np.full((ny, nx), 0.1, dtype=np.float32)
+    dq = np.zeros((ny, nx), dtype=np.uint32)
+    var_r = np.full((ny, nx), 0.01, dtype=np.float32)
+    var_p = np.full((ny, nx), 0.01, dtype=np.float32)
+    mid = np.zeros((ny, nx), dtype=np.float64)
+    trace = np.full(ny, 15.0, dtype=np.float64)
+
+    # Poison one cross-dispersion pixel in every row; extraction must stay finite.
+    data[:, 15] = np.nan
+    err[:, 16] = np.nan
+
+    result = extract_spectrum_box(
+        input_data=data,
+        input_err=err,
+        input_dq=dq,
+        input_var_rnoise=var_r,
+        input_var_poisson=var_p,
+        input_mid_time=mid,
+        trace_positions=trace,
+        extraction_aperture=5.0,
+        orders_are_vertical=True,
+    )
+    assert np.all(np.isfinite(result["spec"]))
+    assert np.all(np.isfinite(result["err"]))
+    # Contaminated pixels are excluded; box renormalization recovers the full aperture sum.
+    assert np.allclose(result["spec"], 5.0, rtol=0, atol=1e-5)

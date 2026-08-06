@@ -158,3 +158,20 @@ Calibrations
 
 - **KOA_SKIP_CALIBRATION_VERSION** (Optional)
   Skip generation of calibration versions when generating filenames even if KOA_CALIBRATION_CACHE is set. If this is not set, the behavior is determined by KOA_CALIBRATION_CACHE.
+
+
+Catalog queries (VizieR)
+++++++++++++++++++++++++
+
+Gaia DR3 and 2MASS lookups go through VizieR. Each query clears the ``astroquery``
+cache, then tries the mirror servers in order until one responds, repeating the whole
+list up to four times before giving up.
+
+- **HISPEC_DRP_VIZIER_MIRRORS** (Optional)
+  Comma-separated VizieR hostnames to try, in order. Default: the CDS, NAOJ, CfA,
+  INASAN, IUCAA and IDIA mirrors. Set this to a single hostname to pin every catalog
+  query to a local or institutional mirror (for example an on-site Gaia DR3 server).
+
+- **HISPEC_DRP_VIZIER_TIMEOUT** (Optional)
+  Per-request timeout in seconds. Default: 60. Values that are not positive numbers are
+  ignored. Lower it to fail over to the next mirror faster on a slow connection.

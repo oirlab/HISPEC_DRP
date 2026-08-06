@@ -36,8 +36,12 @@ __all__ = [
     "masklines_wavelength_unit_meta",
     "package_data_masks_dir",
     "OPTIMAL_TEMPLATE_MASK_BUILD_KW",
+    "CCFOPT_MASK_BUILD_KW",
+    "E2ERV_MASK_BUILD_KW",
     "LineMaskEntry",
     "build_line_mask_from_template",
+    "build_ccfopt_line_mask_from_template_and_seed",
+    "build_e2erv_line_mask_from_template",
     "compare_line_center_lists_um",
     "detect_template_line_centers_gradient_um",
     "detect_template_line_centers_parabolic_um",
@@ -94,6 +98,28 @@ OPTIMAL_TEMPLATE_MASK_BUILD_KW: dict[str, Any] = {
     "continuum_filter_size": 181,
 }
 
+# Defaults for CCF-contrast–optimized delta masks (seed refine at injected RV = 0).
+CCFOPT_MASK_BUILD_KW: dict[str, Any] = {
+    "spectrum_window_half_um": 0.01,
+    "ccf_v_half_m_s": 8000.0,
+    "ccf_v_step_m_s": 25.0,
+    "search_half_m_s": 2500.0,
+    "coarse_step_m_s": 250.0,
+    "fine_half_m_s": 300.0,
+    "fine_step_m_s": 25.0,
+    "rv_gate_m_s": 2000.0,
+    "min_good_pixels": 32,
+}
+
+#: Defaults for :func:`build_e2erv_line_mask_from_template` (RV-aligned e2e mask).
+E2ERV_MASK_BUILD_KW: dict[str, Any] = {
+    "min_continuum_normalized_depth": 0.20,
+    "deblend_sep_resels": 1.5,
+    "resel_um": 1.5e-4,  # ~R=8000 at 1.2 µm
+    "continuum_filter_size": 181,
+    "min_continuum_normalized_flux_floor": 1.0e-3,
+}
+
 _DEFAULT_ATMOSPHERE_REL = os.path.join(
     os.path.dirname(__file__), "..", "data", "atmosphere", "mktrans_zm_10_10.dat"
 )
@@ -135,14 +161,24 @@ def package_data_masks_dir() -> Path:
 
 
 #: Packaged default **delta** line mask basename under :func:`package_data_masks_dir`.
+#: Prefer the e2e-validated mask used to bake ``HB.sim_hdf_wavesol.line_zp.fits``.
 DEFAULT_PACKAGED_LINE_MASK_BASENAME: str = (
+    "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.e2erval.delta.mas"
+)
+#: Fallback when the e2erval product is absent (older checkouts).
+_DEFAULT_PACKAGED_LINE_MASK_FALLBACK: str = (
     "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"
 )
 
 
 def packaged_default_line_mask_path() -> str:
     """Absolute path to the packaged default **delta** mask (same as ``resolve_mask_path(None)``)."""
-    return str((package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME).resolve())
+    masks_dir = package_data_masks_dir()
+    preferred = masks_dir / DEFAULT_PACKAGED_LINE_MASK_BASENAME
+    if preferred.is_file():
+        return str(preferred.resolve())
+    fallback = masks_dir / _DEFAULT_PACKAGED_LINE_MASK_FALLBACK
+    return str(fallback.resolve())
 
 
 def paired_line_mask_path_for_template(
@@ -183,8 +219,8 @@ def resolve_mask_path(mask_path: str | None) -> str:
     if mask_path:
         p = Path(mask_path).expanduser()
         return str(p if p.is_absolute() else (Path.cwd() / p).resolve())
-    default_file = package_data_masks_dir() / DEFAULT_PACKAGED_LINE_MASK_BASENAME
-    if not default_file.exists():
+    default_file = Path(packaged_default_line_mask_path())
+    if not default_file.is_file():
         raise FileNotFoundError(
             f"Default mask not found: {default_file}. "
             "Pass StellarRVPrimitive(mask_path=...) to use a custom mask."
@@ -1529,4 +1565,444 @@ def build_line_mask_from_template(
     path_written = ml.save(output_path=out)
 
     logger.info("Wrote %d mask lines to %s", len(entries), path_written)
+    return path_written, entries
+
+def _ccfopt_single_line_gaussian_contrast(
+    wave_um: np.ndarray,
+    flux: np.ndarray,
+    err: np.ndarray,
+    dq: np.ndarray,
+    lam_um: float,
+    *,
+    v_grid: np.ndarray,
+    v_step_m_s: float,
+    rv_gate_m_s: float,
+) -> tuple[float, float]:
+    """
+    Single-line spline CCF + Gaussian fit at injected RV ≈ 0.
+
+    Returns ``(|contrast|, rv_m_s)``; either may be NaN when the fit fails the RV gate.
+    """
+    from hispecdrp.primitives.utils.ccf.ccf_fitting import calc_ccf_metrics
+    from hispecdrp.primitives.utils.ccf.ccf_utils import (
+        LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
+    )
+    from hispecdrp.primitives.utils.ccf.ccf_spline import compute_ccf_spline
+
+    if not np.isfinite(lam_um) or lam_um <= 0.0:
+        return float("nan"), float("nan")
+    _vg, ccf_raw, ccf_err = compute_ccf_spline(
+        wave_um,
+        flux,
+        err,
+        dq.astype(np.int32),
+        np.asarray([lam_um], dtype=np.float64),
+        np.asarray([1.0], dtype=np.float64),
+        vel_grid=v_grid,
+        zb=0.0,
+        use_variance=True,
+        line_set_velocity=0.0,
+    )
+    stored = -ccf_raw if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else ccf_raw
+    if not np.any(np.isfinite(stored)):
+        return float("nan"), float("nan")
+    metrics = calc_ccf_metrics(
+        v_grid,
+        stored,
+        ccf_err,
+        pix_size=float(v_step_m_s),
+        absorption=not LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
+        calc_bis=False,
+        mu_guess=0.0,
+    )
+    rv = float(metrics.rv)
+    err_rv = float(metrics.rv_err)
+    contrast = float(metrics.contrast)
+    if (
+        not np.isfinite(rv)
+        or not np.isfinite(err_rv)
+        or err_rv <= 0.0
+        or not np.isfinite(contrast)
+        or abs(rv) > float(rv_gate_m_s)
+    ):
+        return float("nan"), rv if np.isfinite(rv) else float("nan")
+    return abs(contrast), rv
+
+
+def _ccfopt_search_line_center_um(
+    wave_um: np.ndarray,
+    flux: np.ndarray,
+    err: np.ndarray,
+    dq: np.ndarray,
+    lam0_um: float,
+    *,
+    v_grid: np.ndarray,
+    v_step_m_s: float,
+    search_half_m_s: float,
+    coarse_step_m_s: float,
+    fine_half_m_s: float,
+    fine_step_m_s: float,
+    rv_gate_m_s: float,
+) -> tuple[float, float]:
+    """
+    Two-stage grid search over mask λ near ``lam0_um`` maximizing |Gaussian contrast|.
+
+    Trial centers are ``λ = λ₀ (1 + δv/c)``. Returns ``(best_lam_um, best_contrast)``.
+    """
+
+    def _trials(half_m_s: float, step_m_s: float, center_dv_m_s: float = 0.0) -> np.ndarray:
+        n = int(np.floor(float(half_m_s) / float(step_m_s) + 0.5))
+        if n < 0:
+            n = 0
+        return center_dv_m_s + np.arange(-n, n + 1, dtype=np.float64) * float(step_m_s)
+
+    def _best_on(dvs: np.ndarray) -> tuple[float, float, float]:
+        best_c = float("nan")
+        best_lam = float("nan")
+        best_dv = 0.0
+        for dv in dvs:
+            lam = float(lam0_um) * (1.0 + float(dv) / C_M_S)
+            c_abs, _rv = _ccfopt_single_line_gaussian_contrast(
+                wave_um,
+                flux,
+                err,
+                dq,
+                lam,
+                v_grid=v_grid,
+                v_step_m_s=v_step_m_s,
+                rv_gate_m_s=rv_gate_m_s,
+            )
+            if not np.isfinite(c_abs) or c_abs <= 0.0:
+                continue
+            if not np.isfinite(best_c) or c_abs > best_c:
+                best_c = float(c_abs)
+                best_lam = float(lam)
+                best_dv = float(dv)
+        return best_lam, best_c, best_dv
+
+    lam_c, con_c, dv_c = _best_on(_trials(search_half_m_s, coarse_step_m_s))
+    if not np.isfinite(lam_c):
+        return float("nan"), float("nan")
+    lam_f, con_f, _dv_f = _best_on(_trials(fine_half_m_s, fine_step_m_s, center_dv_m_s=dv_c))
+    if np.isfinite(lam_f) and np.isfinite(con_f):
+        return float(lam_f), float(con_f)
+    return float(lam_c), float(con_c)
+
+
+def build_ccfopt_line_mask_from_template_and_seed(
+    template_path: str,
+    seed_mask_path: str,
+    *,
+    wl_min_um: float = 0.8,
+    wl_max_um: float = 3.0,
+    spectrum_window_half_um: float = CCFOPT_MASK_BUILD_KW["spectrum_window_half_um"],
+    ccf_v_half_m_s: float = CCFOPT_MASK_BUILD_KW["ccf_v_half_m_s"],
+    ccf_v_step_m_s: float = CCFOPT_MASK_BUILD_KW["ccf_v_step_m_s"],
+    search_half_m_s: float = CCFOPT_MASK_BUILD_KW["search_half_m_s"],
+    coarse_step_m_s: float = CCFOPT_MASK_BUILD_KW["coarse_step_m_s"],
+    fine_half_m_s: float = CCFOPT_MASK_BUILD_KW["fine_half_m_s"],
+    fine_step_m_s: float = CCFOPT_MASK_BUILD_KW["fine_step_m_s"],
+    rv_gate_m_s: float = CCFOPT_MASK_BUILD_KW["rv_gate_m_s"],
+    min_good_pixels: int = CCFOPT_MASK_BUILD_KW["min_good_pixels"],
+    output_path: str | None = None,
+    masks_directory: str | None = None,
+    wave_um: np.ndarray | None = None,
+    flux: np.ndarray | None = None,
+) -> tuple[str, list[LineMaskEntry]]:
+    """
+    Refine a seed delta mask so each line maximizes single-line Gaussian CCF contrast at RV=0.
+
+    For every seed center ``λ₀``, search trial centers
+    ``λ = λ₀ (1 + δv/c)`` on the **template spectrum** (injected RV = 0) and keep the
+    wavelength that maximizes ``|Gaussian contrast|`` from
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`. Output
+    weights are proportional to that contrast and are renormalized to sum to 1.
+
+    Parameters
+    ----------
+    template_path
+        Path to a BT-Settl ``.h5`` template (used for I/O naming / metadata; also loaded
+        unless ``wave_um`` / ``flux`` are provided).
+    seed_mask_path
+        Path to an existing delta ``.mas`` seed (typically the packaged depth-weighted mask).
+    wave_um, flux
+        Optional in-memory vacuum-µm spectrum (for tests). When either is set, both must
+        be set and ``template_path`` is used only for metadata / default output naming.
+    output_path
+        Full output path. Default: ``<stem>.ccfopt.delta.mas`` under ``masks_directory``.
+
+    Returns
+    -------
+    path_written, entries
+        Output ``.mas`` path and in-memory rows.
+    """
+    seed = MaskLines.load(seed_mask_path)
+    if str(seed.mask_style) != MASK_STYLE_DELTA:
+        raise ValueError(
+            f"CCF-opt builder requires a delta seed mask; got style={seed.mask_style!r}"
+        )
+    seed_lam = np.asarray(seed.line_lambda_um, dtype=np.float64).ravel()
+    seed_w = np.asarray(seed.weight, dtype=np.float64).ravel()
+    keep_seed = np.isfinite(seed_lam) & (seed_lam > 0.0) & np.isfinite(seed_w) & (seed_w > 0.0)
+    seed_lam = seed_lam[keep_seed]
+    if seed_lam.size == 0:
+        raise ValueError(f"No positive-weight seed lines in {seed_mask_path}")
+
+    if (wave_um is None) ^ (flux is None):
+        raise ValueError("wave_um and flux must both be provided or both omitted")
+    if wave_um is None:
+        wave_um, flux = load_template_from_path(
+            template_path, wl_min_um=wl_min_um, wl_max_um=wl_max_um
+        )
+    else:
+        wave_um = np.asarray(wave_um, dtype=np.float64).ravel()
+        flux = np.asarray(flux, dtype=np.float64).ravel()
+
+    ok = np.isfinite(wave_um) & np.isfinite(flux) & (wave_um > 0)
+    wave_um = wave_um[ok]
+    flux = flux[ok]
+    order = np.argsort(wave_um)
+    wave_um = wave_um[order]
+    flux = flux[order]
+    if wave_um.size < int(min_good_pixels):
+        raise ValueError("Template spectrum too short after clipping")
+
+    # Relative flux error proxy (template has no formal σ).
+    med_abs = float(np.nanmedian(np.abs(flux)))
+    err_floor = max(1.0e-6 * med_abs, 1.0e-30)
+    err_all = np.maximum(np.abs(flux) * 0.01, err_floor).astype(np.float64)
+    dq_all = np.zeros(flux.shape[0], dtype=np.int32)
+
+    v_half = float(ccf_v_half_m_s)
+    v_step = float(ccf_v_step_m_s)
+    v_grid = np.arange(-v_half, v_half + 0.5 * v_step, v_step, dtype=np.float64)
+    win_half = float(spectrum_window_half_um)
+
+    out_lam: list[float] = []
+    out_contrast: list[float] = []
+    n_seed = int(seed_lam.size)
+    n_drop = 0
+    log_every = max(1, n_seed // 20)
+    for i, lam0 in enumerate(seed_lam):
+        if i % log_every == 0:
+            logger.info(
+                "CCF-opt mask: line %d/%d (λ₀=%.6f µm)",
+                i + 1,
+                n_seed,
+                float(lam0),
+            )
+        lam0_f = float(lam0)
+        if lam0_f < float(wl_min_um) or lam0_f > float(wl_max_um):
+            n_drop += 1
+            continue
+        # Local spectrum window large enough for CCF ± search Doppler span.
+        doppler_pad = (
+            (v_half + float(search_half_m_s)) / C_M_S * lam0_f * 3.0
+        )
+        half = max(win_half, doppler_pad, 1.0e-6)
+        mwin = (wave_um >= lam0_f - half) & (wave_um <= lam0_f + half)
+        if int(np.count_nonzero(mwin)) < int(min_good_pixels):
+            n_drop += 1
+            continue
+        w_loc = wave_um[mwin]
+        f_loc = flux[mwin]
+        e_loc = err_all[mwin]
+        d_loc = dq_all[mwin]
+        lam_best, con_best = _ccfopt_search_line_center_um(
+            w_loc,
+            f_loc,
+            e_loc,
+            d_loc,
+            lam0_f,
+            v_grid=v_grid,
+            v_step_m_s=v_step,
+            search_half_m_s=float(search_half_m_s),
+            coarse_step_m_s=float(coarse_step_m_s),
+            fine_half_m_s=float(fine_half_m_s),
+            fine_step_m_s=float(fine_step_m_s),
+            rv_gate_m_s=float(rv_gate_m_s),
+        )
+        if not np.isfinite(lam_best) or not np.isfinite(con_best) or con_best <= 0.0:
+            n_drop += 1
+            continue
+        out_lam.append(float(lam_best))
+        out_contrast.append(float(con_best))
+
+    if not out_lam:
+        raise ValueError(
+            "CCF-opt builder kept no lines; relax rv_gate_m_s / search windows or check seed"
+        )
+
+    centers_um_arr = np.asarray(out_lam, dtype=np.float64)
+    contrasts = np.asarray(out_contrast, dtype=np.float64)
+    order_out = np.argsort(centers_um_arr)
+    centers_um_arr = centers_um_arr[order_out]
+    contrasts = contrasts[order_out]
+    w_sum = float(np.sum(contrasts))
+    if not np.isfinite(w_sum) or w_sum <= 0.0:
+        raise ValueError("Cannot normalize CCF-opt weights: non-positive contrast sum")
+    weights = contrasts / w_sum
+
+    entries: list[LineMaskEntry] = [
+        LineMaskEntry(wavelength_nm=float(centers_um_arr[i] * 1000.0), weight=float(weights[i]))
+        for i in range(centers_um_arr.size)
+    ]
+
+    if masks_directory is None:
+        masks_directory = str(package_data_masks_dir())
+    os.makedirs(masks_directory, exist_ok=True)
+    base = os.path.splitext(os.path.basename(template_path))[0]
+    auto_name = f"{base}.ccfopt.{MASK_STYLE_DELTA}.mas"
+    out = output_path if output_path is not None else os.path.join(masks_directory, auto_name)
+
+    meta: dict[str, Any] = {
+        "schema_version": 2,
+        "mask_style": MASK_STYLE_DELTA,
+        "generator": (
+            "hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_template_and_seed"
+        ),
+        "template_path": os.path.abspath(template_path),
+        "seed_mask_path": os.path.abspath(seed_mask_path),
+        "wl_min_um": float(wl_min_um),
+        "wl_max_um": float(wl_max_um),
+        "spectrum_window_half_um": float(spectrum_window_half_um),
+        "ccf_v_half_m_s": float(ccf_v_half_m_s),
+        "ccf_v_step_m_s": float(ccf_v_step_m_s),
+        "search_half_m_s": float(search_half_m_s),
+        "coarse_step_m_s": float(coarse_step_m_s),
+        "fine_half_m_s": float(fine_half_m_s),
+        "fine_step_m_s": float(fine_step_m_s),
+        "rv_gate_m_s": float(rv_gate_m_s),
+        "injected_rv_m_s": 0.0,
+        "mask_line_geometry": "delta_two_column",
+        "mask_weight_definition": "abs_gaussian_ccf_contrast",
+        "weights_sum_normalized_to": 1.0,
+        "n_seed_lines": int(n_seed),
+        "n_dropped_lines": int(n_drop),
+        "n_lines": int(len(entries)),
+        "disk_wavelength_columns": {
+            "column0_line_center": "vacuum_nanometer",
+            "column1_weight": "dimensionless",
+        },
+        "hispecdrp_wavelength_columns": {
+            "line_center": masklines_wavelength_unit_meta(u.nm),
+            "line_left_edge": masklines_wavelength_unit_meta(u.nm),
+            "line_right_edge": masklines_wavelength_unit_meta(u.nm),
+            "line_width": masklines_wavelength_unit_meta(u.nm),
+        },
+    }
+    ml = MaskLines.from_delta_centers_um(centers_um_arr, weights, metadata=meta)
+    path_written = ml.save(output_path=out)
+    logger.info(
+        "Wrote %d CCF-opt mask lines (%d dropped) to %s",
+        len(entries),
+        n_drop,
+        path_written,
+    )
+    return path_written, entries
+
+def build_e2erv_line_mask_from_template(
+    template_path: str,
+    *,
+    wl_min_um: float = 0.8,
+    wl_max_um: float = 3.0,
+    min_continuum_normalized_depth: float = E2ERV_MASK_BUILD_KW[
+        "min_continuum_normalized_depth"
+    ],
+    deblend_sep_resels: float = E2ERV_MASK_BUILD_KW["deblend_sep_resels"],
+    resel_um: float = E2ERV_MASK_BUILD_KW["resel_um"],
+    continuum_filter_size: int = E2ERV_MASK_BUILD_KW["continuum_filter_size"],
+    min_continuum_normalized_flux_floor: float | None = E2ERV_MASK_BUILD_KW[
+        "min_continuum_normalized_flux_floor"
+    ],
+    output_path: str | None = None,
+    masks_directory: str | None = None,
+) -> tuple[str, list[LineMaskEntry]]:
+    """
+    Build a delta line mask aligned with e2e WAVE / RV truth (template centers).
+
+    Uses parabolic absorption centroids (same family as the sim-HDF line WAVE
+    correction), a resolution-element deblend that keeps the deepest line in each
+    blend, and continuum-normalized depth weights (sum → 1). No CCF-opt λ shifts —
+    centers stay at template truth so CCF at injected RV=0 is unbiased when WAVE
+    labels apparent line centers.
+
+    Default output: ``<template_stem>.e2erv.delta.mas``.
+    """
+    wave_um, flux = load_template_from_path(
+        template_path, wl_min_um=wl_min_um, wl_max_um=wl_max_um
+    )
+    ok = np.isfinite(wave_um) & np.isfinite(flux) & (wave_um > 0)
+    wave_um = np.asarray(wave_um, dtype=np.float64)[ok]
+    flux = np.asarray(flux, dtype=np.float64)[ok]
+    order = np.argsort(wave_um)
+    wave_um, flux = wave_um[order], flux[order]
+    if wave_um.size < 16:
+        raise ValueError("Template too short after clipping")
+
+    cont = _continuum_envelope(flux, int(continuum_filter_size))
+    centers = detect_template_line_centers_parabolic_um(
+        wave_um,
+        flux,
+        min_continuum_normalized_depth=float(min_continuum_normalized_depth),
+    )
+    if centers.size == 0:
+        raise ValueError("No parabolic line centers for e2erv mask")
+
+    depths = 1.0 - np.interp(centers, wave_um, flux) / np.maximum(
+        np.interp(centers, wave_um, cont), 1e-30
+    )
+    fn = np.interp(centers, wave_um, flux) / np.maximum(
+        np.interp(centers, wave_um, cont), 1e-30
+    )
+    keep = np.isfinite(depths) & (depths >= float(min_continuum_normalized_depth))
+    if min_continuum_normalized_flux_floor is not None:
+        keep &= fn >= float(min_continuum_normalized_flux_floor)
+    centers = centers[keep]
+    depths = depths[keep]
+    if centers.size == 0:
+        raise ValueError("All e2erv candidates failed depth/floor cuts")
+
+    # Deblend: merge radius = deblend_sep_resels * resel (nm on each side → sum).
+    merge_r_nm = 0.5 * float(deblend_sep_resels) * float(resel_um) * 1000.0
+    centers_nm = centers * 1000.0
+    merge_radii = np.full(centers_nm.shape, merge_r_nm, dtype=np.float64)
+    keep_idx = _cluster_max_depth(centers_nm, merge_radii, depths)
+    centers = centers[keep_idx]
+    depths = depths[keep_idx]
+    weights = depths / float(np.sum(depths))
+
+    if masks_directory is None:
+        masks_directory = str(package_data_masks_dir())
+    os.makedirs(masks_directory, exist_ok=True)
+    base = os.path.splitext(os.path.basename(template_path))[0]
+    out = (
+        output_path
+        if output_path is not None
+        else os.path.join(masks_directory, f"{base}.e2erv.delta.mas")
+    )
+    meta: dict[str, Any] = {
+        "schema_version": 2,
+        "mask_style": MASK_STYLE_DELTA,
+        "generator": "hispecdrp.utils.line_mask_utils.build_e2erv_line_mask_from_template",
+        "template_path": os.path.abspath(template_path),
+        "wl_min_um": float(wl_min_um),
+        "wl_max_um": float(wl_max_um),
+        "min_continuum_normalized_depth": float(min_continuum_normalized_depth),
+        "deblend_sep_resels": float(deblend_sep_resels),
+        "resel_um": float(resel_um),
+        "deblend_merge_radius_nm": float(merge_r_nm),
+        "centroid_method": "parabolic",
+        "mask_weight_definition": "continuum_normalized_depth_1_minus_F_over_Fc",
+        "weights_sum_normalized_to": 1.0,
+        "n_lines": int(centers.size),
+        "purpose": "e2e_rv_aligned_with_sim_hdf_line_wave",
+    }
+    ml = MaskLines.from_delta_centers_um(centers, weights, metadata=meta)
+    path_written = ml.save(output_path=out)
+    entries = [
+        LineMaskEntry(wavelength_nm=float(c * 1000.0), weight=float(w))
+        for c, w in zip(centers, weights)
+    ]
+    logger.info("Wrote %d e2erv mask lines to %s", len(entries), path_written)
     return path_written, entries

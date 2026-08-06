@@ -22,14 +22,13 @@ Entry points
    :header: "Module", "Role"
    :widths: 40, 60
 
-   ":mod:`hispecdrp.simulations.e2e_pipeline`", "Orchestrates cal resolution → ramp → Stage 0 → fiberflats → Stage 1 → Stage 2"
+   ":mod:`hispecdrp.simulations.e2e_pipeline`", "Orchestrates cal resolution → ramp → Stage 0 → fiberflats → Stage 1 → Stage 2 (includes preview report + infinite-S/N helpers)"
    ":mod:`hispecdrp.simulations.run_e2e_sim`", "CLI entry point: ``python -m hispecdrp.simulations.run_e2e_sim``"
    ":mod:`hispecdrp.simulations.simulate_up_the_ramp`", "Rate-map builders, UTR ramp, Stage 0 / fiberflat helpers"
    ":mod:`hispecdrp.simulations.e2e_calibrations`", "KOA / YAML / simulated calibration resolution"
    ":mod:`hispecdrp.simulations.e2e_gaia`", "Gaia target metadata, barycentric correction, 2MASS normalization"
    ":mod:`hispecdrp.simulations.e2e_support`", "Stage 1/2 runners, KOA cache paths, default ``prim_args``"
-   ":mod:`hispecdrp.simulations.e2e_previews`", "PNG previews and HTML report (``index.html``)"
-   ":mod:`hispecdrp.simulations.run_caldb`", "KOA calibration store sync/download CLI"
+   ":mod:`hispecdrp.calibrations.run_caldb`", "KOA calibration store sync/download CLI"
    ":mod:`hispecdrp.simulations.simulate_rate_map`", "``SimulateRateMap`` — pyechelle HDF → 2D rate map"
    ":mod:`hispecdrp.simulations.utr`", "``create_ramp`` — UTR ramp from rate map (Poisson, read noise, uint16)"
 
@@ -45,7 +44,7 @@ Execution order in :func:`~hispecdrp.simulations.e2e_pipeline.run_e2e_simulation
 #. **Fiberflat path** (when ``run_stage1=True``) — per-fiber dummy fiberflat rates → :class:`~hispecdrp.pipelines.calibration.process_fiberflats_pipeline.ProcessFiberflatsPipeline` → trace pos/prof + :class:`~hispecdrp.datamodels.fiberflat.FiberflatModel`
 #. **Stage 1** — spectral extraction + HDF-derived wavelength solution
 #. **Stage 2** — blaze correction + barycenter correction + :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive` (line-mask CCF)
-#. **Preview report** (optional) — :func:`~hispecdrp.simulations.e2e_previews.generate_e2e_preview_report`
+#. **Preview report** (optional) — :func:`~hispecdrp.simulations.e2e_pipeline.generate_e2e_preview_report`
 
 .. code-block:: text
 
@@ -90,4 +89,4 @@ See also
 
 * :doc:`configuration` — full ``E2EConfig`` reference
 * :doc:`running` — how to launch a run
-* Example calibration YAML: ``hispecdrp/simulations/e2e_calibrations.example.yaml``
+* Example calibration YAML: ``docs/source/simulations/e2e_calibrations.example.yaml``

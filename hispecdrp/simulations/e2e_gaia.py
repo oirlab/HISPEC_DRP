@@ -19,7 +19,7 @@ from ..primitives.utils import (
     get_2mass_data_vizier,
     get_stellar_data_gaia_from_source_id,
 )
-from ..primitives.utils.gaia_query import GAIA_DR3_VIZIER_ID, VIZIER_MIRRORS
+from ..primitives.utils.gaia_query import GAIA_DR3_VIZIER_ID, query_vizier
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,6 @@ def query_random_bright_gaia_source_id(
     mirror (``I/355/gaiadr3``) for bright stars (G < ``max_g_mag``) with a defined RV and
     positive parallax, returning a random match. Mirrors are tried in order on failure.
     """
-    from astroquery.vizier import Vizier
     import astropy.units as u
     from astropy.coordinates import SkyCoord
 
@@ -123,26 +122,20 @@ def query_random_bright_gaia_source_id(
         ra_deg = rng.uniform(0.0, 360.0)
         dec_deg = float(np.degrees(np.arcsin(rng.uniform(-1.0, 1.0))))
         center = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
-        for server in VIZIER_MIRRORS:
-            try:
-                vizier = Vizier(
-                    columns=["Source", "Gmag", "RV", "Plx"],
-                    column_filters=column_filters,
-                    vizier_server=server,
-                )
-                vizier.ROW_LIMIT = 500
-                result = vizier.query_region(
-                    center, radius=search_radius_deg * u.deg, catalog=GAIA_DR3_VIZIER_ID
-                )
-                if result is not None and len(result) > 0 and len(result[0]) > 0:
-                    tbl = result[0]
-                    idx = rng.randrange(len(tbl))
-                    return str(tbl["Source"][idx])
-            except Exception as e:  # noqa: BLE001 - mirror fallback is intentional
-                logger.warning(
-                    "VizieR mirror %s failed for random bright-star query: %s", server, e
-                )
-                continue
+        # One mirror pass per random cone: an empty cone is expected and is retried at
+        # a new position rather than by hammering the remaining mirrors.
+        tbl = query_vizier(
+            catalog=GAIA_DR3_VIZIER_ID,
+            columns=["Source", "Gmag", "RV", "Plx"],
+            column_filters=column_filters,
+            center=center,
+            radius_deg=search_radius_deg,
+            row_limit=500,
+            max_rounds=1,
+            description="Gaia DR3 random bright-star cone",
+        )
+        if tbl is not None and len(tbl) > 0:
+            return str(tbl["Source"][rng.randrange(len(tbl))])
     raise RuntimeError(
         f"No Gaia DR3 match for bright-star query (G < {max_g_mag}, RV required) "
         f"after {max_rounds} random VizieR cone searches."
@@ -330,12 +323,3 @@ def resolve_e2e_gaia_target(
         mjd_mid=float(mjd_mid),
         twomass_data=twomass_data,
     )
-
-
-def apply_target_meta_to_model(model, meta: dict) -> None:
-    """Set target / exposure metadata fields on a data model."""
-    for key, value in meta.items():
-        if value is None:
-            continue
-        if hasattr(model.meta, key):
-            setattr(model.meta, key, value)

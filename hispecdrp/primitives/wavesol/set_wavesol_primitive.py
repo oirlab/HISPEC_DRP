@@ -78,10 +78,14 @@ class SetInitialWLSPrimitive(BasePrimitive):
 
             for fiber in do_fibers:
 
+                n_orders = n_pix = None
                 if output_model.has_extension_value(f"spec_fib{fiber}"):
                     n_orders, n_pix = getattr(output_model, f'spec_fib{fiber}').shape
                 elif output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
                     n_orders, n_pix = getattr(output_model, f'spec_uncal_fib{fiber}').shape
+                if n_orders is None or n_pix is None:
+                    # Fiber was not extracted (e.g. science injection on one fiber only).
+                    continue
 
                 # Initialize arrays if not set yet
                 if getattr(output_model, f'wave_fib{fiber}', None) is None:

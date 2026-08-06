@@ -1,118 +1,27 @@
+"""Robust statistics helpers used by HISPEC DRP primitives.
+
+Biweight estimators, weighted moments, outlier-resistant summary stats, and
+posterior mode / uncertainty extraction.
+"""
+from __future__ import annotations
+
 import numpy as np
-import scipy.constants
-from numpy.polynomial.chebyshev import chebvander2d
 from numba import njit
 from scipy.interpolate import interp1d
 
 __all__ = [
-    'delta_wave_to_delta_vel', 'delta_vel_to_delta_wave', 'delta_pix_to_delta_wave',
-    'polyval1d', 'solve_chebyshev2d', 'nanmedian_axis0_ignore_empty_columns',
+    "biweight_location",
+    "biweight_midvariance",
+    "get_err_from_posterior",
+    "mad",
+    "robust_stats",
+    "weighted_mean",
+    "weighted_quantile",
+    "weighted_stddev",
 ]
 
-def delta_wave_to_delta_vel(delta_wave : np.ndarray | float, wave : np.ndarray | float) -> np.ndarray | float:
-    """
-    Convert a change in wavelength to a change in velocity.
+from .array_utils import all_sc
 
-    Args:
-        delta_wave (np.ndarray | float): Change in wavelength (any units).
-        wave (np.ndarray | float): Wavelength (same units as delta_wave).
-
-    Returns:
-        np.ndarray | float: Change in velocity in m/s.
-    """
-    return delta_wave / wave * scipy.constants.c
-
-
-def delta_vel_to_delta_wave(delta_vel : np.ndarray | float, wave : np.ndarray | float) -> np.ndarray | float:
-    """
-    Convert a change in velocity to a change in wavelength.
-
-    Args:
-        delta_vel (np.ndarray | float): Change in velocity in m/s.
-        wave (np.ndarray | float): Wavelength (any units).
-
-    Returns:
-        np.ndarray | float: Change in wavelength in the same units as wave.
-    """
-    return delta_vel / scipy.constants.c * wave
-
-
-def delta_pix_to_delta_wave(
-    delta_pix : float,
-    x : float,
-    wavesol : np.ndarray | None = None,
-    dispersion : np.ndarray | float = None
-) -> np.ndarray | float:
-    """
-    Convert a change in pixels to a change in wavelength.
-
-    Args:
-        delta_pix (float): Change in pixels.
-        x (float): Pixel position.
-        wavesol (np.ndarray | None): Wavelength solution used to calculate the dispersion. If None, the dispersion must be provided.
-        dispersion (np.ndarray | float): Dispersion in wavelength per pixel. If None, it will be calculated from the wavelength solution.
-
-    Returns:
-        np.ndarray | float: Change in wavelength in the same units as the wavelength solution.
-    """
-    if dispersion is None:
-        dispersion = np.gradient(wavesol)
-    disp = np.interp(x, np.arange(len(dispersion)), dispersion)
-    dw = disp * delta_pix
-    return dw
-
-
-@njit(nogil=True)
-def polyval1d(coeffs : np.ndarray, x : np.ndarray) -> np.ndarray:
-    """
-    Evaluate a polynomial with given coefficients at specified points using the Horner method.
-
-    Args:
-        coeffs (np.ndarray): Coefficients of the polynomial, ordered from lowest degree to highest (NOTE: numpy is reversed).
-        x (np.ndarray): Points at which to evaluate the polynomial.
-    """
-    v = np.zeros(x.shape, dtype=coeffs.dtype)
-    for coeff in coeffs[::-1]:
-        v = v * x + coeff
-    return v
-
-
-def solve_chebyshev2d_ols(
-    x : np.ndarray, y : np.ndarray, z : np.ndarray,
-    deg_x : int, deg_y : int,
-    weights : np.ndarray | None = None,
-) -> np.ndarray:
-    """
-    Fit a 2D Chebyshev polynomial using ordinary (uncorrelated) weighted least squares.
-
-    Args:
-        x: 1D array of x coordinates (length N).
-        y: 1D array of y coordinates (length N).
-        z (np.ndarray): 1D array of values at coordinates (x,y) (length N).
-        deg_x (int): X Degree of the Chebyshev polynomial.
-        deg_y (int): Y Degree of the Chebyshev polynomial.
-        weights (np.ndarray | None): 1D array of weights (length N). If None, uniform weights are used.
-
-    Returns:
-        coeffs: 2D array of Chebyshev coefficients of shape (deg_x+1, deg_y+1)
-    """
-
-    # Construct the 2D Vandermonde matrix for Chebyshev basis
-    V = chebvander2d(x, y, [deg_x, deg_y])  # shape: (N, (deg_x+1)*(deg_y+1))
-
-    # Apply weights, if provided
-    if weights is not None:
-        W = np.sqrt(weights)
-        V *= W[:, None]
-        z = z * W
-
-    # Solve the least squares problem
-    coeffs_flat, *_ = np.linalg.lstsq(V, z, rcond=None)
-    coeffs = coeffs_flat.reshape((deg_x + 1, deg_y + 1))
-    return coeffs
-
-
-#@njit(nogil=True)
 def robust_stats(
     x: np.ndarray,
     w: np.ndarray | None = None,
@@ -175,7 +84,6 @@ def robust_stats(
 
     return mu_final, sig_final, good
 
-
 @njit(nogil=True)
 def weighted_mean(x : np.ndarray, w : np.ndarray) -> float:
     """
@@ -198,7 +106,6 @@ def weighted_mean(x : np.ndarray, w : np.ndarray) -> float:
         return np.nan
     w = w / w_sum
     return np.sum(x * w)
-
 
 @njit(nogil=True)
 def weighted_stddev(x : np.ndarray, w : np.ndarray, mu : float | None = None):
@@ -273,7 +180,6 @@ def biweight_location(
 
     return M + result_num / result_den
 
-
 @njit(nogil=True)
 def biweight_midvariance(
     x : np.ndarray,
@@ -324,7 +230,6 @@ def biweight_midvariance(
         f2 += t * (1.0 - 5.0 * u2[ii])
     return n_good * f1 / (f2 * f2)
 
-
 @njit(nogil=True)
 def mad(x : np.ndarray, M : float | None = None):
     """
@@ -340,7 +245,6 @@ def mad(x : np.ndarray, M : float | None = None):
     if M is None:
         M = np.nanmedian(x)
     return np.nanmedian(np.abs(x - M))
-
 
 @njit(nogil=True)
 def weighted_quantile(x : np.ndarray, w : np.ndarray | None = None, q : float = 0.5):
@@ -387,130 +291,6 @@ def weighted_quantile(x : np.ndarray, w : np.ndarray | None = None, q : float = 
         return sorted_values[i-1]
     else:
         return sorted_values[0]
-
-
-@njit(nogil=True)
-def all_sc(arr : np.ndarray) -> bool:
-    """
-    Optimized version of np.all which short circuits, unlike numpy.all.
-    """
-    for item in arr.ravel():
-        if item:
-            continue
-        else:
-            return False
-    return True
-
-@njit(nogil=True)
-def any_sc(arr : np.ndarray) -> bool:
-    """
-    Optimized version of np.any which short circuits, unlike numpy.any.
-    """
-    for item in arr.ravel():
-        if item:
-            return True
-    return False
-
-@njit(nogil=True, cache=True, parallel=False)
-def bitwise_or_reduce_uint32(arr: np.ndarray) -> np.uint32:
-    result = np.uint32(0)
-    for k in range(arr.shape[0]):
-        result |= arr[k]
-    return result
-
-@njit(nogil=True)
-def _calc_median_insertion_sort(vals, m):
-    # insertion sort first m entries, then return median
-    for i in range(1, m):
-        key = vals[i]
-        j = i - 1
-        while j >= 0 and vals[j] > key:
-            vals[j + 1] = vals[j]
-            j -= 1
-        vals[j + 1] = key
-    if m == 0:
-        return np.nan
-    if m % 2 == 1:
-        return vals[m // 2]
-    else:
-        a = vals[(m // 2) - 1]
-        b = vals[m // 2]
-        return 0.5 * (a + b)
-
-
-@njit(nogil=True)
-def median_filter_1d(data : np.ndarray, dq : np.ndarray, window_size : int):
-    n = data.shape[0]
-    out = np.empty(n, dtype=data.dtype)
-    half = window_size // 2
-    # temporary array sized to window for collecting valid values
-    temp = np.empty(window_size, dtype=data.dtype)
-    for i in range(n):
-        m = 0
-        start = i - half
-        end = i + half
-        for j in range(start, end + 1):
-            if 0 <= j < n and dq[j] == 0:
-                temp[m] = data[j]
-                m += 1
-        if m == 0:
-            out[i] = np.nan
-        else:
-            out[i] = _calc_median_insertion_sort(temp, m)
-    return out
-
-
-@njit(nogil=True)
-def median_filter_2d(data, dq, window_size : tuple[int, int]):
-    ny, nx = data.shape
-    out = np.empty((ny, nx), dtype=data.dtype)
-    hy = window_size[0] // 2
-    hx = window_size[1] // 2
-    temp = np.empty(window_size[0] * window_size[1], dtype=data.dtype)
-
-    for iy in range(ny):
-        for ix in range(nx):
-            m = 0
-            for jy in range(iy - hy, iy + hy + 1):
-                if jy < 0 or jy >= ny:
-                    continue
-                for jx in range(ix - hx, ix + hx + 1):
-                    if jx < 0 or jx >= nx:
-                        continue
-                    if dq[jy, jx] == 0:
-                        temp[m] = data[jy, jx]
-                        m += 1
-            if m == 0:
-                out[iy, ix] = np.nan
-            else:
-                out[iy, ix] = _calc_median_insertion_sort(temp, m)
-    return out
-
-
-def nanmedian_axis0_ignore_empty_columns(arr: np.ndarray) -> np.ndarray:
-    """
-    Column-wise median of finite values (axis 0). Columns with no finite entries are NaN.
-
-    ``np.nanmedian(..., axis=0)`` emits ``RuntimeWarning: All-NaN slice`` when entire
-    columns are NaN; this matches ``nanmedian`` for mixed finite/NaN columns but avoids
-    that warning.
-    """
-    a = np.asarray(arr, dtype=np.float64)
-    if a.ndim != 2:
-        raise ValueError("nanmedian_axis0_ignore_empty_columns: expected a 2-D array")
-    n_row, n_col = a.shape
-    if n_col == 0:
-        return np.array([], dtype=np.float64)
-    if n_row == 0:
-        return np.full(n_col, np.nan, dtype=np.float64)
-    fin = np.isfinite(a)
-    cnt = np.sum(fin, axis=0)
-    out = np.full(n_col, np.nan, dtype=np.float64)
-    for j in range(n_col):
-        if cnt[j] > 0:
-            out[j] = float(np.median(a[fin[:, j], j]))
-    return out
-
 
 def get_err_from_posterior(x, posterior):
     """ Return the mode, and the left and right errors of a distribution. The errors are defined with a 68% confidence level.
@@ -563,3 +343,4 @@ def get_err_from_posterior(x, posterior):
         rf = interp1d(tmp_cumpost,tmp_x,bounds_error=False,fill_value=x[-1])
         rx = rf(1-0.6827)
     return x[argmax_post],x[argmax_post]-lx,rx-x[argmax_post]
+

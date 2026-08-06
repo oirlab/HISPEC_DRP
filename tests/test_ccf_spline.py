@@ -2,7 +2,7 @@
 import numpy as np
 
 from hispecdrp.primitives.utils.ccf.ccf_spline import compute_ccf_spline
-from hispecdrp.primitives.utils.ccf.cubic_spline import (
+from hispecdrp.primitives.utils.cubic_spline import (
     cubic_spline_build,
     cubic_spline_eval_scalar_arrays,
 )

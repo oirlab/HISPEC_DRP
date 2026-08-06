@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
+from .download_verify import ensure_calibration_on_disk
 from .hispec_store import HISPECCalibrationStore
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,8 @@ def verify_koa_calibrations(
     connect_remote: bool = True,
     sync_remote: bool = True,
     download_missing: bool = True,
+    require_complete: bool = True,
+    ignore_missing_cal_types: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """
     Sync KOA catalog metadata and download missing calibration files for one spectrograph.
@@ -25,6 +29,10 @@ def verify_koa_calibrations(
     Uses ``KOA_CALIBRATION_CACHE`` for the local cache. When ``connect_remote`` /
     ``sync_remote`` are True, also requires ``KECK_OBSERVER_EMAIL`` and
     ``KECK_OBSERVER_PASSWORD`` for remote KOA access.
+
+    Each download is verified on disk (exists, non-trivial size, expected basename)
+    before it is counted as successful. Metadata sync alone is not treated as a
+    successful file download.
 
     Parameters
     ----------
@@ -37,19 +45,40 @@ def verify_koa_calibrations(
     download_missing : bool, optional
         Download calibrations listed in the local DB but missing from the cache,
         filtered to ``spectrograph``. Default True.
+    require_complete : bool, optional
+        If True (default), raise ``RuntimeError`` when any download fails or files
+        remain missing after the pass. Set False to only return the summary.
+    ignore_missing_cal_types : list of str or None, optional
+        Calibration types that may be absent from the cache without failing
+        ``require_complete`` (and are skipped for download attempts). Useful for
+        simulation notebooks that register a packaged ``lfc_wavesol`` instead of
+        the remote geometric product. Example: ``["lfc_wavesol"]``.
 
     Returns
     -------
     dict
         Summary with keys ``spectrograph``, ``n_records``, ``cal_types``,
-        ``n_missing``, ``n_downloaded``, ``n_failed``, ``downloaded``, ``failed``.
+        ``n_missing``, ``n_downloaded``, ``n_failed``, ``downloaded``, ``failed``,
+        ``verified_paths``, ``still_missing``, ``ignored_missing``.
     """
     spec = str(spectrograph).strip().upper()
     if spec not in ("BSPEC", "RSPEC"):
         raise ValueError(f"spectrograph must be BSPEC or RSPEC, got {spectrograph!r}")
 
+    ignore_types = {
+        str(t).strip().lower()
+        for t in (ignore_missing_cal_types or ())
+        if str(t).strip()
+    }
+
+    def _ignored(rec: dict) -> bool:
+        return str(rec.get("cal_type", "")).strip().lower() in ignore_types
+
     downloaded: list[str] = []
+    verified_paths: list[str] = []
     failed: list[dict[str, str]] = []
+    still_missing: list[str] = []
+    ignored_missing: list[str] = []
 
     with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
         if sync_remote:
@@ -68,32 +97,79 @@ def verify_koa_calibrations(
 
         missing: list[dict] = []
         if download_missing:
-            missing = [
+            missing_all = [
                 r
                 for r in (store.get_missing_local_files() or [])
                 if str(r.get("spectrograph", "")).upper() == spec
             ]
+            ignored_missing = [
+                str(r.get("filename") or r.get("id") or "?")
+                for r in missing_all
+                if _ignored(r)
+            ]
+            missing = [r for r in missing_all if not _ignored(r)]
+            if ignored_missing:
+                logger.info(
+                    "Ignoring %d missing %s calibration(s) of type(s) %s: %s",
+                    len(ignored_missing),
+                    spec,
+                    sorted(ignore_types),
+                    ignored_missing[:5],
+                )
+            if missing:
+                logger.info(
+                    "Found %d %s calibration file(s) in the local DB but missing from "
+                    "KOA_CALIBRATION_CACHE=%s",
+                    len(missing),
+                    spec,
+                    os.environ.get("KOA_CALIBRATION_CACHE", "<unset>"),
+                )
             for i, rec in enumerate(missing, 1):
                 filename = str(rec.get("filename") or "?")
                 try:
                     path, _ = store.get_calibration(cal=rec)
+                    path = ensure_calibration_on_disk(
+                        path,
+                        expected_filename=filename if filename != "?" else None,
+                        cal_record=rec,
+                    )
                     downloaded.append(filename)
+                    verified_paths.append(path)
+                    size = os.path.getsize(path)
                     logger.info(
-                        "[%d/%d] Downloaded %s -> %s",
+                        "[%d/%d] Verified download %s -> %s (%d bytes)",
                         i,
                         len(missing),
                         filename,
                         path,
+                        size,
                     )
                 except Exception as e:
                     failed.append({"filename": filename, "error": str(e)})
                     logger.warning(
-                        "[%d/%d] Failed to download %s: %s",
+                        "[%d/%d] Failed to download/verify %s: %s",
                         i,
                         len(missing),
                         filename,
                         e,
                     )
+
+            # Re-scan so we catch zip-basename mismatches and silent no-ops.
+            still_missing_recs = [
+                r
+                for r in (store.get_missing_local_files() or [])
+                if str(r.get("spectrograph", "")).upper() == spec and not _ignored(r)
+            ]
+            still_missing = [
+                str(r.get("filename") or r.get("id") or "?")
+                for r in still_missing_recs
+            ]
+            # Refresh ignored list from the full re-scan.
+            ignored_missing = [
+                str(r.get("filename") or r.get("id") or "?")
+                for r in (store.get_missing_local_files() or [])
+                if str(r.get("spectrograph", "")).upper() == spec and _ignored(r)
+            ]
 
         rows = store.local_db.query() or []
         if not isinstance(rows, list):
@@ -110,14 +186,28 @@ def verify_koa_calibrations(
         "n_failed": len(failed),
         "downloaded": downloaded,
         "failed": failed,
+        "verified_paths": verified_paths,
+        "still_missing": still_missing,
+        "ignored_missing": ignored_missing,
     }
     logger.info(
-        "%s caldb: %d record(s); downloaded %d/%d missing file(s) (%d failed); types=%s",
+        "%s caldb: %d record(s); downloaded %d/%d missing file(s) (%d failed); "
+        "still_missing=%d; ignored_missing=%d; types=%s",
         spec,
         summary["n_records"],
         summary["n_downloaded"],
         summary["n_missing"],
         summary["n_failed"],
+        len(still_missing),
+        len(ignored_missing),
         summary["cal_types"],
     )
+    if require_complete and (failed or still_missing):
+        raise RuntimeError(
+            f"KOA calibration download incomplete for {spec}: "
+            f"{len(failed)} failed, {len(still_missing)} still missing from cache "
+            f"({still_missing[:5]}{'...' if len(still_missing) > 5 else ''}). "
+            "Check KECK_OBSERVER_* credentials, network access to the Keck calibrations "
+            "API, and that KOA_CALIBRATION_CACHE is writable."
+        )
     return summary

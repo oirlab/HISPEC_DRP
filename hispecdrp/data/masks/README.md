@@ -18,14 +18,38 @@ For each template stem, that script writes:
 | `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight (see :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`). |
 | `<template_stem>.tophat.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
 
+### CCF-contrast–optimized delta masks
+
+A second regenerator refines each packaged ``*.delta.mas`` seed line-by-line on the
+paired BT-Settl template at injected RV = 0, choosing the wavelength that maximizes
+single-line Gaussian CCF contrast and setting weights proportional to that contrast:
+
+```bash
+python hispecdrp/data/masks/regenerate_ccfopt_masks.py
+```
+
+| File pattern | Role |
+|--------------|------|
+| `<template_stem>.ccfopt.delta.mas` | Two columns: vacuum line-center (nm), weight from :func:`hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_template_and_seed` (`mask_weight_definition`: `abs_gaussian_ccf_contrast`). |
+
+These are **not** the Stage-2 default; pass ``mask_path`` explicitly to use them.
+
 Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
 :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
 
 **Default mask** when `StellarRVPrimitive(mask_path=None)` (via
 :func:`hispecdrp.utils.line_mask_utils.resolve_mask_path`) is the lte049
-template-derived delta mask — basename
+**e2erval** delta mask — basename
 :data:`hispecdrp.utils.line_mask_utils.DEFAULT_PACKAGED_LINE_MASK_BASENAME`, absolute path
 :func:`hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`.
+
+Regenerate that product (then re-bake packaged WAVE) with
+`regenerate_e2erval_masks.py` on the seed=0 fib2 blaze used by
+`bake_pipeline_example_wavesol.py` so mask and WAVE stay a closed loop.
+Use ``--recenter`` (default) so mask wavelengths sit on apparent minima
+(RV = 0 on that spectrum). For maximum formal aggregate precision on the
+fiber-2 preview path, add ``--keep-all-valid`` (every seed line with a valid
+minimum; ~1556 lines for lte049), then re-bake WAVE with the new mask.
 
 ## On-disk layout and loaders
 

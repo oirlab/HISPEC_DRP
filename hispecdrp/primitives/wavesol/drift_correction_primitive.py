@@ -1,6 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
-from ...utils.math import delta_pix_to_delta_wave, delta_wave_to_delta_vel, robust_stats, weighted_quantile
+from ..utils.spectral_utils import delta_pix_to_delta_wave, delta_wave_to_delta_vel
+from ..utils.stats import robust_stats, weighted_quantile
 from ...calibrations import ReferenceEtalonSelector
 import logging
 

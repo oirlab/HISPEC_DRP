@@ -13,7 +13,7 @@ import pytest
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.primitives import StellarRVPrimitive
-from hispecdrp.utils.spectral_templates_utils import get_spectrum_path
+from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path
 
 
 def _template_ccf_primitive(**kwargs) -> StellarRVPrimitive:

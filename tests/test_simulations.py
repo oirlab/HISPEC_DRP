@@ -1,6 +1,5 @@
 """
-Unit tests for benchmarks: rate map, ramp creation, calibration models,
-stage 0/1 runners, and helpers.
+Unit tests for simulations forward models: rate map, UTR ramp, and noise helpers.
 """
 import os
 import time
@@ -10,10 +9,11 @@ import astropy.units as u
 import pytest
 
 import hispecdrp.simulations as simulations
-from hispecdrp.utils.spectral_templates_utils import get_spectrum_path, load_btsettl_spectrum
-
-
-# ----- simulate_rate_map -----
+from hispecdrp.primitives.utils.spectral_utils import (
+    fetch_svo_2mass_filter,
+    get_spectrum_path,
+    load_btsettl_spectrum,
+)
 
 
 def test_simulate_rate_map():
@@ -38,9 +38,6 @@ def test_simulate_rate_map():
     # BSPEC native rate map can be (4096, 4096) or (4096, 4160) depending on detector layout
     assert srm.rate_map.shape[0] in (4096, 4160) and srm.rate_map.shape[1] in (4096, 4160)
     assert elapsed < 120, "Rate map took too long"
-
-
-# ----- create_ramp (create_ramp.py) -----
 
 
 def test_create_ramp_shape_and_keys(tmp_path):
@@ -104,22 +101,6 @@ def test_generate_1overf_noise_map_vertical_channels():
     assert out.shape == shape_3d
 
 
-def test_compute_psd():
-    """compute_psd returns freqs and psd with expected lengths."""
-    x = np.random.randn(256)
-    freqs, psd = simulations.compute_psd(x, dt=0.1, detrend=True, onesided=True)
-    assert len(freqs) == len(psd)
-    assert len(freqs) == 256 // 2 + 1
-    assert np.all(np.isfinite(psd))
-
-
-def test_generate_1overf_noise_integrated():
-    """generate_1overf_noise_integrated returns 1D array."""
-    n = 500
-    out = simulations.generate_1overf_noise_integrated(n, dt=0.01, readtime=0.1, std=1.0, seed=3, mode="same")
-    assert out.shape == (n,)
-
-
 def test_utr_variable_rate_cube():
     """utr_variable_rate_cube returns rate cube and scaling with correct shapes."""
     source = np.ones((8, 8)) * 100.0
@@ -134,27 +115,6 @@ def test_utr_variable_rate_cube():
     assert np.allclose(np.mean(rate_cube, axis=(1, 2)), 100.0 * scaling, rtol=1e-10)
 
 
-# ----- simulate_up_the_ramp -----
-
-
-def _test_create_simulated_calibration_models():
-    """create_simulated_calibration_models returns dict with expected calibration keys."""
-    cals = simulations.create_simulated_calibration_models(
-        shape=(32, 32),
-        gain=2.0,
-        dark_current=5.0,
-        read_noise=2.0,
-        seed=10,
-    )
-    assert "gain" in cals
-    assert "detflat" in cals
-    assert "bias" in cals
-    assert "dark" in cals
-    assert "rn" in cals
-    assert "saturation" in cals
-    assert "dq" in cals
-
-
 def test_get_spectrum_path():
     """get_spectrum_path resolves relative path under hispecdrp templates dir."""
     rel = "lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5"
@@ -164,71 +124,6 @@ def test_get_spectrum_path():
     assert out.endswith(rel)
     abs_path = "/absolute/path/to/file.h5"
     assert get_spectrum_path(abs_path) == abs_path
-
-
-def _test_get_default_stage0_prim_args():
-    """get_default_stage0_prim_args returns dict with expected primitive keys."""
-    args = simulations.get_default_stage0_prim_args(max_cores=2, ramp_fit_method="ols")
-    assert "dq_init" in args
-    assert "ramp_fit" in args
-    assert "gain_corr" in args
-    assert args["dq_init"]["max_cores"] == 2
-    assert args["ramp_fit"]["method"] == "ols"
-
-
-def _test_simulate_ramp_from_rate_map(tmp_path):
-    """simulate_ramp_from_rate_map produces RampModel from rate map and calibration models."""
-    cals = simulations.create_simulated_calibration_models(shape=(32, 32), seed=20)
-    rate_map = np.ones((32, 32), dtype=np.float64) * 50.0
-    ramp_model = simulations.simulate_ramp_from_rate_map(
-        rate_map,
-        cals,
-        readtime=0.1,
-        n_reads=4,
-        poisson_noise=False,
-        convert_to_uint16=True,
-        max_cores=1,
-    )
-    assert ramp_model is not None
-    assert hasattr(ramp_model, "data")
-    assert ramp_model.data.shape == (4, 32, 32)
-    # Ramp may be float32 or uint16 depending on create_ramp path
-    assert ramp_model.data.dtype in (np.uint16, np.float32)
-
-
-def _test_run_stage0_simulation(tmp_path):
-    """run_stage0_simulation runs Stage 0 pipeline and returns rate/slope model."""
-    os.environ["KOA_CALIBRATION_CACHE"] = str(tmp_path / "caldb")
-    cals = simulations.create_simulated_calibration_models(shape=(64, 64), seed=30)
-    rate_map = np.ones((64, 64), dtype=np.float64) * 30.0
-    ramp_model = simulations.simulate_ramp_from_rate_map(
-        rate_map, cals, n_reads=4, readtime=0.1, poisson_noise=False, max_cores=1
-    )
-    prim_args = simulations.get_default_stage0_prim_args(max_cores=1)
-    result = simulations.run_stage0_simulation(ramp_model, cals, output_dir=str(tmp_path), prim_args=prim_args)
-    assert result is not None
-    assert hasattr(result, "rate")
-    assert result.rate.shape == (64, 64)
-
-
-def _test_create_ramp_and_calibrations(tmp_path):
-    """create_ramp_and_calibrations with given rate_map creates ramp and uses calibrations of matching shape."""
-    rate_map = np.ones((64, 64), dtype=np.float64) * 50.0
-    ramp_model, calibration_models = simulations.create_ramp_and_calibrations(
-        rate_map=rate_map,
-        shape=(64, 64),
-        output_dir=str(tmp_path),
-        n_reads=4,
-        readtime=0.1,
-        spectrograph="BSPEC",
-        max_cores=1,
-        dq_bad_rows=[],
-    )
-    assert ramp_model is not None
-    assert hasattr(ramp_model, "data")
-    assert ramp_model.data.shape == (4, 64, 64)
-    assert calibration_models is not None
-    assert "gain" in calibration_models
 
 
 @pytest.mark.skipif(
@@ -250,8 +145,6 @@ def test_fetch_svo_2mass_filter():
     """fetch_svo_2mass_filter returns wavelength and transmission arrays (requires network)."""
     pytest.importorskip("urllib.request")
     try:
-        #wl_A, trans = simulations.fetch_svo_2mass_filter("J")
-        from hispecdrp.utils import fetch_svo_2mass_filter
         wl_A, trans = fetch_svo_2mass_filter("J")
     except OSError:
         pytest.skip("SVO filter service unreachable (network or server)")
@@ -260,23 +153,3 @@ def test_fetch_svo_2mass_filter():
     assert len(wl_A) == len(trans)
     assert np.all(np.isfinite(wl_A))
     assert np.all(np.isfinite(trans))
-
-
-# ----- run_caldb (optional: get_master_calibrations needs env/DB) -----
-
-
-def _test_run_caldb_get_master_calibrations_empty_or_mock(tmp_path):
-    """get_master_calibrations with empty/missing cache returns dict or raises (e.g. no calibrations)."""
-    (tmp_path / "caldb").mkdir(parents=True, exist_ok=True)
-    os.environ["KOA_CALIBRATION_CACHE"] = str(tmp_path / "caldb")
-    try:
-        result = simulations.get_master_calibrations(
-            spectrograph="BSPEC",
-            instrument_era="0.0.1",
-            connect_remote=False,
-            sync_first=False,
-        )
-        assert isinstance(result, dict)
-    except ValueError as e:
-        # Expected when store has no matching calibrations
-        assert "calibration" in str(e).lower() or "candidate" in str(e).lower() or "store" in str(e).lower()
