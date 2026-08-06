@@ -2311,10 +2311,10 @@ def paint_injected_emission_comb(
     """
     Paint a sparse emission-line spectrum onto a native-oriented rate map.
 
-    Flux is chosen so each line deposits approximately ``photons_per_line``
-    photons/s after multiplication by the local wavelength gradient (so denser
-    combs stay equally bright). Override with ``line_flux_density`` (erg/s/cm²/µm)
-    if set.
+    With ``continuous=False``, each flux sample is a photon count *rate*
+    (ph/s) per unresolved line — not a wavelength density. Defaults to
+    ``photons_per_line`` for every line. ``line_flux_density`` is accepted as a
+    deprecated alias for that per-line rate (same numeric value).
     """
     from astropy import units as u
 
@@ -2324,19 +2324,16 @@ def paint_injected_emission_comb(
     lams.sort()
     if lams.size < 2:
         raise ValueError("Need at least two injected wavelengths")
-    if line_flux_density is None:
-        # Native depositor does flux_density * dλ; invert so each sample is bright.
-        dlam = float(np.median(np.abs(np.diff(lams))))
-        dlam = max(dlam, 1e-9)
-        # Rough erg/s/cm²/µm → ph/s/µm conversion is absorbed into a large scale
-        # factor; we only need centroids, not absolute photometry.
-        line_flux_density = float(photons_per_line) * dlam * 1.0e-3
-    flux = np.full(lams.shape, float(line_flux_density))
+    # Prefer explicit photons_per_line; line_flux_density kept as alias.
+    rate_per_line = (
+        float(line_flux_density) if line_flux_density is not None else float(photons_per_line)
+    )
+    flux = np.full(lams.shape, rate_per_line)
     srm = SimulateRateMap()
     srm.set_fiber_spectrum(
         int(fiber),
         lams * u.micron,
-        flux * u.Unit("erg / (s cm2 um)"),
+        flux * (u.ph / u.s),
         continuous=False,
     )
     rate = srm.create_native_rate_map(
