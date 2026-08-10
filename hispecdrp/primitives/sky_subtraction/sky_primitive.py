@@ -96,6 +96,8 @@ class SkySubtractionPrimitive(BasePrimitive):
             sky_spec = getattr(input_model, f'{spec_key}FIB{sky_fib_num}')
             sky_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sky_fib_num}')
             sky_wave = getattr(input_model, f"WAVE_FIB{sky_fib_num}")
+            if sky_spec is None or sky_spec_err is None or sky_wave is None:
+                raise ValueError(f"Sky fiber {sky_fib_num} data is missing. Cannot perform sky subtraction.")
             if input_model.meta.get(f'distance_fiber{sky_fib_num}') is not None:
                 if input_model.meta.get(f'distance_fiber{sky_fib_num}') < 1.0: #TODO check if warning distance is appropriate number
                     logger.warning(f"Sky fiber {sky_fib_num} is unusually close to the tracking axis. Sky subtraction may be inaccurate.")
@@ -106,6 +108,8 @@ class SkySubtractionPrimitive(BasePrimitive):
             sci_spec = getattr(input_model, f'{spec_key}FIB{sci_fib_num}')
             sci_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sci_fib_num}')
             sci_wave = getattr(input_model, f"WAVE_FIB{sci_fib_num}")
+            if sci_spec is None or sci_spec_err is None or sci_wave is None:
+                raise ValueError(f"Science fiber {sci_fib_num} data is missing. Cannot perform sky subtraction.")
 
             # get variance and DQ arrays for science and sky fibers
             sci_var_poisson = getattr(input_model, f'{spec_key}VAR_POISSON_FIB{sci_fib_num}')
