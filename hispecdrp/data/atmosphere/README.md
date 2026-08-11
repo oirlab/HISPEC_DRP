@@ -17,3 +17,17 @@ from Gemini Observatory’s observing constraints / atmospheric models page.
 
 When publishing, cite the **Gemini Observatory** / your observing site’s transmission
 model policy as appropriate; this file is **not** produced by HISPEC DRP.
+
+# Atmospheric sky background (Gemini `skybg`)
+
+This file is the **Mauna Kea sky background** data file **`mktrans_zm_10_10.dat`**
+from Gemini Observatory’s observing constraints / atmospheric models page.
+
+- **Source URL:**  
+https://www.gemini.edu/sciops/ObsProcess/obsConstraints/atm-models/mktrans_zm_10_10.dat
+- **Format:** ASCII. No header or comment lines.
+  Columns are (**wavelength in nanometers**, **sky emission photons/s/m^2/arcsecond^2/nm**). 
+  Data lines are whitespace-separated floats.
+- **Use in HISPEC DRP:** The model is currently only used for generating simulated data.
+
+Any use of the data in these tables should reference Lord (1992) and acknowledge Gemini Observatory.

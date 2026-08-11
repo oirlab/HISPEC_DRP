@@ -227,6 +227,33 @@ class SimulateRateMap:
         raise NotImplementedError("Telluric application not yet implemented.")
 
 
+    def add_sky_background(self,
+                        fiber_number: int = 1,
+                        sky_filename: str = 'mk_skybg_zm_1.0_1.0_ph.dat'
+                        ) ->  tuple[Quantity, Quantity]:
+        """Add sky background to fiber flux. Sky background should be applied AFTER telluric application but BEFORE throughput application."""
+        if sky_filename is None:
+            raise ValueError("Sky background filename must be provided.")
+
+        from hispecdrp.simulations import e2e_support
+        from ..utils.spectral_templates_utils import (
+            get_skybackground_path,
+            load_sky_spectrum,
+        )
+
+        sky_template_path = get_skybackground_path(sky_filename, base_dir=e2e_support.atmosphere_data_dir())
+        sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
+        sky_flux = sky_flux.to(self.fibers[fiber_number]["flux"].unit)
+
+        # Interpolate sky flux onto fiber wavelengths
+        fiber_wavelengths = self.fibers[fiber_number]["wavelength"]
+        sky_flux_interp = np.interp(fiber_wavelengths.value, sky_wl.value, sky_flux.value)  *sky_flux.unit
+
+        self.fibers[fiber_number]["flux"] += sky_flux_interp
+
+        return fiber_wavelengths, self.fibers[fiber_number]["flux"]
+
+
     def apply_radial_velocity(
         self,
         fiber_number: int = 1,

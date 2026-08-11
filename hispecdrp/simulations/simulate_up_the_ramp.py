@@ -1207,6 +1207,8 @@ def create_ramp_and_calibrations(
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
     seed: int | None = None,
+    sky_filename: str | None = None,
+    sky_fiber: int | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -1273,6 +1275,10 @@ def create_ramp_and_calibrations(
     template_mag_ab, template_2mass_band : optional
         When building the default rate map from the bundled BT-Settl template, normalize
         to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, or ``'K'``).
+    sky_filename : string, optional
+        MK sky background filename to be used as sky background on sky fiber.
+    sky_fiber : int, optional
+        Fiber number to which only the sky background is applied. 
     **cal_kw
         Passed to :func:`create_simulated_calibration_models` when creating dummy calibrations.
 
@@ -1332,13 +1338,21 @@ def create_ramp_and_calibrations(
         # grid (λ × (1+z)). Keep densify-only PCHIP (no global linear rebuild),
         # which previously downsampled already-dense BSPEC BT-Settl lines.
         for f in fibers:
-            if f in (1, 2, 3):
+            if f in (1, 2, 3) and f != sky_fiber:
                 srm.set_fiber_spectrum(
                     fiber_number=f,
                     spectrum_wavelengths=wl,
                     spectrum_flux=flux,
                     continuous=False,
                 )
+            elif f == sky_fiber and sky_filename is not None:
+                srm.set_fiber_spectrum(
+                    fiber_number=f,
+                    spectrum_wavelengths=wl,
+                    spectrum_flux=np.zeros_like(flux),
+                    continuous=False,
+                )
+
         from .simulate_rate_map import (
             _check_wavelength_sampling,
             _upsample_spectrum,
@@ -1376,6 +1390,12 @@ def create_ramp_and_calibrations(
             for f in fibers:
                 if f in (1, 2, 3):
                     srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
+        if sky_filename is not None:
+            for f in fibers:
+                if f in (1, 2, 3):
+                    logger.info("Adding sky background to fiber %s.", f)
+                    srm.add_sky_background(fiber_number=f, sky_filename=sky_filename)
+
         rate_map = srm.create_native_rate_map(
             spectrograph=spectrograph, method="prf_convolution"
         )
@@ -1470,6 +1490,8 @@ def create_ramp_from_spectrum(
     register_stage1_sims: bool = True,
     reuse_stage1_sims: bool = True,
     seed: int | None = 0,
+    sky_filename: str | None = None,
+    sky_fiber: int | None = None,
     **kwargs,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
     """
@@ -1555,6 +1577,10 @@ def create_ramp_from_spectrum(
         UTR noise seed (default ``0``). Keep fixed so the packaged WAVE CCF bake
         transfers across notebook re-runs; change only when intentionally drawing
         a new noise realization.
+    sky_filename : string, optional
+        MK sky background filename to be used as sky background on sky fiber.
+    sky_fiber : int, optional
+        Fiber number to which only the sky background is applied.
     **kwargs
         Forwarded to :func:`create_ramp_and_calibrations`.
 
@@ -1610,6 +1636,8 @@ def create_ramp_from_spectrum(
         overwrite_ramp=overwrite_ramp,
         target_meta=target_meta or None,
         seed=seed,
+        sky_filename=sky_filename,
+        sky_fiber=sky_fiber,
         **kwargs,
     )
     ramp_meta = getattr(ramp_model, "meta", None)
