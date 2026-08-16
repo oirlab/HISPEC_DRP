@@ -53,6 +53,9 @@ SVO_FILTER_URL = "https://svo2.cab.inta-csic.es/theory/fps3/getdata.php?format=a
 _DEFAULT_SPECTRUM_DATA_DIR = os.path.join(
     os.path.dirname(__file__), "..", "data", "templates"
 )
+_DEFAULT_SKYBKGND_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "data", "atmosphere"
+)
 
 try:
     import h5py
@@ -73,6 +76,8 @@ __all__ = [
     "load_btsettl_spectrum",
     "load_template_from_path",
     "resolve_stellar_template_to_log_micron",
+    "get_skybackground_path",
+    "load_sky_spectrum",
 ]
 
 
@@ -269,6 +274,14 @@ def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
         return path
     if base_dir is None:
         base_dir = _DEFAULT_SPECTRUM_DATA_DIR
+    return os.path.join(base_dir, path)
+
+
+def get_skybackground_path(path: str, base_dir: str | None = None) -> str:
+    if os.path.isabs(path):
+        return path
+    if base_dir is None:
+        base_dir = _DEFAULT_SKYBKGND_DATA_DIR
     return os.path.join(base_dir, path)
 
 
@@ -603,3 +616,38 @@ def resolve_stellar_template_to_log_micron(
     tf = tf[idx]
     ln_lam = np.log(tw)
     return ln_lam, tf
+
+
+def load_sky_spectrum(filepath: str, wl_min_um: float = 0.8, wl_max_um: float = 3.0):
+    import astropy.units as u
+
+    sky_wl, sky_flux_ph = np.loadtxt(filepath).T
+    sky_wl *= u.nm
+    sky_flux_ph *= u.ph / u.s / u.m**2 / u.arcsecond**2 / u.nm
+
+    tele_diameter = 10*u.m
+
+    # calculation assuming fiber is size of diffraction limit
+    # diffraction_limit = (sky_wl/tele_diameter.to(u.micron)*u.radian).to(u.arcsec)
+    # solidangle = diffraction_limit**2 * 1.13
+
+    # calculation based on HK fiber core size, telescope focal length
+    fiber_core = 5.5 * u.um
+    focal_length = 17.5*u.m
+    solidangle = ((fiber_core/focal_length).to(u.dimensionless_unscaled) * u.radian)**2
+
+    sky_flux_ph = (sky_flux_ph*solidangle).to(
+        u.photon / (u.s * u.nm * u.m**2)
+    )
+
+    sky_flux = sky_flux_ph.to(
+        u.erg / (u.s * u.cm**2 * u.AA), equivalencies=u.spectral_density(sky_wl)
+    )
+
+    mask = np.isfinite(sky_wl.value) & (sky_wl >= wl_min_um * u.micron) & (
+        sky_wl <= wl_max_um * u.micron
+    )
+    sky_wl = sky_wl[mask]
+    sky_flux = sky_flux[mask]
+
+    return sky_wl.to(u.micron), sky_flux.to(u.erg / (u.s * u.cm**2 * u.AA)) 

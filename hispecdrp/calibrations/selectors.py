@@ -18,6 +18,7 @@ __all__ = [
     'ReferenceEtalonSelector',
     'TracePosSelector',
     'TraceProfSelector',
+    'LSFSelector',
 ]
 
 class HISPECCalibrationSelector(CalibrationSelector):
@@ -706,6 +707,46 @@ class ReferenceEtalonSelector(HISPECCalibrationSelector):
             """,
             {
                 "cal_type": "ref_etalon",
+                "era": meta["instrument_era"],
+                "spec": meta["spectrograph"],
+                "mjd_start": meta["mjd_start"]
+            },
+            order_by="ABS(mjd_start - :mjd_start)"
+        )
+
+        return list(rows)
+    
+class LSFSelector(HISPECCalibrationSelector):
+    """
+    Selector for LSF calibration files.
+
+    **Calibration Type:** Configurable (default: lsf)
+
+    **Selection Logic:**
+
+    - Match instrument era
+    - Match spectrograph
+    - Closest in observation time
+
+    Parameters
+    ----------
+    cal_type : str, optional
+        The type of wavelength calibration to select. Default: lsf
+    """
+
+    def __init__(self, cal_type : str = 'lsf'):
+        super().__init__()
+        self.cal_type = cal_type
+
+    def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
+        rows = db.rows_where(
+            """
+            cal_type = :cal_type AND
+            instrument_era = :era AND
+            spectrograph = :spec
+            """,
+            {
+                "cal_type": self.cal_type,
                 "era": meta["instrument_era"],
                 "spec": meta["spectrograph"],
                 "mjd_start": meta["mjd_start"]
