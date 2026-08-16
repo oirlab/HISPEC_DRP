@@ -200,8 +200,17 @@ def _extract_optimal_numba(
             P = profile[window_inds, x].copy()
             T = input_mid_time[window_inds, x].copy()
 
-        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate / variance / profile
-        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D) & np.isfinite(D_var)
+        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate. Finite rate with
+        # non-finite err keeps the pixel with zero variance (same as box extract).
+        for i in range(D.size):
+            if np.isfinite(D[i]) and not np.isfinite(D_var[i]):
+                D_var[i] = 0.0
+            if np.isfinite(D[i]) and not np.isfinite(D_var_poisson[i]):
+                D_var_poisson[i] = 0.0
+            if np.isfinite(D[i]) and not np.isfinite(D_var_rnoise[i]):
+                D_var_rnoise[i] = 0.0
+
+        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D)
 
         if np.any(~np.isfinite(P)):
             M[:] = False

@@ -110,11 +110,11 @@ class StellarRVPrimitive(BasePrimitive):
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
 
+    All constructor arguments list their **default** from :attr:`ARGUMENTS`; override per run as
+    needed. Order matches the grouped layout in :attr:`ARGUMENTS`.
+
     Parameters
     ----------
-    All entries list **default** from :attr:`ARGUMENTS`; override per run as needed. Order matches
-    the grouped layout in :attr:`ARGUMENTS`.
-
     suffix : str
         **Default:** ``"stellar_rv"``. Short label used by the framework for this primitive’s
         derived products, logging, and file naming together with ``output_dir``.
@@ -143,7 +143,7 @@ class StellarRVPrimitive(BasePrimitive):
     mask_path : str or None
         **Default:** ``None``. Path to a SPIROU ``.mas`` or KPF-style two-column mask file for
         ``ccf_line_mask`` (delta-line model). ``None`` resolves to the packaged lte049
-        **e2erval** delta mask (see
+        **ccfopt** delta mask (see
         :func:`~hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`) via
         :func:`~hispecdrp.utils.line_mask_utils.resolve_mask_path` when you are **not**
         passing ``mask_wavelength`` / ``mask_weight``.
@@ -273,7 +273,7 @@ class StellarRVPrimitive(BasePrimitive):
         "template_wavelength": None,
         "template_flux": None,
         # --- Mask line list & mask-only analysis (ccf_line_mask): mask_* ---
-        # None → hispecdrp/data/masks packaged default (e2erval) via resolve_mask_path.
+        # None → hispecdrp/data/masks packaged default (ccfopt) via resolve_mask_path.
         "mask_path": None,
         "mask_wavelength": None,
         "mask_weight": None,

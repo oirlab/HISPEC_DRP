@@ -29,10 +29,10 @@ Notes
 
 References
 ----------
-.. [1] BT-Settl spectral grid (project home / papers; cite per your file version):
-       http://perso.ens-lyon.fr/france.allard/
-.. [2] SVO Filter Profile Service: https://svo2.cab.inta-csic.es/theory/fps3/
-.. [3] spirou-ccf (spectral order / CCF context): https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+* BT-Settl spectral grid (project home / papers; cite per your file version):
+  http://perso.ens-lyon.fr/france.allard/
+* SVO Filter Profile Service: https://svo2.cab.inta-csic.es/theory/fps3/
+* spirou-ccf (spectral order / CCF context): https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
 
 See Also
 --------

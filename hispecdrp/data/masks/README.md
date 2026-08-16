@@ -3,7 +3,8 @@
 ## Contents of this directory
 
 Line masks here are **generated from packaged BT-Settl templates** under
-`hispecdrp/data/templates/*.h5`. Regenerate all of them with:
+`hispecdrp/data/templates/*.h5`. Regenerate **relaxed** depth-weighted / tophat
+products with:
 
 ```bash
 python hispecdrp/data/masks/regenerate_template_masks.py
@@ -15,14 +16,42 @@ For each template stem, that script writes:
 
 | File pattern | Role |
 |--------------|------|
-| `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight (see :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`). |
+| `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight. Built with :data:`~hispecdrp.utils.line_mask_utils.RELAXED_TEMPLATE_MASK_BUILD_KW` (continuum-normalized depth ≥ 10%; **no** deblend, telluric gate, or saturated-core floor) so line count is maximized. |
 | `<template_stem>.tophat.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
 
-### CCF-contrast–optimized delta masks
+The historical stricter builder kwargs remain available as
+:data:`~hispecdrp.utils.line_mask_utils.OPTIMAL_TEMPLATE_MASK_BUILD_KW` (deblend +
+telluric + flux floor) for ad-hoc use; the packaged regenerator uses the
+**relaxed** path.
 
-A second regenerator refines each packaged ``*.delta.mas`` seed line-by-line on the
-paired BT-Settl template at injected RV = 0, choosing the wavelength that maximizes
-single-line Gaussian CCF contrast and setting weights proportional to that contrast:
+### CCF-contrast–optimized delta masks (bias-culled)
+
+``*.ccfopt.delta.mas`` is a **static rest-frame** refinement of the packaged
+relaxed ``*.delta.mas`` seed so that **line-by-line** stellar RV is unbiased at
+injected RV = 0, weights track CCF contrast, and lines with extreme inject-bias
+are culled. The mask file does **not** change with bulk RV; only
+``ccf_input_velocity`` moves at runtime.
+
+**Canonical regenerator** (reuses the order-scan product tree):
+
+```text
+hispecdrp/simulations/notebooks/ccfopt_bias_cull_from_order_scan.ipynb
+```
+
+That notebook:
+
+1. Reuses ``OUT=/Users/ckilpatrick/hispec_rv_order_scan`` ramps / Stage0–2 blaze L2
+   (skip flags default to no clobber).
+2. Re-zeros each relaxed seed line at inject = 0
+   (``λ' = λ × (1 + RV/c)``) and sets weight ∝ `|Gaussian CCF contrast|`.
+3. Runs line-by-line RV at inject = 0, 100, …, 1000 m/s; histograms per-line
+   mean bias; drops outliers with tunable ``BIAS_ABS_CUT_M_S``.
+4. Writes ``hispecdrp/data/masks/<stem>.ccfopt.delta.mas``.
+
+A shorter path that only rezeros on a single inj0 L2 (no inject-bias cull)
+remains in ``ccfopt_mask_from_sim.ipynb``.
+
+A faster **template-only** smoke path (no ZEMAX / Stage 0–2) is:
 
 ```bash
 python hispecdrp/data/masks/regenerate_ccfopt_masks.py
@@ -30,26 +59,17 @@ python hispecdrp/data/masks/regenerate_ccfopt_masks.py
 
 | File pattern | Role |
 |--------------|------|
-| `<template_stem>.ccfopt.delta.mas` | Two columns: vacuum line-center (nm), weight from :func:`hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_template_and_seed` (`mask_weight_definition`: `abs_gaussian_ccf_contrast`). |
-
-These are **not** the Stage-2 default; pass ``mask_path`` explicitly to use them.
+| `<template_stem>.ccfopt.delta.mas` | Two columns: vacuum line-center (nm), weight (`mask_weight_definition`: contrast after bias cull). |
 
 Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
 :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
 
 **Default mask** when `StellarRVPrimitive(mask_path=None)` (via
 :func:`hispecdrp.utils.line_mask_utils.resolve_mask_path`) is the lte049
-**e2erval** delta mask — basename
+**ccfopt** delta mask — basename
 :data:`hispecdrp.utils.line_mask_utils.DEFAULT_PACKAGED_LINE_MASK_BASENAME`, absolute path
-:func:`hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`.
-
-Regenerate that product (then re-bake packaged WAVE) with
-`regenerate_e2erval_masks.py` on the seed=0 fib2 blaze used by
-`bake_pipeline_example_wavesol.py` so mask and WAVE stay a closed loop.
-Use ``--recenter`` (default) so mask wavelengths sit on apparent minima
-(RV = 0 on that spectrum). For maximum formal aggregate precision on the
-fiber-2 preview path, add ``--keep-all-valid`` (every seed line with a valid
-minimum; ~1556 lines for lte049), then re-bake WAVE with the new mask.
+:func:`hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`
+(fallback: packaged ``*.delta.mas`` until the ccfopt product is regenerated).
 
 ## On-disk layout and loaders
 

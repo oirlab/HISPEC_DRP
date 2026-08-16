@@ -261,12 +261,12 @@ class ProcessingComponent(_BasePrimitive):
     ) -> str:
         """
         Get the output directory for saving any results in the context of a model.
+
         The priority for determining the output directory is as follows:
-            1. ``self.output_dir`` if explicitly set (input model not used).
-            2. ``model._filepath`` directory if available.
-            3. Current working directory as a fallback.
 
-
+        1. ``self.output_dir`` if explicitly set (input model not used).
+        2. ``model._filepath`` directory if available.
+        3. Current working directory as a fallback.
 
         - If ``self.output_dir`` is set, it is returned and the input model is not used.
         - Otherwise, the output dir is determined from the input model's filepath if available, and if not, the current working directory is used.

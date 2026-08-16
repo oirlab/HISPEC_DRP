@@ -351,6 +351,149 @@ def test_gradient_and_parabolic_centers_agree_on_smooth_minimum():
     assert abs(float(np.min(grad)) - 1.0) < 2e-4
 
 
+def test_build_ccfopt_line_mask_from_l2_single_line_ccf_zeros_bias(tmp_path, monkeypatch):
+    """Single-line builder applies λ×(1+RV/c) and contrast weights (stubbed CCF)."""
+    from astropy.table import Table
+
+    from hispecdrp import datamodels
+    from hispecdrp.utils import line_mask_utils as lmu
+
+    seed_lam = 1.20
+    rv_m_s = 150.0
+    contrast = 0.35
+    v_min, v_max, v_step = -500.0, 500.0, 25.0
+    v_grid = np.arange(v_min, v_max + 0.5 * v_step, v_step)
+    ccf = contrast * np.exp(-0.5 * ((v_grid - rv_m_s) / 80.0) ** 2)
+
+    model = datamodels.L2Model(
+        meta={
+            "order_start": 100,
+            "order_end": 100,
+            "spectrograph": "BSPEC",
+            "instrument_name": "HISPEC",
+        }
+    )
+    model.meta.order_start = 100
+    model.meta.order_end = 100
+    model.wave_fib2 = np.linspace(1.1, 1.3, 64, dtype=np.float64).reshape(1, -1)
+    model.spec_fib2 = np.ones((1, 64), dtype=np.float32)
+    model.spec_err_fib2 = np.full((1, 64), 0.01, dtype=np.float32)
+    model.spec_dq_fib2 = np.zeros((1, 64), dtype=np.uint32)
+
+    def _stub_run_ccf_line_mask_for_fiber(**kwargs):
+        mw = np.asarray(kwargs["mask_wavelength"], dtype=np.float64).ravel()
+        assert mw.size == 1
+        assert abs(float(kwargs["window_size_um"]) - 5.65e-5) < 1e-12
+        assert kwargs["window_line_by_line"] is True
+        assert abs(float(kwargs["ccf_half_window_m_s"]) - 15000.0) < 1e-6
+        supp = Table(
+            {
+                "CHUNK_ID": np.array([0], dtype=np.int32),
+                "N_GOOD": np.array([32], dtype=np.int32),
+                "V_MIN": np.array([v_min], dtype=np.float64),
+                "V_MAX": np.array([v_max], dtype=np.float64),
+                "V_STEP": np.array([v_step], dtype=np.float64),
+                "N_VEL": np.array([ccf.size], dtype=np.int32),
+                "CCF": np.array([ccf], dtype=object),
+            }
+        )
+        return (
+            np.array([float(mw[0])], dtype=np.float64),
+            np.array([rv_m_s], dtype=np.float64),
+            np.array([10.0], dtype=np.float64),
+            np.array([100], dtype=np.int32),
+            None,
+            supp,
+        )
+
+    monkeypatch.setattr(
+        "hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber",
+        _stub_run_ccf_line_mask_for_fiber,
+    )
+
+    seed_path = tmp_path / "seed.delta.mas"
+    MaskLines.from_delta_centers_um(
+        np.array([seed_lam]),
+        np.array([1.0]),
+    ).save(output_path=str(seed_path))
+
+    out_path = tmp_path / "from_l2.ccfopt.delta.mas"
+    path, entries = lmu.build_ccfopt_line_mask_from_l2_single_line_ccf(
+        str(seed_path),
+        model,
+        fiber=2,
+        template_path=str(tmp_path / "synthetic.h5"),
+        output_path=str(out_path),
+        masks_directory=str(tmp_path),
+        rezero_verify_abs_rv_m_s=None,  # stub returns fixed RV; skip verify pass
+        max_rv_err_m_s=None,
+    )
+    assert Path(path).is_file()
+    assert len(entries) == 1
+    expected = seed_lam * (1.0 + rv_m_s / C_M_S)
+    recovered = entries[0].wavelength_nm * 1.0e-3
+    assert abs(recovered - expected) / expected * C_M_S < 1.0
+    assert abs(float(entries[0].weight) - 1.0) < 1e-9
+    meta = read_mask_generation_meta(path)
+    assert meta is not None
+    assert "build_ccfopt_line_mask_from_l2_single_line_ccf" in str(
+        meta.get("generator", "")
+    )
+    assert meta.get("window_line_by_line") is True
+    assert abs(float(meta.get("v_half_window_m_s")) - 15000.0) < 1.0e-6
+    assert abs(float(meta.get("window_size_um")) - 5.65e-5) < 1e-12
+
+
+def test_build_ccfopt_line_mask_from_rvccf_table_shifts_and_weights(tmp_path):
+    """RVCCF-based CCF-opt builder applies λ×(1+RV/c) and contrast weights."""
+    from astropy.table import Table
+
+    from hispecdrp.utils.line_mask_utils import build_ccfopt_line_mask_from_rvccf_table
+
+    seed_lam = 1.50
+    rv_m_s = 100.0
+    contrast = 0.4
+    seed_path = tmp_path / "seed.delta.mas"
+    MaskLines.from_delta_centers_um(
+        np.array([seed_lam]),
+        np.array([1.0]),
+    ).save(output_path=str(seed_path))
+
+    v_min, v_max, v_step = -500.0, 500.0, 25.0
+    v_grid = np.arange(v_min, v_max + 0.5 * v_step, v_step)
+    # Stored emission-like Gaussian peak at rv_m_s (LINE_MASK_CCF_STORED_NEGATED_FROM_RAW).
+    ccf = contrast * np.exp(-0.5 * ((v_grid - rv_m_s) / 80.0) ** 2)
+
+    tbl = Table(
+        {
+            "RV": np.array([rv_m_s], dtype=np.float64),
+            "WAVELENGTH": np.array([seed_lam], dtype=np.float64),
+            "CCF": np.array([ccf], dtype=object),
+            "V_MIN": np.array([v_min], dtype=np.float64),
+            "V_MAX": np.array([v_max], dtype=np.float64),
+            "V_STEP": np.array([v_step], dtype=np.float64),
+        }
+    )
+    out_path = tmp_path / "from_rvccf.ccfopt.delta.mas"
+    path, entries = build_ccfopt_line_mask_from_rvccf_table(
+        str(seed_path),
+        tbl,
+        template_path=str(tmp_path / "synthetic.h5"),
+        output_path=str(out_path),
+        masks_directory=str(tmp_path),
+    )
+    assert Path(path).is_file()
+    assert len(entries) == 1
+    expected = seed_lam * (1.0 + rv_m_s / C_M_S)
+    recovered = entries[0].wavelength_nm * 1.0e-3
+    assert abs(recovered - expected) / expected * C_M_S < 1.0
+    assert abs(float(entries[0].weight) - 1.0) < 1e-9
+    meta = read_mask_generation_meta(path)
+    assert meta is not None
+    assert meta.get("mask_weight_definition") == "abs_gaussian_ccf_contrast"
+    assert "build_ccfopt_line_mask_from_rvccf_table" in str(meta.get("generator", ""))
+
+
 def test_build_ccfopt_line_mask_recovers_offset_center(tmp_path):
     """CCF-opt refine should pull a biased seed toward the true absorption core."""
     true_lam = 1.50

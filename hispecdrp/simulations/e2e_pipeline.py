@@ -886,11 +886,11 @@ def run_pipeline_example(
     template_mag_ab: float = 3.05,
 ) -> E2EResult:
     """
-    Minimal-entry e2e run used by ``pipeline_example.ipynb``.
+    Minimal-entry e2e run used by the docs Basic Usage walkthrough.
 
     Uses sim-HDF Stage-1 products, the packaged line-ZP WAVE (including baked
-    CCF-order refine), and the e2erval mask so order-averaged stellar RV at
-    injected RV=0 reaches the demonstrated ≪10 cm/s performance. Only
+    CCF-order refine), and the packaged ccfopt mask so order-averaged stellar RV
+    at injected RV=0 reaches the demonstrated ≪10 cm/s performance. Only
     ``output_dir`` and ``fibers`` are typically changed by notebook users.
 
     Default brightness is AB=3.05 with Poisson noise and uint16 ramps: the
@@ -921,7 +921,7 @@ def run_pipeline_example(
         template_filename=template_filename,
         template_mag_ab=float(template_mag_ab),
         template_mag_from_2mass=False,
-        # Default stellar-RV mask is the packaged e2erval product.
+        # Default stellar-RV mask is the packaged ccfopt product.
         stellar_rv_mask_path=None,
         poisson_noise=True,
         convert_to_uint16=True,
@@ -951,7 +951,7 @@ def prepare_pipeline_example_stage1(
     reuse_existing: bool = True,
 ) -> dict[str, Any]:
     """
-    Build sim-HDF Stage-1 products for ``pipeline_example.ipynb``.
+    Build sim-HDF Stage-1 products for the docs Basic Usage walkthrough.
 
     Returns ``trace_pos``, ``trace_prof``, ``fiberflat``, and packaged line-ZP
     ``wavesol`` so Stage 1/2 can use the demonstrated fiber-2 RV path instead of
@@ -1421,11 +1421,11 @@ def validate_deposit_inverse_wavesol_geometry(
     order_list = _order_list(spectrograph)
     pix_grid = np.arange(4096, dtype=np.float64)
 
-    if write_plots:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+    from .plotting.comb_wavesol_geometry import (
+        write_comb_wavesol_order_residual_png,
+        write_comb_wavesol_per_fiber_summary_png,
+        write_comb_wavesol_per_order_summary_png,
+    )
 
     per_fiber: dict[int, dict[str, Any]] = {}
     all_mads: list[float] = []
@@ -1470,71 +1470,36 @@ def validate_deposit_inverse_wavesol_geometry(
                 "vel_cm_s": (vel * 100).tolist(),
             }
             if write_plots:
-                fig, axes = plt.subplots(
-                    2,
-                    1,
-                    figsize=(10, 6.5),
-                    sharex=True,
-                    gridspec_kw={"height_ratios": [2, 1]},
+                write_comb_wavesol_order_residual_png(
+                    out / f"comb_wavesol_fib{fib}_order{od}_dpix.png",
+                    fiber=fib,
+                    order=od,
+                    pix=rows[use],
+                    vel_cm_s=vel * 100,
+                    lam_mid_um=lam_mid,
+                    mad_cm_s=mad * 100,
+                    rms_cm_s=rms * 100,
+                    target_cm_s=target_cm_s,
+                    legacy_alias_path=(
+                        out / f"comb_wavesol_order{od}_dpix.png"
+                        if fiber_list == [2]
+                        else None
+                    ),
                 )
-                ax = axes[0]
-                ax.plot(
-                    rows[use], vel * 100, ".", ms=2.5, alpha=0.5, color="C0", label="features"
-                )
-                ax.axhline(0, color="C3", lw=1.5, label="WAVE = deposit inverse")
-                ax.axhline(
-                    target_cm_s,
-                    color="k",
-                    ls="--",
-                    lw=0.8,
-                    label=f"±{target_cm_s:g} cm/s target",
-                )
-                ax.axhline(-target_cm_s, color="k", ls="--", lw=0.8)
-                ax.set_ylabel(f"Δv (cm/s) at ⟨λ⟩={lam_mid:.4f} µm")
-                ax.set_title(
-                    f"Fiber {fib} order {od}: geometry inject/recover  |  "
-                    f"MAD={mad*100:.3f} cm/s  RMS={rms*100:.3f} cm/s  N={int(use.sum())}"
-                )
-                ax.legend(fontsize=8)
-                ax.grid(True, alpha=0.3)
-                ax.set_ylim(-30, 30)
-
-                axr = axes[1]
-                axr.plot(rows[use], vel * 100, ".", ms=2.0, alpha=0.45, color="C0")
-                axr.axhline(0, color="C3", lw=1.2)
-                axr.axhline(mad * 100, color="k", ls="--", lw=0.8)
-                axr.axhline(-mad * 100, color="k", ls="--", lw=0.8)
-                axr.set_xlabel("deposit spectral pixel (exact λ→row)")
-                axr.set_ylabel("residual (cm/s)")
-                axr.grid(True, alpha=0.3)
-                fig.tight_layout()
-                fig.savefig(out / f"comb_wavesol_fib{fib}_order{od}_dpix.png", dpi=150)
-                # Legacy alias when only fiber 2 is requested (old test/scripts).
-                if fiber_list == [2]:
-                    fig.savefig(out / f"comb_wavesol_order{od}_dpix.png", dpi=150)
-                plt.close(fig)
 
         orders = sorted(per)
         if write_plots and orders:
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(orders, [per[o]["mad_cm_s"] for o in orders], "o-", ms=4, label="MAD")
-            ax.plot(orders, [per[o]["rms_cm_s"] for o in orders], "s-", ms=3, label="RMS")
-            ax.axhline(
-                target_cm_s, color="k", ls="--", lw=1, label=f"{target_cm_s:g} cm/s target"
+            write_comb_wavesol_per_order_summary_png(
+                out / f"comb_wavesol_fib{fib}_per_order.png",
+                fiber=fib,
+                orders=orders,
+                per_order=per,
+                mads_cm_s=mads,
+                target_cm_s=target_cm_s,
+                legacy_alias_path=(
+                    out / "comb_wavesol_per_order.png" if fiber_list == [2] else None
+                ),
             )
-            ax.set_xlabel("echelle order")
-            ax.set_ylabel("geometry residual (cm/s)")
-            ax.set_title(
-                f"Fiber {fib} deposit-inverse WAVE  |  "
-                f"median MAD={float(np.median(mads)):.3f} cm/s"
-            )
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            fig.tight_layout()
-            fig.savefig(out / f"comb_wavesol_fib{fib}_per_order.png", dpi=140)
-            if fiber_list == [2]:
-                fig.savefig(out / "comb_wavesol_per_order.png", dpi=140)
-            plt.close(fig)
 
         fib_report = {
             "fiber": int(fib),
@@ -1551,32 +1516,11 @@ def validate_deposit_inverse_wavesol_geometry(
         all_mads.extend(mads)
 
     if write_plots and len(fiber_list) > 1:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        fibs = sorted(per_fiber)
-        ax.plot(
-            fibs,
-            [per_fiber[f]["median_mad_cm_s"] for f in fibs],
-            "o-",
-            ms=6,
-            label="median MAD",
+        write_comb_wavesol_per_fiber_summary_png(
+            out / "comb_wavesol_per_fiber.png",
+            per_fiber=per_fiber,
+            target_cm_s=target_cm_s,
         )
-        ax.plot(
-            fibs,
-            [per_fiber[f]["max_mad_cm_s"] for f in fibs],
-            "s-",
-            ms=5,
-            label="max MAD",
-        )
-        ax.axhline(target_cm_s, color="k", ls="--", lw=1, label=f"{target_cm_s:g} cm/s target")
-        ax.set_xticks(fibs)
-        ax.set_xlabel("fiber")
-        ax.set_ylabel("geometry residual (cm/s)")
-        ax.set_title("Deposit-inverse WAVE by fiber")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        fig.savefig(out / "comb_wavesol_per_fiber.png", dpi=140)
-        plt.close(fig)
 
     wavesol_path = out / "sim_hdf_wavesol_injected_comb.fits"
     if write_wavesol:
@@ -1658,6 +1602,109 @@ def _extract_box_one_order(
     )
     return spec, err
 
+
+def extract_spectrum_from_rate_map(
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    extraction_aperture: float = 8.0,
+    orders: list[int] | None = None,
+    rate_err: np.ndarray | None = None,
+    rate_dq: np.ndarray | None = None,
+) -> dict[str, object]:
+    """
+    Box-extract 1D spectra directly from a ZEMAX / sim rate map (UTR bypass).
+
+    Uses HDF ``y_pos`` / WAVE grids from :func:`get_sim_hdf_trace_grids` so the
+    extract matches the paint geometry without Stage0 ``rate_err`` artifacts.
+    Intended for RV / injection diagnostics where the truth rate map is already
+    near-infinite S/N.
+
+    Parameters
+    ----------
+    rate_map
+        2D rate image ``(ny, nx)`` in the pipeline-oriented frame (same as
+        ``rate_map.fits`` from :func:`~hispecdrp.simulations.simulate_up_the_ramp.create_ramp_from_spectrum`).
+    spectrograph
+        ``'BSPEC'`` or ``'RSPEC'``.
+    fiber
+        Fiber number (1–3).
+    extraction_aperture
+        Box aperture width in pixels.
+    orders
+        Optional subset of echelle orders; default is all orders for the spectrograph.
+    rate_err, rate_dq
+        Optional companions; default to zeros (no NaN-err masking).
+
+    Returns
+    -------
+    dict
+        ``orders`` (list[int]), ``wavelength`` (n_orders, n_pix), ``flux``,
+        ``flux_err``, ``fiber``, ``spectrograph``, ``extraction_aperture``.
+    """
+    spectrograph = str(spectrograph).upper()
+    fiber = int(fiber)
+    if fiber not in (1, 2, 3):
+        raise ValueError(f"fiber must be 1, 2, or 3; got {fiber}")
+
+    rate = np.asarray(rate_map, dtype=np.float64)
+    if rate.ndim != 2:
+        raise ValueError(f"rate_map must be 2D; got shape {rate.shape}")
+    if rate_err is None:
+        rate_err = np.zeros_like(rate)
+    else:
+        rate_err = np.asarray(rate_err, dtype=np.float64)
+        if rate_err.shape != rate.shape:
+            raise ValueError("rate_err shape must match rate_map")
+    if rate_dq is None:
+        rate_dq = np.zeros(rate.shape, dtype=np.uint32)
+    else:
+        rate_dq = np.asarray(rate_dq, dtype=np.uint32)
+        if rate_dq.shape != rate.shape:
+            raise ValueError("rate_dq shape must match rate_map")
+
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    if fiber not in grids:
+        raise KeyError(f"No HDF trace grids for fiber {fiber}")
+    order_list = list(_order_list(spectrograph) if orders is None else orders)
+    wave_rows: list[np.ndarray] = []
+    flux_rows: list[np.ndarray] = []
+    err_rows: list[np.ndarray] = []
+    kept: list[int] = []
+    for od in order_list:
+        g = grids[fiber].get(int(od))
+        if g is None:
+            continue
+        y_pos = np.asarray(g["y_pos"], dtype=np.float64)
+        wave = np.asarray(g["wavelength"], dtype=np.float64)
+        spec, err = _extract_box_one_order(
+            rate,
+            rate_err,
+            rate_dq,
+            y_pos,
+            extraction_aperture=float(extraction_aperture),
+        )
+        kept.append(int(od))
+        wave_rows.append(wave)
+        flux_rows.append(spec)
+        err_rows.append(err)
+
+    if not kept:
+        raise RuntimeError(
+            f"No orders extracted for {spectrograph} fiber {fiber} "
+            f"(requested={order_list})"
+        )
+
+    return {
+        "spectrograph": spectrograph,
+        "fiber": fiber,
+        "extraction_aperture": float(extraction_aperture),
+        "orders": kept,
+        "wavelength": np.stack(wave_rows, axis=0),
+        "flux": np.stack(flux_rows, axis=0),
+        "flux_err": np.stack(err_rows, axis=0),
+    }
 
 def create_fiberflat_model_from_rate_maps(
     rate_paths: list[str],
@@ -2068,6 +2115,44 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     }
 
 
+def build_wavesol_aidan_with_order_zp(
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | tuple[int, ...] | None = None,
+    fiber: int | None = None,
+    known_rv_m_s: float = 0.0,
+    meta: dict | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    """
+    Aidan ``get_wavelength_solution`` WAVE + constant (deg-0) per-order ZP only.
+
+    Builds :func:`create_wavelength_solution_model_from_sim` (Brent inverse of the
+    HDF λ→x map), then applies
+    :func:`refine_sim_hdf_wavesol_line_zeropoint` with ``poly_deg=0`` so each
+    order gets a single Doppler scale and no higher-order λ trend is fit.
+
+    Returns ``(wavesol_model, zp_info)``.
+    """
+    from .simulate_up_the_ramp import create_wavelength_solution_model_from_sim
+
+    spectrograph = spectrograph.upper()
+    model_meta = {"spectrograph": spectrograph, "note": "aidan_gws+order_zp0"}
+    if meta:
+        model_meta.update(meta)
+    wavesol = create_wavelength_solution_model_from_sim(spectrograph, meta=model_meta)
+    zp_info = refine_sim_hdf_wavesol_line_zeropoint(
+        wavesol,
+        rate_map,
+        spectrograph=spectrograph,
+        fibers=fibers,
+        fiber=fiber,
+        known_rv_m_s=float(known_rv_m_s),
+        poly_deg=0,
+    )
+    return wavesol, zp_info
+
+
 def materialize_stage1_bundle_from_sim_hdf(
     *,
     spectrograph: str,
@@ -2241,6 +2326,97 @@ def build_injected_line_list(
     return out
 
 
+def resolve_lfc_fiber_object(spectrograph: str) -> str:
+    """Return ``LFC-B`` / ``LFC-R`` for the spectrograph (matches ``target.yaml`` enum)."""
+    sp = (spectrograph or "").strip().upper()
+    if sp == "BSPEC":
+        return "LFC-B"
+    if sp == "RSPEC":
+        return "LFC-R"
+    raise ValueError(f"Unknown spectrograph {spectrograph!r}; expected BSPEC or RSPEC")
+
+
+def build_lfc_line_list(
+    spectrograph: str,
+    *,
+    fiber: int = 2,
+    fiber_object: str | None = None,
+    edge_margin_frac: float = 0.05,
+    mode_stride: int = 1,
+    nu0: float | None = None,
+    delta_nu: float | None = None,
+) -> tuple[dict[int, np.ndarray], dict[str, float]]:
+    """
+    Physical LFC mode wavelengths matching :func:`gen_lfc_modes` / ``FitLFCLinesPrimitive``.
+
+    Modes follow ``ν_n = ν_0 + n·Δν`` with ``λ = c/ν`` using ``HISPECConfig.lfc_params``
+    for ``LFC-B`` / ``LFC-R`` (same Hz values written as ``LFCNU0`` / ``LFCDELNU``),
+    clipped to each order's HDF wavelength span after an optional spectral-edge trim.
+
+    Parameters
+    ----------
+    mode_stride
+        Keep every ``mode_stride``-th mode (1 = full comb). Useful for faster
+        diagnostic paints without changing the underlying ladder physics.
+
+    Returns
+    -------
+    line_list
+        ``{order: λ_um array}`` of vacuum wavelengths to paint / measure.
+    lfc_meta
+        ``fiber_object``, ``nu0``, ``delta_nu`` used to generate the list.
+    """
+    from ..primitives.line_fitting.fit_lfc_lines_primitive import gen_lfc_modes
+
+    spectrograph = spectrograph.upper()
+    fiber_object = fiber_object or resolve_lfc_fiber_object(spectrograph)
+    params = hispec_config.HISPECConfig.lfc_params.get(fiber_object)
+    if params is None:
+        raise ValueError(
+            f"No HISPECConfig.lfc_params entry for {fiber_object!r}; "
+            f"expected one of {sorted(hispec_config.HISPECConfig.lfc_params)}"
+        )
+    nu0_hz = float(nu0 if nu0 is not None else params["nu0"])
+    delta_nu_hz = float(delta_nu if delta_nu is not None else params["delta_nu"])
+    stride = max(1, int(mode_stride))
+    edge = float(edge_margin_frac)
+
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    pix = np.arange(4096, dtype=np.float64)
+    out: dict[int, np.ndarray] = {}
+    for od in _order_list(spectrograph):
+        if od not in grids.get(fiber, {}):
+            continue
+        w = np.asarray(grids[fiber][od]["wavelength"], dtype=np.float64)
+        ok = np.isfinite(w)
+        if int(ok.sum()) < 10:
+            continue
+        # Trim in spectral-row space (same convention as lfc_wavesol_refit),
+        # then convert edge rows → wavelength bounds for gen_lfc_modes.
+        lo_pix, hi_pix = np.percentile(pix[ok], [100 * edge, 100 * (1 - edge)])
+        w_lo = float(np.interp(lo_pix, pix, w))
+        w_hi = float(np.interp(hi_pix, pix, w))
+        w_min, w_max = (min(w_lo, w_hi), max(w_lo, w_hi))
+        if not (np.isfinite(w_min) and np.isfinite(w_max) and w_max > w_min):
+            continue
+        waves, _nus, _ints = gen_lfc_modes(nu0_hz, delta_nu_hz, w_min, w_max)
+        waves = np.asarray(waves, dtype=np.float64)
+        if waves.size == 0:
+            continue
+        if stride > 1:
+            waves = waves[::stride]
+        out[int(od)] = waves
+
+    lfc_meta = {
+        "fiber_object": fiber_object,
+        "nu0": nu0_hz,
+        "delta_nu": delta_nu_hz,
+        "edge_margin_frac": edge,
+        "mode_stride": float(stride),
+    }
+    return out, lfc_meta
+
+
 def _hdf_deposit_xy_interpolators(
     spectrograph: str,
     fiber: int,
@@ -2391,6 +2567,97 @@ def paint_compact_emission_comb(
             clo, chi = ic - hw, ic + hw + 1
             if rlo < 0 or clo < 0 or rhi > rate.shape[0] or chi > min(rate.shape[1], 4096):
                 continue
+            rate[rlo:rhi, clo:chi] += stamp
+    return rate
+
+
+def _elliptical_gaussian_stamp(
+    rr: np.ndarray,
+    cc: np.ndarray,
+    *,
+    row0: float,
+    col0: float,
+    a_pix: float,
+    b_pix: float,
+    pa_rad: float,
+    amp: float,
+) -> np.ndarray:
+    """
+    Elliptical Gaussian on coordinate grids ``rr``, ``cc`` (same shape).
+
+    ``a_pix`` / ``b_pix`` are 1-σ semimajor / semiminor axes (pixels).
+    ``pa_rad`` is the position angle of the semimajor axis from +row toward +col
+    (counter-clockwise, radians).
+    """
+    a = max(float(a_pix), 1e-6)
+    b = max(float(b_pix), 1e-6)
+    cos_p = float(np.cos(pa_rad))
+    sin_p = float(np.sin(pa_rad))
+    dr = np.asarray(rr, dtype=np.float64) - float(row0)
+    dc = np.asarray(cc, dtype=np.float64) - float(col0)
+    # Rotate into ellipse frame: u along semimajor.
+    u = cos_p * dr + sin_p * dc
+    v = -sin_p * dr + cos_p * dc
+    return float(amp) * np.exp(-0.5 * ((u / a) ** 2 + (v / b) ** 2))
+
+
+def paint_elliptical_gaussian_comb(
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    a_pix: float = 0.80,
+    b_pix: float = 0.55,
+    pa_rad: float = 0.0,
+    peak_value: float = 1.0e6,
+    half_stamp: int | None = None,
+) -> np.ndarray:
+    """
+    Paint compact *elliptical* Gaussians at exact oriented deposit ``(row, col)``.
+
+    Same geometry as :func:`paint_compact_emission_comb`, but with known
+    semimajor / semiminor / PA so a 2D elliptical fit can recover the input
+    profile parameters (used by ``lfc_wavesol_refit``).
+    """
+    spectrograph = spectrograph.upper()
+    rate = np.zeros((4096, 4160), dtype=np.float64)
+    a = float(a_pix)
+    b = float(b_pix)
+    pa = float(pa_rad)
+    # Stamp large enough to cover ~5σ along the major axis.
+    if half_stamp is None:
+        hw = max(3, int(np.ceil(5.0 * max(a, b))))
+    else:
+        hw = int(half_stamp)
+
+    for od, lams in line_list.items():
+        lams = np.asarray(lams, dtype=np.float64)
+        if lams.size == 0:
+            continue
+        rows, cols = expected_feature_xy_oriented(spectrograph, fiber, int(od), lams)
+        for r0, c0 in zip(rows, cols):
+            if not (np.isfinite(r0) and np.isfinite(c0)):
+                continue
+            ir = int(np.rint(r0))
+            ic = int(np.rint(c0))
+            rlo, rhi = ir - hw, ir + hw + 1
+            clo, chi = ic - hw, ic + hw + 1
+            if rlo < 0 or clo < 0 or rhi > rate.shape[0] or chi > min(rate.shape[1], 4096):
+                continue
+            # Absolute pixel centers of stamp pixels
+            rr = np.arange(rlo, rhi, dtype=np.float64)[:, None]
+            cc = np.arange(clo, chi, dtype=np.float64)[None, :]
+            stamp = _elliptical_gaussian_stamp(
+                rr,
+                cc,
+                row0=float(r0),
+                col0=float(c0),
+                a_pix=a,
+                b_pix=b,
+                pa_rad=pa,
+                amp=1.0,
+            )
+            stamp *= float(peak_value) / max(float(stamp.max()), 1e-30)
             rate[rlo:rhi, clo:chi] += stamp
     return rate
 
@@ -2597,6 +2864,222 @@ def _centroid_2d_flux(
     row_err = float(np.sqrt(max(var_r, 0.0) / max(n_eff, 1.0)))
     col_err = float(np.sqrt(max(var_c, 0.0) / max(n_eff, 1.0)))
     return row_c, col_c, row_err, col_err
+
+
+def _canonicalize_ellipse_ab_pa(
+    a: float, b: float, pa_rad: float
+) -> tuple[float, float, float]:
+    """Enforce ``a >= b`` and wrap PA into ``[-π/2, π/2)``."""
+    a = float(a)
+    b = float(b)
+    pa = float(pa_rad)
+    if b > a:
+        a, b = b, a
+        pa = pa + 0.5 * np.pi
+    # Wrap to [-π/2, π/2)
+    pa = (pa + 0.5 * np.pi) % np.pi - 0.5 * np.pi
+    return a, b, pa
+
+
+def fit_elliptical_gaussian_2d(
+    image: np.ndarray,
+    *,
+    row0: float,
+    col0: float,
+    half_win: int = 5,
+    a_seed: float | None = None,
+    b_seed: float | None = None,
+    pa_seed: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Fit an elliptical Gaussian spot in a local window about ``(row0, col0)``.
+
+    Model (pixel coords; row = spectral, col = cross-dispersion)::
+
+        I = A · exp(-½ [(u/a)² + (v/b)²])
+        (u, v) = R(-PA) · (r − r₀, c − c₀)
+
+    Returns a dict with ``row``, ``col``, ``a``, ``b``, ``pa_rad``, ``amp``,
+    ``success``, ``residual_rms``, ``n_pix``. Axes are canonicalized so ``a ≥ b``
+    and ``pa_rad ∈ [-π/2, π/2)``.
+    """
+    from scipy.optimize import least_squares
+
+    nan_out: dict[str, Any] = {
+        "row": float("nan"),
+        "col": float("nan"),
+        "a": float("nan"),
+        "b": float("nan"),
+        "pa_rad": float("nan"),
+        "amp": float("nan"),
+        "success": False,
+        "residual_rms": float("nan"),
+        "n_pix": 0,
+    }
+    img = np.asarray(image, dtype=np.float64)
+    ny, nx = img.shape
+    hw = int(half_win)
+    r0i = int(np.clip(np.rint(row0), 0, ny - 1))
+    c0i = int(np.clip(np.rint(col0), 0, nx - 1))
+    rlo, rhi = max(0, r0i - hw), min(ny, r0i + hw + 1)
+    clo, chi = max(0, c0i - hw), min(nx, c0i + hw + 1)
+    stamp = img[rlo:rhi, clo:chi]
+    if stamp.size < 9:
+        return nan_out
+    rr = np.arange(rlo, rhi, dtype=np.float64)[:, None]
+    cc = np.arange(clo, chi, dtype=np.float64)[None, :]
+    rr_g = np.broadcast_to(rr, stamp.shape).ravel()
+    cc_g = np.broadcast_to(cc, stamp.shape).ravel()
+    data = stamp.ravel()
+    m = np.isfinite(data) & (data > 0)
+    if int(m.sum()) < 9:
+        return nan_out
+    rr_g, cc_g, data = rr_g[m], cc_g[m], data[m]
+
+    # Moment seeds
+    w = data
+    wsum = float(w.sum())
+    row_c = float((w * rr_g).sum() / wsum)
+    col_c = float((w * cc_g).sum() / wsum)
+    var_r = float((w * (rr_g - row_c) ** 2).sum() / wsum)
+    var_c = float((w * (cc_g - col_c) ** 2).sum() / wsum)
+    sig_r = float(np.sqrt(max(var_r, 1e-4)))
+    sig_c = float(np.sqrt(max(var_c, 1e-4)))
+    a0 = float(a_seed) if a_seed is not None and np.isfinite(a_seed) else max(sig_r, sig_c)
+    b0 = float(b_seed) if b_seed is not None and np.isfinite(b_seed) else min(sig_r, sig_c)
+    a0, b0, pa0 = _canonicalize_ellipse_ab_pa(a0, b0, float(pa_seed))
+    amp0 = float(np.max(data))
+
+    # Params: amp, row, col, a, b, pa
+    x0 = np.array([amp0, row_c, col_c, a0, b0, pa0], dtype=np.float64)
+    lo = np.array(
+        [0.0, float(rlo), float(clo), 0.05, 0.05, -0.5 * np.pi],
+        dtype=np.float64,
+    )
+    hi = np.array(
+        [np.inf, float(rhi - 1), float(chi - 1), float(hw), float(hw), 0.5 * np.pi],
+        dtype=np.float64,
+    )
+
+    def resid(p: np.ndarray) -> np.ndarray:
+        model = _elliptical_gaussian_stamp(
+            rr_g,
+            cc_g,
+            row0=float(p[1]),
+            col0=float(p[2]),
+            a_pix=float(p[3]),
+            b_pix=float(p[4]),
+            pa_rad=float(p[5]),
+            amp=float(p[0]),
+        )
+        return model - data
+
+    try:
+        sol = least_squares(resid, x0, bounds=(lo, hi), method="trf", max_nfev=200)
+    except Exception:
+        return nan_out
+    if not sol.success and sol.cost > 0.5 * float(np.sum(data**2)):
+        return nan_out
+    amp, row_f, col_f, a_f, b_f, pa_f = (float(x) for x in sol.x)
+    a_f, b_f, pa_f = _canonicalize_ellipse_ab_pa(a_f, b_f, pa_f)
+    res = resid(sol.x)
+    rms = float(np.sqrt(np.mean(res**2)))
+    return {
+        "row": row_f,
+        "col": col_f,
+        "a": a_f,
+        "b": b_f,
+        "pa_rad": pa_f,
+        "amp": amp,
+        "success": bool(sol.success) or rms < 0.05 * amp0,
+        "residual_rms": rms,
+        "n_pix": int(data.size),
+    }
+
+
+def measure_lfc_spots_elliptical(
+    rate_map: np.ndarray,
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    a_pix: float = 0.80,
+    b_pix: float = 0.55,
+    pa_rad: float = 0.0,
+    half_win: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fit every injected LFC spot with :func:`fit_elliptical_gaussian_2d`.
+
+    Returns a list of row dicts with truth deposit ``(row, col, λ)``, input
+    profile params, and fitted parameters / deltas.
+    """
+    spectrograph = spectrograph.upper()
+    a_true, b_true, pa_true = _canonicalize_ellipse_ab_pa(
+        float(a_pix), float(b_pix), float(pa_rad)
+    )
+    if half_win is None:
+        hw = max(5, int(np.ceil(5.0 * max(a_true, b_true))))
+    else:
+        hw = int(half_win)
+    out: list[dict[str, Any]] = []
+    for od, lams in line_list.items():
+        lams = np.asarray(lams, dtype=np.float64)
+        if lams.size == 0:
+            continue
+        rows, cols = expected_feature_xy_oriented(
+            spectrograph, int(fiber), int(od), lams
+        )
+        for lam, r_exp, c_exp in zip(lams, rows, cols):
+            if not (np.isfinite(lam) and np.isfinite(r_exp) and np.isfinite(c_exp)):
+                continue
+            fit = fit_elliptical_gaussian_2d(
+                rate_map,
+                row0=float(r_exp),
+                col0=float(c_exp),
+                half_win=hw,
+                a_seed=a_true,
+                b_seed=b_true,
+                pa_seed=pa_true,
+            )
+            dpa = float(fit["pa_rad"] - pa_true) if np.isfinite(fit["pa_rad"]) else float("nan")
+            # Smallest signed angle difference
+            if np.isfinite(dpa):
+                dpa = (dpa + 0.5 * np.pi) % np.pi - 0.5 * np.pi
+            out.append(
+                {
+                    "order": int(od),
+                    "lam_true_um": float(lam),
+                    "row_expected": float(r_exp),
+                    "col_expected": float(c_exp),
+                    "a_true": a_true,
+                    "b_true": b_true,
+                    "pa_true_rad": pa_true,
+                    "row_fit": float(fit["row"]),
+                    "col_fit": float(fit["col"]),
+                    "a_fit": float(fit["a"]),
+                    "b_fit": float(fit["b"]),
+                    "pa_fit_rad": float(fit["pa_rad"]),
+                    "amp_fit": float(fit["amp"]),
+                    "drow_pix": float(fit["row"] - r_exp)
+                    if np.isfinite(fit["row"])
+                    else float("nan"),
+                    "dcol_pix": float(fit["col"] - c_exp)
+                    if np.isfinite(fit["col"])
+                    else float("nan"),
+                    "da_pix": float(fit["a"] - a_true)
+                    if np.isfinite(fit["a"])
+                    else float("nan"),
+                    "db_pix": float(fit["b"] - b_true)
+                    if np.isfinite(fit["b"])
+                    else float("nan"),
+                    "dpa_rad": dpa,
+                    "success": bool(fit["success"]),
+                    "residual_rms": float(fit["residual_rms"]),
+                    "n_pix": int(fit["n_pix"]),
+                }
+            )
+    return out
 
 
 def _polyfit_scaled(
@@ -3495,686 +3978,15 @@ def log_infinite_snr_rv_evaluation(evaluation: InfiniteSnrRvEvaluation) -> None:
             f"{row.inlier_median_bias_m_s:.1f}" if row.inlier_median_bias_m_s is not None else "—",
         )
 
+
 # ========================================================================
-# E2E HTML / PNG preview report (formerly e2e_previews.py)
+# E2E HTML / PNG preview report (moved to simulations.plotting.e2e_preview)
 # ========================================================================
 
-PREVIEWS_SUBDIR = "previews"
-REPORT_HTML_NAME = "index.html"
-
-# Longest image dimension (pixels) for rendered detector/rate previews.
-_MAX_IMAGE_DIM = 1100
-
-# Canonical ordering and display labels for Stage 0 / Stage 1 step tokens. Tokens are the text
-# after the suffix dash in the saved filename (e.g. ``HB...._raw-dqinit.fits`` -> ``dqinit``).
-_STAGE0_TOKEN_ORDER: dict[str, str] = {
-    "dqinit": "DQ Init",
-    "satcheck": "Saturation Check",
-    "biassub": "Bias Subtraction",
-    "refpixcorr": "Reference Pixel Correction",
-    "nonlincorr": "Nonlinearity Correction",
-    "jumpdetec": "Jump Detection",
-    "rampfit": "Ramp Fitting",
-    "darksub": "Dark Subtraction",
-    "gaincorr": "Gain Correction",
-    "detflatcorr": "Detector Flat Correction",
-}
-_STAGE1_TOKEN_ORDER: dict[str, str] = {
-    "specextract": "Spectral Extraction",
-    "wavesolinit": "Initial Wavelength Solution",
-}
-_STAGE2_TOKEN_ORDER: dict[str, str] = {
-    "blaze_correct": "Blaze Correction",
-    "barycorr": "Barycentric Correction",
-    "stellar_rv": "Stellar RV (CCF)",
-}
-
-# Filename suffix tokens: <base>_<group>-<token>.fits
-_PRODUCT_RE = re.compile(r"^(?P<base>.+?)_(?P<group>raw|rate|specuncal|spec)-(?P<token>[A-Za-z0-9_]+)\.fits$")
-
-
-@dataclass
-class PreviewItem:
-    """One rendered preview belonging to a (stage, primitive) section."""
-
-    primitive_label: str
-    primitive_order: int
-    images: list[str] = field(default_factory=list)  # paths relative to the report dir
-    links: list[tuple[str, str]] = field(default_factory=list)  # (label, href)
-    caption: str = ""
-
-
-def infer_exposure_base_name(
-    *,
-    stage0_model=None,
-    stage1_model=None,
-    stage2_model=None,
-) -> str | None:
-    """Best-effort science exposure base name (e.g. ``HB.20260612.57502.95``) from a model."""
-    for model in (stage2_model, stage1_model, stage0_model):
-        if model is None:
-            continue
-        meta = getattr(model, "meta", None)
-        fname = getattr(meta, "filename", None) if meta is not None else None
-        if not fname:
-            fname = getattr(model, "_filepath", None)
-        if fname:
-            base = _strip_product_suffix(os.path.basename(str(fname)))
-            if base:
-                return base
-    return None
-
-
-def _strip_product_suffix(filename: str) -> str | None:
-    m = _PRODUCT_RE.match(filename)
-    if m:
-        return m.group("base")
-    # Fall back to a bare ``<base>_rate.fits`` / ``<base>_specuncal.fits`` style name.
-    m2 = re.match(r"^(?P<base>.+?)_(raw|rate|specuncal|spec)\.fits$", filename)
-    if m2:
-        return m2.group("base")
-    return None
-
-
-def _infer_base_from_dir(output_dir: str) -> str | None:
-    """Pick the exposure base with the most products directly under ``output_dir``."""
-    counts: dict[str, int] = {}
-    for name in os.listdir(output_dir):
-        if not name.endswith(".fits"):
-            continue
-        m = _PRODUCT_RE.match(name)
-        if not m:
-            continue
-        counts[m.group("base")] = counts.get(m.group("base"), 0) + 1
-    if not counts:
-        return None
-    return max(counts, key=lambda k: counts[k])
-
-
-# --------------------------------------------------------------------------------------
-# Image rendering helpers
-# --------------------------------------------------------------------------------------
-
-
-def _downsample_2d(arr: np.ndarray, max_dim: int = _MAX_IMAGE_DIM) -> np.ndarray:
-    """Stride-downsample a 2-D array so its longest dimension is <= ``max_dim``."""
-    a = np.asarray(arr)
-    if a.ndim != 2:
-        return a
-    ny, nx = a.shape
-    step = max(1, int(np.ceil(max(ny, nx) / float(max_dim))))
-    if step <= 1:
-        return a
-    return a[::step, ::step]
-
-
-def _finite_mean_std(arr: np.ndarray) -> tuple[float, float]:
-    """Mean and sample std of finite pixels in a 2-D (or collapsible) array."""
-    a = np.asarray(arr, dtype=np.float64).ravel()
-    finite = a[np.isfinite(a)]
-    if finite.size == 0:
-        return float("nan"), float("nan")
-    return float(np.mean(finite)), float(np.std(finite))
-
-
-def _format_2d_frame_title(base_title: str, mean: float, std: float) -> str:
-    """Append pixel mean and standard deviation to a matplotlib frame title."""
-    return f"{base_title}\nMean={mean:.2f}, Standard Deviation={std:.2f}"
-
-
-def _save_detector_image_png(arr2d: np.ndarray, out_path: str, title: str) -> None:
-    """Render a 2-D detector/rate image with robust percentile scaling to ``out_path``."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    a = _downsample_2d(np.asarray(arr2d, dtype=np.float64))
-    finite = np.isfinite(a)
-    if np.any(finite):
-        vmin, vmax = np.nanpercentile(a[finite], [1.0, 99.0])
-        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
-            vmin = float(np.nanmin(a[finite]))
-            vmax = float(np.nanmax(a[finite]))
-            if vmin == vmax:
-                vmax = vmin + 1.0
-    else:
-        vmin, vmax = 0.0, 1.0
-
-    fig, ax = plt.subplots(figsize=(7.2, 7.0))
-    im = ax.imshow(a, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
-    ax.set_title(title, fontsize=10)
-    ax.set_xlabel("detector x (downsampled)")
-    ax.set_ylabel("detector y (downsampled)")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=95)
-    plt.close(fig)
-
-
-def _save_orders_spectra_png(
-    flux: np.ndarray,
-    dq: np.ndarray | None,
-    out_path: str,
-    title: str,
-) -> None:
-    """Render 1-D extracted spectra (one panel per order) for a single fiber."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    f = np.asarray(flux, dtype=np.float64)
-    if f.ndim != 2:
-        f = np.atleast_2d(f)
-    n_orders, n_pix = f.shape
-    dq_arr = np.asarray(dq) if dq is not None else None
-
-    ncols = 4
-    nrows = int(np.ceil(n_orders / ncols))
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(ncols * 3.4, nrows * 1.7), squeeze=False
-    )
-    x = np.arange(n_pix)
-    for k in range(nrows * ncols):
-        ax = axes[k // ncols][k % ncols]
-        if k >= n_orders:
-            ax.axis("off")
-            continue
-        y = f[k].copy()
-        if dq_arr is not None and dq_arr.shape == f.shape:
-            y = np.where(dq_arr[k] != 0, np.nan, y)
-        ax.plot(x, y, lw=0.5, color="#1f77b4")
-        ax.set_title(f"order {k}", fontsize=7)
-        ax.tick_params(labelsize=6)
-        ax.margins(x=0.0)
-    fig.suptitle(title, fontsize=11)
-    fig.tight_layout(rect=(0, 0, 1, 0.985))
-    fig.savefig(out_path, dpi=95)
-    plt.close(fig)
-
-
-# --------------------------------------------------------------------------------------
-# Per-stage preview builders
-# --------------------------------------------------------------------------------------
-
-
-def _read_hdu_data(path: str, names: list[str]):
-    from astropy.io import fits
-
-    with fits.open(path, memmap=False) as hdul:
-        available = {hdu.name.upper(): i for i, hdu in enumerate(hdul)}
-        for name in names:
-            idx = available.get(name.upper())
-            if idx is not None and hdul[idx].data is not None:
-                return np.asarray(hdul[idx].data)
-    return None
-
-
-def _build_stage0_item(
-    path: str,
-    token: str,
-    *,
-    kind: str,
-    previews_dir: str,
-    report_dir: str,
-) -> PreviewItem | None:
-    label = _STAGE0_TOKEN_ORDER.get(token, token)
-    order = list(_STAGE0_TOKEN_ORDER).index(token) if token in _STAGE0_TOKEN_ORDER else 999
-    out_png = os.path.join(previews_dir, f"stage0_{token}.png")
-    if kind == "ramp_mean":
-        cube = _read_hdu_data(path, ["DATA", "SCI"])
-        if cube is None or cube.ndim < 3:
-            logger.warning("Stage 0 preview: no ramp cube in %s; skipping.", path)
-            return None
-        # Mean across the read axis (axis 0 for (nreads, ny, nx); collapse leading axes if 4-D).
-        img = np.asarray(cube, dtype=np.float64)
-        while img.ndim > 2:
-            img = np.nanmean(img, axis=0)
-        base_title = f"{label}: mean of detector across all reads"
-        mean, std = _finite_mean_std(img)
-        title = _format_2d_frame_title(base_title, mean, std)
-        caption = (
-            "Average of the detector counts across all UTR reads. "
-            f"Mean={mean:.2f}, Standard Deviation={std:.2f}."
-        )
-    else:  # rate_map
-        img = _read_hdu_data(path, ["RATE", "SCI", "DATA"])
-        if img is None:
-            logger.warning("Stage 0 preview: no rate image in %s; skipping.", path)
-            return None
-        img = np.asarray(img, dtype=np.float64)
-        while img.ndim > 2:
-            img = img[0]
-        base_title = f"{label}: rate map"
-        mean, std = _finite_mean_std(img)
-        title = _format_2d_frame_title(base_title, mean, std)
-        caption = (
-            "Rate map (e-/s per pixel) after this step. "
-            f"Mean={mean:.2f}, Standard Deviation={std:.2f}."
-        )
-    _save_detector_image_png(img, out_png, title)
-    rel = os.path.relpath(out_png, report_dir)
-    return PreviewItem(
-        primitive_label=label,
-        primitive_order=order,
-        images=[rel],
-        caption=caption,
-    )
-
-
-def _build_stage1_item(
-    path: str,
-    token: str,
-    *,
-    previews_dir: str,
-    report_dir: str,
-) -> PreviewItem | None:
-    from astropy.io import fits
-
-    label = _STAGE1_TOKEN_ORDER.get(token, token)
-    order = list(_STAGE1_TOKEN_ORDER).index(token) if token in _STAGE1_TOKEN_ORDER else 999
-    images: list[str] = []
-    with fits.open(path, memmap=False) as hdul:
-        hdu_names = [h.name.upper() for h in hdul]
-        spec_names = sorted(
-            (hdu.name for hdu in hdul if re.match(r"^SPEC_UNCAL_FIB\d+$", hdu.name.upper())),
-            key=lambda s: int(re.search(r"\d+", s).group()),
-        )
-        for spec_name in spec_names:
-            fib = int(re.search(r"\d+", spec_name).group())
-            flux = hdul[spec_name].data
-            if flux is None:
-                continue
-            dq_name = f"SPEC_DQ_FIB{fib}"
-            dq = hdul[dq_name].data if dq_name.upper() in hdu_names else None
-            out_png = os.path.join(previews_dir, f"stage1_{token}_fib{fib}.png")
-            _save_orders_spectra_png(
-                np.asarray(flux),
-                np.asarray(dq) if dq is not None else None,
-                out_png,
-                f"{label}: extracted 1-D spectra, fiber {fib}",
-            )
-            images.append(os.path.relpath(out_png, report_dir))
-    if not images:
-        return None
-    return PreviewItem(
-        primitive_label=label,
-        primitive_order=order,
-        images=images,
-        caption="Extracted 1-D spectrum per echelle order (flux vs. detector column).",
-    )
-
-
-def _collect_stage2_items(
-    output_dir: str,
-    base: str,
-    report_dir: str,
-) -> list[PreviewItem]:
-    """Collect the pipeline's default Stage 2 previews already written next to the L2 products."""
-    items: dict[str, PreviewItem] = {}
-    for name in sorted(os.listdir(output_dir)):
-        if not name.startswith(base + "_spec"):
-            continue
-        if not name.lower().endswith((".png", ".html")):
-            continue  # default previews only (skip .fits products)
-        path = os.path.join(output_dir, name)
-        token = None
-        for tok in _STAGE2_TOKEN_ORDER:
-            if f"_spec-{tok}" in name or f"-{tok}_" in name or f"-{tok}." in name:
-                token = tok
-                break
-        if "stellar_rv" in name:
-            token = "stellar_rv"
-        if token is None:
-            continue
-        label = _STAGE2_TOKEN_ORDER.get(token, token)
-        order = list(_STAGE2_TOKEN_ORDER).index(token) if token in _STAGE2_TOKEN_ORDER else 999
-        item = items.setdefault(
-            token, PreviewItem(primitive_label=label, primitive_order=order, caption="")
-        )
-        rel = os.path.relpath(path, report_dir)
-        if name.lower().endswith(".png"):
-            item.images.append(rel)
-        elif name.lower().endswith(".html"):
-            item.links.append((name.replace(base + "_", ""), rel))
-    return [it for it in items.values() if it.images or it.links]
-
-
-def _collect_fiberflat_items(output_dir: str, report_dir: str) -> list[PreviewItem]:
-    """Collect trace-position previews from the fiberflat pipeline under ``output_dir/cals/``."""
-    cals_dir = os.path.join(output_dir, "cals")
-    if not os.path.isdir(cals_dir):
-        return []
-
-    previews: list[tuple[float, str]] = []
-    for name in os.listdir(cals_dir):
-        lower = name.lower()
-        if "mastercal-tracepos" not in lower or not lower.endswith("_preview.png"):
-            continue
-        path = os.path.join(cals_dir, name)
-        if os.path.isfile(path):
-            previews.append((os.path.getmtime(path), path))
-
-    if not previews:
-        return []
-
-    # Use the most recently written trace-pos preview (current E2E run).
-    _, best_path = max(previews, key=lambda t: t[0])
-    rel = os.path.relpath(best_path, report_dir)
-    return [
-        PreviewItem(
-            primitive_label="Trace Positions",
-            primitive_order=0,
-            images=[rel],
-            caption=(
-                "Fitted echelle trace centroids on simulated fiberflat rate maps "
-                "(ProcessFiberflatsPipeline / TracePositionPrimitive)."
-            ),
-        )
-    ]
-
-
-# --------------------------------------------------------------------------------------
-# HTML report
-# --------------------------------------------------------------------------------------
-
-_HTML_CSS = """
-:root { color-scheme: light dark; }
-body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-       margin: 0; padding: 1.5rem; line-height: 1.4; }
-h1 { font-size: 1.5rem; margin: 0 0 0.25rem 0; }
-.subtitle { color: #888; margin-bottom: 1.25rem; font-size: 0.9rem; }
-details.stage { border: 1px solid #8884; border-radius: 8px; margin: 0 0 1rem 0; padding: 0.25rem 0.75rem; }
-details.stage > summary { font-size: 1.15rem; font-weight: 600; cursor: pointer; padding: 0.5rem 0; }
-details.prim { border-top: 1px dashed #8884; margin: 0.25rem 0; padding: 0.25rem 0.25rem 0.5rem 0.75rem; }
-details.prim > summary { font-size: 1rem; font-weight: 500; cursor: pointer; padding: 0.4rem 0; }
-.caption { color: #888; font-size: 0.85rem; margin: 0.1rem 0 0.5rem 0; }
-.gallery { display: flex; flex-wrap: wrap; gap: 0.75rem; max-height: 80vh; overflow: auto;
-           padding: 0.25rem; border: 1px solid #8882; border-radius: 6px; }
-.gallery img { max-width: 100%; height: auto; border: 1px solid #8884; border-radius: 4px; }
-.gallery figure { margin: 0; }
-.links a { display: inline-block; margin: 0.2rem 0.6rem 0.2rem 0; }
-.rv-summary { margin: 1.25rem 0 0.5rem 0; }
-.rv-summary h2 { font-size: 1.15rem; margin: 0 0 0.5rem 0; }
-.rv-summary table { border-collapse: collapse; width: 100%; max-width: 960px; font-size: 0.9rem; }
-.rv-summary th, .rv-summary td { border: 1px solid #8884; padding: 0.45rem 0.55rem; text-align: right; }
-.rv-summary th:first-child, .rv-summary td:first-child { text-align: center; }
-.rv-summary th { background: #8882; font-weight: 600; }
-.rv-summary caption { caption-side: top; text-align: left; color: #888; font-size: 0.85rem; margin-bottom: 0.35rem; }
-"""
-
-
-def _render_item_html(item: PreviewItem) -> str:
-    parts = [f'<details class="prim" open><summary>{_esc(item.primitive_label)}</summary>']
-    if item.caption:
-        parts.append(f'<div class="caption">{_esc(item.caption)}</div>')
-    if item.images:
-        parts.append('<div class="gallery">')
-        for img in item.images:
-            parts.append(
-                f'<figure><a href="{_esc(img)}" target="_blank">'
-                f'<img src="{_esc(img)}" loading="lazy"></a></figure>'
-            )
-        parts.append("</div>")
-    if item.links:
-        parts.append('<div class="links">')
-        for label, href in item.links:
-            parts.append(f'<a href="{_esc(href)}" target="_blank">{_esc(label)} &#8599;</a>')
-        parts.append("</div>")
-    parts.append("</details>")
-    return "\n".join(parts)
-
-
-def _render_stage_html(stage_title: str, items: list[PreviewItem]) -> str:
-    items = sorted(items, key=lambda it: (it.primitive_order, it.primitive_label))
-    body = "\n".join(_render_item_html(it) for it in items)
-    return (
-        f'<details class="stage" open><summary>{_esc(stage_title)}</summary>\n{body}\n</details>'
-    )
-
-
-def _esc(s: str) -> str:
-    return (
-        str(s)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def _fmt_num(value: float | None, *, decimals: int = 3, unit: str = "") -> str:
-    if value is None or not np.isfinite(value):
-        return "—"
-    return f"{value:.{decimals}f}{unit}"
-
-
-def _render_rv_performance_table_html(
-    perf_rows: list,
-    *,
-    injected_rv_km_s: float,
-    injected_berv_km_s: float | None = None,
-) -> str:
-    """HTML table of E2E RV recovery metrics (from :func:`collect_e2e_rv_performance_rows`)."""
-    from . import e2e_support
-
-    if not perf_rows:
-        return ""
-
-    header = (
-        f"Injected stellar RV = {_fmt_num(injected_rv_km_s, decimals=3)} km/s "
-        f"({_fmt_num(injected_rv_km_s * 1000.0, decimals=1)} m/s); "
-        "excludes BERV (simulation Doppler uses topocentric ``Gaia RV - BERV``; "
-        "Stage 2 CCF converts measured RV to barycentric via ``ccf_zb``)"
-    )
-    if injected_berv_km_s is not None and np.isfinite(injected_berv_km_s):
-        header += (
-            f". Reference BERV at ``mjd_mid`` = {_fmt_num(injected_berv_km_s, decimals=3)} km/s "
-            f"({_fmt_num(injected_berv_km_s * 1000.0, decimals=1)} m/s)"
-        )
-    header += (
-        ". Measured RV and σ(⟨RV⟩) from RVCCFAVG; BERV column from Stage 2 "
-        "``BARYCORR_FIB*``; inlier scatter is RMS of "
-        "inlier chunk RVs about ⟨RV⟩ (same metric as the Stage 2 preview sidebar)."
-    )
-    body_rows: list[str] = []
-    for row in perf_rows:
-        if not isinstance(row, e2e_support.E2ERVPerformanceRow):
-            continue
-        body_rows.append(
-            "<tr>"
-            f"<td>{row.fiber}</td>"
-            f"<td>{_fmt_num(row.injected_rv_km_s, decimals=3)}</td>"
-            f"<td>{_fmt_num(row.berv_km_s, decimals=3)}</td>"
-            f"<td>{_fmt_num(row.measured_rv_km_s, decimals=3)}</td>"
-            f"<td>{_fmt_num(row.bias_m_s, decimals=1)}</td>"
-            f"<td>{_fmt_num(row.rv_err_m_s, decimals=3)}</td>"
-            f"<td>{_fmt_num(row.inlier_scatter_m_s, decimals=3)}</td>"
-            f"<td>{row.n_inlier_chunks} / {row.n_total_chunks}</td>"
-            "</tr>"
-        )
-    if not body_rows:
-        return ""
-
-    return f"""
-<section class="rv-summary">
-<h2>RV performance summary</h2>
-<table>
-<caption>{_esc(header)}</caption>
-<thead>
-<tr>
-<th>Fiber</th>
-<th>Injected stellar RV (km/s)</th>
-<th>BERV (km/s)</th>
-<th>Measured RV (km/s)</th>
-<th>Bias (m/s)</th>
-<th>σ(⟨RV⟩) (m/s)</th>
-<th>Inlier scatter (m/s)</th>
-<th>Inlier chunks</th>
-</tr>
-</thead>
-<tbody>
-{os.linesep.join(body_rows)}
-</tbody>
-</table>
-</section>
-"""
-
-
-def generate_e2e_preview_report(
-    output_dir: str,
-    *,
-    exposure_base_name: str | None = None,
-    gaia_target=None,
-    stage2_model=None,
-    injected_rv_km_s: float | None = None,
-    fibers: list[int] | None = None,
-) -> str:
-    """
-    Render PNG previews and write ``index.html`` summarizing the E2E run.
-
-    Parameters
-    ----------
-    output_dir : str
-        Directory containing the saved per-step FITS products (the E2E ``output_dir``).
-    exposure_base_name : str or None
-        Science exposure base name (e.g. ``HB.20260612.57502.95``). If ``None``, inferred
-        from the products in ``output_dir``.
-    gaia_target : optional
-        :class:`~hispecdrp.simulations.e2e_gaia.E2EGaiaTarget` for a short header summary.
-    stage2_model : optional
-        Stage 2 L2 model for the RV performance table. When omitted, the table is skipped.
-    injected_rv_km_s : float or None
-        Template Doppler RV injected before rate-map generation. Defaults to
-        ``gaia_target.injected_rv_km_s`` when available.
-    fibers : list of int or None
-        Fibers to include in the RV table (default ``[1, 2, 3]``).
-
-    Returns
-    -------
-    str
-        Absolute path to the written ``index.html``.
-    """
-    output_dir = os.path.abspath(output_dir)
-    base = exposure_base_name or _infer_base_from_dir(output_dir)
-    if not base:
-        raise RuntimeError(f"Could not determine exposure base name in {output_dir!r}")
-
-    previews_dir = os.path.join(output_dir, PREVIEWS_SUBDIR)
-    os.makedirs(previews_dir, exist_ok=True)
-    report_dir = output_dir
-    report_path = os.path.join(output_dir, REPORT_HTML_NAME)
-
-    stage0_items: list[PreviewItem] = []
-    stage1_items: list[PreviewItem] = []
-
-    for name in sorted(os.listdir(output_dir)):
-        if not name.startswith(base + "_") or not name.endswith(".fits"):
-            continue
-        m = _PRODUCT_RE.match(name)
-        if not m:
-            continue
-        group = m.group("group")
-        token = m.group("token")
-        path = os.path.join(output_dir, name)
-        try:
-            if group == "raw":
-                item = _build_stage0_item(
-                    path, token, kind="ramp_mean",
-                    previews_dir=previews_dir, report_dir=report_dir,
-                )
-                if item:
-                    stage0_items.append(item)
-            elif group == "rate":
-                item = _build_stage0_item(
-                    path, token, kind="rate_map",
-                    previews_dir=previews_dir, report_dir=report_dir,
-                )
-                if item:
-                    stage0_items.append(item)
-            elif group == "specuncal" and token == "specextract":
-                item = _build_stage1_item(
-                    path, token, previews_dir=previews_dir, report_dir=report_dir,
-                )
-                if item:
-                    stage1_items.append(item)
-        except Exception:
-            logger.exception("Failed to build preview for %s", name)
-
-    stage2_items = _collect_stage2_items(output_dir, base, report_dir)
-    fiberflat_items = _collect_fiberflat_items(output_dir, report_dir)
-
-    # Header summary
-    summary_bits = [f"Exposure: <code>{_esc(base)}</code>"]
-    if gaia_target is not None:
-        meta = getattr(gaia_target, "target_meta", {}) or {}
-        summary_bits.append(f"Target: <code>{_esc(meta.get('target_name', '?'))}</code>")
-        summary_bits.append(f"Gaia DR3 <code>{_esc(getattr(gaia_target, 'source_id', '?'))}</code>")
-        summary_bits.append(f"injected RV = {getattr(gaia_target, 'injected_rv_km_s', float('nan')):.3f} km/s")
-
-    stages_html = []
-    if stage0_items:
-        stages_html.append(_render_stage_html("Stage 0 — detector reduction", stage0_items))
-    if fiberflat_items:
-        stages_html.append(
-            _render_stage_html("Fiberflat calibration — trace positions", fiberflat_items)
-        )
-    if stage1_items:
-        stages_html.append(_render_stage_html("Stage 1 — spectral extraction", stage1_items))
-    if stage2_items:
-        stages_html.append(_render_stage_html("Stage 2 — spectral calibration & RV", stage2_items))
-
-    eff_injected_rv = injected_rv_km_s
-    if eff_injected_rv is None and gaia_target is not None:
-        eff_injected_rv = getattr(gaia_target, "injected_rv_km_s", None)
-    eff_injected_berv = None
-    if gaia_target is not None:
-        eff_injected_berv = getattr(gaia_target, "berv_km_s", None)
-    rv_table_html = ""
-    if stage2_model is not None and eff_injected_rv is not None:
-        from . import e2e_support
-
-        perf_rows = e2e_support.collect_e2e_rv_performance_rows(
-            stage2_model,
-            injected_rv_km_s=float(eff_injected_rv),
-            injected_berv_km_s=(
-                float(eff_injected_berv)
-                if eff_injected_berv is not None and np.isfinite(eff_injected_berv)
-                else None
-            ),
-            fibers=fibers,
-        )
-        rv_table_html = _render_rv_performance_table_html(
-            perf_rows,
-            injected_rv_km_s=float(eff_injected_rv),
-            injected_berv_km_s=(
-                float(eff_injected_berv)
-                if eff_injected_berv is not None and np.isfinite(eff_injected_berv)
-                else None
-            ),
-        )
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HISPEC E2E previews — {_esc(base)}</title>
-<style>{_HTML_CSS}</style>
-</head>
-<body>
-<h1>HISPEC end-to-end simulation previews</h1>
-<div class="subtitle">{' &middot; '.join(summary_bits)}</div>
-{os.linesep.join(stages_html)}
-{rv_table_html}
-</body>
-</html>
-"""
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    logger.info(
-        "E2E previews: wrote %d stage-0, %d fiberflat, %d stage-1, %d stage-2 sections to %s",
-        len(stage0_items), len(fiberflat_items), len(stage1_items), len(stage2_items), report_path,
-    )
-    return report_path
+from .plotting.e2e_preview import (  # noqa: E402
+    PREVIEWS_SUBDIR,
+    REPORT_HTML_NAME,
+    PreviewItem,
+    generate_e2e_preview_report,
+    infer_exposure_base_name,
+)

@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, Sequence
 
 from .download_verify import ensure_calibration_on_disk
 from .hispec_store import HISPECCalibrationStore
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["verify_koa_calibrations"]
+__all__ = [
+    "verify_koa_calibrations",
+    "seed_koa_calibration_cache",
+    "ensure_koa_calibrations",
+]
+
 
 
 def verify_koa_calibrations(
@@ -89,7 +94,20 @@ def verify_koa_calibrations(
                     getattr(store, "remote_db", None),
                 )
             else:
-                added = store.sync_records_from_remote(mode="id")
+                try:
+                    added = store.sync_records_from_remote(mode="id")
+                except RuntimeError as exc:
+                    # Belt-and-suspenders: store soft-fails most remote 404s, but
+                    # keep verify usable when the Keck catalog API is down.
+                    msg = str(exc)
+                    if "Failed to query metadata" not in msg and "404" not in msg:
+                        raise
+                    logger.warning(
+                        "Remote KOA metadata sync failed (%s); "
+                        "continuing with local caldb only.",
+                        msg.splitlines()[0] if msg else exc,
+                    )
+                    added = []
                 logger.info(
                     "Synced %d KOA calibration record(s) into the local caldb.",
                     len(added or []),
@@ -211,3 +229,262 @@ def verify_koa_calibrations(
             "API, and that KOA_CALIBRATION_CACHE is writable."
         )
     return summary
+
+
+def _koa_cache_fit_count(cache_dir: str | os.PathLike[str]) -> int:
+    root = os.path.join(str(cache_dir), "calibrations")
+    if not os.path.isdir(root):
+        return 0
+    n = 0
+    for _dirpath, _dirnames, filenames in os.walk(root):
+        n += sum(1 for name in filenames if name.lower().endswith(".fits"))
+    return n
+
+
+def _koa_cache_has_db(cache_dir: str | os.PathLike[str]) -> bool:
+    cache_dir = str(cache_dir)
+    for name in (
+        os.path.join(cache_dir, "database", "hispec_calibrations.db"),
+        os.path.join(cache_dir, "hispec_calibrations.db"),
+    ):
+        if os.path.isfile(name):
+            return True
+    return False
+
+
+def _discover_koa_cache_sources(
+    dest: str,
+    *,
+    extra: Sequence[str | os.PathLike[str]] | None = None,
+) -> list[str]:
+    """Candidate seed caches, richest first (by FITS count), excluding ``dest``."""
+    dest_abs = os.path.abspath(dest)
+    cands: list[str] = []
+
+    def _add(path: str | os.PathLike[str] | None) -> None:
+        if not path:
+            return
+        p = os.path.abspath(os.path.expanduser(str(path)))
+        if p == dest_abs or not os.path.isdir(p):
+            return
+        if p not in cands:
+            cands.append(p)
+
+    for path in extra or ():
+        _add(path)
+
+    env_seed = (os.environ.get("HISPEC_KOA_CACHE_SEED") or "").strip()
+    if env_seed:
+        _add(env_seed)
+
+    home = os.path.expanduser("~")
+    try:
+        for name in os.listdir(home):
+            if not name.startswith("hispec"):
+                continue
+            _add(os.path.join(home, name, "cals", "KOA_CALIBRATION_CACHE"))
+    except OSError:
+        pass
+
+    # Rank by FITS count then DB presence.
+    ranked = sorted(
+        cands,
+        key=lambda p: (_koa_cache_fit_count(p), _koa_cache_has_db(p)),
+        reverse=True,
+    )
+    return [p for p in ranked if _koa_cache_fit_count(p) > 0 or _koa_cache_has_db(p)]
+
+
+def seed_koa_calibration_cache(
+    dest: str | os.PathLike[str] | None = None,
+    *,
+    sources: Sequence[str | os.PathLike[str]] | None = None,
+    min_fits: int = 1,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Copy a populated KOA cache into ``dest`` when the destination is empty/thin.
+
+    Parameters
+    ----------
+    dest
+        Target ``KOA_CALIBRATION_CACHE`` directory. Defaults to the current
+        ``KOA_CALIBRATION_CACHE`` environment variable.
+    sources
+        Optional explicit seed directories (tried first). Otherwise discovers
+        ``~/hispec*/cals/KOA_CALIBRATION_CACHE`` and ``HISPEC_KOA_CACHE_SEED``.
+    min_fits
+        Destination is considered populated once it has at least this many
+        FITS files under ``calibrations/``.
+    force
+        If True, replace the destination from the richest source even when
+        ``dest`` already meets ``min_fits``.
+
+    Returns
+    -------
+    dict
+        ``dest``, ``seeded``, ``source``, ``n_fits_before``, ``n_fits_after``,
+        ``candidates``.
+    """
+    import shutil
+
+    dest_path = (str(dest).strip() if dest is not None else "") or (
+        os.environ.get("KOA_CALIBRATION_CACHE") or ""
+    ).strip()
+    if not dest_path:
+        raise ValueError(
+            "dest or KOA_CALIBRATION_CACHE must be set to seed a KOA cache."
+        )
+    dest_path = os.path.abspath(os.path.expanduser(dest_path))
+    os.makedirs(dest_path, exist_ok=True)
+    os.environ["KOA_CALIBRATION_CACHE"] = dest_path
+
+    n_before = _koa_cache_fit_count(dest_path)
+    candidates = _discover_koa_cache_sources(dest_path, extra=sources)
+    result: dict[str, Any] = {
+        "dest": dest_path,
+        "seeded": False,
+        "source": None,
+        "n_fits_before": n_before,
+        "n_fits_after": n_before,
+        "candidates": candidates,
+    }
+    if not force and n_before >= int(min_fits) and _koa_cache_has_db(dest_path):
+        logger.info(
+            "KOA cache already populated (%d FITS) at %s; skip seed.",
+            n_before,
+            dest_path,
+        )
+        return result
+    if not candidates:
+        logger.warning(
+            "No KOA cache seed found for dest=%s (set HISPEC_KOA_CACHE_SEED "
+            "or pass sources=...).",
+            dest_path,
+        )
+        return result
+
+    source = candidates[0]
+    if os.path.abspath(source) == dest_path:
+        return result
+
+    logger.info(
+        "Seeding KOA cache %s <- %s (%d FITS in source).",
+        dest_path,
+        source,
+        _koa_cache_fit_count(source),
+    )
+    # Copy tree contents into dest (preserve existing unrelated files).
+    for name in os.listdir(source):
+        src_item = os.path.join(source, name)
+        dst_item = os.path.join(dest_path, name)
+        if os.path.isdir(src_item):
+            shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+        elif os.path.isfile(src_item):
+            os.makedirs(os.path.dirname(dst_item) or dest_path, exist_ok=True)
+            shutil.copy2(src_item, dst_item)
+
+    n_after = _koa_cache_fit_count(dest_path)
+    result.update(
+        seeded=True,
+        source=source,
+        n_fits_after=n_after,
+    )
+    logger.info(
+        "Seeded KOA cache: %d -> %d FITS under %s",
+        n_before,
+        n_after,
+        dest_path,
+    )
+    return result
+
+
+def _is_recoverable_remote_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    markers = (
+        "failed to query metadata",
+        "404",
+        "failed login",
+        "incorrect password",
+        "incorrect password or email",
+        "must be set as environment variables",
+        "keck_observer",
+        "connection",
+        "timeout",
+        "timed out",
+        "name or service not known",
+        "nodename nor servname",
+        "temporary failure",
+        "remote",
+    )
+    return any(m in msg for m in markers)
+
+
+def ensure_koa_calibrations(
+    spectrograph: str = "BSPEC",
+    *,
+    cache_dir: str | os.PathLike[str] | None = None,
+    seed_sources: Sequence[str | os.PathLike[str]] | None = None,
+    ignore_missing_cal_types: list[str] | tuple[str, ...] | None = None,
+    require_complete: bool = True,
+    connect_remote: bool = True,
+) -> dict[str, Any]:
+    """
+    Seed the local KOA cache if thin, then verify/download calibrations.
+
+    Tries a remote sync first. On auth / network / API failures, falls back to
+    the local cache only (after seeding from another cache when needed).
+    """
+    if ignore_missing_cal_types is None:
+        ignore_missing_cal_types = ["lfc_wavesol"]
+
+    if cache_dir is not None:
+        cache_path = os.path.abspath(os.path.expanduser(str(cache_dir)))
+        os.makedirs(cache_path, exist_ok=True)
+        os.environ["KOA_CALIBRATION_CACHE"] = cache_path
+    elif not (os.environ.get("KOA_CALIBRATION_CACHE") or "").strip():
+        raise ValueError(
+            "KOA_CALIBRATION_CACHE is unset; pass cache_dir= or set the env var."
+        )
+
+    seed_info = seed_koa_calibration_cache(
+        os.environ["KOA_CALIBRATION_CACHE"],
+        sources=seed_sources,
+    )
+
+    try:
+        summary = verify_koa_calibrations(
+            spectrograph,
+            connect_remote=bool(connect_remote),
+            sync_remote=bool(connect_remote),
+            ignore_missing_cal_types=ignore_missing_cal_types,
+            require_complete=require_complete,
+        )
+        summary["seed"] = seed_info
+        summary["remote_mode"] = "remote" if connect_remote else "local"
+        return summary
+    except (RuntimeError, ValueError, OSError) as exc:
+        if connect_remote and _is_recoverable_remote_error(exc):
+            logger.warning(
+                "Remote KOA sync/login failed (%s: %s); "
+                "retrying with local cache only.",
+                type(exc).__name__,
+                str(exc).splitlines()[0] if str(exc) else exc,
+            )
+            # Re-seed in case the failed remote path left the cache empty.
+            seed_info = seed_koa_calibration_cache(
+                os.environ["KOA_CALIBRATION_CACHE"],
+                sources=seed_sources,
+            )
+            summary = verify_koa_calibrations(
+                spectrograph,
+                connect_remote=False,
+                sync_remote=False,
+                ignore_missing_cal_types=ignore_missing_cal_types,
+                require_complete=require_complete,
+            )
+            summary["seed"] = seed_info
+            summary["remote_mode"] = "local_fallback"
+            summary["remote_error"] = f"{type(exc).__name__}: {exc}"
+            return summary
+        raise

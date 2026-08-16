@@ -3,7 +3,7 @@ import glob
 from koa_middleware import CalibrationStore, CalibrationSelector
 import os
 from .. import datamodels
-from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid
+from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid, get_env_var_bool
 
 from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
@@ -19,11 +19,42 @@ from .download_verify import (
 
 __all__ = ['HISPECCalibrationStore']
 
+
+def _default_connect_remote() -> bool:
+    """Remote KOA unless ``HISPEC_KOA_CONNECT_REMOTE`` / ``KOA_CONNECT_REMOTE`` is false."""
+    if "HISPEC_KOA_CONNECT_REMOTE" in os.environ:
+        return get_env_var_bool("HISPEC_KOA_CONNECT_REMOTE", default=True)
+    if "KOA_CONNECT_REMOTE" in os.environ:
+        return get_env_var_bool("KOA_CONNECT_REMOTE", default=True)
+    return True
+
+
+def _is_recoverable_remote_init_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    markers = (
+        "failed login",
+        "incorrect password",
+        "incorrect password or email",
+        "must be set as environment variables",
+        "keck_observer",
+        "failed to query metadata",
+        "404",
+        "connection",
+        "timeout",
+        "timed out",
+        "name or service not known",
+        "nodename nor servname",
+        "temporary failure",
+    )
+    return any(m in msg for m in markers)
+
+
 class HISPECCalibrationStore(CalibrationStore):
 
     def __init__(
         self, *args,
         instrument_name : str | None = None,
+        connect_remote : bool | None = None,
         **kwargs
     ):
         if instrument_name is None:
@@ -31,9 +62,31 @@ class HISPECCalibrationStore(CalibrationStore):
                 'HISPECDRP_INSTRUMENT_NAME',
                 datamodels.DataModel._DEFAULT_INSTRUMENT
             )
+        if connect_remote is None:
+            connect_remote = _default_connect_remote()
+
+        if connect_remote:
+            try:
+                super().__init__(
+                    *args,
+                    instrument_name=instrument_name,
+                    connect_remote=True,
+                    **kwargs
+                )
+                return
+            except (ValueError, RuntimeError, OSError) as exc:
+                if not _is_recoverable_remote_init_error(exc):
+                    raise
+                logger.warning(
+                    "Remote KOA unavailable (%s: %s); using local caldb only.",
+                    type(exc).__name__,
+                    str(exc).splitlines()[0] if str(exc) else exc,
+                )
+
         super().__init__(
             *args,
             instrument_name=instrument_name,
+            connect_remote=False,
             **kwargs
         )
 
@@ -390,6 +443,11 @@ class HISPECCalibrationStore(CalibrationStore):
         ``cals`` is accepted for compatibility with callers that pass an explicit
         remote query result; when omitted, records are discovered via
         ``get_missing_records`` (same as ``koa_middleware``).
+
+        Remote metadata failures (e.g. KOA API 404) are logged and treated as a
+        no-op so pipelines can continue with the local caldb/cache. Callers that
+        need a hard failure should inspect logs or sync explicitly with their own
+        error handling.
         """
         if cals is not None:
             mode = str(mode).lower()
@@ -420,7 +478,20 @@ class HISPECCalibrationStore(CalibrationStore):
                 mode,
             )
             return []
-        return super().sync_records_from_remote(mode=mode)
+        if self.remote_db is None:
+            logger.info("Skipping remote sync (remote_db is None).")
+            return []
+        try:
+            return super().sync_records_from_remote(mode=mode)
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "Failed to query metadata" in msg or "404" in msg:
+                logger.warning(
+                    "Remote KOA metadata sync failed (%s); continuing with local caldb only.",
+                    msg.splitlines()[0] if msg else exc,
+                )
+                return []
+            raise
 
     def calibration_record_in_cache(
         self,

@@ -36,11 +36,11 @@ There are **three** preview surfaces:
    Payload arrays are **downsampled** before embedding; limits come from env
    ``HISPEC_DRP_MASK_OVERLAY_SPECTRUM_MAX_POINTS`` / ``HISPEC_DRP_MASK_OVERLAY_CCF_MAX_POINTS``
    (template crop length: ``HISPEC_DRP_TEMPLATE_OVERLAY_MAX_TEMPLATE_POINTS``).
-  **Lagrange pixel-interpolation** curve on the mask spectrum panel (same stencil as
-  ``rv_per_chunks_line_mask`` / ``mask_ccf_pixel_interp_order``) is **always** embedded in mask
-  overlay debug HTML. The dense λ grid size is derived from the displayed spectrum point count:
-  ``n_dense = 2 * mask_ccf_pixel_interp_order * N_specpoints`` (clamped to ``[24, 8192]``),
-  where ``N_specpoints`` is the number of points in the plotted blue spectrum trace.
+   **Lagrange pixel-interpolation** curve on the mask spectrum panel (same stencil as
+   ``rv_per_chunks_line_mask`` / ``mask_ccf_pixel_interp_order``) is **always** embedded in mask
+   overlay debug HTML. The dense λ grid size is derived from the displayed spectrum point count:
+   ``n_dense = 2 * mask_ccf_pixel_interp_order * N_specpoints`` (clamped to ``[24, 8192]``),
+   where ``N_specpoints`` is the number of points in the plotted blue spectrum trace.
 
 Gaussian reference curves use :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`;
 mask geometry uses :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils` (mask loaders).
@@ -63,8 +63,8 @@ in :mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`.
 
 References
 ----------
-.. [1] spirou-ccf masks: https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
-.. [2] KPF radial_velocity ``src``: https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+* spirou-ccf masks: https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+* KPF radial_velocity ``src``: https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
 """
 from __future__ import annotations
 

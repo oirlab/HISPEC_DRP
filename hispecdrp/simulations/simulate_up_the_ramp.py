@@ -1469,6 +1469,7 @@ def create_ramp_from_spectrum(
     register_wavesol: bool = True,
     register_stage1_sims: bool = True,
     reuse_stage1_sims: bool = True,
+    extraction_aperture: float = 10.0,
     seed: int | None = 0,
     **kwargs,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
@@ -1551,6 +1552,10 @@ def create_ramp_from_spectrum(
     reuse_stage1_sims : bool, optional
         When True (default), reuse Stage-1 masters / fiberflat rate frames already
         present under ``<output_dir>/cals``. Set False to force re-simulation.
+    extraction_aperture : float, optional
+        Box-extraction aperture (pixels) used when building / caching sim-HDF
+        Stage-1 fiberflat masters. Default ``10``. Science Stage-1 extraction
+        still needs the same value in ``spec_extract`` prim args.
     seed : int or None, optional
         UTR noise seed (default ``0``). Keep fixed so the packaged WAVE CCF bake
         transfers across notebook re-runs; change only when intentionally drawing
@@ -1622,6 +1627,7 @@ def create_ramp_from_spectrum(
             fibers=fibers,
             ramp_meta=ramp_meta,
             connect_remote=False,
+            extraction_aperture=float(extraction_aperture),
             reuse_existing=bool(reuse_stage1_sims),
         )
         for key in ("trace_pos", "trace_prof", "fiberflat", "wavesol"):

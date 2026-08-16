@@ -15,7 +15,7 @@ Run from the repository root::
     python hispecdrp/data/wavesol/regenerate_sim_hdf_line_zp_wavesol.py \\
         --rate-map test_data/e2e_rv0_hdf_trace_linezp/rate_map.fits \\
         --spectrum test_data/e2e_rv0_hdf_trace_linezp/*_spec-blaze_correct.fits \\
-        --mask hispecdrp/data/masks/lte049*.e2erval.delta.mas \\
+        --mask hispecdrp/data/masks/lte049*.ccfopt.delta.mas \\
         --ccf-refine --spectrograph BSPEC --known-rv-m-s 0
 """
 

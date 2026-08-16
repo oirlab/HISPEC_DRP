@@ -1,23 +1,31 @@
 Simulations
 ===========
 
-The :mod:`hispecdrp.simulations` package provides forward models and an end-to-end (E2E)
-exercise of HISPEC DRP: from a stellar template and pyechelle instrument model through a
-synthetic up-the-ramp (UTR) exposure, full Stage 0–2 reduction, and radial-velocity (RV)
-estimation.
+The :mod:`hispecdrp.simulations` package builds synthetic HISPEC exposures and
+reduces them with the same Stage 0–2 pipelines used on real data.
 
-Use these pages for the **E2E simulation pipeline** (``python -m hispecdrp.simulations.run_e2e_sim``).
-For low-level rate-map and ramp builders without the full pipeline, see also
-:doc:`../quickstart/create_simulations`.
+Start with the short worked example:
+
+.. toctree::
+   :maxdepth: 1
+
+   basic_usage
+
+Additional runnable examples (simulation workflows and pipeline tests):
 
 .. toctree::
    :maxdepth: 2
 
-   overview
-   spectrum_and_rate_map
+   examples/examples
+
+For lower-level rate-map builders without the full pipeline, see also
+:doc:`../quickstart/create_simulations`.
+
+Reference
+---------
+
+.. toctree::
+   :maxdepth: 1
+
    calibrations
-   pipeline_stages
-   configuration
-   outputs_and_previews
-   running
    limitations

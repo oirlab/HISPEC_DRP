@@ -16,24 +16,84 @@ __all__ = ['FitRampPrimitive']
 _DO_NOT_USE = int(DQ_FLAGS["DO_NOT_USE"])
 
 
-def flag_nonfinite_rate_pixels(rate, rate_err, dq, *, do_not_use: int = _DO_NOT_USE):
+def sanitize_ramp_fit_rate_err(
+    rate,
+    rate_err,
+    dq,
+    *,
+    rate_var_rnoise=None,
+    do_not_use: int = _DO_NOT_USE,
+):
     """
-    OR ``do_not_use`` into ``dq`` wherever ``rate`` or ``rate_err`` is non-finite.
+    Make ramp-fit ``rate_err`` safe for downstream extraction.
 
-    Ramp fits often leave inter-order / empty pixels as ``rate==0`` with NaN
-    ``rate_err`` and a clear DQ bit; extraction previously treated those as good.
-    Returns ``(dq, n_flagged)``; ``dq`` is copied only when flags are added.
+    Ramp fits often leave empty / inter-order pixels as ``rate==0`` with NaN
+    ``rate_err``. Flagging those as ``DO_NOT_USE`` and letting box extract
+    renormalize the aperture caused large spectral spikes for undersampled
+    PSFs. Instead:
+
+    - Where ``rate`` is finite and ``rate_err`` is not: fill ``rate_err`` with
+      ``sqrt(rate_var_rnoise)`` when that variance is finite and positive,
+      otherwise ``0``. Do **not** mark ``DO_NOT_USE``.
+    - Where ``rate`` is non-finite: OR ``do_not_use`` into ``dq`` and set
+      ``rate_err`` to ``0`` for array hygiene.
+
+    Returns
+    -------
+    rate_err_out, dq_out, n_filled_err, n_flagged_rate
+        ``rate_err`` / ``dq`` are copied only when modified.
     """
     rate_a = np.asarray(rate)
     rate_err_a = np.asarray(rate_err)
     dq_a = np.asarray(dq)
-    bad = (~np.isfinite(rate_err_a)) | (~np.isfinite(rate_a))
-    n_bad = int(np.count_nonzero(bad))
-    if n_bad == 0:
-        return dq_a, 0
-    dq_out = dq_a.copy()
-    dq_out[bad] = dq_out[bad] | int(do_not_use)
-    return dq_out, n_bad
+
+    rate_finite = np.isfinite(rate_a)
+    err_bad = ~np.isfinite(rate_err_a)
+    fill = rate_finite & err_bad
+    flag = ~rate_finite
+    n_filled = int(np.count_nonzero(fill))
+    n_flagged = int(np.count_nonzero(flag))
+
+    if n_filled == 0 and n_flagged == 0:
+        return rate_err_a, dq_a, 0, 0
+
+    rate_err_out = rate_err_a.copy()
+    dq_out = dq_a
+
+    if n_filled:
+        fill_val = np.zeros(n_filled, dtype=rate_err_out.dtype)
+        if rate_var_rnoise is not None:
+            vr = np.asarray(rate_var_rnoise)
+            if vr.shape == rate_a.shape:
+                vr_fill = vr[fill]
+                ok = np.isfinite(vr_fill) & (vr_fill > 0)
+                fill_val = fill_val.astype(np.result_type(fill_val, np.float64), copy=False)
+                fill_val[ok] = np.sqrt(vr_fill[ok]).astype(fill_val.dtype, copy=False)
+        rate_err_out[fill] = fill_val
+
+    if n_flagged:
+        dq_out = dq_a.copy()
+        dq_out[flag] = dq_out[flag] | int(do_not_use)
+        rate_err_out[flag] = np.asarray(0, dtype=rate_err_out.dtype)
+
+    return rate_err_out, dq_out, n_filled, n_flagged
+
+
+def flag_nonfinite_rate_pixels(rate, rate_err, dq, *, do_not_use: int = _DO_NOT_USE):
+    """
+    Backward-compatible wrapper around :func:`sanitize_ramp_fit_rate_err`.
+
+    Historically this ORed ``DO_NOT_USE`` for non-finite ``rate`` **or**
+    ``rate_err``. That mistreated empty pixels (``rate==0``, NaN err) and
+    caused extraction spikes. The sanitizer now fills finite ``rate_err`` for
+    those pixels and only flags non-finite ``rate``.
+
+    Returns ``(dq, n_flagged_rate)`` for compatibility with existing callers.
+    """
+    _rate_err, dq_out, _n_filled, n_flagged = sanitize_ramp_fit_rate_err(
+        rate, rate_err, dq, do_not_use=do_not_use
+    )
+    return dq_out, n_flagged
 
 
 class FitRampPrimitive(BasePrimitive):
@@ -228,15 +288,27 @@ class FitRampPrimitive(BasePrimitive):
         output_model.dq = result['dq']
         output_model.mid_time = result['mid_time']
 
-        # Unfitted / empty pixels often return rate=0 with non-finite rate_err and
-        # leave DQ clear. Flag them DO_NOT_USE so extraction and later stages skip them.
-        output_model.dq, n_bad = flag_nonfinite_rate_pixels(
-            output_model.rate, output_model.rate_err, output_model.dq
+        # Empty / unfitted pixels often return rate=0 with NaN rate_err. Fill a
+        # finite rate_err (0 or RN floor) so box extract does not drop aperture
+        # edge pixels and renormalize; only flag DO_NOT_USE when rate itself is
+        # non-finite.
+        (
+            output_model.rate_err,
+            output_model.dq,
+            n_filled,
+            n_flagged,
+        ) = sanitize_ramp_fit_rate_err(
+            output_model.rate,
+            output_model.rate_err,
+            output_model.dq,
+            rate_var_rnoise=output_model.rate_var_rnoise,
         )
-        if n_bad:
+        if n_filled or n_flagged:
             logger.info(
-                "Ramp fit: flagged %d pixels with non-finite rate/rate_err as DO_NOT_USE.",
-                n_bad,
+                "Ramp fit: filled non-finite rate_err on %d finite-rate pixel(s); "
+                "flagged %d non-finite-rate pixel(s) as DO_NOT_USE.",
+                n_filled,
+                n_flagged,
             )
 
         return dict(output=output_model, method=self.method, mcds_num_coadd=_mcds_num_coadd)

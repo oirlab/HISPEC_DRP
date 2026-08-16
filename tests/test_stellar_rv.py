@@ -233,7 +233,7 @@ _DEFAULT_BSPEC_BTSETTL_CCF_LINE_MASK_ORDER = 139
 # lte049 + polynomial L2 (same construction as line-mask smoke scripts)
 _BTSETTL_LTE049_POLY_COEFS = np.array([0.0001, -0.001, 0.01, 0.05, 1.0])
 # Fixed lte049 BT-Settl template + paired depth-weighted **delta** mask.
-# Keep this on the classic ``*.delta.mas`` product (not ``e2erval`` / packaged default):
+# Keep this on the classic ``*.delta.mas`` product (not ``ccfopt`` / packaged default):
 # these unit tests calibrate chunk counts and RV recovery on that mask.
 LTE049_BTSETTL_SPEC_H5 = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
 LTE049_BTSETTL_MASK_MAS = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"

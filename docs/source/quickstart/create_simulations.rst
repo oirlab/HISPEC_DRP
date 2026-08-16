@@ -4,7 +4,8 @@ Create Simulated HISPEC Data
 
 This example shows how to create simulated HISPEC data using
 :mod:`hispecdrp.simulations.simulate_rate_map` and :mod:`hispecdrp.simulations.simulate_up_the_ramp`.
-For the full end-to-end pipeline (ramp → Stage 0–2 → RV), see :doc:`../simulations/overview`.
+For the full end-to-end pipeline (ramp → Stage 0–2 → RV), see
+:doc:`../simulations/basic_usage`.
 
 .. note::
 

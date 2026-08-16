@@ -5,6 +5,11 @@ from .pipelines import * # Import all pipelines
 from . import datamodels
 from . import calibrations
 from . import keck
+
+# ``from .primitives import *`` re-exports the ``utils`` submodule
+# (``hispecdrp.primitives.utils``), which shadows this package's ``utils``.
+# Drop the shadowed name so the real ``hispecdrp.utils`` package binds.
+globals().pop("utils", None)
 from . import utils
 
 from .utils.logging import setup_default_logging

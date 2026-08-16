@@ -38,14 +38,14 @@ in the community; HISPEC DRP does not ship Keck KPF pipeline source.
 References
 ^^^^^^^^^^
 
-.. [1] KPF mask-line algorithm reference (``alg_rv_mask_line.py``):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
-.. [2] KPF radial_velocity module source tree:
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
-.. [3] spirou-ccf helper library (``spiroulib.py``):
-       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
-.. [4] spirou-ccf example masks:
-       https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+* KPF mask-line algorithm reference (``alg_rv_mask_line.py``):
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+* KPF radial_velocity module source tree:
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+* spirou-ccf helper library (``spiroulib.py``):
+  https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+* spirou-ccf example masks:
+  https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
 
 
 Units and conventions
@@ -63,7 +63,7 @@ Units and conventions
 
 
 RV tables and data storage (RVCCF)
----------------------------------
+----------------------------------
 
 L2 datamodel formatting (code references)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -119,7 +119,7 @@ The overlay debug page is written by
 
 
 Workflow outline (``ccf_line_mask``)
------------------------------------
+------------------------------------
 
 This is a high-level outline of what :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`
 does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorithm follows a different path).

@@ -187,17 +187,14 @@ def line_mask_line_window_velocity_half_width_m_s(
     """
     Effective half-width (m/s) for a **uniform** centered CCF grid in line-window mode.
 
-    Uses the largest chunk wavelength span (in velocity units
-    :math:`\\Delta v \\approx c\\,\\Delta\\lambda/\\lambda`) over all echelle rows in
-    ``order_tasks``, together with ``v_center_m_s`` (``ccf_input_velocity``), to ensure
-    the centered window is at least as wide as the caller half-width and the chunk
-    Doppler span.
+    Returns the caller half-width (floored by a few velocity steps) for
+    :func:`build_centered_uniform_velocity_grid`, plus the maximum Voronoi chunk
+    Doppler span :math:`c\\,\\Delta\\lambda/\\lambda` for logging.
 
-    Returns
-    -------
-    half_width_eff_m_s, dv_chunk_max_m_s : float
-        Half-width for :func:`build_centered_uniform_velocity_grid` and the maximum
-        :math:`c\\,\\Delta\\lambda/\\lambda` among chunks (m/s).
+    The CCF grid is **not** expanded to the Voronoi chunk span: that produced
+    :math:`10^5`--:math:`10^6`-point grids for sparse/line-by-line masks. Per-chunk
+    mask membership still uses
+    :func:`line_mask_chunk_restrict_velocity_range_m_s` with the chunk Δλ.
     """
     v_c = float(v_center_m_s)
     dv_max = 0.0
@@ -218,7 +215,7 @@ def line_mask_line_window_velocity_half_width_m_s(
                 if math.isfinite(dv):
                     dv_max = max(dv_max, float(dv))
     half_w = float(half_width_m_s)
-    pad = max(half_w, 2.0 * dv_max, 5.0 * abs(float(v_step_m_s)))
+    pad = max(half_w, 5.0 * abs(float(v_step_m_s)))
     if not math.isfinite(pad) or pad <= 0.0:
         pad = half_w if math.isfinite(half_w) and half_w > 0.0 else abs(float(v_step_m_s)) * 5.0
     return float(pad), float(dv_max)
@@ -531,12 +528,12 @@ def _rv_err_slope_propagation_m_s(
     sigma_ccf: np.ndarray | None,
 ) -> float:
     """
-    Diagonal error propagation σ_RV ≈ σ_y / |d(CCF)/dv| (m/s), v in m/s.
+    Diagonal error propagation σ_RV ≈ σ_y / ``|d(CCF)/dv|`` (m/s), v in m/s.
 
-    Uses a robust high-percentile of |dCCF/dv| in the central part of the window so a
+    Uses a robust high-percentile of ``|dCCF/dv|`` in the central part of the window so a
     single noisy bin does not dominate. When ``sigma_ccf`` is missing, uses ``mad_std``
     of ``y_ccf`` as a noise scale. The result is **not** clipped to an arbitrary
-    upper bound; very large values indicate a near-flat CCF or tiny |dCCF/dv|.
+    upper bound; very large values indicate a near-flat CCF or tiny ``|dCCF/dv|``.
     """
     v0 = np.asarray(v_m_s, np.float64).ravel()
     y0 = np.asarray(y_ccf, np.float64).ravel()
@@ -959,40 +956,6 @@ class CCFFitConfig:
 
     Velocity windows in the first and second pass are expressed in **km s\\ :sup:`−1`**
     (``*_km_s`` fields); RV results from :func:`fit_ccf_rv` are still returned in **m s\\ :sup:`−1`**.
-
-    Attributes
-    ----------
-    pass1_half_width_km_s, pass2_half_width_km_s : float
-        Half-width of the velocity window (km/s) around the peak for LM fit pass 1 and 2.
-        Pass 1 is wider to stabilize the baseline; pass 2 is narrower for refinement.
-    initial_stddev_km_s : float
-        Initial Gaussian width (km/s) for the Astropy model before fitting.
-    min_points : int
-        Minimum number of finite CCF samples required in a window to attempt a fit.
-    emission_strength_ratio : float
-        Threshold for classifying absorption vs. emission line profiles (affects peak search).
-    cal_mask_methods : frozenset
-        ``mask_method`` values treated as calibration (etalon/LFC/ThAr) for fit behavior.
-    levmar_maxiter : int
-        Max Levenberg–Marquardt iterations per χ² minimization step in Astropy’s fitter.
-    sigma_clip_unclipped_prefit_passes : int
-        Repeated **unclipped** LM fits on the full window before sigma-clipping rounds.
-    sigma_clip_enable : bool
-        If False, skip residual-based clipping after the prefit passes.
-    sigma_clip_max_iter : int
-        Maximum fit → clip → refit rounds after prefit.
-    sigma_clip_n_sigma, sigma_clip_n_sigma_relaxed : float
-        MAD multipliers for residual clipping (strict vs. relaxed early rounds).
-    sigma_clip_relax_first_clip_iters : int
-        Number of initial clipping iterations using the relaxed multiplier.
-    sigma_clip_min_keep_frac : float
-        Minimum fraction of points to retain when clipping (guards over-aggressive removal).
-    rv_err_cov_combine : str
-        How to merge gradient-based CCF error with LevMar covariance (e.g. ``"max"``).
-    rv_err_bootstrap_samples : int
-        Parametric bootstrap draws on ``ccf`` noise; ``0`` disables.
-    rv_err_bootstrap_seed : int or None
-        RNG seed for bootstrap when ``rv_err_bootstrap_samples > 0``.
     """
 
     # Wider windows help the LM Gaussian recover a sensible baseline away from the peak.
@@ -1240,7 +1203,7 @@ def _levmar_lsq_fit(ft, init, *args, **kwargs):
 
 def _levmar_ccf_y_scale(gy: np.ndarray) -> float:
     """
-    Multiplicative scale so ``gy * scale`` has max(|·|) ≈ 1.
+    Multiplicative scale so ``gy * scale`` has max absolute value ≈ 1.
 
     ``scipy.optimize.leastsq`` (used by Astropy :class:`~astropy.modeling.fitting.LevMarLSQFitter`)
     reports ``ierr`` outside {1,…,4} when the problem is poorly scaled (common for mask-CCF
@@ -5172,12 +5135,11 @@ def rv_per_chunks_line_mask(
     line_mask_line_chunk_v_center_m_s : float or None, optional
         Required (finite) when ``window_line_by_line`` is true: pipeline velocity prior in m/s
         (typically ``ccf_input_velocity``), defining observed-frame mask-line positions.
-
-    When ``window_line_by_line`` is true, spectral pixels per chunk are the intersection of the
-    line-window Voronoi interval with a symmetric band
-    :func:`mask_line_window_spectrum_band_um` about the chunk center (``window_size_um`` plus
-    :data:`LINE_MASK_LINE_WINDOW_SPEC_REL_PAD`). If that intersection has fewer than
-    ``min_good_pixels`` samples, the chunk falls back to the full Voronoi pixel set.
+        When ``window_line_by_line`` is true, spectral pixels per chunk are the intersection of
+        the line-window Voronoi interval with a symmetric band
+        :func:`mask_line_window_spectrum_band_um` about the chunk center (``window_size_um`` plus
+        :data:`LINE_MASK_LINE_WINDOW_SPEC_REL_PAD`). If that intersection has fewer than
+        ``min_good_pixels`` samples, the chunk falls back to the full Voronoi pixel set.
 
     Returns
     -------

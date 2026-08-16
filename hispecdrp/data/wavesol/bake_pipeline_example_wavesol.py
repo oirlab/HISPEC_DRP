@@ -5,7 +5,7 @@ Bake packaged sim-HDF line-ZP WAVE for fibers 1, 2, and 3.
 Matches the fiber-2 ``pipeline_example`` recipe for each fiber:
   * ``create_ramp_from_spectrum(..., seed=0, RV=0)``
   * Stage0 → Stage1 → Stage2 (blaze-corrected spectrum)
-  * rate-map line ZP + L2 poly refine + 2× CCF-order refine (e2erval mask)
+  * rate-map line ZP + L2 poly refine + 2× CCF-order refine (ccfopt mask)
 
 Writes ``hispecdrp/data/wavesol/HB.sim_hdf_wavesol.line_zp.fits`` (+ JSON).
 
@@ -209,7 +209,7 @@ def ensure_fiber_pipeline_products(
             filter_band="J",
             seed=0,
             radial_velocity_km_s=0.0,
-            # Match pipeline_example.ipynb: force BERV=0 for the controlled RV=0 path.
+            # Match Basic Usage walkthrough: force BERV=0 for the controlled RV=0 path.
             barycentric_velocity_km_s=0.0,
             # Always reuse Stage-1 masters (fiberflat/traces/WAVE registration).
             # ``reuse_existing`` only gates whether science rate_map/blaze are rebuilt.
@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ccf-v-step-m-s", type=float, default=25.0)
     p.add_argument(
         "--mask",
-        default="hispecdrp/data/masks/lte049*.e2erval.delta.mas",
+        default="hispecdrp/data/masks/lte049*.ccfopt.delta.mas",
         help="Line mask glob for CCF refine",
     )
     p.add_argument(

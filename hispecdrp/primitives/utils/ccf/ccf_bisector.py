@@ -404,57 +404,35 @@ class CCFBisectorConfig:
     independent-measurement reduction of those errors.) Cut weights are the core
     performance weight only; per-cut :math:`e_i` comes from CCF-error propagation
     when informative, otherwise from the smooth-profile discretization estimate.
-
-    Attributes
-    ----------
-    rv_percentile_lo, rv_percentile_hi : float
-        Percentile range (0–100, relative to peak depth above baseline) over which
-        bisector midpoints contribute to the RV estimate.
-    rv_n_percentile_cuts : int
-        Fixed number of evenly spaced percentile cuts between
-        ``rv_percentile_lo`` and ``rv_percentile_hi`` (inclusive). When ``>= 2``,
-        this overrides ``rv_percentile_step``. Default ``31`` samples the CCF
-        contrast densely for RV refinement.
-    rv_percentile_step : float
-        Step between percentile cuts (percent). Used only when
-        ``rv_n_percentile_cuts < 2``.
-    bis_top_lo, bis_top_hi : float
-        Top section for bisector inverse slope (BIS), NEID default 60–90%.
-    bis_bottom_lo, bis_bottom_hi : float
-        Bottom section for BIS, NEID default 10–40%.
-    core_weight_sigma_percentile : float
-        Gaussian performance weight on percentile cuts, centered at 50% depth
-        (emphasizes the CCF core). Set very large to approximate uniform weighting.
-    rv_err_core_percentile : float
-        Depth percentile recorded in diagnostics as the representative “core” cut
-        (does **not** set ``rv_err``; retained for previews / BIS section labeling).
-    min_cuts : int
-        Minimum successful bisector cuts required for a valid RV.
-    min_peak_contrast_sigma : float
-        Minimum peak amplitude (above baseline) in units of robust wing noise (MAD of
-        ``y - baseline``). Weak peaks scale ``rv_err`` up by
-        ``min_peak_contrast_sigma / (peak/MAD)`` so alias fits are down-weighted.
-    rv_err_min_vstep_fraction : float
-        Floor ``rv_err`` to this fraction of the minimum positive velocity spacing.
-        Keeps noiseless / discretization-only formal σ from collapsing far below the
-        grid scale (which breaks coverage checks like residual ≤ 3×RV_ERR). Default
-        ``0.15`` → 7.5 m/s on a 50 m/s grid.
     """
 
+    #: Percentile range low (0–100) for bisector midpoints in the RV estimate.
     rv_percentile_lo: float = 10.0
+    #: Percentile range high (0–100) for bisector midpoints in the RV estimate.
     rv_percentile_hi: float = 90.0
+    #: Fixed number of evenly spaced percentile cuts (overrides ``rv_percentile_step`` when ``>= 2``).
     rv_n_percentile_cuts: int = 31
+    #: Step between percentile cuts when ``rv_n_percentile_cuts < 2``.
     rv_percentile_step: float = 5.0
+    #: Top section low for bisector inverse slope (BIS), NEID default 60–90%.
     bis_top_lo: float = 60.0
+    #: Top section high for BIS.
     bis_top_hi: float = 90.0
+    #: Bottom section low for BIS, NEID default 10–40%.
     bis_bottom_lo: float = 10.0
+    #: Bottom section high for BIS.
     bis_bottom_hi: float = 40.0
+    #: Gaussian performance weight on percentile cuts (core emphasis).
     core_weight_sigma_percentile: float = 25.0
+    #: Representative “core” cut percentile for diagnostics / preview labeling.
     rv_err_core_percentile: float = 50.0
     rv_err_bootstrap_samples: int = 0
     rv_err_bootstrap_seed: int | None = None
+    #: Minimum successful bisector cuts required for a valid RV.
     min_cuts: int = 5
+    #: Minimum peak amplitude (above baseline) in units of robust wing noise.
     min_peak_contrast_sigma: float = 5.0
+    #: Floor ``rv_err`` to this fraction of the minimum positive velocity spacing.
     rv_err_min_vstep_fraction: float = 0.15
 
 

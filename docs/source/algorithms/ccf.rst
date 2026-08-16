@@ -1,6 +1,6 @@
-=====================
+=======================
 Cross-correlation (CCF)
-=====================
+=======================
 
 This page summarizes the CCF algorithms and fitting machinery implemented in
 :mod:`hispecdrp.primitives.utils.ccf.ccf_utils` (and used by both stellar-RV algorithms).
@@ -75,10 +75,10 @@ diagonal ``ccf_err`` perturbations.
 References
 ----------
 
-.. [1] KPF-Pipeline radial_velocity ``src`` (mask-line tables and RV context; template path differs):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
-.. [2] KPF ``alg.py`` (masking algorithms in KPF):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg.py
-.. [3] spirou-ccf (SPIRou spectra / CCF ecosystem):
-       https://github.com/edermartioli/spirou-ccf
+* KPF-Pipeline radial_velocity ``src`` (mask-line tables and RV context; template path differs):
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+* KPF ``alg.py`` (masking algorithms in KPF):
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg.py
+* spirou-ccf (SPIRou spectra / CCF ecosystem):
+  https://github.com/edermartioli/spirou-ccf
 

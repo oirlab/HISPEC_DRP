@@ -4,8 +4,10 @@ Regenerate CCF line masks from packaged BT-Settl templates.
 
 For each ``*.h5`` under ``hispecdrp/data/templates/``, writes:
 
-- ``<stem>.delta.mas`` — two-column mask from
-  :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template`.
+- ``<stem>.delta.mas`` — two-column **relaxed** seed mask from
+  :func:`hispecdrp.utils.line_mask_utils.build_line_mask_from_template` using
+  :data:`hispecdrp.utils.line_mask_utils.RELAXED_TEMPLATE_MASK_BUILD_KW`
+  (depth ≥ 10%; no deblend / telluric / saturated-core rejection).
 - ``<stem>.tophat.mas`` — three-column segment mask: each delta line center becomes a
   finite rest segment with half-width
   ``half_width_nm = slope * λ_center_nm + intercept`` using
@@ -34,6 +36,7 @@ def main() -> None:
     from hispecdrp.utils.line_mask_utils import MaskLines
     from hispecdrp.utils.line_mask_utils import (
         DEFAULT_WIDTH_CALIBRATION_K2_ALL,
+        RELAXED_TEMPLATE_MASK_BUILD_KW,
         build_line_mask_from_template,
         read_mask_generation_meta,
     )
@@ -50,9 +53,12 @@ def main() -> None:
     for tpl in h5_list:
         stem = tpl.stem
         out_delta = masks_dir / f"{stem}.delta.mas"
-        print(f"delta: {tpl.name} -> {out_delta.name}")
+        print(f"delta (relaxed): {tpl.name} -> {out_delta.name}")
         _path, entries = build_line_mask_from_template(
-            str(tpl), output_path=str(out_delta), masks_directory=str(masks_dir)
+            str(tpl),
+            output_path=str(out_delta),
+            masks_directory=str(masks_dir),
+            **RELAXED_TEMPLATE_MASK_BUILD_KW,
         )
         centers_nm = np.array([e.wavelength_nm for e in entries], dtype=np.float64)
         weights = np.array([e.weight for e in entries], dtype=np.float64)
@@ -88,7 +94,7 @@ def main() -> None:
             lo_nm / 1000.0, hi_nm / 1000.0, weights, metadata=md
         )
         out_tophat = masks_dir / f"{stem}.tophat.mas"
-        print(f"tophat: {tpl.name} -> {out_tophat.name}")
+        print(f"tophat: {tpl.name} -> {out_tophat.name}  (n={len(entries)})")
         ml.save(output_path=str(out_tophat))
 
 

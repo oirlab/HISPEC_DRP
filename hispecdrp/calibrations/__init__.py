@@ -1,5 +1,9 @@
 from .hispec_store import HISPECCalibrationStore
-from .koa_sync import verify_koa_calibrations
+from .koa_sync import (
+    ensure_koa_calibrations,
+    seed_koa_calibration_cache,
+    verify_koa_calibrations,
+)
 from .selectors import *
 
 from koa_middleware import CalibrationSelector

@@ -142,6 +142,6 @@ If ``wavesol`` is resolved from KOA or YAML, that model is used instead.
 See also
 --------
 
-* :doc:`pipeline_stages` — fiberflat pipeline primitives
-* :doc:`configuration` — ``use_master_calibrations``, ``derive_stage1_trace_from_sim``
 * :doc:`../calibrations/calibration_database` — calibration store internals
+* :doc:`basic_usage` — short E2E worked example
+* :doc:`limitations` — known simulation limits

@@ -797,11 +797,11 @@ class DataModel:
         append_receipts : bool, optional
             Whether to append receipts from input models. Defaults to True.
         ancestor_rule : str, optional
-            Rule for handling data ancestors. Defaults to 'these'.
-            Rules are:
-                - 'these': Add the input models themselves to the data ancestors of the output model, but do not copy their ancestors.
-                - 'append': Copy the data ancestors from the input models to the output model, but do not include the input models themselves as ancestors.
-                - 'none': Do not copy ancestors or add input models as ancestors.
+            Rule for handling data ancestors. Defaults to ``these``.
+
+            - ``these``: Add the input models themselves to the data ancestors of the output model, but do not copy their ancestors.
+            - ``append``: Copy the data ancestors from the input models to the output model, but do not include the input models themselves as ancestors.
+            - ``none``: Do not copy ancestors or add input models as ancestors.
 
         append_calibrations : bool, optional
             Whether to append calibrations from input models. Defaults to True.
