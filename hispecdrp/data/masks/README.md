@@ -3,7 +3,7 @@
 ## Contents of this directory
 
 Line masks here are **generated from packaged BT-Settl templates** under
-`hispecdrp/data/templates/*.h5`. Regenerate **relaxed** depth-weighted / tophat
+`hispecdrp/data/templates/*.h5`. Regenerate packaged depth-weighted / tophat
 products with:
 
 ```bash
@@ -16,21 +16,20 @@ For each template stem, that script writes:
 
 | File pattern | Role |
 |--------------|------|
-| `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight. Built with :data:`~hispecdrp.utils.line_mask_utils.RELAXED_TEMPLATE_MASK_BUILD_KW` (continuum-normalized depth ≥ 10%; **no** deblend, telluric gate, or saturated-core floor) so line count is maximized. |
+| `<template_stem>.delta.mas` | Two columns: vacuum line-center (nm), weight. Built with :data:`~hispecdrp.utils.line_mask_utils.OPTIMAL_TEMPLATE_MASK_BUILD_KW` (continuum-normalized depth ≥ 10%; deblend + telluric gate + saturated-core floor). |
 | `<template_stem>.tophat.mas` | Three columns: vacuum segment start (nm), end (nm), weight — finite-width lines derived from the delta table using the linear half-width law :data:`hispecdrp.utils.line_mask_utils.DEFAULT_WIDTH_CALIBRATION_K2_ALL`. |
 
-The historical stricter builder kwargs remain available as
-:data:`~hispecdrp.utils.line_mask_utils.OPTIMAL_TEMPLATE_MASK_BUILD_KW` (deblend +
-telluric + flux floor) for ad-hoc use; the packaged regenerator uses the
-**relaxed** path.
+:data:`~hispecdrp.utils.line_mask_utils.RELAXED_TEMPLATE_MASK_BUILD_KW` (no deblend /
+telluric / floor) remains for **seed** masks in ccfopt bias-cull notebooks — do not
+overwrite the packaged ``*.delta.mas`` / ``*.tophat.mas`` with that path (BT-Settl
+stellar-RV tests expect the optimal products).
 
 ### CCF-contrast–optimized delta masks (bias-culled)
 
-``*.ccfopt.delta.mas`` is a **static rest-frame** refinement of the packaged
-relaxed ``*.delta.mas`` seed so that **line-by-line** stellar RV is unbiased at
-injected RV = 0, weights track CCF contrast, and lines with extreme inject-bias
-are culled. The mask file does **not** change with bulk RV; only
-``ccf_input_velocity`` moves at runtime.
+``*.ccfopt.delta.mas`` is a **static rest-frame** refinement of a seed delta mask
+so that **line-by-line** stellar RV is unbiased at injected RV = 0, weights track
+CCF contrast, and lines with extreme inject-bias are culled. The mask file does
+**not** change with bulk RV; only ``ccf_input_velocity`` moves at runtime.
 
 **Canonical regenerator** (reuses the order-scan product tree):
 
@@ -42,7 +41,7 @@ That notebook:
 
 1. Reuses ``OUT=/Users/ckilpatrick/hispec_rv_order_scan`` ramps / Stage0–2 blaze L2
    (skip flags default to no clobber).
-2. Re-zeros each relaxed seed line at inject = 0
+2. Re-zeros each seed line at inject = 0
    (``λ' = λ × (1 + RV/c)``) and sets weight ∝ `|Gaussian CCF contrast|`.
 3. Runs line-by-line RV at inject = 0, 100, …, 1000 m/s; histograms per-line
    mean bias; drops outliers with tunable ``BIAS_ABS_CUT_M_S``.
