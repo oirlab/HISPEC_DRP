@@ -1204,11 +1204,13 @@ def create_ramp_and_calibrations(
     template_mag_ab: float | None = None,
     template_2mass_band: str | None = None,
     template_filename: str | None = None,
+    save_ramp: bool = False,
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
     seed: int | None = None,
     sky_filename: str | None = None,
     sky_fiber: int | None = None,
+    apply_e2e_throughput: list | None = None,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
@@ -1279,6 +1281,9 @@ def create_ramp_and_calibrations(
         MK sky background filename to be used as sky background on sky fiber.
     sky_fiber : int, optional
         Fiber number to which only the sky background is applied. 
+    apply_e2e_throughput : list, optional
+        List of fibers to apply end-to-end throughput (telescope through detector,
+        not including atmosphere)
     **cal_kw
         Passed to :func:`create_simulated_calibration_models` when creating dummy calibrations.
 
@@ -1395,9 +1400,14 @@ def create_ramp_and_calibrations(
                 if f in (1, 2, 3):
                     logger.info("Adding sky background to fiber %s.", f)
                     srm.add_sky_background(fiber_number=f, sky_filename=sky_filename)
+        if apply_e2e_throughput is not None:
+            for f in fibers:
+                if f in apply_e2e_throughput:
+                    logger.info("Applying E2E throughput to fiber %s.", f)
+                    srm.apply_throughput_total(fiber_number=f, mode='NGS')
 
         rate_map = srm.create_native_rate_map(
-            spectrograph=spectrograph, method="prf_convolution"
+            spectrograph=spectrograph, method="prf_convolution", save=False,
         )
         logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
 
@@ -1463,7 +1473,7 @@ def create_ramp_and_calibrations(
         target_meta=target_meta,
         seed=seed,
     )
-    if overwrite_ramp or not os.path.isfile(ramp_path):
+    if save_ramp and overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
     return ramp_model, calibration_models, np.asarray(rate_map, dtype=np.float64)
 
@@ -1492,6 +1502,7 @@ def create_ramp_from_spectrum(
     seed: int | None = 0,
     sky_filename: str | None = None,
     sky_fiber: int | None = None,
+    apply_e2e_throughput: list | None = None,
     **kwargs,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
     """
@@ -1581,6 +1592,9 @@ def create_ramp_from_spectrum(
         MK sky background filename to be used as sky background on sky fiber.
     sky_fiber : int, optional
         Fiber number to which only the sky background is applied.
+    apply_e2e_throughput : list, optional
+        List of fibers to apply end-to-end throughput (telescope through detector,
+        not including atmosphere)
     **kwargs
         Forwarded to :func:`create_ramp_and_calibrations`.
 
@@ -1638,6 +1652,7 @@ def create_ramp_from_spectrum(
         seed=seed,
         sky_filename=sky_filename,
         sky_fiber=sky_fiber,
+        apply_e2e_throughput=apply_e2e_throughput,
         **kwargs,
     )
     ramp_meta = getattr(ramp_model, "meta", None)

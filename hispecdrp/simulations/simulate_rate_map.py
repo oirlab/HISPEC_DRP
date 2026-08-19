@@ -183,7 +183,7 @@ class SimulateRateMap:
 
         Throughput should be applied AFTER any radial velocity shifts"""
 
-        logger.warning("Throughput application is in development and may not reflect true HISPEC throughput.", UserWarning)
+        logger.warning("Throughput application is in development and may not reflect true HISPEC throughput.")
 
         mode = mode.upper()
         if mode not in ("NGS", "LGS"):
