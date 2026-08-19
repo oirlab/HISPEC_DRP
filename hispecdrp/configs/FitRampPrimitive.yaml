@@ -1,4 +1,4 @@
-class: RampFitPrimitive
+class: FitRampPrimitive
 description: Standard ramp fitting configuration.
 context: {}
 parameters: {}

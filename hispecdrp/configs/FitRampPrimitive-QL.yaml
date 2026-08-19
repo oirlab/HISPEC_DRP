@@ -1,4 +1,4 @@
-class: RampFitPrimitive
+class: FitRampPrimitive
 description: Quick look ramp fitting configuration.
 context:
   quicklook: true
