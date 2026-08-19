@@ -1,0 +1,4 @@
+class: SaturationCheckPrimitive
+description: Standard saturation check configuration.
+context: {}
+parameters: {}

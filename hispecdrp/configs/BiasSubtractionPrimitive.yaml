@@ -1,0 +1,4 @@
+class: BiasSubtractionPrimitive
+description: Standard bias subtraction configuration.
+context: {}
+parameters: {}

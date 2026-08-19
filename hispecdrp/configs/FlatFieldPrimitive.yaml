@@ -1,0 +1,4 @@
+class: DetectorFlatPrimitive
+description: Standard detector flat field correction configuration.
+context: {}
+parameters: {}

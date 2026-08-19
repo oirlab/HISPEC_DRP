@@ -1,0 +1,4 @@
+class: NonlinearCorrectionPrimitive
+description: Standard nonlinear correction configuration.
+context: {}
+parameters: {}
