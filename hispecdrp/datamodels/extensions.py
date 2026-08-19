@@ -22,10 +22,11 @@ RECEIPT = {
             'PROC_START_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
             'PROC_END_TIME' : str, # Processing time YYYY-MM-DDTHH:MM:SS.sss
             'FILENAME' : str, # Base filename (is this useful?)
-            'ARGUMENTS' : str, # JSON rep of args. This may become problematic with arrays.
+            'PARAMETERS' : str, # JSON rep of args. This may become problematic with arrays.
             'DRP_VERSION' : str, # DRP semver
             'DRP_GIT_COMMIT_ID' : str, # full SHA1
             'STATUS' : str, # COMPLETED, FAILED, SKIPPED
+            'CONFIG_FILE' : str, # Path to the configuration file
         }
     }
 }
