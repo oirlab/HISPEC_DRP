@@ -174,7 +174,7 @@ class FitRampPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'rampfit',
         'method' : 'cython_likely',
         'mcds_num_coadd' : None,
@@ -204,7 +204,7 @@ class FitRampPrimitive(BasePrimitive):
             raise ValueError("JWST jump detection is only for shared memory optimization in combination with JWST ramp fitting methods. "
                              "Please set jwst_jump_detection to False or change ramp fitting algorithm.")
 
-        input_model = datamodels.open(self.input, copy=False)
+        input_model = datamodels.open(self.dataset, copy=False)
         logger.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 
         gain_cal, _ = self.get_calibration(input_model, 'gain')
