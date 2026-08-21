@@ -4,9 +4,9 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 
 from .datamodels import DataModel
 from . import datamodels
-from .utils.config import get_config_path, read_config_file
+from .driver import load_config_file, get_config_dir
 
-from typing import Sequence
+from typing import Any, Sequence
 
 import logging
 logger = logging.getLogger(__name__)
@@ -15,8 +15,7 @@ __all__ = ['ProcessingComponent']
 
 class ProcessingComponent(_BasePrimitive):
 
-    ARGUMENTS = {
-        'input': None,
+    PARAMETERS = {
         'run' : True,
         'save_result': None,
         'output_model': 'input',
@@ -27,33 +26,48 @@ class ProcessingComponent(_BasePrimitive):
         'show_preview' : False,
     }
 
-    def _init_log_config(self, log_config=None) -> None:
+    LOG_CONFIG_FILE = "logging.yaml"
+
+    ########################
+    #### INITIALIZATION ####
+    ########################
+
+    def __init_subclass__(cls, **kwargs):
+        # Ensure proper cooperative multiple inheritance behavior
+        super().__init_subclass__(**kwargs)
+
+        # Merge ARGUMENTS from the full (reversed) MRO so base defaults apply first
+        merged_args = {}
+        for _cls in cls.mro()[::-1]:
+            if issubclass(_cls, ProcessingComponent):
+                merged_args.update(getattr(_cls, 'PARAMETERS', {}))
+        cls.PARAMETERS = merged_args
+
+    def _init_log_config(self, log_config : dict | str | None = None) -> None:
         """
         Resolve and store ``self.log_config`` by merging (lowest → highest priority):
 
         1. Package defaults from ``hispecdrp/configs/logging.yaml``
-        2. ``logging`` key embedded in ``self.config`` (removed from ``self.config`` after reading)
+        2. ``logging`` attribute embedded in ``self.config``.
         3. ``log_config`` kwarg passed at construction time (dict or file path/name)
         """
 
-        from .pipelines.base_pipeline import BasePipeline
-        if isinstance(self, BasePipeline):
-            logging_file = "logging_pipeline.yaml"
-        else:
-            logging_file = "logging_primitive.yaml"
+        logging_file = os.path.join(get_config_dir(), self.LOG_CONFIG_FILE)
 
         # 1. Package defaults
         try:
-            defaults = read_config_file(get_config_path(logging_file))
+            defaults = load_config_file(logging_file)
         except FileNotFoundError:
+            logger.warning(f"Logging config file not found: {logging_file}")
             defaults = {}
 
-        # 2. Embedded logging block inside the run config (mutates self.config)
-        config_log = self.config.pop("logging", {}) or {}
+        # 2. Embedded logging block inside the run config
+        config_log = self.config.logging
 
         # 3. Runtime kwarg
         if isinstance(log_config, str):
-            kwarg_log = read_config_file(get_config_path(log_config))
+            #kwarg_log = read_config_file(get_config_path(log_config))
+            kwarg_log = load_config_file(log_config)
         elif isinstance(log_config, dict):
             kwarg_log = log_config
         else:
@@ -61,9 +75,13 @@ class ProcessingComponent(_BasePrimitive):
 
         self.log_config = defaults | config_log | kwarg_log
 
-    def apply(self, *args, **kwargs):
+    ##################
+    #### MAIN API ####
+    ##################
+
+    def apply(self, dataset : Any = None, **kwargs):
         """
-        The main method a user calls to run a primitive.
+        One of the two primary methods a user calls to run a primitive. The other is ``Primitive.call()``.
         Users should **not** need to override this method, and care should be taken if doing so.
 
         Both BasePrimitive and BasePipeline implement apply().
@@ -86,6 +104,14 @@ class ProcessingComponent(_BasePrimitive):
         If a ``dict``, additional keys can be included for other outputs. These are accessible at ``self._output['key_name']``.
         """
         raise NotImplementedError(f"instance method _perform not implemented for type {self.__class__.__name__}")
+
+    def _create_preview(self):
+        """
+        Create a preview image for the output data model.
+        This method can be overridden by subclasses to implement specific preview generation logic.
+        By default, this method does nothing.
+        """
+        pass
     
     def _pre_condition(self):
         raise NotImplementedError(f"instance method _pre_condition not implemented for type {self.__class__.__name__}")
@@ -94,16 +120,70 @@ class ProcessingComponent(_BasePrimitive):
         # NOTE: This is to block anyone from calling this method since we don't support it.
         raise NotImplementedError(f"instance method _post_condition not implemented for type {self.__class__.__name__}")
 
-    def __init_subclass__(cls, **kwargs):
-        # Ensure proper cooperative multiple inheritance behavior
-        super().__init_subclass__(**kwargs)
+    #############################
+    #### PARAMETER UTILITIES ####
+    #############################
 
-        # Merge ARGUMENTS from the full (reversed) MRO so base defaults apply first
-        merged_args = {}
-        for _cls in cls.mro()[::-1]:
-            if issubclass(_cls, ProcessingComponent):
-                merged_args.update(getattr(_cls, 'ARGUMENTS'))
-        cls.ARGUMENTS = merged_args
+    @property
+    def allowed_parameters(self):
+        return list(self.PARAMETERS.keys()) + list(getattr(self, "CALIBRATIONS", {}).keys())
+
+    def set_pars(self, **kwargs):
+        """
+        Set parameter values including calibrations as top-level attributes.
+
+        Parameters
+        ----------
+        **kwargs
+            Parameters to set as attributes.
+            For primitives, one can also override calibration values.
+        
+        Notes
+        -----
+        Selector logic is not run here.
+        """
+        allowed = self.allowed_parameters
+        for k, v in kwargs.items():
+            try:
+                if k not in allowed:
+                    raise ValueError(
+                        f"Invalid parameter name '{k}' for {self.__class__.__name__}. "
+                        f"Valid arguments are: {list(allowed)}"
+                    )
+                setattr(self, k, v)
+            except ValueError:
+                logger.exception(f"Failed to set parameter '{k}'")
+
+    def get_pars(self):
+        """
+        Get the current parameter values.
+
+        Returns
+        -------
+        dict
+            A dictionary of parameter names and their current values.
+            Primitive parameters include both parameters and calibrations.
+        """
+        allowed = self.allowed_parameters
+        pars = {}
+        for k in allowed:
+            pars[k] = getattr(self, k, None)
+        return pars
+
+    def pars_str(self) -> str:
+        """
+        Pretty print the current parameters and calibrations for this primitive or pipeline.
+        
+        Returns
+        -------
+        str
+            A formatted string showing all current parameter values.
+        """
+        return "\n".join(f"{k} = {v}" for k, v in self.get_pars().items())
+
+    #######################
+    #### INPUT/OUTPUTS ####
+    #######################
 
     def save_output(self) -> str | None:
         """
@@ -129,8 +209,8 @@ class ProcessingComponent(_BasePrimitive):
 
     def save_model(
         self,
-        model : 'DataModel',
-        filepath : str | None = None,
+        model : datamodels.DataModel,
+        output_path : str | None = None,
     ) -> str:
         """
         Save a DataModel to a file in the context of this processing component.
@@ -140,7 +220,7 @@ class ProcessingComponent(_BasePrimitive):
         ----------
         model : DataModel
             The model to save.
-        filepath : str | None, optional
+        output_path : str | None, optional
             The full filepath where to save the model.
             Supersedes ``self.output_dir`` and ``self.suffix``.
 
@@ -149,84 +229,11 @@ class ProcessingComponent(_BasePrimitive):
         str
             The file path where the model was saved.
         """
-        output_path = self.generate_output_path(model)
+        if output_path is None:
+            output_path = self.generate_output_path(model)
         model.save(filepath=output_path)
         logger.info(f"Saved {model}")
-        return filepath
-
-    def get_args(self) -> dict:
-        """
-        Get the current arguments as a dictionary.
-
-        Returns
-        -------
-        dict
-            A dictionary of the current argument values.
-        """
-        args = {}
-        for k in self.ARGUMENTS:
-            args[k] = getattr(self, k, self.ARGUMENTS[k])
-        for k in getattr(self, "CALIBRATIONS", {}):
-            args[k] = getattr(self, k, self.CALIBRATIONS[k])
-        return args
-
-    def set_args(self, **kwargs):
-        """
-        Set arguments including calibrations as top-level attributes.
-
-        Parameters
-        ----------
-        **kwargs
-            Arguments to set as attributes.
-            To override a calibration, provide the calibration name as a keyword argument.
-            Selector logic is not handled here.
-        """
-
-        allowed = set(self.ARGUMENTS.keys()) | set(getattr(self, "CALIBRATIONS", {}).keys())
-
-        for k, v in kwargs.items():
-            if k not in allowed:
-                logger.error(
-                    f"Invalid argument name '{k}' for {self.__class__.__name__}. "
-                    f"Valid arguments are: {list(allowed)}"
-                )
-            setattr(self, k, v)
-
-    def _prepr_args(self) -> str:
-        """
-        Pretty print the current arguments and calibrations for this object only.
-        
-        Returns
-        -------
-        str
-            A formatted string showing all current argument values.
-        """
-        args = self.get_args()
-        keys = list(self.ARGUMENTS) + list(getattr(self, "CALIBRATIONS", {}))
-        return "\n".join(f"{k} = {args[k]}" for k in keys)
-
-    @staticmethod
-    def get_do_traces(
-        input_model: datamodels.DataModel,
-        do_fibers: list[str] | None = None,
-        do_orders: list[int] | None = None,
-    ) -> dict[str, list[int]]:
-
-        if do_fibers is None:
-            do_fibers = [str(f + 1) for f in range(input_model.num_fibers)]
-
-        if do_orders is None:
-            do_orders = input_model.make_order_vec()
-
-        return do_fibers, do_orders
-
-    def _create_preview(self):
-        """
-        Create a preview image for the output data model.
-        This method can be overridden by subclasses to implement specific preview generation logic.
-        By default, this method does nothing.
-        """
-        pass
+        return output_path
 
     def generate_output_path(
         self,
@@ -235,41 +242,39 @@ class ProcessingComponent(_BasePrimitive):
     ):
         """
         Generate an output filepath for a model.
+
+        Parameter
+        ---------
+        model : str | DataModel
+            The model to generate the output path for.
+        output_dir : str | None, optional
+            The output directory to use. If None, the output directory is determined by ``self.get_output_dir(model)``.
         """
-
-        # Open model
-        #model = datamodels.open(model, meta_only=True)
-
-        # If the model has a filepath, use it
-        #if model._filepath is not None:
-        #    return model._filepath
         
         # Get output directory
-        output_dir = self.get_output_dir(model)
+        if output_dir is None:
+            output_dir = self.get_output_dir(model)
 
         # Get the filename
         if self.output_file is not None:
             filename = self.output_file
         else:
             filename = model.generate_filename(suffix=self.suffix)
+
+        # Construct the full output path
         output_path = os.path.abspath(os.path.join(output_dir, filename))
+
+        # Return the output path
         return output_path
 
-    def get_output_dir(
-        self,
-        model : str | DataModel
-    ) -> str:
+    def get_output_dir(self, model : str | DataModel) -> str:
         """
         Get the output directory for saving any results in the context of a model.
-
         The priority for determining the output directory is as follows:
 
         1. ``self.output_dir`` if explicitly set (input model not used).
-        2. ``model._filepath`` directory if available.
-        3. Current working directory as a fallback.
-
-        - If ``self.output_dir`` is set, it is returned and the input model is not used.
-        - Otherwise, the output dir is determined from the input model's filepath if available, and if not, the current working directory is used.
+        2. ``model._filepath`` directory if available If an input model is provided, the fallback is the directory of self.dataset.
+        3. Current working directory as a final fallback.
 
         Parameters
         ----------
@@ -294,17 +299,22 @@ class ProcessingComponent(_BasePrimitive):
         # Fallback is the current working directory
         return os.getcwd()
 
-    def get_input_dir(self, model=None):
+    def get_input_dir(self, model : str | DataModel | None = None):
         """
         Get the input directory for a given model.
+
+        Parameters
+        ----------
+        model : str | DataModel | None
+            The input model to determine the input directory from. If None, uses ``self.dataset``.
         """
         
         # Model contenxt
         if model is None:
-            model = self.input
+            model = self.dataset
 
         # Helper function for below.
-        def _get_filepath(model):
+        def _get_model_filepath(model):
             _filepath = getattr(model, '_filepath', None)
             if _filepath is not None:
                 return os.path.dirname(os.path.abspath(_filepath))
@@ -317,20 +327,64 @@ class ProcessingComponent(_BasePrimitive):
         
         # Case 2: DataModel instance with _filepath attr
         elif isinstance(model, datamodels.DataModel):
-            return _get_filepath(model)
+            return _get_model_filepath(model)
         
         # Case 3: Sequence
         elif isinstance(model, (list, tuple)):
             first_input = model[0]
-            return _get_filepath(first_input)
+            return _get_model_filepath(first_input)
         
         # Case 4: Dict
         elif isinstance(model, dict):
             first_input = next(iter(model.values()))
-            return _get_filepath(first_input)
+            return _get_model_filepath(first_input)
         
         return None
+
+    #####################
+    #### OTHER UTILS ####
+    #####################
+
+    def __repr__(self):
+        s = self.__class__.__name__
+        for key in self.allowed_parameters:
+            s += f"\n  {key}: {getattr(self, key)}"
+        return s
     
+    @staticmethod
+    def get_do_traces(
+        input_model: datamodels.DataModel,
+        do_fibers: list[str] | None = None,
+        do_orders: list[int] | None = None,
+    ) -> dict[str, list[int]]:
+        """
+        Determine which fibers and orders to process based on the input model and optional user-specified lists.
+
+        Parameters
+        ----------
+        input_model : datamodels.DataModel
+            The input data model.
+        do_fibers : list[str] | None, optional
+            A list of fiber numbers to process. If None, all fibers are processed.
+        do_orders : list[int] | None, optional
+            A list of order numbers to process. If None, all orders are processed.
+
+        Returns
+        -------
+        do_fibers : list[str | int]
+            The list of fiber numbers to process.
+        do_orders : list[int]
+            The list of order numbers to process.
+        """
+
+        if do_fibers is None:
+            do_fibers = [str(f + 1) for f in range(input_model.num_fibers)]
+
+        if do_orders is None:
+            do_orders = input_model.make_order_vec()
+
+        return do_fibers, do_orders
+
     def _iter_inputs(self, input=None):
         """
         Yields (key, item) pairs from self.input, normalized

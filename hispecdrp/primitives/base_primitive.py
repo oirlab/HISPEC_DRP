@@ -1,7 +1,7 @@
 from __future__ import annotations
 import datetime
 import numpy as np
-import copy
+from copy import deepcopy
 from typing import Sequence
 import os
 
@@ -11,17 +11,19 @@ from koa_middleware.utils import is_valid_uuid
 import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
-from ..utils.config import get_config_path, read_config_file
 from ..utils.logging import logging_context
 from ..calibrations.utils import get_calibration_selector_type
 from ..calibrations import HISPECCalibrationStore
-
+from ..driver import ConfigFile, ConfigStore, ConfigSelector, get_config_filepath
 from ..processing_component import ProcessingComponent
 
 import logging
 logger = logging.getLogger(__name__)
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..pipelines import BasePipeline
 
 
 __all__ = ['BasePrimitive']
@@ -31,9 +33,13 @@ class BasePrimitive(ProcessingComponent):
     
     CALIBRATIONS = {}
 
+    #### INITIALIZATION AND CONFIGURATION ####
+
     def __init__(
         self,
-        config : dict | str | None = None,
+        dataset : Any = None,
+        config : dict | ConfigFile | str | None = None,
+        context : dict | None = None,
         log_config : dict | str | None = None,
         parent : Any | None = None,
         **kwargs
@@ -41,6 +47,8 @@ class BasePrimitive(ProcessingComponent):
         """
         Parameters
         ----------
+        dataset : Any
+            The dataset to process.
         config : dict | str | None
             A configuration dictionary, or the path to to a configuration file.
         log_config : dict | str | None
@@ -52,74 +60,137 @@ class BasePrimitive(ProcessingComponent):
             Any additional keyword arguments to set or override (including ``config``) for this primitive.
         """
 
+        # Parent pipeline instance
+        self.parent = parent
+        self.dataset = dataset
+
         # Load the configuration file or Config object
-        self.init_config(config)
+        self.init_config(dataset, config, context)
 
         # Resolve logging config (merges defaults -> config file -> kwarg)
         self._init_log_config(log_config)
 
         # Set any kwargs passed to init
-        self.init_args(**kwargs)
+        self.init_parameters(**kwargs)
+
 
         # Init the output, status, and calibrations used
         self._output = None
         self._status = None
         self._calibrations_used = {}
 
-        self._parent = parent
-
     def init_config(
         self,
-        config : dict | str | None = None,
-    ) -> dict:
+        dataset : Any = None,
+        config : dict | None = None,
+        context : dict | None = None
+    ):
+        if config is not None:
+            if isinstance(config, str):
+                self.config = ConfigFile.from_file(config)
+            elif isinstance(config, dict):
+                self.config = ConfigFile.from_dict(config)
+            elif isinstance(config, ConfigFile):
+                self.config = config
+            else:
+                raise TypeError("config must be a str (filename or filepath), dict, or ConfigFile instance.")
+        else:
+            if dataset is None:
+                raise ValueError(
+                    "A dataset must be passed to the Step constructor if no config file is provided."
+                )
+            self.config = self.get_config(
+                dataset, context=context
+            )
+
+        # Initialize parameters from config and kwargs
+        self.init_parameters()
+
+        # Initialize parameters
+        #self.init_calibrations()
+
+    @classmethod
+    def get_config(
+        cls,
+        dataset : Any,
+        context : dict | None = None
+    ) -> ConfigFile:
         """
-        Initialize the configuration for this primitive.
+        Retrieve the configuration for this primitive based on the dataset and context.
 
         Parameters
         ----------
-        config : dict | str | None
-            A configuration dictionary, a path to to a configuration file, or None.
+        dataset : Any
+            The dataset to use for selecting the configuration. Cannot be None.
+        context : dict | None
+            Optional context to use for selecting the configuration.
 
         Returns
         -------
-        dict
-            The final configuration dictionary at `self.config`.
+        config_file : ConfigFile
+            The configuration file for this primitive.
         """
-        class_name = self.__class__.__module__ + '.' + self.__class__.__name__
+        with ConfigStore() as store:
+            selector = ConfigSelector(class_name=cls.__name__, context=context)
+            return store.select_and_get_config(dataset, selector=selector)
 
-        # No user config, use defaults
-        if config is None:
-            self.config = {
-                'class': class_name,
-                'arguments': self.ARGUMENTS.copy(),
-            }
-            return self.config
-        
-        # Load from file or use provided dict or filepath
+    @classmethod
+    def from_config_file(cls, config : ConfigFile | str, **kwargs):
+        """
+        Initialize a primitive from a configuration file.
+
+        Parameters
+        ----------
+        config : str, dict, or ConfigFile, optional.
+            The configuration for the primitive. Can be one of:
+                - str: A full path to a configuration file or a filename in the ConfigStore.
+                - dict: A dictionary of configuration parameters.
+                - ConfigFile: A ConfigFile instance.
+
+            If not provided, the primitive will attempt to auto-configure based on the input dataset and context.
+            If the dataset is required for auto-configuration, it must be provided.
+        kwargs : dict
+            Additional keyword arguments to pass to the primitive constructor.
+
+        Returns
+        -------
+        BasePrimitive
+                An instance of the primitive with the configuration loaded.
+        """
+
+        # If ConfigFile object is passed, use it directly.
+        # Otherwise, load the config file.
         if isinstance(config, str):
-            config_filepath = get_config_path(config)
-            self.config = read_config_file(config_filepath)
+            config_filepath = get_config_filepath(config)
+            config_file = ConfigFile.from_file(config_filepath)
         elif isinstance(config, dict):
-            self.config = config
+            config_file = ConfigFile.from_dict(config)
+        elif isinstance(config, ConfigFile):
+            config_file = config
         else:
-            raise TypeError(f"Invalid config type: {type(config)}. Expected dict or str.")
-        
-        # Set class name
-        self.config['class'] = class_name
-        
-        # NOTE: Fully populate config with all defaults
+            raise ValueError("Input config must be a filepath (str) or a ConfigFile object")
 
-        # Default arguments
-        if 'arguments' not in self.config:
-            self.config['arguments'] = self.ARGUMENTS.copy()
-        else:
-            self.config['arguments'] = self.ARGUMENTS | self.config['arguments']
-        #
-        self._init_calibrations()
+        # If class is not provided, then use the current cls context
+        prim_class = config_file.class_
+        if prim_class is None:
+            prim_class = cls
 
-        return self.config
+        # Check the class is a valid Step or Pipeline class
+        if not issubclass(prim_class, cls):
+            raise ValueError(f"Config file {config_file} specifies class {prim_class}, which is not a subclass of {cls}")
+        from ..pipelines.base_pipeline import BasePipeline
+        if prim_class in (BasePrimitive, BasePipeline):
+            raise ValueError(f"Config file {config_file} does not specify a class, and the current context is {cls}, which is not a valid class to initialize.")
+
+        if issubclass(prim_class, BasePipeline):
+            raise ValueError(f"Config file {config_file} specifies class {prim_class}, which is a Pipeline. Use BasePipeline.from_config_file to initialize a Pipeline.")
+
+        return prim_class(
+            config=config_file,
+            **kwargs
+        )
     
-    def _init_calibrations(self):
+    def init_calibrations(self):
         """
         Process calibration configurations applying selector and kwargs logic.
         
@@ -134,108 +205,109 @@ class BasePrimitive(ProcessingComponent):
         cal_config_dict : dict
             The calibrations config dictionary to process
         """
+        pass
         for cal in self.CALIBRATIONS:
             
-            # Alias
-            cal_config = self.config['arguments'].get(cal)
+            # Alias 
+            cal_config = self.config.parameters.get(cal)
 
             # Case 1: No entry in config dict or entry is empty dict
             # -> use default selector and kwargs
             if not cal_config:
-                self.config['arguments'][cal] = self.CALIBRATIONS[cal].copy()
+                #self.config['arguments'][cal] = self.CALIBRATIONS[cal].copy()
                 continue
             
             # Case 2: User provided selector class (string or class)
             # -> If selector matches default selector, use default kwargs (merged with user kwargs)
             # -> If selector does not match, use only user kwargs (or empty dict)
-            if 'selector' in cal_config:
+            # if 'selector' in cal_config:
 
-                user_selector = cal_config['selector']
+            #     user_selector = cal_config['selector']
                 
-                # Convert string to class if needed
-                if isinstance(user_selector, str):
-                    user_selector = get_calibration_selector_type(user_selector)
-                    cal_config['selector'] = user_selector
+            #     # Convert string to class if needed
+            #     if isinstance(user_selector, str):
+            #         user_selector = get_calibration_selector_type(user_selector)
+            #         cal_config['selector'] = user_selector
                 
-                # Validate selector is a CalibrationSelector subclass
-                if not issubclass(user_selector, CalibrationSelector):
-                    raise TypeError(f"Invalid selector for calibration '{cal}': {user_selector}. Must be a CalibrationSelector subclass.")
+            #     # Validate selector is a CalibrationSelector subclass
+            #     if not issubclass(user_selector, CalibrationSelector):
+            #         raise TypeError(f"Invalid selector for calibration '{cal}': {user_selector}. Must be a CalibrationSelector subclass.")
                 
-                # Check if same selector as default
-                same_selector = user_selector is self.CALIBRATIONS[cal]['selector']
+            #     # Check if same selector as default
+            #     same_selector = user_selector is self.CALIBRATIONS[cal]['selector']
                 
-                if same_selector:
-                    # Merge default kwargs with user kwargs
-                    default_kwargs = self.CALIBRATIONS[cal].get('selector_kwargs', {})
-                    user_kwargs = cal_config.get('selector_kwargs', {})
-                    cal_config['selector_kwargs'] = default_kwargs | user_kwargs
-                else:
-                    # Different selector, use only user kwargs (or empty dict)
-                    if 'selector_kwargs' not in cal_config:
-                        cal_config['selector_kwargs'] = {}
+            #     if same_selector:
+            #         # Merge default kwargs with user kwargs
+            #         default_kwargs = self.CALIBRATIONS[cal].get('selector_kwargs', {})
+            #         user_kwargs = cal_config.get('selector_kwargs', {})
+            #         cal_config['selector_kwargs'] = default_kwargs | user_kwargs
+            #     else:
+            #         # Different selector, use only user kwargs (or empty dict)
+            #         if 'selector_kwargs' not in cal_config:
+            #             cal_config['selector_kwargs'] = {}
             
-            # Case 3: Filepath provided
-            elif isinstance(cal_config, str):
-                # Assume it's a filepath to a calibration model, but do not validate here
-                # User can provide filepath directly as argument value instead of using selector logic
-                continue
+            # # Case 3: Filepath provided
+            # elif isinstance(cal_config, str):
+            #     # Assume it's a filepath to a calibration model, but do not validate here
+            #     # User can provide filepath directly as argument value instead of using selector logic
+            #     continue
 
-            # Case 4: No selector class specified, but user may have kwargs
-            # -> Use default selector and merge kwargs
-            else:
-                cal_config['selector'] = self.CALIBRATIONS[cal]['selector']
-                default_kwargs = self.CALIBRATIONS[cal].get('selector_kwargs', {})
-                user_kwargs = cal_config.get('selector_kwargs', {})
-                cal_config['selector_kwargs'] = default_kwargs | user_kwargs
+            # # Case 4: No selector class specified, but user may have kwargs
+            # # -> Use default selector and merge kwargs
+            # else:
+            #     cal_config['selector'] = self.CALIBRATIONS[cal]['selector']
+            #     default_kwargs = self.CALIBRATIONS[cal].get('selector_kwargs', {})
+            #     user_kwargs = cal_config.get('selector_kwargs', {})
+            #     cal_config['selector_kwargs'] = default_kwargs | user_kwargs
     
-    def init_args(self, **kwargs):
+    def init_parameters(self, **kwargs):
         """
-        Initialize arguments including calibrations as top-level attributes with the following priorities:
-            2. `self.config['arguments']` (from config)
-            1. Direct attribute setting (highest priority)
-        
-        This must be called after `self.config` is initialized.
+        Initialize parameters including calibrations as top-level attributes with the following priorities:
+            1. `self.PARAMETERS` (lowest priority)
+            2. `self.config.parameters`
+            3. Direct attribute setting (highest priority)
 
         Parameters
         ----------
         **kwargs
             Direct attribute settings to override config and defaults.
             To override a calibration, provide the calibration name as a keyword argument.
-            Selector logic is not handled here.
+            Selector logic is not run here.
         """
 
-        allowed = set(self.ARGUMENTS.keys()) | set(self.CALIBRATIONS.keys())
+        # Allowed set of parameter names
+        allowed = list(set(self.PARAMETERS.keys()) | set(self.CALIBRATIONS.keys()))
 
-        # Config already populated with default args
-        args = self.config["arguments"]
-
-        # Initialize calibrations with selector and kwargs logic
-        #args.update(self.config['calibrations'])
-
-        # Override with direct kwargs
-        args.update(kwargs)
+        # Get all step parameter values from config file and input kwargs
+        pars = self.PARAMETERS | self.config.parameters | kwargs
 
         # Set attributes
-        for k, v in args.items():
+        for k, v in pars.items():
             if k not in allowed:
-                logger.error(
-                    f"Invalid argument name '{k}' for {self.__class__.__name__}. "
-                    f"Valid arguments are: {list(args.keys())}"
-                )
+                msg = f"Invalid parameter name '{k}' for {self.__class__.__name__}. Valid parameters are: {allowed}"
+                logger.error(msg)
+                raise NameError(msg)
             setattr(self, k, v)
+
+    ##################
+    #### MAIN API ####
+    ##################
 
     def _pre_condition(self):
         """
         Checks if all preconditions are met in order to run this primitive.
-        The base class checks if ``self.run`` is ``True``. If not met, the primitive will be skipped.
+        The base class checks if ``self.run`` is ``True``.
+        If not met, the primitive will be skipped.
         This can be overridden to implement custom pre-condition checks.
 
-        Returns:
-            bool: The precondition status.
+        Returns
+        -------
+        pre_condition : bool
+            The precondition status.
         """
-        return self.run
+        return self.run in (True, None)
 
-    def apply(self, input, **kwargs):
+    def apply(self, dataset : Any = None, **kwargs):
         """
         The main method a user calls to run a primitive.
 
@@ -263,13 +335,17 @@ class BasePrimitive(ProcessingComponent):
             self._datetime_start = datetime.datetime.now().isoformat(timespec='microseconds')
 
             try:
-                self.set_args(input=input, **kwargs)
+                # Set new parameters
+                self.set_pars(**kwargs)
 
-                input_dir = self.get_input_dir(self.input)
+                # Primary input
+                if dataset is not None:
+                    self.dataset = dataset
+
                 if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
-                    self.output_dir = input_dir
+                    self.output_dir = self.get_input_dir(self.input)
 
                 if not self._pre_condition():
                     logger.info(f"Skipping {self.__class__.__name__}")
@@ -279,13 +355,13 @@ class BasePrimitive(ProcessingComponent):
                     self.finalize_output()
                     # NOTE: No saving or previews if skipped
                 else:
-                    logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self._prepr_args()}")
+                    logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.pars_str}")
                     self._output = self._perform()
                     # Check again if skipped since primitives can do this dynamically during processing.
                     if not self.run:
                         logger.info(f"Skipping {self.__class__.__name__} after processing due to run=False.")
                         self._status = "SKIPPED"
-                        self.on_skip()
+                        self._on_skip()
                     else:
                         if isinstance(self._output, dict):
                             if 'output' not in self._output:
@@ -302,7 +378,7 @@ class BasePrimitive(ProcessingComponent):
             except Exception as e:
                 self._output = dict(output=input)
                 self._status = "FAILED"
-                self.on_exception(e)
+                self._on_exception(e)
                 self.finalize_output()
                 logger.exception(
                     f"Failed executing primitive {self.__class__.__name__}"
@@ -322,209 +398,53 @@ class BasePrimitive(ProcessingComponent):
 
         # Return main output
         return output
-    
-    def on_exception(self, exc : Exception):
-        """
-        Hook called when an exception occurs during processing. By default, it does nothing.
-        """
-        pass
 
-    def on_skip(self):
-        """
-        Hook called when the primitive is skipped due to pre-condition check failing. By default, it does nothing.
-        """
-        pass
-
-    def __repr__(self):
-        s = self.__class__.__name__
-        for key in self.ARGUMENTS:
-            if hasattr(self, key):
-                s += f"\n  {key}: {getattr(self, key)}"
-        if hasattr(self, 'CALIBRATIONS'):
-            for key in self.CALIBRATIONS:
-                if hasattr(self, key):
-                    s += f"\n  {key}: {getattr(self, key)}"
-        return s
-    
-    def add_receipt_entry(self, model : DataModel):
-        """
-        Add an entry to the receipt table of the model summarizing the processing.
-
-        Parameters
-        ----------
-        model : DataModel
-            The data model to add the receipt entry to.
-        """
-        row = {
-            'PROC_START_TIME' : self._datetime_start,
-            'PROC_END_TIME' : self._datetime_end,
-            'CLASS': f"{self.__class__.__module__}.{self.__class__.__name__}",
-            'FILENAME' : model.meta.filename or 'None',
-            'DRP_VERSION': hispecdrp._version.__version__,
-            'DRP_GIT_COMMIT_ID' : hispecdrp._version.__commit_id__,
-            'ARGUMENTS': self._get_args_repr(),
-            'STATUS' : self._status
-        }
-        model.receipt.add_row(row)
-    
-    def add_calibration_entry(
-        self,
-        model : DataModel,
-        calibration : DataModel | str | dict,
-        cal_role : str,
+    @classmethod
+    def call(
+        cls,
+        dataset : Any,
+        config : dict | str | ConfigFile | None = None,
+        context : dict | None = None,
+        parent : BasePipeline | None = None,
+        return_instance : bool = False,
+        **kwargs
     ):
         """
-        Add a calibration to the DataModel's calibrations table.
-        
+        Top level method to instantiate a primitive or pipeline and run it in one call.
+
         Parameters
         ----------
-        model : DataModel
-            The data model to add the calibration to.
-        calibration : DataModel | str | dict
-            The calibration to add. Can be:
+        dataset : object
+            The dataset to process.
+        context : object, optional
+            The context in which the primitive is being called.
+        config : object, optional
+            The configuration to use for the primitive. Can be a dict, a config file path, or a ConfigFile object.
+        parent : BasePipeline, optional
+            The parent pipeline of this primitive.
+        return_instance : bool, optional
+            If True, return a tuple of (result, primitive_instance).
+            If False, return only the result.
+        kwargs : dict
+            Override primitive parameters.
 
-                - DataModel object
-                - String filepath (will load metadata to create entry)
-                - Dict with calibration column values
-
-        cal_role : str
-            The role of the calibration.
+        Returns
+        -------
+        results: Any
+            The result of processing the input with the primitive.
         """
-
-        # Case 1: Either metadata dict or SQL record (dict)
-        # Assume same keys for now
-        if isinstance(calibration, datamodels.MetaModel):
-            new_row = {
-                'CAL_ROLE': cal_role,
-                'FILENAME' : calibration['filename'] or 'None',
-                'TIME_APPLIED' : self._datetime_start,
-                'CAL_TYPE' : calibration['cal_type'],
-                'DATETIME_OBS' : calibration['datetime_obs'],
-                'LAST_PROCESSED' : calibration['last_processed'],
-                'ID' : calibration['cal_id'],
-                'CLASS' : self.__class__.__name__,
-                'DRP_VERSION' : calibration['drp_version'],
-            }
-
-        if isinstance(calibration, dict):
-            new_row = {
-                'CAL_ROLE': cal_role,
-                'FILENAME' : calibration['filename'] or 'None',
-                'TIME_APPLIED' : self._datetime_start,
-                'CAL_TYPE' : calibration['cal_type'],
-                'DATETIME_OBS' : calibration['datetime_obs'],
-                'LAST_PROCESSED' : calibration['last_processed'],
-                'ID' : calibration['id'],
-                'CLASS' : self.__class__.__name__,
-                'DRP_VERSION' : calibration['drp_version'],
-            }
-
-        # Case 2: filepath or DataModel
-        # NOTE: This path should be used with caution
-        #   and limited to dev purposes or limited user cases, never at Keck.
-        elif isinstance(calibration, (str, DataModel)):
-            from ..datamodels import open as open_datamodel
-            cal_model = open_datamodel(calibration, meta_only=True)
-            new_row = {
-                'CAL_ROLE': cal_role,
-                'FILENAME' : cal_model.meta.filename or 'None',
-                'TIME_APPLIED' : self._datetime_start,
-                'CAL_TYPE' : cal_model.meta.cal_type,
-                'DATETIME_OBS' : cal_model.meta.datetime_obs or 'None',
-                'LAST_PROCESSED' : cal_model.meta.last_processed or None,
-                'ID' : cal_model.meta.cal_id,
-                'CLASS' : self.__class__.__name__,
-                'DRP_VERSION' : cal_model.meta.drp_version,
-            }
+        prim = cls(
+            dataset,
+            config=config,
+            parent=parent,
+            context=context,
+            **kwargs
+        )
+        result = prim.apply()
+        if return_instance:
+            return result, prim
         else:
-            raise ValueError("Invalid calibration input")
-
-        # Add new row
-        model.calibrations.add_row(new_row)
-
-    def add_data_ancestors(
-        self,
-        model : DataModel,
-        sources: DataModel | str | list[DataModel | str],
-    ):
-        if not isinstance(sources, list):
-            sources = [sources]
-        for f in sources:
-            source_model = datamodels.open(f)
-            
-            row_data = {
-                'FILENAME': str(source_model.meta.filename),
-                'CLASS' : self.__class__.__name__,
-                'TIME_APPLIED': self._datetime_start
-            }
-
-            # Add extra fields if include_ancestors is True and value is not None
-            for prop, schema in source_model.meta._schema.get('properties', {}).items():
-                if schema.get('include_ancestors', False):
-                    val = getattr(source_model.meta, prop)
-                    if val is not None:
-                        row_data[prop.upper()] = val
-
-            # Expand table if needed
-            new_cols = [c for c in row_data.keys() if c not in model.data_ancestors.colnames]
-            if new_cols:
-                model._extend_data_ancestors_columns(new_cols)
-
-            model.data_ancestors.add_row(row_data)
-
-    def _get_args_repr(self):
-        """Helper to get a string representation of current arguments."""
-        args_dict = {'input': getattr(self, 'input', None)}
-        for key in self.ARGUMENTS:
-            if hasattr(self, key):
-                val = getattr(self, key)
-                if isinstance(val, np.ndarray) and val.size > 100: # MAX SIZE = 100 elements
-                    args_dict[key] = f"ndarray shape={val.shape} dtype={val.dtype}"
-                else:
-                    args_dict[key] = getattr(self, key)
-        if hasattr(self, 'CALIBRATIONS'):
-            for key in self.CALIBRATIONS:
-                if hasattr(self, key):
-                    args_dict[key] = getattr(self, key)
-        return str(args_dict)
-
-    def finalize_output(self):
-        """
-        Hook called at the end of ``primitive.apply`` to finalize the output.
-        See ``finalize_model`` for details.
-        """
-        assert self._output is not None and 'output' in self._output, 'No output to finalize.'
-        output = self._output['output']
-        self._datetime_end = datetime.datetime.now().isoformat(timespec='microseconds')
-        
-        def _finalize(item):
-            if isinstance(item, (str, DataModel)):
-                self.finalize_model(item)
-            elif isinstance(item, dict):
-                for val in item.values():
-                    self.finalize_model(val)
-            elif isinstance(item, list):
-                for val in item:
-                    self.finalize_model(val)
-
-        _finalize(output)
-        
-    def finalize_model(self, model : DataModel | str):
-        """
-        Finalize a single datamodel by adding receipt entries, used calibrations, and updating metadata.
-        """
-        if isinstance(model, str):
-            return
-        
-        if model.meta.filename is None and not isinstance(model, datamodels.CalibrationModel):
-            model.generate_filename(suffix=self.suffix)
-
-        model.meta.drp_version = hispecdrp._version.__version__ # Always override the current DRP version.
-        if self.run:
-            model.meta.last_processed = self._datetime_end
-        self.add_receipt_entry(model)
-        for cal_role, calibration in self._calibrations_used.items():
-            self.add_calibration_entry(model, calibration, cal_role=cal_role)
+            return result
 
     def get_calibration(
         self,
@@ -715,7 +635,178 @@ class BasePrimitive(ProcessingComponent):
         msg = f"Invalid calibration value for '{cal_role}': {type(cal_value)}"
         logger.error(msg)
         raise ValueError(msg)
+
+    #################
+    #### OUTPUTS ####
+    #################
+
+    def finalize_output(self):
+        """
+        Hook called at the end of ``primitive.apply`` to finalize the output.
+        See ``finalize_model`` for details.
+        """
+        assert self._output is not None and 'output' in self._output, 'No output to finalize.'
+        output = self._output['output']
+        self._datetime_end = datetime.datetime.now().isoformat(timespec='microseconds')
+        
+        def _finalize(item):
+            if isinstance(item, (str, DataModel)):
+                self.finalize_model(item)
+            elif isinstance(item, dict):
+                for val in item.values():
+                    self.finalize_model(val)
+            elif isinstance(item, list):
+                for val in item:
+                    self.finalize_model(val)
+
+        _finalize(output)
+        
+    def finalize_model(self, model : DataModel | str):
+        """
+        Finalize a single datamodel by adding receipt entries, used calibrations, and updating metadata.
+        """
+        if isinstance(model, str):
+            return
+        
+        if model.meta.filename is None and not isinstance(model, datamodels.CalibrationModel):
+            model.generate_filename(suffix=self.suffix)
+
+        model.meta.drp_version = hispecdrp._version.__version__ # Always override the current DRP version.
+        if self.run:
+            model.meta.last_processed = self._datetime_end
+        self.add_receipt_entry(model)
+        for cal_role, calibration in self._calibrations_used.items():
+            self.add_calibration_entry(model, calibration, cal_role=cal_role)
+
+    def add_receipt_entry(self, model : DataModel):
+        """
+        Add an entry to the receipt table of the model summarizing the processing.
+
+        Parameters
+        ----------
+        model : DataModel
+            The data model to add the receipt entry to.
+        """
+        config_filename = self.config.filename or self.config.name or "InMemoryConfigFile"
+
+        row = {
+            'PROC_START_TIME' : self._datetime_start,
+            'PROC_END_TIME' : self._datetime_end,
+            'CLASS': f"{self.__class__.__module__}.{self.__class__.__name__}",
+            'FILENAME' : model.meta.filename or 'None',
+            'DRP_VERSION': hispecdrp._version.__version__,
+            'DRP_GIT_COMMIT_ID' : hispecdrp._version.__commit_id__,
+            'PARAMETERS': self.get_pars_str_for_receipt(),
+            'STATUS' : self._status,
+            'CONFIG_FILE' : config_filename
+        }
+        model.receipt.add_row(row)
     
+    def add_calibration_entry(
+        self,
+        model : DataModel,
+        calibration : DataModel | str | dict,
+        cal_role : str,
+    ):
+        """
+        Add a calibration to the DataModel's calibrations table.
+        
+        Parameters
+        ----------
+        model : DataModel
+            The data model to add the calibration to.
+        calibration : DataModel | str | dict
+            The calibration to add. Can be:
+
+                - DataModel object
+                - String filepath (will load metadata to create entry)
+                - Dict with calibration column values
+
+        cal_role : str
+            The role of the calibration.
+        """
+
+        # Case 1: Either metadata dict or SQL record (dict)
+        # Assume same keys for now
+        if isinstance(calibration, datamodels.MetaModel):
+            new_row = {
+                'CAL_ROLE': cal_role,
+                'FILENAME' : calibration['filename'] or 'None',
+                'TIME_APPLIED' : self._datetime_start,
+                'CAL_TYPE' : calibration['cal_type'],
+                'DATETIME_OBS' : calibration['datetime_obs'],
+                'LAST_PROCESSED' : calibration['last_processed'],
+                'ID' : calibration['cal_id'],
+                'CLASS' : self.__class__.__name__,
+                'DRP_VERSION' : calibration['drp_version'],
+            }
+
+        if isinstance(calibration, dict):
+            new_row = {
+                'CAL_ROLE': cal_role,
+                'FILENAME' : calibration['filename'] or 'None',
+                'TIME_APPLIED' : self._datetime_start,
+                'CAL_TYPE' : calibration['cal_type'],
+                'DATETIME_OBS' : calibration['datetime_obs'],
+                'LAST_PROCESSED' : calibration['last_processed'],
+                'ID' : calibration['id'],
+                'CLASS' : self.__class__.__name__,
+                'DRP_VERSION' : calibration['drp_version'],
+            }
+
+        # Case 2: filepath or DataModel
+        # NOTE: This path should be used with caution
+        #   and limited to dev purposes or limited user cases, never at Keck.
+        elif isinstance(calibration, (str, DataModel)):
+            from ..datamodels import open as open_datamodel
+            cal_model = open_datamodel(calibration, meta_only=True)
+            new_row = {
+                'CAL_ROLE': cal_role,
+                'FILENAME' : cal_model.meta.filename or 'None',
+                'TIME_APPLIED' : self._datetime_start,
+                'CAL_TYPE' : cal_model.meta.cal_type,
+                'DATETIME_OBS' : cal_model.meta.datetime_obs or 'None',
+                'LAST_PROCESSED' : cal_model.meta.last_processed or None,
+                'ID' : cal_model.meta.cal_id,
+                'CLASS' : self.__class__.__name__,
+                'DRP_VERSION' : cal_model.meta.drp_version,
+            }
+        else:
+            raise ValueError("Invalid calibration input")
+
+        # Add new row
+        model.calibrations.add_row(new_row)
+
+    def add_data_ancestors(
+        self,
+        model : DataModel,
+        sources: DataModel | str | list[DataModel | str],
+    ):
+        if not isinstance(sources, list):
+            sources = [sources]
+        for f in sources:
+            source_model = datamodels.open(f)
+            
+            row_data = {
+                'FILENAME': str(source_model.meta.filename),
+                'CLASS' : self.__class__.__name__,
+                'TIME_APPLIED': self._datetime_start
+            }
+
+            # Add extra fields if include_ancestors is True and value is not None
+            for prop, schema in source_model.meta._schema.get('properties', {}).items():
+                if schema.get('include_ancestors', False):
+                    val = getattr(source_model.meta, prop)
+                    if val is not None:
+                        row_data[prop.upper()] = val
+
+            # Expand table if needed
+            new_cols = [c for c in row_data.keys() if c not in model.data_ancestors.colnames]
+            if new_cols:
+                model._extend_data_ancestors_columns(new_cols)
+
+            model.data_ancestors.add_row(row_data)
+
     def get_output_model(
         self,
         input,
@@ -834,6 +925,10 @@ class BasePrimitive(ProcessingComponent):
         #####################################
         raise ValueError(f"Invalid output_model argument {output_model=}.")
 
+    ###############
+    #### UTILS ####
+    ###############
+
     def __getattr__(self, attr):
         if (
             '_output' in self.__dict__
@@ -842,3 +937,33 @@ class BasePrimitive(ProcessingComponent):
         ):
             return self.__dict__['_output'][attr]
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'.")
+
+    def get_effective_config(self):
+        config_file = deepcopy(self.config)
+        config_file.parameters |= self.get_pars()
+        return config_file
+
+    @property
+    def default_suffix(self):
+        return f'proc-{self.class_alias}'
+
+    def get_pars_str_for_receipt(self):
+        pars = self.get_pars()
+        pars['input'] = getattr(self, 'input', None)
+        for key in pars:
+            val = pars[key]
+            if isinstance(val, np.ndarray) and val.size > 100: # MAX SIZE = 100 elements
+                pars[key] = f"ndarray shape={val.shape} dtype={val.dtype}"
+        return str(pars)
+
+    def _on_exception(self, exc : Exception):
+        """
+        Hook called when an exception occurs during processing. By default, it does nothing.
+        """
+        pass
+
+    def _on_skip(self):
+        """
+        Hook called when the primitive is skipped due to pre-condition check failing. By default, it does nothing.
+        """
+        pass
