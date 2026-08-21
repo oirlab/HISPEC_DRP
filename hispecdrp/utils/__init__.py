@@ -1,4 +1,3 @@
-from . import config
 from . import logging
 from .endian_utils import *
 from .gdrive import *

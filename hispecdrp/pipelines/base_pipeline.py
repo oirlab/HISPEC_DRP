@@ -1,8 +1,9 @@
 import os
 import logging
+from typing import Any
 
-from ..utils.config import read_config_file, get_config_path
 from ..utils.logging import logging_context
+from ..driver import ConfigFile, ConfigStore, ConfigSelector, get_config_filepath
 from ..processing_component import ProcessingComponent
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ class BasePipeline(ProcessingComponent):
     suffix (str | None): Suffix to append to the output filename for the pipeline only.
     """
 
+    LOG_CONFIG_FILE = "logging_pipeline.yaml"
+
     ARGUMENTS = {
         'save_result': True,
     }
@@ -25,29 +28,47 @@ class BasePipeline(ProcessingComponent):
 
     def __init__(
         self,
-        config : dict | str | None = None,
+        dataset : Any = None,
+        config : dict | ConfigFile | str | None = None,
+        context : dict | None = None,
         log_config : dict | str | None = None,
-        prim_args : dict | None = None,
+        primitives : dict | None = None,
         **kwargs
     ):
         """
         Parameters
         ----------
-        config : str | dict | None
+        config : dict | ConfigFile | str | None
             The configuration file or Config to further specify parameters.
         log_config : dict | str | None
             Logging configuration override applied to this pipeline and all its
             primitives. Can be a dict of logging keys, a path to a logging YAML
             file, or None to use package defaults.
-        prim_args : dict | None
-            A dictionary of primitive arguments to set for this pipeline.
+        primitives : dict | None
+            A dictionary of primitive instances to use for this pipeline.
         **kwargs
             Any additional keyword arguments to set as direct attributes for this pipeline.
         """
-        self.init_config(config)
+
+        self.dataset = dataset
+        
+        # Load the configuration file or Config object
+        self.init_config(dataset, config, context)
+
+        # Resolve logging config (merges defaults -> config file -> kwarg)
         self._init_log_config(log_config)
-        self.init_args(**kwargs)
-        self.init_primitives(prim_args)
+
+        # Set any kwargs passed to init
+        self.init_parameters(**kwargs)
+
+        # Initialize the primitives
+        self.init_primitives(context, primitives)
+
+
+        # Init the output, status, and calibrations used
+        self._output = None
+        self._status = None
+        self._calibrations_used = {}
     
     def set_prim_args(self, prim_args : dict | None = None):
         """
@@ -83,26 +104,71 @@ class BasePipeline(ProcessingComponent):
                 elif input_dir is not None:
                     prim_instance.output_dir = input_dir
 
-    def init_primitives(self, prim_args : dict | None = None):
+    def init_primitives(
+        self,
+        context : dict | None = None,
+        primitives : dict | None = None,
+    ):
         """
-        Initialize each primitive object in the primitive table passing the appropriate configuration.
-        """
-        for prim_alias, prim_class in self.PRIMITIVES.items():
-            primitive = prim_class(config=self.config['primitives'][prim_alias], parent=self)
-            primitive.log_config = self.log_config
-            setattr(self, prim_alias, primitive)
-        self.set_prim_args(prim_args)
+        Initialize all primitives in the pipeline.
 
-    def apply(self, input, prim_args : dict | None = None, **kwargs):
+        Parameters
+        ----------
+        context : dict, optional
+            A dictionary of context information to use for selecting the configuration file for each primitive.
+        primitives : dict, optional
+            A dictionary of primitive aliases and user-specified parameters.
+        """
+
+        # Default steps dict from user input
+        primitives = primitives or {}
+        context = context or {}
+
+        # Default steps dict from pipeline config file
+        prim_config_from_pipe_config = self.config_file.primitives
+
+        # Alias pipeline context
+        pipe_context = self.config_file.context
+
+        # Loop over and instantiate all primitives in the pipeline
+        for prim_alias, prim_class in self.PRIMITIVES.items():
+
+            # TODO: Consider resolving step config file here to more robustly handle step parameters if needed. Currently, step config files are not resolved until the step is instantiated. If we want to override step parameters like output_dir, etc, we may want to refactor this loop.
+
+            # Config for this step from pipeline config file (if any)
+            prim_config_from_pipe_config = self.config_file.primitives.get(prim_alias, {})
+            prim_config_from_steps_dict = primitives.get(prim_alias, {})
+
+            # Context for this step
+            prim_context_from_pipe_config = prim_config_from_pipe_config.get('context', {})
+            prim_context_from_steps_dict = prim_config_from_steps_dict.get('context', {})
+            prim_context = pipe_context | context | prim_context_from_pipe_config | prim_context_from_steps_dict
+
+            # Parameters for this step
+            prim_pars_from_pipe_config = prim_config_from_pipe_config.get('parameters', {})
+            prim_pars_from_steps_dict = prim_config_from_steps_dict.get('parameters', {})
+            prim_pars = prim_pars_from_pipe_config | prim_pars_from_steps_dict
+
+            # Initialize the step
+            primitive = prim_class(
+                dataset=self.dataset,
+                parent=self,
+                context=prim_context,
+                config_file=None,
+                **prim_pars
+            )
+
+            # Set as attribute of the pipeline
+            setattr(self, prim_alias, primitive)
+
+    def apply(self, dataset : Any | None = None, **kwargs):
         """
         The main method a user calls to run a pipeline.
 
         Parameters
         ----------
-        input
-            The input data to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
-        prim_args : dict | None, optional
-            A dictionary of primitive-specific arguments. Keys must match the PRIMITIVES dictionary keys.
+        dataset
+            The dataset to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
         **kwargs
             Additional keyword arguments to set or override for this pipeline. These will override any arguments set during initialization.
 
@@ -133,9 +199,6 @@ class BasePipeline(ProcessingComponent):
 
                 if self.save_result:
                     self.save_output() # Already finalized in the primitive's perform.
-            #except Exception as e:
-                #logger.error(f"Failed executing pipeline {self.__class__.__name__}: {e}", exc_info=True)
-                #raise
             except Exception as e:
                 self._output = dict(output=input)
                 self._status = "FAILED"
@@ -180,7 +243,7 @@ class BasePipeline(ProcessingComponent):
         if config is None:
             self.config = {
                 'class': class_name,
-                'arguments': self.ARGUMENTS.copy(),
+                'parameters': self.PARAMETERS.copy(),
                 'primitives': {key: {} for key in self.PRIMITIVES},
             }
         elif isinstance(config, str):
@@ -253,33 +316,32 @@ class BasePipeline(ProcessingComponent):
 
         return self.config
     
-    def init_args(self, **kwargs):
+    def init_parameters(self, **kwargs):
         """
-        Initialize arguments including calibrations as top-level attributes with the following priorities:
-            2. `self.config['arguments']` (from config)
-            1. Direct attribute setting (highest priority)
-        
-        This must be called after `self.config` is initialized.
+        Initialize parameter values as top-level attributes.
 
         Parameters
         ----------
         **kwargs
-            Direct attribute settings to override config and defaults.
-            To override a calibration, provide the calibration name as a keyword argument.
-            Selector logic is not handled here.
+            Any additional parameter values to override.
         """
+        # Get all step parameter values from config file and input kwargs
+        pars = self.PARAMETERS | self.config.parameters | kwargs
 
-        # Config already populated with default args
-        args = self.config["arguments"]
-        args.update(**kwargs)
-
-        for k, v in args.items():
-            if k not in self.ARGUMENTS:
-                logger.error(
-                    f"Invalid argument name '{k}' for {self.__class__.__name__}. "
-                    f"Valid arguments are: {list(self.ARGUMENTS.keys())}"
-                )
+        # Set attributes
+        allowed = self.allowed_parameters
+        for k, v in pars.items():
+            if k not in allowed:
+                msg = f"Invalid parameter name '{k}' for {self.__class__.__name__}. Valid parameters are: {allowed}"
+                logger.error(msg)
+                raise NameError(msg)
             setattr(self, k, v)
+
+    def get_pars(self):
+        pars = {}
+        for k in self.allowed_parameters:
+            pars[k] = getattr(self, k, None)
+        return pars
     
     def __repr__(self):
         s = f"{self.__class__.__name__}:\n"
