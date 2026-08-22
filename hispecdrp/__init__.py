@@ -12,7 +12,7 @@ from . import driver
 globals().pop("utils", None)
 from . import utils
 
-from .utils.logging import setup_default_logging
+from .driver.logging import setup_default_logging
 setup_default_logging()
 
 
