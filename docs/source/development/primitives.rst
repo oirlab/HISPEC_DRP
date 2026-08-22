@@ -12,16 +12,16 @@ Implement New Primitive
 
 To implement a new primitive (``NewPrimitive``), first create a new Python class that inherits from :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. If formally part of the HISPEC DRP, this class should be added to the `primitives` module in the code base, following the structure of existing primitives.
 
-2. Arguments
-~~~~~~~~~~~~
+2. Parameters
+~~~~~~~~~~~~~
 
-By default, ``NewPrimitive`` will inherit all arguments from :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. It must specify any additional arguments in the class attribute ``ARGUMENTS``.
+By default, ``NewPrimitive`` will inherit all parameters from :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. It must specify any additional parameters in the class attribute ``PARAMETERS``.
 
 .. code-block:: python
 
     class NewPrimitive(BasePrimitive):
 
-        ARGUMENTS = {
+        PARAMETERS = {
             'arg_name': ... # <default_value>
         }
 
@@ -52,7 +52,7 @@ The values specify how to retrieve the calibration, and must include a 'selector
 4. Perform Method
 ~~~~~~~~~~~~~~~~~
 
-The primitive must implement the required method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._perform`. This method contains the main processing code for the primitive. It takes in no arguments and returns a dictionary, which must contain at least one key - ``output``. If additional / ancillary outputs are needed (i.e., the dark calibration model or file that was used), they can be found with either ``primitive._output[<key>]`` or simply ``primitive.<key>`` if there is no collision with the explicit attributes.
+The primitive must implement the required method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._perform`. This method contains the main processing code for the primitive. It takes in no parameters and returns a dictionary, which must contain at least one key - ``output``. If additional / ancillary outputs are needed (i.e., the dark calibration model or file that was used), they can be found with either ``primitive._output[<key>]`` or simply ``primitive.<key>`` if there is no collision with the explicit attributes.
 
 .. code-block:: python
 
@@ -60,8 +60,8 @@ The primitive must implement the required method :py:meth:`~hispecdrp.primitives
 
         def _perform(self):
             # Main processing code here
-            # Primary input is accessed with self.input
-            # Access arguments with ``self.<arg_name>``
+            # Primary input is accessed with self.dataset
+            # Access parameters with ``self.<param_name>``
             ...
             return dict(output=result, extra1=<extra_output1>, extra2=<extra_output2>)
 
@@ -86,7 +86,7 @@ Logging messages is done through the standard Python logging module.
 5. Previews
 ~~~~~~~~~~~
 
-(Optional) The primitive can optionally implement the method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._create_preview` to generate a preview of the results if either of the arguments ``save_preview`` or ``show_preview`` is True. Figures should be generated with the Plotly library.
+(Optional) The primitive can optionally implement the method :py:meth:`~hispecdrp.primitives.base_primitive.BasePrimitive._create_preview` to generate a preview of the results if either of the parameters ``save_preview`` or ``show_preview`` is True. Figures should be generated with the Plotly library.
 
 See the :py:class`~hispecdrp.primitives.dark_subtraction.make_dark_primitive.MakeDarkPrimitive` for a current example.
 
