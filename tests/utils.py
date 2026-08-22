@@ -54,7 +54,7 @@ def make_stage0_cals(
     
     if nonlin_coeffs is not None:
         nonlin_coeffs = np.broadcast_to(nonlin_coeffs[::-1, None, None], (np.size(nonlin_coeffs), *shape))
-        max = np.full(shape, np.iinfo(np.uint16).max, dtype=np.uint16)
+        max = np.full(shape, fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
         thresh = max
         nonlin_model = datamodels.NonlinearCorrectionModel(
             coeffs=nonlin_coeffs,
@@ -117,6 +117,8 @@ def make_stage0_cals(
         dark_model = datamodels.DarkModel(
             rate=dark_map / gain_map,  # dark current DataModel in DN RMS
             rate_err=np.zeros_like(dark_map),
+            rate_var_rnoise=np.zeros_like(dark_map),
+            rate_var_poisson=np.zeros_like(dark_map),
             meta=meta,
             dq=dqinit_map,
         )
@@ -127,6 +129,8 @@ def make_stage0_cals(
         flat_model = datamodels.DetectorFlatModel(
             flat=flat_map,
             flat_err=np.zeros_like(flat_map),
+            flat_var_rnoise=np.zeros_like(flat_map),
+            flat_var_poisson=np.zeros_like(flat_map),
             meta=meta,
             dq=dqinit_map,
         )
