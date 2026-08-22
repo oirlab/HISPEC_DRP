@@ -5,6 +5,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive as _BasePri
 from .datamodels import DataModel
 from . import datamodels
 from .driver import load_config_file, get_config_dir
+from .driver import ConfigFile, ConfigStore, ConfigSelector, get_config_filepath
 
 from typing import Any, Sequence
 
@@ -22,6 +23,7 @@ class ProcessingComponent(_BasePrimitive):
         'output_file' : None,
         'output_dir': None,
         'suffix': None,
+        'max_cores' : 1,
         'save_preview' : False,
         'show_preview' : False,
     }
@@ -74,6 +76,31 @@ class ProcessingComponent(_BasePrimitive):
             kwarg_log = {}
 
         self.log_config = defaults | config_log | kwarg_log
+
+    @classmethod
+    def get_config(
+        cls,
+        dataset : Any,
+        context : dict | None = None
+    ) -> ConfigFile:
+        """
+        Retrieve the configuration for this primitive based on the dataset and context.
+
+        Parameters
+        ----------
+        dataset : Any
+            The dataset to use for selecting the configuration. Cannot be None.
+        context : dict | None
+            Optional context to use for selecting the configuration.
+
+        Returns
+        -------
+        config_file : ConfigFile
+            The configuration file for this primitive.
+        """
+        with ConfigStore() as store:
+            selector = ConfigSelector(class_name=cls.__name__, context=context)
+            return store.select_and_get_config(dataset, selector=selector)
 
     ##################
     #### MAIN API ####
@@ -170,6 +197,7 @@ class ProcessingComponent(_BasePrimitive):
             pars[k] = getattr(self, k, None)
         return pars
 
+    @property
     def pars_str(self) -> str:
         """
         Pretty print the current parameters and calibrations for this primitive or pipeline.
@@ -259,7 +287,8 @@ class ProcessingComponent(_BasePrimitive):
         if self.output_file is not None:
             filename = self.output_file
         else:
-            filename = model.generate_filename(suffix=self.suffix)
+            suffix = self.suffix if self.suffix is not None else self.default_suffix
+            filename = model.generate_filename(suffix=suffix)
 
         # Construct the full output path
         output_path = os.path.abspath(os.path.join(output_dir, filename))
@@ -299,19 +328,19 @@ class ProcessingComponent(_BasePrimitive):
         # Fallback is the current working directory
         return os.getcwd()
 
-    def get_input_dir(self, model : str | DataModel | None = None):
+    def get_input_dir(self, dataset : Any = None):
         """
         Get the input directory for a given model.
 
         Parameters
         ----------
-        model : str | DataModel | None
+        dataset : Any, optional
             The input model to determine the input directory from. If None, uses ``self.dataset``.
         """
         
         # Model contenxt
-        if model is None:
-            model = self.dataset
+        if dataset is None:
+            dataset = self.dataset
 
         # Helper function for below.
         def _get_model_filepath(model):
@@ -322,21 +351,21 @@ class ProcessingComponent(_BasePrimitive):
                 return None
         
         # Case 1: Filepath string
-        if isinstance(model, str) and os.path.exists(model):
-            return os.path.dirname(os.path.abspath(model))
+        if isinstance(dataset, str) and os.path.exists(dataset):
+            return os.path.dirname(os.path.abspath(dataset))
         
         # Case 2: DataModel instance with _filepath attr
-        elif isinstance(model, datamodels.DataModel):
-            return _get_model_filepath(model)
+        elif isinstance(dataset, datamodels.DataModel):
+            return _get_model_filepath(dataset)
         
         # Case 3: Sequence
-        elif isinstance(model, (list, tuple)):
-            first_input = model[0]
+        elif isinstance(dataset, (list, tuple)):
+            first_input = dataset[0]
             return _get_model_filepath(first_input)
         
         # Case 4: Dict
-        elif isinstance(model, dict):
-            first_input = next(iter(model.values()))
+        elif isinstance(dataset, dict):
+            first_input = next(iter(dataset.values()))
             return _get_model_filepath(first_input)
         
         return None
@@ -385,31 +414,31 @@ class ProcessingComponent(_BasePrimitive):
 
         return do_fibers, do_orders
 
-    def _iter_inputs(self, input=None):
+    def _iter_inputs(self, dataset=None):
         """
-        Yields (key, item) pairs from self.input, normalized
+        Yields (key, item) pairs from self.dataset, normalized
         to a single item, list, or dict depending on the input.
         """
-        if input is None:
-            input = self.input
-        if isinstance(input, (DataModel, str)):
-            yield None, input
-        elif isinstance(input, dict):
-            yield from input.items()
-        elif isinstance(input, Sequence):
-            yield from enumerate(input)
+        if dataset is None:
+            dataset = self.dataset
+        if isinstance(dataset, (DataModel, str)):
+            yield None, dataset
+        elif isinstance(dataset, dict):
+            yield from dataset.items()
+        elif isinstance(dataset, Sequence):
+            yield from enumerate(dataset)
         else:
-            raise ValueError(f"Unsupported input type: {type(input)}")
+            raise ValueError(f"Unsupported input type: {type(dataset)}")
 
-    def _wrap_outputs(self, keyed_outputs: dict, input=None):
+    def _wrap_outputs(self, keyed_outputs: dict, dataset=None):
         """
         Reconstruct a keyed_outputs dict (built via _iter_inputs) into the original container shape.
         """
-        if input is None:
-            input = self.input
-        if isinstance(input, (DataModel, str)):
+        if dataset is None:
+            dataset = self.dataset
+        if isinstance(dataset, (DataModel, str)):
             return keyed_outputs[None]
-        elif isinstance(input, dict):
+        elif isinstance(dataset, dict):
             return keyed_outputs
         else:  # Sequence
             return [keyed_outputs[i] for i in range(len(keyed_outputs))]

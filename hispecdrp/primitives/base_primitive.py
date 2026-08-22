@@ -11,7 +11,7 @@ from koa_middleware.utils import is_valid_uuid
 import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
-from ..utils.logging import logging_context
+from ..driver.logging import logging_context
 from ..calibrations.utils import get_calibration_selector_type
 from ..calibrations import HISPECCalibrationStore
 from ..driver import ConfigFile, ConfigStore, ConfigSelector, get_config_filepath
@@ -33,7 +33,9 @@ class BasePrimitive(ProcessingComponent):
     
     CALIBRATIONS = {}
 
+    ##########################################
     #### INITIALIZATION AND CONFIGURATION ####
+    ##########################################
 
     def __init__(
         self,
@@ -97,42 +99,11 @@ class BasePrimitive(ProcessingComponent):
         else:
             if dataset is None:
                 raise ValueError(
-                    "A dataset must be passed to the Step constructor if no config file is provided."
+                    "A dataset must be passed to the Primitive constructor if no config file is provided."
                 )
             self.config = self.get_config(
                 dataset, context=context
             )
-
-        # Initialize parameters from config and kwargs
-        self.init_parameters()
-
-        # Initialize parameters
-        #self.init_calibrations()
-
-    @classmethod
-    def get_config(
-        cls,
-        dataset : Any,
-        context : dict | None = None
-    ) -> ConfigFile:
-        """
-        Retrieve the configuration for this primitive based on the dataset and context.
-
-        Parameters
-        ----------
-        dataset : Any
-            The dataset to use for selecting the configuration. Cannot be None.
-        context : dict | None
-            Optional context to use for selecting the configuration.
-
-        Returns
-        -------
-        config_file : ConfigFile
-            The configuration file for this primitive.
-        """
-        with ConfigStore() as store:
-            selector = ConfigSelector(class_name=cls.__name__, context=context)
-            return store.select_and_get_config(dataset, selector=selector)
 
     @classmethod
     def from_config_file(cls, config : ConfigFile | str, **kwargs):
@@ -155,7 +126,7 @@ class BasePrimitive(ProcessingComponent):
         Returns
         -------
         BasePrimitive
-                An instance of the primitive with the configuration loaded.
+            An instance of the primitive with the configuration loaded.
         """
 
         # If ConfigFile object is passed, use it directly.
@@ -289,6 +260,11 @@ class BasePrimitive(ProcessingComponent):
                 raise NameError(msg)
             setattr(self, k, v)
 
+        # Set additional dynamic defaults
+        if self.max_cores is None:
+            if self.parent is not None:
+                self.max_cores = self.parent.max_cores or 1
+
     ##################
     #### MAIN API ####
     ##################
@@ -345,17 +321,17 @@ class BasePrimitive(ProcessingComponent):
                 if self.save_result is None and self.output_dir is not None:
                     self.save_result = True
                 if self.save_result and self.output_dir is None:
-                    self.output_dir = self.get_input_dir(self.input)
+                    self.output_dir = self.get_input_dir(self.dataset)
 
                 if not self._pre_condition():
                     logger.info(f"Skipping {self.__class__.__name__}")
                     self._status = "SKIPPED"
-                    self.on_skip()
-                    self._output = dict(output=input)
+                    self._on_skip()
+                    self._output = dict(output=self.dataset)
                     self.finalize_output()
                     # NOTE: No saving or previews if skipped
                 else:
-                    logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.pars_str}")
+                    logger.info(f"Applying {self.__class__.__name__} with parameters:\n{self.pars_str}")
                     self._output = self._perform()
                     # Check again if skipped since primitives can do this dynamically during processing.
                     if not self.run:
@@ -389,7 +365,7 @@ class BasePrimitive(ProcessingComponent):
             output = self._output.get('output', None) if self._output is not None else None
 
             # Reset input
-            self.input = None
+            self.dataset = None
 
         # import threading
         # import multiprocessing as mp
@@ -809,7 +785,7 @@ class BasePrimitive(ProcessingComponent):
 
     def get_output_model(
         self,
-        input,
+        dataset : Any = None,
         output_model : str | 'DataModel' | type['DataModel'] | None = None,
         **kwargs
     ) -> 'DataModel':
@@ -818,8 +794,8 @@ class BasePrimitive(ProcessingComponent):
 
         Parameters
         ----------
-        input : datamodels.DataModel, optional
-            The input data model to base the output on.
+        dataset : Any, optional
+            The dataset to use for creating the output model.
         output_model : str | datamodels.DataModel | type[datamodels.DataModel], optional
             The desired output model type or specification. It can take on several values:
                 
@@ -841,27 +817,27 @@ class BasePrimitive(ProcessingComponent):
         if output_model is None:
             output_model = getattr(self, 'output_model', None)
 
-        def _get_first_input(input):
-            if isinstance(input, datamodels.DataModel):
-                return input, None, 1
-            if isinstance(input, str):
-                return datamodels.open(input), None, 1
-            if isinstance(input, Sequence):
-                for item in input:
+        def _get_first_input(dataset):
+            if isinstance(dataset, datamodels.DataModel):
+                return dataset, None, 1
+            if isinstance(dataset, str):
+                return datamodels.open(dataset), None, 1
+            if isinstance(dataset, Sequence):
+                for item in dataset:
                     if isinstance(item, datamodels.DataModel):
-                        return item, list, len(input)
+                        return item, list, len(dataset)
                     if isinstance(item, str) and os.path.isfile(item):
-                        return datamodels.open(item), list, len(input)
-            if isinstance(input, dict):
-                for val in input.values():
+                        return datamodels.open(item), list, len(dataset)
+            if isinstance(dataset, dict):
+                for val in dataset.values():
                     if isinstance(val, datamodels.DataModel):
-                        return val, dict, len(input)
+                        return val, dict, len(dataset)
                     if isinstance(val, str) and os.path.isfile(val):
-                        return datamodels.open(val), dict, len(input)
+                        return datamodels.open(val), dict, len(dataset)
             raise ValueError("Input must be a datamodel, filepath, sequence, or dict.")
 
         # Get the first input model and its container type
-        input_model, input_type, input_len = _get_first_input(input)
+        input_model, input_type, input_len = _get_first_input(dataset)
 
         ###################################
         #### Return output model as is ####
@@ -876,19 +852,17 @@ class BasePrimitive(ProcessingComponent):
             #### Return input model as is ####
             ##################################
             if output_model.lower() == 'input':
-                assert isinstance(
-                    input, (datamodels.DataModel, str)
-                ), "Input DataModel or filepath must be provided if output_model is 'input'."
-                return datamodels.open(input)
+                if not isinstance(dataset, (datamodels.DataModel, str)):
+                    raise ValueError("Input DataModel or filepath must be provided if output_model is 'input'.")
+                return datamodels.open(dataset)
 
             ####################################
             #### Return copy of input model ####
             ####################################
             if output_model.lower() == 'input_copy':
-                assert isinstance(
-                    input, (datamodels.DataModel, str)
-                ), "Input DataModel or filepath must be provided if output_model is 'input_copy'."
-                input_model = datamodels.open(input)
+                if not isinstance(dataset, (datamodels.DataModel, str)):
+                    raise ValueError("Input DataModel or filepath must be provided if output_model is 'input_copy'.")
+                input_model = datamodels.open(dataset)
                 kwargs.setdefault('primitive', self)
                 return input_model.from_datamodels(input_model, **kwargs)
 
@@ -910,7 +884,7 @@ class BasePrimitive(ProcessingComponent):
                 return input_model
 
             kwargs.setdefault('primitive', self)
-            return output_model_class.from_datamodels(input, **kwargs)
+            return output_model_class.from_datamodels(dataset, **kwargs)
             
 
         #################################
@@ -918,7 +892,7 @@ class BasePrimitive(ProcessingComponent):
         #################################
         if isinstance(output_model, type) and issubclass(output_model, datamodels.DataModel):
             kwargs.setdefault('primitive', self)
-            return output_model.from_datamodels(input, **kwargs)
+            return output_model.from_datamodels(dataset, **kwargs)
 
         #####################################
         #### Everything else is an error ####
