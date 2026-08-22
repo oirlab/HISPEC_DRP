@@ -109,8 +109,19 @@ class ConfigFile:
 
     @property
     def class_(self):
-        if not hasattr(self, '_class'):
-            self._class = get_primitive_class(self.class_name)
+        if not hasattr(self, '_class') or self._class is not None:
+            try:
+                class_ = get_primitive_class(self.class_name)
+            except KeyError:
+                class_ = None
+            if class_ is None:
+                try:
+                    class_ = get_pipeline_class(self.class_name)
+                except KeyError:
+                    class_ = None
+            if class_ is None:
+                raise ValueError(f"Could not find class for {self.class_name}.")
+            self._class = class_
         return self._class
 
     @property
@@ -256,19 +267,8 @@ class ConfigStore:
         config_file : ConfigFile
             The selected config file object.
         """
-
-        if isinstance(dataset, datamodels.DataModel):
-            meta = dataset.meta
-        elif isinstance(dataset, str):
-            if os.path.isfile(dataset):
-                model = datamodels.open(dataset, meta_only=True)
-                meta = model.meta
-            else:
-                raise ValueError(f"Input string is not a valid file path: {dataset}")
-        elif isinstance(dataset, dict):
-            meta = dataset
-        else:
-            raise TypeError(f"Unsupported dataset type: {type(dataset)}")
+        model = datamodels.utils.get_first_model(dataset, meta_only=True)
+        meta = model.meta
 
         # Select the config file
         config_file = selector.select(meta, self.configs)
@@ -766,4 +766,16 @@ def get_primitive_class(name: str) -> type | None:
     - Full dot path: "some_external_pkg.module.CustomStep"
     """
     from ..primitives import PRIMITIVE_REGISTER
-    return PRIMITIVE_REGISTER.get(name, None)
+    return PRIMITIVE_REGISTER[name]
+
+
+def get_pipeline_class(name: str) -> type | None:
+    """
+    Lazily resolve and return a primitive or pipeline class.
+    
+    Accepts:
+    - Short class name: "AssignWCSStep"
+    - Full dot path: "some_external_pkg.module.CustomStep"
+    """
+    from ..pipelines import PIPELINE_REGISTER
+    return PIPELINE_REGISTER[name]
