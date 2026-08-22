@@ -27,7 +27,7 @@ class CheckSaturationPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. Currently, this is expected
         to be a raw (ramp) data product.
     suffix : str or None, optional
@@ -50,7 +50,7 @@ class CheckSaturationPrimitive(BasePrimitive):
         The saturation calibration model used for flagging.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'satcheck',
         'max_cores' : 1,
     }
@@ -65,7 +65,7 @@ class CheckSaturationPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the saturation threshold model
         sat, _ = self.get_calibration(input_model, 'saturation')

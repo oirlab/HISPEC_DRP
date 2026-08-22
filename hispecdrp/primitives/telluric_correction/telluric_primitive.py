@@ -45,7 +45,7 @@ class TelluricCorrectionPrimitive(BasePrimitive):
     output
         The telluric corrected level 2 data model with updated error and data quality arrays.
     """
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'tell',
         'do_orders' : None,
         'method' : 'airmass_scaling',
@@ -62,12 +62,12 @@ class TelluricCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
         
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            input = [self.input]
-        elif isinstance(self.input, Sequence):
+            input = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            input = self.input
+            input = self.dataset
 
         # Loop over inputs (now a list)
         for _input in input:

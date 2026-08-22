@@ -35,7 +35,7 @@ class Stage2Pipeline(BasePipeline):
     }
 
     def _perform(self):
-        model_to_process = datamodels.open(self.input)
+        model_to_process = datamodels.open(self.dataset)
         result = self.blaze_corr.apply(model_to_process)
         result = self.sky_sub.apply(result)
         result = self.barycorr.apply(result)

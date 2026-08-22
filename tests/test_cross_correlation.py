@@ -16,9 +16,10 @@ from hispecdrp.primitives import StellarRVPrimitive
 from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path
 
 
-def _template_ccf_primitive(**kwargs) -> StellarRVPrimitive:
+def _template_ccf_primitive(model, **kwargs) -> StellarRVPrimitive:
     """``StellarRVPrimitive`` configured for template cross-correlation."""
-    return StellarRVPrimitive(
+    return StellarRVPrimitive.call(
+        model,
         algorithm="ccf_stellar_template",
         save_preview=False,
         **kwargs,
@@ -249,13 +250,13 @@ def template_path():
 def test_cross_correlation_debug_ccf_logs_per_chunk(capsys, template_path):
     """Run template CCF with debug_ccf=True and assert per-chunk diagnostics are logged."""
     model = _make_minimal_l2_for_ccf(n_orders=10, n_pix=1024)
-    prim = _template_ccf_primitive(
+    out = _template_ccf_primitive(
+        model,
         template_path=template_path,
         do_fibers=["1"],
         debug_ccf=True,
         window_size_um=0.3,
     )
-    out = prim.apply(model)
     assert out is not None
 
     captured = capsys.readouterr()
@@ -273,13 +274,13 @@ def test_cross_correlation_debug_ccf_wavelength_vs_signal(capsys, template_path)
     whether chunks above 1.17 µm have weaker CCF (diagnostic for user issue).
     """
     model = _make_minimal_l2_for_ccf(n_orders=15, n_pix=1024)
-    prim = _template_ccf_primitive(
+    out = _template_ccf_primitive(
+        model,
         template_path=template_path,
         do_fibers=["1"],
         debug_ccf=True,
         window_size_um=0.3,
     )
-    prim.apply(model)
 
     captured = capsys.readouterr()
     log_text = captured.out + captured.err
@@ -335,14 +336,14 @@ def test_cross_correlation_recovers_rv_per_chunk(spectrograph):
         sigma_v_km_s=SIGMA_V_KM_S,
     )
 
-    prim = _template_ccf_primitive(
+    result = _template_ccf_primitive(
+        l2,
         template_wavelength=template_wl,
         template_flux=template_flux,
         do_fibers=["1"],
         window_size_um=0.3,
         debug_ccf=True,
     )
-    result = prim.apply(l2)
     assert result is not None
     # apply() returns the main output (L2Model) directly, not a dict
     out = result

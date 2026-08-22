@@ -3,7 +3,7 @@ Tests for hispecdrp.utils.logging
 """
 import logging
 import pytest
-from hispecdrp.utils.logging import (
+from hispecdrp.driver.logging import (
     LogConfig,
     RunIdFilter,
     PackageCaptureFilter,

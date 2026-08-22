@@ -262,7 +262,7 @@ class StellarRVPrimitive(BasePrimitive):
 
     # Default primitive arguments (merged with ProcessingComponent at class init).
     # Keys and semantics: see class docstring **Parameters** (same order as below).
-    ARGUMENTS = {
+    PARAMETERS = {
         # --- Dispatch ---
         "suffix": "stellar_rv",
         "algorithm": "ccf_line_mask",
@@ -319,12 +319,12 @@ class StellarRVPrimitive(BasePrimitive):
         dict
             With key "output" containing the output L2 model (or list of models).
         """
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            inp_list = [self.input]
-        elif isinstance(self.input, Sequence):
+            inp_list = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            inp_list = self.input
+            inp_list = self.dataset
         else:
             raise TypeError("Input must be a DataModel, path, or sequence of these.")
 

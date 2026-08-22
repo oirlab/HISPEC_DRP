@@ -22,7 +22,7 @@ class GainCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. This is expected to be a
         level 0 (rate map) data product.
     suffix : str or None, optional
@@ -40,7 +40,7 @@ class GainCorrectionPrimitive(BasePrimitive):
         electrons.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'gaincorr',
         'max_cores' : 1,
     }
@@ -55,7 +55,7 @@ class GainCorrectionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the gain model
         gain, _ = self.get_calibration(input_model, 'gain')

@@ -44,7 +44,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
     
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'deg_intra_order' : 'auto',
         'deg_inter_order' : 9,
         'max_iters' : 100,
@@ -58,7 +58,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
     def _perform(self):
 
         # Open the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get fibers and orders
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)

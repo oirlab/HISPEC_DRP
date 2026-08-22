@@ -42,7 +42,7 @@ class MakeBiasPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'BiasModel',
         'max_cores' : 1,
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad
@@ -50,10 +50,10 @@ class MakeBiasPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector bias and kTC noise from a list of {nfiles} inputs.")
 

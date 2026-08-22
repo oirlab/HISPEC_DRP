@@ -40,8 +40,7 @@ def test_calc_barycorr(tmp_path, datadir):
     input_model.spec_dq_fib1 = np.zeros((num_orders, npix), dtype=np.uint32)
     input_model.mid_time_fib1 = np.full((num_orders, npix), mjd_utc, dtype=np.float64)
 
-    prim = BarycenterCorrectionPrimitive()
-    output_model = prim.apply(input_model)
+    output_model = BarycenterCorrectionPrimitive.call(input_model)
 
     bc_table = output_model.barycorr_fib1
     assert bc_table is not None
@@ -71,7 +70,7 @@ def test_force_berv_m_s_skips_barycorrpy():
     input_model.spec_dq_fib1 = np.zeros((num_orders, npix), dtype=np.uint32)
     input_model.mid_time_fib1 = np.full((num_orders, npix), mjd_utc, dtype=np.float64)
 
-    output_model = BarycenterCorrectionPrimitive().apply(input_model)
+    output_model = BarycenterCorrectionPrimitive.call(input_model)
     bc_table = output_model.barycorr_fib1
     assert bc_table is not None
     assert float(bc_table["BERV"][0]) == 0.0
@@ -135,11 +134,10 @@ def test_stellar_rv_uses_barycorr_ccf_zb_per_fiber():
     input_model.spec_dq_fib1 = np.zeros((num_orders, npix), dtype=np.uint32)
     input_model.mid_time_fib1 = np.full((num_orders, npix), mjd_utc, dtype=np.float64)
 
-    bary_model = BarycenterCorrectionPrimitive().apply(input_model)
+    bary_model = BarycenterCorrectionPrimitive.call(input_model)
     berv_m_s = float(bary_model.barycorr_fib1["BERV"][0])
 
-    prim = StellarRVPrimitive()
-    prim.init_args(do_fibers=["1"], do_orders=[139])
+    prim = StellarRVPrimitive(bary_model, do_fibers=['1'], do_orders=[139])
     from hispecdrp.primitives.barycenter_correction.barycenter_corr import berv_m_s_to_ccf_zb
     from hispecdrp.utils.physical_constants import C_M_S
 
@@ -171,8 +169,7 @@ def test_calc_solar_barycenter_corrections(tmp_path, datadir):
     input_model.spec_dq_fib1 = np.zeros((num_orders, npix), dtype=np.uint32)
     input_model.mid_time_fib1 = np.full((num_orders, npix), mjd_utc, dtype=np.float64)
 
-    prim = BarycenterCorrectionPrimitive()
-    output_model = prim.apply(input_model)
+    output_model = BarycenterCorrectionPrimitive.call(input_model)
 
     bc_table = output_model.barycorr_fib1
     assert bc_table is not None
@@ -216,7 +213,7 @@ def test_calc_barycorr_with_simulated_spec_dq(tmp_path, datadir):
         mjd_utc - 0.001, mjd_utc + 0.001, num=num_orders * npix
     ).reshape(num_orders, npix)
 
-    output_model = BarycenterCorrectionPrimitive().apply(input_model)
+    output_model = BarycenterCorrectionPrimitive.call(input_model)
     bc_table = output_model.barycorr_fib1
     assert bc_table is not None
     assert np.isfinite(bc_table['MJDUTC'][0])

@@ -47,7 +47,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
         Extracted spectra for each fiber and order.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'specextract',
         'method' : 'box',
         'extraction_aperture' : 10,
@@ -70,19 +70,19 @@ class SpectralExtractionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            input = [self.input]
-        elif isinstance(self.input, Sequence):
+            input = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            input = self.input
-        elif isinstance(self.input, dict):
+            input = self.dataset
+        elif isinstance(self.dataset, dict):
             output = {}
-            input_keys = list(self.input.keys())
-            input_vals = list(self.input.values())
+            input_keys = list(self.dataset.keys())
+            input_vals = list(self.dataset.values())
             input = input_vals
         else:
-            raise ValueError(f"Unsupported input type: {type(self.input)}")
+            raise ValueError(f"Unsupported input type: {type(self.dataset)}")
 
         # Loop over inputs
         for _input_i, _input in enumerate(input):
@@ -173,11 +173,11 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 raise ValueError(f"Unknown extraction method: {self.method}")
                 
             # Add to output
-            if isinstance(self.input, (datamodels.DataModel, str)):
+            if isinstance(self.dataset, (datamodels.DataModel, str)):
                 output = output_model
-            elif isinstance(self.input, Sequence):
+            elif isinstance(self.dataset, Sequence):
                 output.append(output_model)
-            elif isinstance(self.input, dict):
+            elif isinstance(self.dataset, dict):
                 output[input_keys[_input_i]] = output_model
 
         # Return

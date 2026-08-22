@@ -18,13 +18,13 @@ class MakeFiberflatPrimitive(BasePrimitive):
         The derived fiber flat calibration model.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'FiberFlatPrimitive',
     }
 
     def _perform(self):
 
-        ff_coadded_models_L1 = self.input
+        ff_coadded_models_L1 = self.dataset
 
         # Prepare output fiberflat model
         ff_output_model = datamodels.FiberflatModel.from_datamodels(ff_coadded_models_L1, primitive=self)

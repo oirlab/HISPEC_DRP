@@ -15,27 +15,22 @@ def test_process_lfc_parvi(tmp_path, datadir):
     # Fit 1D LFC lines with Gaussian
     do_orders = np.array([90, 91, 92, 93, 94, 96, 97, 98, 99])
     do_fibers = ['4']
-    prim = FitLFCLinesPrimitive()
-    line_fits_model = prim.apply(
-        lfc_path,
-        do_orders=do_orders,
-        do_fibers=do_fibers,
-    )
+    line_fits_model = FitLFCLinesPrimitive.call(lfc_path, do_orders=do_orders, do_fibers=  do_fibers)
     assert isinstance(line_fits_model, datamodels.LFCFitParamsModel)
     assert line_fits_model.meta.cal_type == 'lfc_fitparams'
     assert len(line_fits_model.lfc_fitparams_fib4) > 1000 # Number of modes found > 1000. NOTE: REVISIT THIS TEST!
 
     # Fit 2D Chebyshev polynomial to the LFC modes
-    prim = CalculateChebyshev2DWLSPrimitive()
     deg_inter_order = 6
     deg_intra_order = 9
-    wavesol_model = prim.apply(
+    wavesol_model, prim = CalculateChebyshev2DWLSPrimitive.call(
         line_fits_model,
+        deg_inter_order=deg_inter_order,
+        deg_intra_order=deg_intra_order,
         fit_orders=do_orders,
         opt_weights=True,
         do_fibers=['4'],
-        deg_inter_order=deg_inter_order,
-        deg_intra_order=deg_intra_order,
+        return_instance=True,
     )
     fit_results = prim.fit_results
     assert isinstance(wavesol_model, datamodels.LFCWavesolModel)
@@ -46,16 +41,14 @@ def test_process_lfc_parvi(tmp_path, datadir):
     assert getattr(wavesol_model, f'wave_fib{do_fibers[0]}').shape == getattr(wavesol_model, f'spec_fib{do_fibers[0]}').shape
 
     # Fit 2D Chebyshev polynomial to best fit Gaussian sigmas to determine LSF width at each pixel
-    prim = CalculateGaussianLSFPrimitive()
-    deg_inter_order = 3
-    deg_intra_order = 3
     
-    lsf_model = prim.apply(
+    lsf_model, prim = CalculateGaussianLSFPrimitive.call(
         wavesol_model,
         do_fibers=do_fibers,
-        deg_inter_order=deg_inter_order,
-        deg_intra_order=deg_intra_order,
+        deg_inter_order=3,
+        deg_intra_order=3,
         fit_orders=do_orders,
+        return_instance=True
     )
     assert isinstance(lsf_model, datamodels.GaussianLSFModel)
     assert lsf_model.meta.cal_type == 'lsf'

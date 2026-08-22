@@ -44,7 +44,7 @@ class SetInitialWLSPrimitive(BasePrimitive):
     
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'wavesolinit',
         'do_fibers' : None,
         'do_orders': None,

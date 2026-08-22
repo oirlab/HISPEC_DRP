@@ -53,7 +53,7 @@ class TracePositionPrimitive(BasePrimitive):
         Output model containing fitted trace positions and widths for each fiber.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'deg_pos' : None,
         'deg_width' : None,
         'window_size' : 8,
@@ -67,14 +67,14 @@ class TracePositionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Associate inputs by fiber number
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            self._input_by_fiber = datamodels.group_by_fiber_combination([self.input])
-        if isinstance(self.input, Sequence):
-            self._input_by_fiber = datamodels.group_by_fiber_combination(self.input)
-        elif isinstance(self.input, dict):
-            self._input_by_fiber = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            self._input_by_fiber = datamodels.group_by_fiber_combination([self.dataset])
+        if isinstance(self.dataset, Sequence):
+            self._input_by_fiber = datamodels.group_by_fiber_combination(self.dataset)
+        elif isinstance(self.dataset, dict):
+            self._input_by_fiber = self.dataset
         else:
-            raise ValueError(f"Unsupported input type: {type(self.input)}")
+            raise ValueError(f"Unsupported input type: {type(self.dataset)}")
         
         first_key = next(iter(self._input_by_fiber))
 

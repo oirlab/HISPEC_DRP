@@ -45,7 +45,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'do_fibers' : None,
         'fit_orders' : None,
         'deg_intra_order' : 3,
@@ -58,7 +58,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get fibers and orders to fit
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)

@@ -40,12 +40,7 @@ def test_gain_primitive():
         dq=np.zeros_like(gain_map, dtype=np.uint32),
     )
 
-    primitive = GainCorrectionPrimitive()
-    primitive.gain = gain_model
-
-    result = primitive.apply(l0_model)
-
-    out = result  # apply() returns the main output model directly
+    out = GainCorrectionPrimitive.call(l0_model, gain=gain_model)
     assert out is not None
     # Rate should be rate_dn_s * gain -> e-/s
     expected_rate = rate_dn_s * gain_value

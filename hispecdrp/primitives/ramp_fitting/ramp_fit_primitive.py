@@ -120,7 +120,7 @@ class FitRampPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. This must be a raw
         up-the-ramp (UTR) ramp data product in which ramps are to be fitted.
     suffix : str or None, optional

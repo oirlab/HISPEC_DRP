@@ -1378,57 +1378,57 @@ def _run_lte049_k2all_line_mask_previews(
         else _mask_ccf_pixel_interp_order_from_env()
     )
     if serialize_only:
-        prim = StellarRVPrimitive(
-            algorithm="ccf_line_mask",
-            mask_path=mask_path,
-            do_fibers=["1"],
-            do_orders=do_orders,
-            window_size_um=w_um,
-            v_step_coarse=v_step_c,
-            mask_auto_center_scout=False,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
-            mask_ccf_pixel_interp_order=_pio_preview,
-            show_preview=False,
-            save_preview=True,
-            save_overlay_debug=False,
-            show_overlay_debug=False,
-            output_dir=out_dir,
-            suffix=suffix,
-            max_cores=6,
-            **v_grid_kw,
-            **prim_line_kw,
-            **v_line_uniform_step_kw,
-        )
         t0 = time.perf_counter()
         with patch.object(srv_prev, "create_stellar_rv_preview", lambda _p: None):
-            out = prim.apply(model, do_orders=do_orders)
+            out = StellarRVPrimitive.call(
+                model,
+                algorithm="ccf_line_mask",
+                mask_path=mask_path,
+                do_fibers=["1"],
+                do_orders=do_orders,
+                window_size_um=w_um,
+                v_step_coarse=v_step_c,
+                mask_auto_center_scout=False,
+                ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
+                mask_ccf_pixel_interp_order=_pio_preview,
+                show_preview=False,
+                save_preview=True,
+                save_overlay_debug=False,
+                show_overlay_debug=False,
+                output_dir=out_dir,
+                suffix=suffix,
+                max_cores=6,
+                **v_grid_kw,
+                **prim_line_kw,
+                **v_line_uniform_step_kw,
+            )
         apply_wall = time.perf_counter() - t0
     else:
-        prim = StellarRVPrimitive(
-            algorithm="ccf_line_mask",
-            mask_path=mask_path,
-            do_fibers=["1"],
-            do_orders=do_orders,
-            window_size_um=w_um,
-            v_step_coarse=v_step_c,
-            mask_auto_center_scout=False,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
-            mask_ccf_pixel_interp_order=_pio_preview,
-            show_preview=False,
-            save_preview=True,
-            save_overlay_debug=True,
-            show_overlay_debug=True,
-            output_dir=out_dir,
-            suffix=suffix,
-            max_cores=6,
-            **v_grid_kw,
-            **prim_line_kw,
-            **v_line_uniform_step_kw,
-        )
         t0 = time.perf_counter()
         with patch.object(srv_prev, "write_mask_overlay_debug_pages", _timed_mask):
             with patch.object(srv_prev, "create_stellar_rv_preview", _timed_create):
-                out = prim.apply(model, do_orders=do_orders)
+                out = StellarRVPrimitive.call(
+                    model,
+                    algorithm="ccf_line_mask",
+                    mask_path=mask_path,
+                    do_fibers=["1"],
+                    do_orders=do_orders,
+                    window_size_um=w_um,
+                    v_step_coarse=v_step_c,
+                    mask_auto_center_scout=False,
+                    ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
+                    mask_ccf_pixel_interp_order=_pio_preview,
+                    show_preview=False,
+                    save_preview=True,
+                    save_overlay_debug=True,
+                    show_overlay_debug=True,
+                    output_dir=out_dir,
+                    suffix=suffix,
+                    max_cores=6,
+                    **v_grid_kw,
+                    **prim_line_kw,
+                    **v_line_uniform_step_kw,
+                )
         apply_wall = time.perf_counter() - t0
 
     assert out is not None
@@ -1537,26 +1537,27 @@ def _run_lte049_btsettl_template_previews(
         finally:
             t_unified_html += time.perf_counter() - t1
 
-    prim = StellarRVPrimitive(
-        algorithm="ccf_stellar_template",
-        template_wavelength=np.asarray(template_wavelength_um, dtype=np.float64),
-        template_flux=np.asarray(template_flux, dtype=np.float64),
-        do_fibers=["1"],
-        do_orders=do_orders,
-        window_size_um=w_um,
-        v_step_coarse=float(_TEST_TEMPLATE_CCF_V_STEP_M_S),
-        ccf_input_velocity=None,
-        show_preview=False,
-        save_preview=True,
-        save_overlay_debug=True,
-        show_overlay_debug=True,
-        output_dir=out_dir,
-        suffix="lte049_template_ccf",
-        max_cores=6,
-    )
+    
     t0 = time.perf_counter()
     with patch.object(srv_prev, "create_stellar_rv_preview", _timed_create):
-        out = prim.apply(l2_model, do_orders=do_orders)
+        out = StellarRVPrimitive.call(
+            l2_model,
+            algorithm="ccf_stellar_template",
+            template_wavelength=np.asarray(template_wavelength_um, dtype=np.float64),
+            template_flux=np.asarray(template_flux, dtype=np.float64),
+            do_fibers=["1"],
+            do_orders=do_orders,
+            window_size_um=w_um,
+            v_step_coarse=float(_TEST_TEMPLATE_CCF_V_STEP_M_S),
+            ccf_input_velocity=None,
+            show_preview=False,
+            save_preview=True,
+            save_overlay_debug=True,
+            show_overlay_debug=True,
+            output_dir=out_dir,
+            suffix="lte049_template_ccf",
+            max_cores=6,
+        )
     apply_wall = time.perf_counter() - t0
 
     assert out is not None
@@ -1658,7 +1659,8 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
     if save_plots:
         plot_out_dir = os.path.join(os.path.dirname(__file__), "output", "stellar_rv_plots")
         os.makedirs(plot_out_dir, exist_ok=True)
-    prim = StellarRVPrimitive(
+    out = StellarRVPrimitive.call(
+        l2,
         template_wavelength=template_wl,
         template_flux=template_flux,
         do_fibers=["1"],
@@ -1670,7 +1672,6 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
         save_preview=save_plots or show,
         output_dir=plot_out_dir,
     )
-    out = prim.apply(l2)
     assert out is not None
 
     tbl = getattr(out, "rvccf_fib1", None)
@@ -1906,7 +1907,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
     rvccf_l2.spec_dq_fib1 = dq_2d
 
     t0 = time.perf_counter()
-    prim_rvccf = StellarRVPrimitive(
+    out_rvccf, prim_rvccf = StellarRVPrimitive.call(
+        rvccf_l2,
         algorithm="ccf_line_mask",
         mask_path=mas_lte049,
         do_fibers=["1"],
@@ -1922,8 +1924,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         show_preview=False,
         output_dir=str(tmp_path),
         suffix="parallel_rvccf_hdu_validate",
+        return_instance=True
     )
-    out_rvccf = prim_rvccf.apply(rvccf_l2, do_orders=orders)
     timing_rows.append(
         (
             "RVCCF_HDU: StellarRVPrimitive ccf_line_mask → rvccf_fib1 schema check",
@@ -2179,7 +2181,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
     rvccf_l2.spec_dq_fib1 = dq_2d
 
     t0 = time.perf_counter()
-    prim_rvccf = StellarRVPrimitive(
+    out_rvccf, prim_rvccf = StellarRVPrimitive.call(
+        rvccf_l2,
         algorithm="ccf_line_mask",
         mask_path=mas_lte049,
         do_fibers=["1"],
@@ -2193,8 +2196,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
         save_preview=False,
         output_dir=str(tmp_path),
         suffix="parallel_rvccf_hdu_validate_tophat_mask",
+        return_instance=True,
     )
-    out_rvccf = prim_rvccf.apply(rvccf_l2, do_orders=orders)
     timing_rows.append(
         (
             "RVCCF_HDU: StellarRVPrimitive ccf_line_mask (tophat mask) → rvccf_fib1 schema check",
@@ -2463,7 +2466,8 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         )
 
     t0 = time.perf_counter()
-    prim_rvccf = StellarRVPrimitive(
+    out_rvccf, prim_rvccf = StellarRVPrimitive.call(
+        rvccf_l2,
         algorithm="ccf_line_mask",
         mask_path=mas_lte049,
         do_fibers=["1"],
@@ -2485,8 +2489,8 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         show_preview=False,
         output_dir=str(tmp_path),
         suffix="parallel_rvccf_line_window_n1",
+        return_instance=True
     )
-    out_rvccf = prim_rvccf.apply(rvccf_l2, do_orders=orders)
     timing_rows.append(
         (
             "RVCCF: StellarRVPrimitive ccf_line_mask (line-by-line chunks)",
@@ -2783,7 +2787,8 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
 
         v_min_c = float(inj_m_s - v_coarse_half_m_s)
         v_max_c = float(inj_m_s + v_coarse_half_m_s)
-        prim = StellarRVPrimitive(
+        out = StellarRVPrimitive.call(
+            rvccf_l2,
             algorithm="ccf_line_mask",
             mask_path=mas_lte049,
             do_fibers=["1"],
@@ -2806,7 +2811,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
             output_dir=str(tmp_path),
             suffix=f"line_window_rv_scan_{k}",
         )
-        out = prim.apply(rvccf_l2, do_orders=orders)
         assert out is not None
         avg_tbl = getattr(out, "rvccfavg_fib1", None)
         assert avg_tbl is not None and len(avg_tbl) > 0
@@ -2945,7 +2949,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
 
         # Pipeline defaults for ccf_line_mask (omit window_line_by_line / n_samples /
         # interp order / coarse grid overrides so ARGUMENTS defaults apply).
-        prim = StellarRVPrimitive(
+        out = StellarRVPrimitive.call(
+            rvccf_l2,
             algorithm="ccf_line_mask",
             mask_path=mas_lte049,
             do_fibers=["1"],
@@ -2957,7 +2962,6 @@ def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
             output_dir=str(tmp_path),
             suffix=f"default_rv_scan_{k}",
         )
-        out = prim.apply(rvccf_l2, do_orders=orders)
         assert out is not None
         avg_tbl = getattr(out, "rvccfavg_fib1", None)
         assert avg_tbl is not None and len(avg_tbl) > 0
@@ -3173,7 +3177,8 @@ def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
     tpl_l2.spec_dq_fib1 = dq_2d
 
     t0 = time.perf_counter()
-    prim_tpl = StellarRVPrimitive(
+    out_tpl, prim_tpl = StellarRVPrimitive.call(
+        tpl_l2,
         algorithm="ccf_stellar_template",
         template_wavelength=np.asarray(w_rest, dtype=np.float64),
         template_flux=np.asarray(flux_rest, dtype=np.float64),
@@ -3188,8 +3193,8 @@ def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
         show_preview=False,
         output_dir=str(tmp_path),
         suffix="parallel_rvccf_hdu_validate_template",
+        return_instance=True
     )
-    out_tpl = prim_tpl.apply(tpl_l2, do_orders=orders)
     timing_rows.append(
         (
             "RVCCF_HDU: StellarRVPrimitive ccf_stellar_template → rvccf_fib1 schema check",

@@ -35,7 +35,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. This is expected to be a
         raw up-the-ramp (UTR) ramp data product.
     suffix : str or None, optional
@@ -60,7 +60,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'nonlincorr',
         'max_cores' : 1,
     }
@@ -74,7 +74,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         nonlin, _ = self.get_calibration(input_model, 'nonlin')
         nonlin_model = datamodels.open(nonlin)

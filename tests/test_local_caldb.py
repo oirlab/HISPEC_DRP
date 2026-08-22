@@ -24,8 +24,7 @@ def test_local_caldb(tmp_path, datadir, monkeypatch):
     mjds = _CALDB_TEST_BASE_MJD + np.arange(N) * 365
     for i in range(N):
         dark_model = datamodels.DarkModel(meta={'mjd_start': mjds[i]})
-        prim = RegisterCalibrationPrimitive()
-        prim.apply(dark_model)
+        dark_model = RegisterCalibrationPrimitive.call(dark_model)
         dark_models.append(dark_model)
 
     # Connect to DB
@@ -67,8 +66,8 @@ def test_local_caldb(tmp_path, datadir, monkeypatch):
             _store_init(self, *args, **kwargs)
 
         monkeypatch.setattr(HISPECCalibrationStore, "__init__", _local_only_store_init)
-        dark_prim = DarkSubtractionPrimitive()
-        dark4_filepath, _ = dark_prim.get_calibration(input_model, 'dark')
+        dark_prim = DarkSubtractionPrimitive(input_model)
+        dark4_filepath, _ = dark_prim.get_calibration(dark_prim.dataset, 'dark')
         assert dark4_filepath == dark_models[2]._filepath, "Wrong dark model retrieved via DarkSubtractionPrimitive"
 
         # Check calibration retrieval by ID

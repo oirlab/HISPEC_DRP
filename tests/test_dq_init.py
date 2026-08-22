@@ -36,12 +36,7 @@ def test_dq_init_primitive():
     dq_map[2, :] |= DQ_FLAGS["DO_NOT_USE"]
     dq_model = datamodels.DQModel(dq=dq_map)
 
-    primitive = DQInitPrimitive()
-    primitive.dq = dq_model
-
-    result = primitive.apply(ramp_model)
-
-    out = result  # apply() returns the main output model directly
+    out = DQInitPrimitive.call(ramp_model, dq=dq_model)
     assert out is not None
     assert out.data.shape == (n_reads, ny, nx)
     assert out.dq_raw.shape == (n_reads, ny, nx)

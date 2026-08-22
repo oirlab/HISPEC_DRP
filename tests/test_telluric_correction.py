@@ -65,8 +65,7 @@ def test_telluric_correction():
     setattr(lsf_model, "LSF_PARAMS_FIB1", lsf_params)
 
     # run primitive
-    prim = TelluricCorrectionPrimitive()
-    telluric_corrected = prim.apply(science_model, lsf=lsf_model, show_preview=False, save_preview=False)
+    telluric_corrected = TelluricCorrectionPrimitive.call(science_model, lsf=lsf_model, show_preview=False, save_preview=False)
 
     step_time = time.time()
     print(f"Telluric correction, elapsed: {step_time - start_time:.2f}s")

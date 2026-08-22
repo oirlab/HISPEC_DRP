@@ -110,51 +110,33 @@ def test_pipeline_call_interface(tmp_path):
 
     primitives = {
         'dq_init': {
-            'parameters' : {
-                'dq': cals['dq'],
-            },
+            'dq': cals['dq'],
         },
         'saturation_check': {
-            'parameters' : {
-                'saturation': cals['saturation'],
-            },
+            'saturation': cals['saturation'],
         },
         'bias_sub': {
-            'parameters' : {
-                'bias': cals['bias'],
-            },
+            'bias': cals['bias'],
         },
         'nonlin_corr': {
-            'parameters' : {
-                'nonlin': cals['nonlin'],
-            },
+            'nonlin': cals['nonlin'],
         },
         'jump_detec': {
-            'parameters' : {
-                'rn': cals['rn'],
-                'gain': cals['gain'],
-            },
+            'rn': cals['rn'],
+            'gain': cals['gain'],
         },
         'ramp_fit': {
-            'parameters' : {
-                'rn': cals['rn'],
-                'gain': cals['gain'],
-            },
+            'rn': cals['rn'],
+            'gain': cals['gain'],
         },
         'dark_sub' : {
-            'parameters' : {
-                'dark': cals['dark'],
-            }
+            'dark': cals['dark'],
         },
         'gain_corr' : {
-            'parameters' : {
-                'gain': cals['gain'],
-            }
+            'gain': cals['gain'],
         },
         'detflat_corr' : {
-            'parameters' : {
-                'detflat': cals['detflat'],
-            }
+            'detflat': cals['detflat'],
         }
     }
 
@@ -174,10 +156,8 @@ def test_effective_pipeline_config(tmp_path):
     mcds_num_coadd = 5
     primitives = {
         'ramp_fit': {
-            'parameters': {
-                'method': method,
-                'mcds_num_coadd': mcds_num_coadd
-            }
+            'method': method,
+            'mcds_num_coadd': mcds_num_coadd
         }
     }
 

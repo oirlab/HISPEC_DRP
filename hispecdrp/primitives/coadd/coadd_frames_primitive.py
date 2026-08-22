@@ -52,7 +52,7 @@ class CoaddFramesPrimitive(BasePrimitive):
         models is returned.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'coadded',
         'output_model' : None,
         'do_sigma_clip' : False,
@@ -65,19 +65,19 @@ class CoaddFramesPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_type = type(self.input)
+        input_type = type(self.dataset)
 
         # Make sure input is a list of models
         if input_type in (str, datamodels.DataModel):
             logger.warning("Input is a single model or path, returning without coadding.")
             self.run = False
-            return dict(output=self.input)
+            return dict(output=self.dataset)
         
         # Group by fiber illumination pattern
         if input_type in (list, tuple):
-            input_grouped = datamodels.group_by_fiber_combination(self.input)
+            input_grouped = datamodels.group_by_fiber_combination(self.dataset)
         elif input_type is dict:
-            input_grouped = self.input
+            input_grouped = self.dataset
 
         # Coadd each group separately
         outputs = []
