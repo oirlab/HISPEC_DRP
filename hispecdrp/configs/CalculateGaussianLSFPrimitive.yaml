@@ -1,0 +1,4 @@
+class: CalculateGaussianLSFPrimitive
+description: Standard Gaussian LSF calculation configuration.
+context: {}
+parameters: {}

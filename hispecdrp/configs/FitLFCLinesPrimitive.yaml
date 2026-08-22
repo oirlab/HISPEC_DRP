@@ -1,0 +1,4 @@
+class: FitLFCLinesPrimitive
+description: Standard fit LFC lines configuration.
+context: {}
+parameters: {}

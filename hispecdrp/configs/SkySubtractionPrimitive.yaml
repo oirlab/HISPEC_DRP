@@ -1,0 +1,4 @@
+class: SkySubtractionPrimitive
+description: Standard sky subtraction configuration.
+context: {}
+parameters: {}

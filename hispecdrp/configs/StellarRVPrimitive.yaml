@@ -1,0 +1,5 @@
+class: StellarRVPrimitive
+description: Standard stellar RV configuration.
+context: {}
+parameters: {}
+steps: {}
