@@ -1,0 +1,4 @@
+class: MakeReadnoisePrimitive
+description: Standard make readnoise configuration.
+context: {}
+parameters: {}

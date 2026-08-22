@@ -3,4 +3,4 @@ description: Quick look jump detection configuration.
 context:
   quicklook: true
 parameters:
-  skip: true
+  run: false

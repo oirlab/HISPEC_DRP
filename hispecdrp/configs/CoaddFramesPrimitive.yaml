@@ -1,0 +1,4 @@
+class: CoaddFramesPrimitive
+description: Standard coadd frames configuration.
+context: {}
+parameters: {}

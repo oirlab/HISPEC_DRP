@@ -1,0 +1,4 @@
+class: MakeNonLinPrimitive
+description: Standard make nonlinearity configuration.
+context: {}
+parameters: {}

@@ -1,6 +1,0 @@
-class: Stage1Pipeline
-description: Standard Stage 1 pipeline configuration.
-context:
-  quicklook: false
-parameters: {}
-steps: {}

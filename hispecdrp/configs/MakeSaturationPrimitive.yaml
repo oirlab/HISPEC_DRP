@@ -1,0 +1,4 @@
+class: MakeSaturationPrimitive
+description: Standard make saturation configuration.
+context: {}
+parameters: {}

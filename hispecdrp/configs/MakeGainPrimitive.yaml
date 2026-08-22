@@ -1,0 +1,4 @@
+class: MakeGainPrimitive
+description: Standard make gain configuration.
+context: {}
+parameters: {}
