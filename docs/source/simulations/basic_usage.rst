@@ -8,6 +8,10 @@ ccfopt settings).
 
 .. raw:: html
 
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">github</a>.</span></p>
+
+.. raw:: html
+
    <p class="download-notebook">
      <a class="download-notebook-btn"
         href="../_static/notebooks/basic_usage.ipynb"
@@ -15,7 +19,11 @@ ccfopt settings).
         download="basic_usage.ipynb">Download as notebook</a>
    </p>
 
-If ``KOA_CALIBRATION_CACHE`` is unset, the setup cell sets it under ``OUT``.
+.. warning::
+   **Setup.** This example uses a local KOA calibration cache. If
+   ``KOA_CALIBRATION_CACHE`` is unset, the first cell sets it under ``OUT``.
+   Optional remote sync uses ``KECK_OBSERVER_EMAIL`` and
+   ``KECK_OBSERVER_PASSWORD``.
 
 Imports and output directory
 ----------------------------
@@ -35,6 +43,10 @@ Imports and output directory
 
 1. KOA caldb
 ------------
+
+The pipeline resolves KOA calibrations by default when reducing real data.
+This step is still needed here so ``create_ramp_from_spectrum`` can populate
+and use a local cache while building the simulated UTR.
 
 .. code-block:: python
 
@@ -139,8 +151,8 @@ Same pipeline classes as real data. Stage-2 stellar RV uses line-by-line
            print(f"fiber {fib} <RV> = {rv:.4f} +/- {err:.4f} m/s")
            print(f"fiber {fib} bias = {rv - injected_m_s:.4f} m/s")
 
-4. Stellar RV preview
----------------------
+4. Consistency check: stellar RV preview
+----------------------------------------
 
 The Stage-2 stellar-RV HTML preview is written next to the FITS product:
 

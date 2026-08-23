@@ -5,6 +5,10 @@ Runnable worked examples for exploring HISPEC simulation workflows and pipeline
 tests. Each page follows the same style as :doc:`../basic_usage`: short setup, a
 focused simulation or validation, and products under a local output directory.
 
+Published examples live under this documentation tree (including a
+**Download as notebook** button on each page). Work-in-progress notebooks remain
+under ``hispecdrp/simulations/notebooks/`` until they are ready to promote here.
+
 Simulated Calibrations
 ----------------------
 

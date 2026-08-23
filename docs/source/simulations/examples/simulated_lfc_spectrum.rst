@@ -5,6 +5,10 @@ Paint a physical laser frequency comb (LFC) on BSPEC fiber 2, fit each spot with
 a 2D elliptical Gaussian, and compare WAVE at the fitted centroids to the known
 injected wavelengths.
 
+.. raw:: html
+
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">github</a>.</span></p>
+
 Modes follow ``nu_n = nu_0 + n * delta_nu`` via
 :func:`~hispecdrp.simulations.e2e_pipeline.build_lfc_line_list` (same ladder as
 ``FitLFCLinesPrimitive`` / ``LFCNU0`` and ``LFCDELNU``).
@@ -18,8 +22,11 @@ Modes follow ``nu_n = nu_0 + n * delta_nu`` via
         download="simulated_lfc_example.ipynb">Download as notebook</a>
    </p>
 
-Setup
------
+This calibration paint/fit example does **not** require KOA credentials or a
+calibration cache.
+
+Imports and output directory
+----------------------------
 
 .. code-block:: python
 
@@ -29,7 +36,6 @@ Setup
 
    from hispecdrp.simulations.e2e_pipeline import resolve_lfc_fiber_object
 
-   # OUTPUT DIRECTORY - update this to your desired output directory
    OUT = Path("/path/to/hispec_simulated_lfc_example")
    OUT.mkdir(parents=True, exist_ok=True)
 
@@ -181,8 +187,8 @@ For each successful fit, compare ``WAVE(row_fit)`` to the injected wavelength.
        f"orders={len(ods)}  median MAD(WAVE@row_fit)={np.median(mads):.3f} cm/s"
    )
 
-4. PDF and JSON report
-----------------------
+4. Consistency check: PDF and JSON report
+-----------------------------------------
 
 .. code-block:: python
 

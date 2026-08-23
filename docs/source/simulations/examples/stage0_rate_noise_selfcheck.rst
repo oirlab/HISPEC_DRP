@@ -16,8 +16,6 @@ UTR and again with a realistic ``uint16`` UTR.
         download="stage0_rate_noise_selfcheck.ipynb">Download as notebook</a>
    </p>
 
-If ``KOA_CALIBRATION_CACHE`` is unset, the setup cell sets it under ``OUT``.
-
 Imports and output directory
 ----------------------------
 
@@ -36,6 +34,10 @@ Imports and output directory
 
 1. KOA caldb
 ------------
+
+Calibrations are downloaded for this step as the simulator
+``create_ramp_from_spectrum`` below can use realistic calibrations stored on
+KOA.
 
 .. code-block:: python
 
@@ -93,24 +95,26 @@ Imports and output directory
 3. Stage 0
 ----------
 
-Same path as basic usage: ``Stage0Pipeline.call(ramp, output_dir=OUT)`` with
-pipeline defaults (no custom ``primitives``). Products land under ``OUT``.
-``create_ramp_from_spectrum`` defaults to identity forward nonlin and registers
-the matching Stage-0 nonlin cal automatically.
+This cell will call the Stage0Pipeline for the ``uint16`` and ``float32`` UTR
+frames with: ``Stage0Pipeline(output_dir=OUT).apply(ramp)`` using all default
+pipeline arguments. Products will be stored under ``OUT``.
 
 .. code-block:: python
 
    from hispecdrp.pipelines import Stage0Pipeline
 
    l0s = {
-       label: Stage0Pipeline.call(ramp, output_dir=OUT)
+       label: Stage0Pipeline(output_dir=OUT).apply(ramp)
        for label, ramp in ramps.items()
    }
 
 4. Pull histograms
 ------------------
 
-``(rate − truth) / rate_err`` with a Gaussian fit (main product).
+``(rate − truth) / rate_err`` with a Gaussian fit demonstrating that the
+pipeline can recover a rate map resembling the injected value. After subtracting
+the injected value and normalizing by the recovered error map, we should see a
+normal distribution of pixels with a mean of 0 and unit variance.
 
 .. code-block:: python
 
@@ -126,3 +130,16 @@ the matching Stage-0 nonlin cal automatically.
            title=f"Stage 0 rate ({label})",
            print_stats=False,
        )
+
+.. figure:: ../../_static/images/simulations/stage0_rate_pull_float32.png
+   :alt: Stage 0 rate pull histogram for float32 UTR
+   :width: 90%
+
+   Pull histogram for the ideal ``float32`` UTR
+   (``(rate − truth) / rate_err`` with Gaussian fit).
+
+.. figure:: ../../_static/images/simulations/stage0_rate_pull_uint16.png
+   :alt: Stage 0 rate pull histogram for uint16 UTR
+   :width: 90%
+
+   Same check for the realistic ``uint16`` UTR.

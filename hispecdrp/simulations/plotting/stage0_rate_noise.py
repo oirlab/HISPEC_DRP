@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -371,6 +372,7 @@ def plot_stage0_rate_pull_histogram(
     title: str | None = None,
     display: bool = True,
     print_stats: bool = True,
+    savefig: str | os.PathLike[str] | None = None,
     dq_exclude_flags: int | None = None,
     min_truth_rate: float | None = DEFAULT_STAGE0_PULL_MIN_TRUTH,
     robust_clip_sigma: float = 3.0,
@@ -383,6 +385,11 @@ def plot_stage0_rate_pull_histogram(
 
     Default ``error_mode='fit'`` divides by the pipeline ``rate_err``.
     ``error_mode='truth'`` is optional (requires variance planes).
+
+    Parameters
+    ----------
+    savefig
+        Optional path to write a PNG (dpi=150). Independent of ``display``.
     """
     mode = str(error_mode).strip().lower()
     if mode == "truth" and (rate_var_poisson is None or rate_var_rnoise is None):
@@ -462,6 +469,13 @@ def plot_stage0_rate_pull_histogram(
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
+
+    if savefig is not None:
+        out = os.fspath(savefig)
+        parent = os.path.dirname(out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fig.savefig(out, format="png", dpi=150, bbox_inches="tight")
 
     if display:
         from IPython.display import Image, display as ipy_display

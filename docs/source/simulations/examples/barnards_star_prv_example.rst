@@ -4,6 +4,10 @@ Barnard's Star PRV Example
 End-to-end simulation of observation and pipeline reduction of a Barnard's star
 analog as a precision RV standard.
 
+.. raw:: html
+
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">github</a>.</span></p>
+
 This page shows two examples:
 
 1. A single up-the-ramp exposure of a star with a theoretical spectrum similar to
@@ -24,7 +28,9 @@ template, builds a ``RampModel``, then runs ``Stage0Pipeline`` →
         download="barnards_star_prv_example.ipynb">Download as notebook</a>
    </p>
 
-**Environment variables** (set these in your shell / notebook kernel before running):
+.. warning::
+   **Setup.** Set these in your shell / notebook kernel before running (or let
+   the first cell create a local cache under ``OUT``):
 
 .. list-table::
    :header-rows: 1
@@ -43,8 +49,6 @@ template, builds a ``RampModel``, then runs ``Stage0Pipeline`` →
      - Optional remote sync
      - Keck Observer account password
 
-If ``KOA_CALIBRATION_CACHE`` is unset, the setup cell sets it under ``OUT``.
-
 Imports and output directory
 ----------------------------
 
@@ -55,7 +59,6 @@ Imports and output directory
 
    print(f"hispecdrp {hispecdrp.__version__} @ {hispecdrp.__file__}")
 
-   # OUTPUT DIRECTORY - update this to your desired output directory
    OUT = "/path/to/barnards_star_prv_example"
    os.makedirs(OUT, exist_ok=True)
 
@@ -63,14 +66,15 @@ Imports and output directory
        "KOA_CALIBRATION_CACHE",
        os.path.join(OUT, "cals", "KOA_CALIBRATION_CACHE"),
    )
-   print("output:", OUT)
+   print("OUT:", OUT)
    print("KOA_CALIBRATION_CACHE:", os.environ["KOA_CALIBRATION_CACHE"])
 
-1. Sync / verify KOA caldb (BSPEC)
-----------------------------------
+1. KOA caldb
+------------
 
-Pull BSPEC calibration metadata into the local caldb and download any missing
-files.
+The pipeline resolves KOA calibrations by default when reducing real data.
+This step is still needed here so ``create_ramp_from_spectrum`` can populate
+and use a local cache while building simulated UTRs.
 
 .. code-block:: python
 
@@ -176,10 +180,12 @@ What this simulation does **not** include:
        f"{getattr(getattr(cals.get('wavesol'), 'meta', None), 'note', None)}"
    )
 
-2.2 Stage 0 to 2 via pipeline classes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2.2 Stage 0–2
+~~~~~~~~~~~~~
 
-Reduce the simulated ramp with the same pipeline classes used on real data.
+Same pipeline classes as real data.
+``Stage0Pipeline.call`` / ``Stage1Pipeline.call`` / ``Stage2Pipeline.call`` with
+only the ``primitives`` needed for this fiber set and WAVE.
 
 .. code-block:: python
 
@@ -188,13 +194,14 @@ Reduce the simulated ramp with the same pipeline classes used on real data.
    l0 = Stage0Pipeline.call(ramp, output_dir=OUT)
 
    do_fibers = [str(f) for f in FIBERS]
-   # Fixed packaged line-ZP WAVE from create_ramp_from_spectrum
-   # (unscaled for spectrum paint)
-   stage1_primitives = {
-       "spec_extract": {"do_fibers": do_fibers},
-       "set_wavesol": {"wavesol": cals["wavesol"]},
-   }
-   l1 = Stage1Pipeline.call(l0, output_dir=OUT, primitives=stage1_primitives)
+   l1 = Stage1Pipeline.call(
+       l0,
+       output_dir=OUT,
+       primitives={
+           "spec_extract": {"do_fibers": do_fibers},
+           "set_wavesol": {"wavesol": cals["wavesol"]},
+       },
+   )
 
    injected_m_s = float(STELLAR_RV) * 1000.0
    l2 = Stage2Pipeline.call(
@@ -212,12 +219,7 @@ Reduce the simulated ramp with the same pipeline classes used on real data.
        },
    )
 
-   print(f"L0 type: {l0.meta.model_type}")
-   print(f"L0 filename: {l0.meta.filename}")
-   print(f"L1 type: {l1.meta.model_type}")
-   print(f"L1 filename: {l1.meta.filename}")
-   print(f"L2 type: {l2.meta.model_type}")
-   print(f"L2 filename: {l2.meta.filename}")
+   print(f"L2: {l2.meta.model_type}  {l2.meta.filename}")
 
 3. Segment of PRV observations
 ------------------------------
@@ -388,8 +390,8 @@ product.
            seed=0,
        )
 
-3.4 Injected vs recovered RV vs MJD
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3.4 Consistency check: injected vs recovered RV vs MJD
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Three-panel PRV diagnostic via `plot_injected_vs_recovered_rv`:
 
