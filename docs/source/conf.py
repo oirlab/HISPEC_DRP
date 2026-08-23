@@ -3,6 +3,7 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import hashlib
 import json
 import re
 import sys, os
@@ -81,13 +82,11 @@ pygments_style_dark = "friendly"
 html_permalinks_icon = Icons.permalinks_icon
 html_static_path = ['_static']
 html_css_files = ["custom.css"]
-html_js_files = [
-    "notebook_embeds.js",
-    "download_notebook.js",
-]
 
 # Embed downloadable notebooks as JS so the download button can force a real
 # file save (browsers often open ``.ipynb`` as text, especially via ``file://``).
+# Content-hash the script URL so a docs rebuild always busts browser caches of
+# the previous embed (otherwise "Download as notebook" can serve a stale .ipynb).
 _static_dir = Path(__file__).resolve().parent / "_static"
 _nb_dir = _static_dir / "notebooks"
 _notebook_embeds = _static_dir / "notebook_embeds.js"
@@ -98,7 +97,19 @@ if _nb_dir.is_dir():
             f"window.HISPEC_DRP_NOTEBOOKS[{json.dumps(_nb_path.name)}] = "
             f"{json.dumps(_nb_path.read_text(encoding='utf-8'))};\n"
         )
-_notebook_embeds.write_text("".join(_embed_lines), encoding="utf-8")
+_embed_body = "".join(_embed_lines)
+_notebook_embeds.write_text(_embed_body, encoding="utf-8")
+_embed_hash = hashlib.sha256(_embed_body.encode("utf-8")).hexdigest()[:12]
+_hashed_embed_name = f"notebook_embeds.{_embed_hash}.js"
+for _old in _static_dir.glob("notebook_embeds.*.js"):
+    if _old.name != _hashed_embed_name:
+        _old.unlink(missing_ok=True)
+(_static_dir / _hashed_embed_name).write_text(_embed_body, encoding="utf-8")
+
+html_js_files = [
+    _hashed_embed_name,
+    "download_notebook.js",
+]
 
 
 add_module_names = False

@@ -148,7 +148,6 @@ CCFOPT_SINGLE_LINE_STELLAR_RV_KW: dict[str, Any] = {
     "ccf_input_velocity_m_s": 0.0,
     "mask_auto_center_scout": False,
     "mask_ccf_pixel_interp_order": 3,
-    "ccf_parabolic_vertex_n_samples": 31,
     "ccf_min_good_pixels": 9,
     "max_abs_rv_m_s": 5000.0,
     "min_contrast": 0.0,
@@ -2202,9 +2201,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
     mask_ccf_pixel_interp_order: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
         "mask_ccf_pixel_interp_order"
     ],
-    ccf_parabolic_vertex_n_samples: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
-        "ccf_parabolic_vertex_n_samples"
-    ],
     ccf_min_good_pixels: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["ccf_min_good_pixels"],
     max_abs_rv_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["max_abs_rv_m_s"],
     min_contrast: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["min_contrast"],
@@ -2316,7 +2312,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             zb=float(zb),
             want_preview=False,
             mask_auto_center_scout=bool(mask_auto_center_scout),
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             min_good_pixels=int(ccf_min_good_pixels),
             mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
             window_line_by_line=bool(window_line_by_line),
@@ -2403,7 +2398,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
                 zb=float(zb),
                 want_preview=False,
                 mask_auto_center_scout=bool(mask_auto_center_scout),
-                ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
                 min_good_pixels=int(ccf_min_good_pixels),
                 mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
                 window_line_by_line=bool(window_line_by_line),
@@ -2490,7 +2484,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             zb=float(zb),
             want_preview=False,
             mask_auto_center_scout=bool(mask_auto_center_scout),
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             min_good_pixels=int(ccf_min_good_pixels),
             mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
             window_line_by_line=True,
@@ -2578,7 +2571,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
         "ccf_input_velocity_m_s": float(ccf_input_velocity_m_s),
         "mask_auto_center_scout": bool(mask_auto_center_scout),
         "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
-        "ccf_parabolic_vertex_n_samples": int(ccf_parabolic_vertex_n_samples),
         "ccf_min_good_pixels": int(ccf_min_good_pixels),
         "max_abs_rv_m_s": float(max_abs_rv_m_s),
         "min_contrast": float(min_contrast),

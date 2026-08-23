@@ -113,6 +113,69 @@ def identity_nonlin_calibration_model(ny: int, nx: int) -> datamodels.NonlinearC
     )
 
 
+# Default UTR forward nonlinearity used by :func:`simulate_ramp_from_rate_map`
+# when ``nonlin_coeffs`` is None (``np.polyval`` high→low order).
+DEFAULT_UTR_FORWARD_NONLIN_POLY = np.array([-1e-6, 1.0, 0.0], dtype=np.float64)
+
+# Identity forward poly (no distortion). Pass as ``nonlin_coeffs`` to keep Stage 0
+# nonlin correction a no-op when a matching cal is registered.
+IDENTITY_UTR_FORWARD_NONLIN_POLY = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+# Tagged on sim nonlin cals so :class:`NonlinearCorrectionSelector` prefers them
+# over KOA masters when ``nonlin_coeffs`` was set on the UTR simulator.
+SIM_MATCHED_NONLIN_NOTE = "sim_matched_nonlin"
+
+
+def matching_poly_nonlin_calibration_model(
+    ny: int,
+    nx: int,
+    *,
+    forward_poly_high_first: np.ndarray | None = None,
+) -> datamodels.NonlinearCorrectionModel:
+    """
+    Build a Stage-0 ``NonlinearCorrectionModel`` that undoes a UTR forward poly.
+
+    The ramp simulator applies ``np.polyval(forward_poly_high_first, DN)`` (high
+    order first). Stage 0 stores coefficients **low→high** and evaluates
+    ``a0 + a1·DN + a2·DN² + …``.
+
+    For the default quadratic ``y = x − ε x²`` (``ε = 1e-6``), the first-order
+    inverse is ``x ≈ y + ε y²``, implemented as ``[a0, a1, a2] = [0, 1, ε]``.
+    """
+    fwd = np.asarray(
+        DEFAULT_UTR_FORWARD_NONLIN_POLY
+        if forward_poly_high_first is None
+        else forward_poly_high_first,
+        dtype=np.float64,
+    ).ravel()
+    if fwd.size < 2:
+        raise ValueError("forward_poly_high_first must have at least 2 coefficients")
+    # np.polyval order: [c_n, ..., c1, c0] → y = c_n x^n + ... + c1 x + c0
+    c0 = float(fwd[-1])
+    c1 = float(fwd[-2])
+    c2 = float(fwd[-3]) if fwd.size >= 3 else 0.0
+    if abs(c0) > 1e-12 or abs(c1 - 1.0) > 1e-6:
+        raise ValueError(
+            "matching_poly_nonlin_calibration_model currently supports forward "
+            f"polys ≈ [c2, 1, 0]; got high-first {fwd.tolist()}"
+        )
+    # Inverse of y = x + c2 x^2 ≈ x = y - c2 y^2  (Stage-0 low→high: a0, a1, a2)
+    a0, a1, a2 = 0.0, 1.0, -c2
+    coeffs = np.zeros((3, ny, nx), dtype=np.float32)
+    coeffs[0, :, :] = a0
+    coeffs[1, :, :] = a1
+    coeffs[2, :, :] = a2
+    nonlin_thresh = np.zeros((ny, nx), dtype=np.uint16)
+    nonlin_max = np.full((ny, nx), np.iinfo(np.uint16).max, dtype=np.uint16)
+    nonlin_dq = np.zeros((ny, nx), dtype=np.uint32)
+    return datamodels.NonlinearCorrectionModel(
+        coeffs=coeffs,
+        nonlin_thresh=nonlin_thresh,
+        nonlin_max=nonlin_max,
+        dq=nonlin_dq,
+    )
+
+
 _CALIBRATION_SHAPE_ARRAY_NAMES: tuple[str, ...] = (
     "dq",
     "gain",

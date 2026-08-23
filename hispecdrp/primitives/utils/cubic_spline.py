@@ -1,11 +1,14 @@
 import numpy as np
 from numba import njit
 
+from hispecdrp.utils.physical_constants import C_M_S
+
 __all__ = [
     "cubic_spline_build",
     "cubic_spline_eval",
     "cubic_spline_eval_scalar",
     "cubic_spline_eval_scalar_arrays",
+    "doppler_paint_cubic_spline",
 ]
 
 
@@ -249,3 +252,65 @@ def cubic_spline_eval(cache : tuple, xq : np.ndarray):
         t = xx - xk[i]
         out[k] = a[i] + t * (b[i] + t * (c[i] + t * d[i]))
     return out
+
+
+def doppler_paint_cubic_spline(
+    wave_obs_um: np.ndarray,
+    wave_rest_um: np.ndarray,
+    flux_rest: np.ndarray,
+    rv_m_s: float,
+    *,
+    zb: float = 0.0,
+) -> np.ndarray:
+    """
+    Resample a rest-frame spectrum onto an observed wavelength grid via cubic spline.
+
+    Uses the same not-a-knot cubic spline as
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`
+    (alternate / research path). For paint that matches the **science**
+    ``ccf_line_mask`` sampler, use
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.doppler_paint_lagrange`
+    instead (Numba Lanczos / ``mask_ccf_pixel_interp_order``).
+
+    At injected radial velocity ``rv_m_s`` and barycentric factor ``zb``,
+
+    .. math::
+
+        F_{\\rm obs}(\\lambda) = F_{\\rm rest}\\!\\left(
+            \\lambda\\,\\frac{1+z_b}{1+v/c}
+        \\right)
+
+    which is the inverse of the mask Doppler map
+    :math:`\\lambda_{\\rm obs}=\\lambda_{\\rm rest}(1+v/c)/(1+z_b)`.
+
+    Parameters
+    ----------
+    wave_obs_um
+        Observed wavelengths (µm), **strictly ascending** (as for one echelle order).
+    wave_rest_um, flux_rest
+        Rest-frame knots (µm) and fluxes; ``wave_rest_um`` must be strictly ascending.
+    rv_m_s
+        Injected stellar RV (m s⁻¹).
+    zb
+        Barycentric redshift factor (same convention as the mask CCF).
+
+    Returns
+    -------
+    np.ndarray
+        Flux on ``wave_obs_um`` (float64).
+    """
+    w_obs = np.asarray(wave_obs_um, dtype=np.float64).ravel()
+    w_rest = np.asarray(wave_rest_um, dtype=np.float64).ravel()
+    f_rest = np.asarray(flux_rest, dtype=np.float64).ravel()
+    if w_rest.size != f_rest.size:
+        raise ValueError("wave_rest_um and flux_rest must have the same length")
+    if w_rest.size < 3:
+        raise ValueError("need at least 3 rest-frame knots for cubic spline")
+    if w_obs.size and not np.all(np.diff(w_obs) > 0.0):
+        raise ValueError("wave_obs_um must be strictly ascending")
+    if not np.all(np.diff(w_rest) > 0.0):
+        raise ValueError("wave_rest_um must be strictly ascending")
+
+    cache = cubic_spline_build(w_rest, f_rest)
+    beta = (1.0 + float(zb)) / (1.0 + float(rv_m_s) / float(C_M_S))
+    return cubic_spline_eval(cache, w_obs * beta)

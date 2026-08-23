@@ -2153,6 +2153,161 @@ def build_wavesol_aidan_with_order_zp(
     return wavesol, zp_info
 
 
+def _aidan_order_zp0_wavesol_cache_path(shared_dir: str, spectrograph: str) -> str:
+    prefix = "HB" if str(spectrograph).upper() == "BSPEC" else "HR"
+    return os.path.join(
+        e2e_support.calibration_dir(shared_dir),
+        f"{prefix}.aidan_gws_order_zp0_wavesol.fits",
+    )
+
+
+def load_shared_stage1_cals_for_rv_sim(
+    shared_dir: str,
+    spectrograph: str = "BSPEC",
+) -> dict[str, Any] | None:
+    """
+    Load a previously cached complete Stage-1 cal bundle for RV recovery sims.
+
+    Expects sim-HDF ``tracepos`` / ``traceprof`` / ``fiberflat`` under
+    ``<shared_dir>/cals`` plus an Aidan+deg-0 order-ZP ``wavesol`` FITS written by
+    :func:`ensure_shared_stage1_cals_for_rv_sim`. Returns ``None`` if incomplete.
+    """
+    from .. import datamodels
+    from .simulate_up_the_ramp import (
+        get_sim_stage1_master_paths,
+        load_cached_sim_stage1_masters,
+    )
+
+    spectrograph = str(spectrograph).upper()
+    out_abs = os.path.abspath(shared_dir)
+    wavesol_path = _aidan_order_zp0_wavesol_cache_path(out_abs, spectrograph)
+    paths = get_sim_stage1_master_paths(out_abs, spectrograph)
+    required = ("trace_pos", "trace_prof", "fiberflat", "meta")
+    if not os.path.isfile(wavesol_path):
+        return None
+    if not all(os.path.isfile(paths[k]) for k in required):
+        return None
+
+    masters = load_cached_sim_stage1_masters(out_abs, spectrograph)
+    wavesol = datamodels.open(wavesol_path)
+    return {
+        "trace_pos": masters["trace_pos"],
+        "trace_prof": masters["trace_prof"],
+        "fiberflat": masters["fiberflat"],
+        "wavesol": wavesol,
+        "zp_info": {
+            "loaded_from_cache": True,
+            "wavesol_path": wavesol_path,
+        },
+        "shared_dir": out_abs,
+    }
+
+
+def ensure_shared_stage1_cals_for_rv_sim(
+    shared_dir: str,
+    *,
+    rate_map: np.ndarray | None = None,
+    spectrograph: str = "BSPEC",
+    fibers: list[int] | tuple[int, ...] | None = None,
+    known_rv_m_s: float = 0.0,
+    extraction_aperture: float = 8.0,
+    ramp_meta: Any | None = None,
+    rebuild: bool = False,
+) -> dict[str, Any]:
+    """
+    Return a complete Stage-1 cal bundle for RV recovery simulations.
+
+    Products (HISPEC datamodel objects):
+
+    - ``trace_pos``, ``trace_prof``, ``fiberflat`` — sim-HDF masters
+    - ``wavesol`` — Aidan ``get_wavelength_solution`` + deg-0 per-order ZP
+      (:func:`build_wavesol_aidan_with_order_zp`)
+
+    On the first call (or when ``rebuild=True``), ``rate_map`` from the science
+    injection is required: fiberflat simulation and WAVE ZP refine use that map.
+    Results are cached under ``<shared_dir>/cals`` so later injections (and
+    notebook restarts) reuse the same frames without rebuilding.
+
+    Parameters
+    ----------
+    shared_dir
+        Directory that owns the cached Stage-1 masters (typically
+        ``<OUT>/_shared_stage1``).
+    rate_map
+        2-D e-/s rate map from the first ``create_ramp_from_spectrum`` call.
+        Required when the cache is missing or ``rebuild`` is True.
+    known_rv_m_s
+        Injected stellar RV of the rate map used for the WAVE order-ZP refine
+        (m/s). For ``inject_rv_via='spectrum'``, pass the first injection's RV.
+    """
+    from .simulate_up_the_ramp import register_sim_stage1_calibrations
+
+    spectrograph = str(spectrograph).upper()
+    fibs = [int(f) for f in (fibers if fibers is not None else [2]) if int(f) in (1, 2, 3)]
+    if not fibs:
+        raise ValueError("fibers must include at least one of 1, 2, 3")
+    out_abs = e2e_support.ensure_output_directory(shared_dir)
+
+    if not rebuild:
+        cached = load_shared_stage1_cals_for_rv_sim(out_abs, spectrograph)
+        if cached is not None:
+            logger.info(
+                "Reusing shared Stage-1 cals under %s (tracepos/traceprof/fiberflat + Aidan WAVE).",
+                e2e_support.calibration_dir(out_abs),
+            )
+            return cached
+
+    if rate_map is None:
+        raise ValueError(
+            "ensure_shared_stage1_cals_for_rv_sim: rate_map is required to build "
+            "shared Stage-1 cals (cache missing). Pass the rate map from the first "
+            "create_ramp_from_spectrum call."
+        )
+
+    logger.info(
+        "Building shared Stage-1 cals under %s (fiberflat/traces + Aidan+ZP0 WAVE; "
+        "known_rv=%.3f m/s). This is a one-time cost for the RV recovery grid.",
+        out_abs,
+        float(known_rv_m_s),
+    )
+    bundle = register_sim_stage1_calibrations(
+        out_abs,
+        rate_map,
+        spectrograph=spectrograph,
+        fibers=fibs,
+        ramp_meta=ramp_meta,
+        connect_remote=False,
+        extraction_aperture=float(extraction_aperture),
+        reuse_existing=False if rebuild else True,
+    )
+    wavesol_meta: dict[str, Any] = {}
+    if ramp_meta is not None:
+        mjd = getattr(ramp_meta, "mjd_start", None)
+        if mjd is not None:
+            wavesol_meta["mjd_start"] = mjd
+    wavesol, zp_info = build_wavesol_aidan_with_order_zp(
+        rate_map,
+        spectrograph=spectrograph,
+        fibers=fibs,
+        known_rv_m_s=float(known_rv_m_s),
+        meta=wavesol_meta or None,
+    )
+    wavesol_path = _aidan_order_zp0_wavesol_cache_path(out_abs, spectrograph)
+    wavesol.save(filepath=wavesol_path)
+    zp_info = dict(zp_info or {})
+    zp_info["wavesol_path"] = wavesol_path
+    zp_info["loaded_from_cache"] = False
+
+    return {
+        "trace_pos": bundle["trace_pos"],
+        "trace_prof": bundle["trace_prof"],
+        "fiberflat": bundle["fiberflat"],
+        "wavesol": wavesol,
+        "zp_info": zp_info,
+        "shared_dir": out_abs,
+    }
+
+
 def materialize_stage1_bundle_from_sim_hdf(
     *,
     spectrograph: str,

@@ -54,21 +54,6 @@ from .ccf_bisector import (
     calc_bisector_inverse_slope,
     fit_ccf_rv_bisector,
 )
-from .ccf_parabolic import (
-    CCFParabolicConfig,
-    _line_mask_parabolic_vertex_lstsq_npt_numba,
-    _refine_ccf_rv_after_gaussian_fit_ccf_line_mask,
-    _refine_ccf_rv_parabolic_after_gaussian_fit,
-    _require_ccf_parabolic_vertex_n_samples,
-    ensure_line_mask_lstsq_preview_plot_metadata,
-    fit_ccf_rv_parabolic,
-    line_mask_parabolic_vertex_rv_err_levmar_m_s,
-    line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s,
-    refine_ccf_rv_coarse_grid_parabolic,
-    refine_ccf_rv_line_mask_lstsq_from_stored,
-    require_ccf_parabolic_vertex_n_samples,
-    sweep_refine_ccf_rv_coarse_grid_min_abs_bias,
-)
 from .ccf_common import (
     V_MAX_DEFAULT_M_S,
     V_MIN_DEFAULT_M_S,
@@ -97,11 +82,15 @@ STELLAR_RV_LINE_MASK_ALGORITHMS: frozenset[str] = frozenset({"ccf_line_mask"})
 # to :func:`fit_ccf_rv` when fitting those arrays; see ``diag["ccf_line_mask_stored_negated"]``.
 LINE_MASK_CCF_STORED_NEGATED_FROM_RAW = True
 
-# Max Lagrange degree+1 stencil for mask-line CCF sampling on L2 wavelength pixels
-# (see ``mask_ccf_pixel_interp_order``).
-MAX_MASK_CCF_PIXEL_INTERP_ORDER = 12
+# Max Lanczos parameter *a* for mask-line CCF sampling on L2 wavelength pixels
+# (``mask_ccf_pixel_interp_order``; stencil spans up to ``2*a`` pixels).
+# Default science value is ``3`` (Lanczos-3). ``1`` keeps linear interpolation.
+MAX_MASK_CCF_PIXEL_INTERP_ORDER = 8
+# Weight buffer length for :func:`_lagrange_stencil_index_and_weights` (Lanczos).
+_MAX_PIXEL_INTERP_STENCIL = 2 * MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
 from .ccf_tophat import TOPHAT_MASK_CCF_SEGMENT_SAMPLES
+from .ccf_gauss_fit_numba import fit_ccf_rv_rows_numba
 
 # Default coarse CCF velocity grid (m/s) for :func:`resolve_ccf_broad_grid_m_s` when any of
 # ``v_min``, ``v_max``, or ``v_step`` are ``None``, and for StellarRVPrimitive coarse kwargs when unset.
@@ -2052,7 +2041,7 @@ def fit_ccf_rv(
 
 
 # =============================================================================
-# Numba per-chunk log-λ CCF + Python Gaussian / parabolic RV (many orders at once)
+# Numba per-chunk log-λ CCF + Python Gaussian RV (many orders at once)
 # =============================================================================
 
 
@@ -2065,13 +2054,12 @@ def _ccf_rv_from_ccf(
     vel_span_m_s_per_pixel: float | None = None,
     *,
     min_good_pixels: int = 10,
-    ccf_parabolic_vertex_n_samples: int | None = None,
     ccf_bisector_config: CCFBisectorConfig | None = None,
 ) -> tuple[float, float]:
     """Gaussian fit to CCF for final RV; else grid peak / HWHM.
 
-    ``ccf_parabolic_vertex_n_samples`` and ``ccf_bisector_config`` are retained for
-    API compatibility. Bisector refine is not used for the reported RV.
+    ``ccf_bisector_config`` is retained for API compatibility. Bisector refine is not
+    used for the reported RV.
     """
     ccf = np.asarray(ccf, dtype=np.float64)
     n_vel = len(ccf)
@@ -2516,7 +2504,6 @@ def _process_all_orders_rvs_numba_single_grid(
     numba_threads: int | None = None,
     min_good_pixels: int = 10,
     zb: float = 0.0,
-    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -2593,7 +2580,6 @@ def _process_all_orders_rvs_numba_single_grid(
             int(all_n_good[i]),
             vel_span_m_s_per_pixel=vspan,
             min_good_pixels=mg,
-            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
         all_rvs[i] = rv
         all_rv_errs[i] = rv_err
@@ -2626,7 +2612,6 @@ def _process_all_orders_rvs_numba_single_vgrid(
     numba_threads: int | None = None,
     min_good_pixels: int = 10,
     zb: float = 0.0,
-    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -2704,7 +2689,6 @@ def _process_all_orders_rvs_numba_single_vgrid(
             int(all_n_good[i]),
             vel_span_m_s_per_pixel=vspan,
             min_good_pixels=mg,
-            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
         all_rvs[i] = rv
         all_rv_errs[i] = rv_err
@@ -2741,7 +2725,6 @@ def process_all_orders_rvs_numba(
     ccf_half_window_m_s: float = 20000.0,
     min_good_pixels: int = 10,
     zb: float = 0.0,
-    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray]
     | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -2777,7 +2760,6 @@ def process_all_orders_rvs_numba(
             numba_threads=numba_threads,
             min_good_pixels=int(min_good_pixels),
             zb=float(zb),
-            ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
         )
 
     vc = float(ccf_center_m_s)
@@ -2817,7 +2799,6 @@ def process_all_orders_rvs_numba(
         numba_threads=numba_threads,
         min_good_pixels=int(min_good_pixels),
         zb=float(zb),
-        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
     )
 
 
@@ -2882,7 +2863,6 @@ def process_orders_rvs_numba_parallel(
     ccf_half_window_m_s: float = 20000.0,
     min_good_pixels: int = 10,
     zb: float = 0.0,
-    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> (
     tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     | tuple[
@@ -2939,17 +2919,12 @@ def process_orders_rvs_numba_parallel(
         Half-width (m/s) of the centered uniform window; default matches
         :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
     min_good_pixels : int, optional
-        Minimum good spectral pixels per chunk for CCF evaluation and Gaussian / parabolic
+        Minimum good spectral pixels per chunk for CCF evaluation and Gaussian
         RV fit (same role as ``ccf_min_good_pixels`` on :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`).
     zb : float, optional
         Barycentric factor :math:`z_b` in :math:`\\ln\\lambda` template shifts,
         :math:`\\Delta\\ln\\lambda = \\ln\\frac{1+v/c}{1+z_b}` (matches mask-line mapping when
         ``z_b`` is small).
-    ccf_parabolic_vertex_n_samples : int or None, optional
-        When set (odd, :math:`\\ge 3`), after each chunk’s Gaussian fit, apply the same
-        LSTSQ parabolic vertex refinement used for mask-line CCF (see
-        :func:`_refine_ccf_rv_after_gaussian_fit_ccf_line_mask`). ``None`` skips that step
-        (Gaussian-only RV per chunk).
 
     Returns
     -------
@@ -3064,7 +3039,6 @@ def process_orders_rvs_numba_parallel(
             **kw_h,
             "min_good_pixels": int(min_good_pixels),
             "zb": float(zb),
-            "ccf_parabolic_vertex_n_samples": ccf_parabolic_vertex_n_samples,
         }
         if return_ccf:
             all_rvs, all_rv_errs, all_wl, all_ccf, v_grid, all_n_good = process_all_orders_rvs_numba(
@@ -3148,7 +3122,6 @@ def _fit_ccf_preview_slot_worker(
     vs: float,
     *,
     ccf_line_mask_stored_negated: bool | None = None,
-    ccf_parabolic_vertex_n_samples: int = 11,
     line_mask_line_window_by_line: bool | None = None,
     line_mask_gaussian_seed_mean_m_s: float | None = None,
     ccf_bisector_config: CCFBisectorConfig | None = None,
@@ -3158,7 +3131,6 @@ def _fit_ccf_preview_slot_worker(
     RV for pipeline/preview metadata (:func:`_refine_ccf_rv_bisector_after_gaussian_fit`).
     Thread-safe (no shared mutable state).
 
-    ``ccf_parabolic_vertex_n_samples`` is ignored (retained for call-site compatibility).
     """
     wl = sl.get("wl_lo", np.nan)
     if not np.isfinite(wl):
@@ -3219,7 +3191,6 @@ def finalize_ccf_preview_dict(
     all_ccf_err_rows: list[np.ndarray] | None = None,
     *,
     ccf_line_mask_stored_negated: bool | None = None,
-    ccf_parabolic_vertex_n_samples: int = 11,
     line_mask_line_window_by_line: bool | None = None,
     line_mask_gaussian_seed_mean_m_s: float | None = None,
 ) -> dict:
@@ -3240,9 +3211,6 @@ def finalize_ccf_preview_dict(
     ccf_line_mask_stored_negated : bool or None, optional
         When not ``None``, forwarded to each slot’s :func:`fit_ccf_rv` call and copied to
         the returned dict as ``"ccf_line_mask_stored_negated"`` (mask-line preview only).
-    ccf_parabolic_vertex_n_samples : int, optional
-        **Odd** integer :math:`\\ge 3` for LSTSQ parabolic refinement after Gaussian fit
-        (mask-line slots only; raises if even). Must match :func:`run_ccf_line_mask_for_fiber`.
     line_mask_line_window_by_line : bool or None, optional
         Forwarded to :func:`fit_ccf_rv` (see :func:`_line_mask_ccf_fit_free_baseline_requested`).
     line_mask_gaussian_seed_mean_m_s : float or None, optional
@@ -3301,7 +3269,6 @@ def finalize_ccf_preview_dict(
             s,
             vs,
             ccf_line_mask_stored_negated=ccf_line_mask_stored_negated,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             line_mask_line_window_by_line=line_mask_line_window_by_line,
             line_mask_gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
         )
@@ -3333,7 +3300,6 @@ def finalize_ccf_preview_dict(
     ):
         out["line_mask_gaussian_seed_mean_m_s"] = float(line_mask_gaussian_seed_mean_m_s)
     return out
-
 
 def build_ccf_preview_dict(
     kind: Literal["numba_flat", "spectra_orders"],
@@ -3677,7 +3643,6 @@ def _masked_ccf_rv_core(
     v_grid: np.ndarray | None = None,
     zb: float = 0.0,
     min_good_pixels: int = 10,
-    ccf_parabolic_vertex_n_samples: int | None = None,
 ) -> tuple[float, float, np.ndarray, np.ndarray, dict | None]:
     """
     Single CCF build + fit; optionally build diagnostics dict (no duplicate CCF work).
@@ -3759,7 +3724,6 @@ def _masked_ccf_rv_core(
         v_step_fit,
         n_good,
         min_good_pixels=mg,
-        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
     )
     diag_out: dict | None = None
     if diagnostics:
@@ -3806,7 +3770,6 @@ def masked_ccf_rv(
     v_grid: np.ndarray | None = None,
     zb: float = 0.0,
     min_good_pixels: int = 10,
-    ccf_parabolic_vertex_n_samples: int | None = None,
     return_ccf: bool = False,
     diagnostics: bool = False,
 ) -> (
@@ -3844,14 +3807,6 @@ def masked_ccf_rv(
         :func:`_ccf_chunk_ccf_numba`).
     min_good_pixels : int, optional
         Minimum good pixels required before building the CCF and fitting.
-    ccf_parabolic_vertex_n_samples : int or None, optional
-        Deprecated; ignored for the returned RV. After the Gaussian fit, final RV and
-        :math:`\\sigma_{\\rm RV}` come from :func:`fit_ccf_rv_bisector` when that step succeeds.
-    return_ccf : bool, optional
-        If ``True``, also return ``v_grid`` and the 1-D CCF array on that grid.
-    diagnostics : bool, optional
-        If ``True``, also return a diagnostics dict with template/CCF statistics at the
-        fitted peak (produced by the internal CCF core).
 
     Returns
     -------
@@ -3884,7 +3839,6 @@ def masked_ccf_rv(
         v_grid=v_grid,
         zb=float(zb),
         min_good_pixels=int(min_good_pixels),
-        ccf_parabolic_vertex_n_samples=ccf_parabolic_vertex_n_samples,
     )
     if return_ccf and diagnostics:
         assert diag is not None
@@ -4189,6 +4143,47 @@ def _linear_interp_sorted_1d(xq: float, x: np.ndarray, y: np.ndarray, n: int) ->
     return (1.0 - t) * float(y[i0]) + t * float(y[i1])
 
 
+@njit(cache=True, inline="always")
+def _normalized_sinc(x: float) -> float:
+    """``sin(πx)/(πx)`` with ``sinc(0)=1``."""
+    if x == 0.0:
+        return 1.0
+    pix = math.pi * x
+    return math.sin(pix) / pix
+
+
+@njit(cache=True, inline="always")
+def _lanczos_kernel(x: float, a: float) -> float:
+    """Lanczos-*a* kernel: ``sinc(x) sinc(x/a)`` for ``|x|<a``, else 0."""
+    ax = abs(x)
+    if ax >= a:
+        return 0.0
+    if ax == 0.0:
+        return 1.0
+    return _normalized_sinc(x) * _normalized_sinc(x / a)
+
+
+@njit(cache=True, inline="always")
+def _fractional_pixel_index(xq: float, x: np.ndarray, n: int) -> float:
+    """
+    Continuous pixel index for ``xq`` on sorted abscissae ``x[:n]``.
+
+    Linear in wavelength between neighboring samples (handles mildly irregular
+    BSPEC WAVE spacing while applying the band-limited kernel in pixel index).
+    """
+    j = int(np.searchsorted(x, xq, side="right")) - 1
+    if j < 0:
+        j = 0
+    if j >= n - 1:
+        j = n - 2
+    x0 = float(x[j])
+    x1 = float(x[j + 1])
+    dx = x1 - x0
+    if dx == 0.0:
+        return float(j)
+    return float(j) + (xq - x0) / dx
+
+
 @njit(cache=True)
 def _poly_interp_sorted_1d(
     xq: float,
@@ -4198,11 +4193,12 @@ def _poly_interp_sorted_1d(
     order: int,
 ) -> float:
     """
-    Lagrange interpolation on sorted ``x[:n]`` (ascending); clamps outside ``[x[0], x[n-1]]``.
+    Interpolate ``y`` at ``xq`` on sorted ``x[:n]`` (ascending).
 
-    Uses ``k = min(order + 1, n)`` consecutive samples centered on the ``searchsorted``
-    bracket (degree at most ``k - 1``). ``order == 1`` matches :func:`_linear_interp_sorted_1d`
-    on interior points.
+    * ``order == 1`` — linear between bracketing samples (fast / robust).
+    * ``order >= 2`` — **Lanczos-a** windowed-sinc in **pixel-index** space with
+      ``a = order`` (science default ``a = 3``). Clamps outside ``[x[0], x[n-1]]``.
+      Near edges the truncated kernel is renormalized.
     """
     if n <= 0:
         return np.nan
@@ -4215,42 +4211,128 @@ def _poly_interp_sorted_1d(
     if o > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
         o = MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
-    k = o + 1
-    if k > n:
-        k = n
-
     if xq <= float(x[0]):
         return float(y[0])
     if xq >= float(x[n - 1]):
         return float(y[n - 1])
 
-    j = int(np.searchsorted(x, xq, side="right")) - 1
-    if j < 0:
-        j = 0
-    if j >= n - 1:
-        j = n - 2
+    if o == 1:
+        j = int(np.searchsorted(x, xq, side="right")) - 1
+        if j < 0:
+            j = 0
+        if j >= n - 1:
+            j = n - 2
+        x0 = float(x[j])
+        x1 = float(x[j + 1])
+        dx = x1 - x0
+        if dx == 0.0:
+            return float(y[j])
+        t = (xq - x0) / dx
+        return (1.0 - t) * float(y[j]) + t * float(y[j + 1])
 
-    s = j - (k - 1) // 2
-    if s < 0:
-        s = 0
-    if s + k > n:
-        s = n - k
-
+    a = float(o)
+    pf = _fractional_pixel_index(xq, x, n)
+    i0 = int(math.floor(pf)) - o + 1
+    i1 = int(math.floor(pf)) + o
+    if i0 < 0:
+        i0 = 0
+    if i1 > n - 1:
+        i1 = n - 1
     acc = 0.0
-    for m in range(k):
-        xm = float(x[s + m])
-        ym = float(y[s + m])
-        lm = 1.0
-        for t in range(k):
-            if t == m:
-                continue
-            xt = float(x[s + t])
-            d = xm - xt
-            if d == 0.0:
-                return ym
-            lm *= (xq - xt) / d
-        acc += ym * lm
-    return acc
+    wsum = 0.0
+    for i in range(i0, i1 + 1):
+        w = _lanczos_kernel(pf - float(i), a)
+        if w == 0.0:
+            continue
+        acc += w * float(y[i])
+        wsum += w
+    if wsum == 0.0:
+        j = int(math.floor(pf + 0.5))
+        if j < 0:
+            j = 0
+        if j > n - 1:
+            j = n - 1
+        return float(y[j])
+    return acc / wsum
+
+
+def doppler_paint_lanczos(
+    wave_obs_um: np.ndarray,
+    wave_rest_um: np.ndarray,
+    flux_rest: np.ndarray,
+    rv_m_s: float,
+    *,
+    zb: float = 0.0,
+    order: int = 3,
+) -> np.ndarray:
+    """
+    Resample a rest-frame spectrum onto an observed wavelength grid via Lanczos.
+
+    Uses the same Numba kernel as the science ``ccf_line_mask`` sampler
+    (:func:`_poly_interp_sorted_1d` / ``mask_ccf_pixel_interp_order``). At injected
+    radial velocity ``rv_m_s`` and barycentric factor ``zb``,
+
+    .. math::
+
+        F_{\\rm obs}(\\lambda) = F_{\\rm rest}\\!\\left(
+            \\lambda\\,\\frac{1+z_b}{1+v/c}
+        \\right)
+
+    which is the inverse of the mask Doppler map
+    :math:`\\lambda_{\\rm obs}=\\lambda_{\\rm rest}(1+v/c)/(1+z_b)`.
+
+    Parameters
+    ----------
+    wave_obs_um
+        Observed wavelengths (µm).
+    wave_rest_um, flux_rest
+        Rest-frame knots (µm) and fluxes; ``wave_rest_um`` must be strictly ascending.
+    rv_m_s
+        Injected stellar RV (m s⁻¹).
+    zb
+        Barycentric redshift factor (same convention as the mask CCF).
+    order
+        Lanczos parameter *a* (default ``3`` = Lanczos-3), matching
+        ``mask_ccf_pixel_interp_order``. ``1`` selects linear interpolation.
+        Clamped to ``[1, MAX_MASK_CCF_PIXEL_INTERP_ORDER]``.
+
+    Returns
+    -------
+    np.ndarray
+        Flux on ``wave_obs_um`` (float64).
+
+    See Also
+    --------
+    :func:`~hispecdrp.primitives.utils.cubic_spline.doppler_paint_cubic_spline`
+        Alternate not-a-knot cubic paint (not the science/CCF-matching path).
+    """
+    w_obs = np.asarray(wave_obs_um, dtype=np.float64).ravel()
+    w_rest = np.asarray(wave_rest_um, dtype=np.float64).ravel()
+    f_rest = np.asarray(flux_rest, dtype=np.float64).ravel()
+    if w_rest.size != f_rest.size:
+        raise ValueError("wave_rest_um and flux_rest must have the same length")
+    if w_rest.size < 1:
+        raise ValueError("need at least one rest-frame knot")
+    if w_rest.size >= 2 and not np.all(np.diff(w_rest) > 0.0):
+        raise ValueError("wave_rest_um must be strictly ascending")
+
+    pio = int(order)
+    if pio < 1:
+        pio = 1
+    elif pio > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
+        pio = MAX_MASK_CCF_PIXEL_INTERP_ORDER
+
+    beta = (1.0 + float(zb)) / (1.0 + float(rv_m_s) / float(C_M_S))
+    xq = w_obs * beta
+    n = int(w_rest.size)
+    out = np.empty(xq.size, dtype=np.float64)
+    for i in range(xq.size):
+        out[i] = _poly_interp_sorted_1d(float(xq[i]), w_rest, f_rest, n, pio)
+    return out
+
+
+# Backward-compatible alias (former Lagrange paint name).
+doppler_paint_lagrange = doppler_paint_lanczos
 
 
 @njit(cache=True)
@@ -4263,13 +4345,12 @@ def _poly_interp_sorted_1d_value_and_flux_variance(
     order: int,
 ) -> tuple[float, float]:
     """
-    Lagrange interpolation of ``y`` at ``xq`` plus propagated variance from pixel σ.
+    Interpolate ``y`` at ``xq`` plus propagated variance from pixel σ.
 
-    On the same stencil as ``_poly_interp_sorted_1d``, with independent pixel
-    uncertainties ``e_sig[m]`` (standard deviations), returns
-    ``(ŷ, \\sum_m L_m^2 e_sig[m]^2)``. Edge clamps return the endpoint sample and its
-    ``e_sig^2``. Returns ``(nan, nan)`` if any stencil ``e_sig`` is non-finite or
-    non-positive (caller should fall back to flux-only interpolation).
+    Same stencil / weights as :func:`_poly_interp_sorted_1d` (linear or Lanczos-*a*).
+    Returns ``(ŷ, \\sum_m w_m^2 e_sig[m]^2)`` with renormalized weights near edges.
+    Edge clamps return the endpoint sample and its ``e_sig^2``. Returns
+    ``(nan, nan)`` if any stencil ``e_sig`` is non-finite or non-positive.
     """
     if n <= 0:
         return np.nan, np.nan
@@ -4285,10 +4366,6 @@ def _poly_interp_sorted_1d_value_and_flux_variance(
     if o > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
         o = MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
-    k = o + 1
-    if k > n:
-        k = n
-
     if xq <= float(x[0]):
         es = float(e_sig[0])
         if not np.isfinite(es) or es <= 0.0:
@@ -4300,38 +4377,52 @@ def _poly_interp_sorted_1d_value_and_flux_variance(
             return np.nan, np.nan
         return float(y[n - 1]), es * es
 
-    j = int(np.searchsorted(x, xq, side="right")) - 1
-    if j < 0:
-        j = 0
-    if j >= n - 1:
-        j = n - 2
+    if o == 1:
+        j = int(np.searchsorted(x, xq, side="right")) - 1
+        if j < 0:
+            j = 0
+        if j >= n - 1:
+            j = n - 2
+        es0 = float(e_sig[j])
+        es1 = float(e_sig[j + 1])
+        if (not np.isfinite(es0) or es0 <= 0.0) or (
+            not np.isfinite(es1) or es1 <= 0.0
+        ):
+            return np.nan, np.nan
+        x0 = float(x[j])
+        x1 = float(x[j + 1])
+        dx = x1 - x0
+        if dx == 0.0:
+            return float(y[j]), es0 * es0
+        t = (xq - x0) / dx
+        w0 = 1.0 - t
+        w1 = t
+        yhat = w0 * float(y[j]) + w1 * float(y[j + 1])
+        return yhat, w0 * w0 * es0 * es0 + w1 * w1 * es1 * es1
 
-    s = j - (k - 1) // 2
-    if s < 0:
-        s = 0
-    if s + k > n:
-        s = n - k
-
+    a = float(o)
+    pf = _fractional_pixel_index(xq, x, n)
+    i0 = int(math.floor(pf)) - o + 1
+    i1 = int(math.floor(pf)) + o
+    if i0 < 0:
+        i0 = 0
+    if i1 > n - 1:
+        i1 = n - 1
+    wsum = 0.0
+    for i in range(i0, i1 + 1):
+        w = _lanczos_kernel(pf - float(i), a)
+        wsum += w
+    if wsum == 0.0:
+        return np.nan, np.nan
     acc_y = 0.0
     acc_var = 0.0
-    for m in range(k):
-        xm = float(x[s + m])
-        ym = float(y[s + m])
-        es_m = float(e_sig[s + m])
+    for i in range(i0, i1 + 1):
+        es_m = float(e_sig[i])
         if not np.isfinite(es_m) or es_m <= 0.0:
             return np.nan, np.nan
-        lm = 1.0
-        for t in range(k):
-            if t == m:
-                continue
-            xt = float(x[s + t])
-            d = xm - xt
-            if d == 0.0:
-                # Degenerate stencil; variance from duplicated abscissa is undefined.
-                return float(ym), float(np.nan)
-            lm *= (xq - xt) / d
-        acc_y += ym * lm
-        acc_var += lm * lm * es_m * es_m
+        wn = _lanczos_kernel(pf - float(i), a) / wsum
+        acc_y += wn * float(y[i])
+        acc_var += wn * wn * es_m * es_m
     return acc_y, acc_var
 
 
@@ -4344,10 +4435,12 @@ def _lagrange_stencil_index_and_weights(
     out_L: np.ndarray,
 ) -> tuple[int, int]:
     """
-    Lagrange basis ``L_m`` on the same stencil as ``_poly_interp_sorted_1d``.
+    Interpolation weights on the same stencil as :func:`_poly_interp_sorted_1d`.
 
-    Writes ``out_L[0:k]`` and returns ``(s, k)`` where pixel indices are ``s, s+1, …, s+k-1``.
-    Clamped endpoints use a one-point stencil with ``L[0]=1``. Returns ``(-1, 0)`` if invalid.
+    Despite the historical name, weights are **linear** (``order==1``) or
+    **renormalized Lanczos-a** (``a=order``). Writes ``out_L[0:k]`` and returns
+    ``(s, k)`` for pixel indices ``s … s+k-1``. Clamped endpoints use a one-point
+    stencil with ``L[0]=1``. Returns ``(-1, 0)`` if invalid.
     """
     if n <= 0:
         return -1, 0
@@ -4361,10 +4454,6 @@ def _lagrange_stencil_index_and_weights(
     if o > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
         o = MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
-    k = o + 1
-    if k > n:
-        k = n
-
     if xq <= float(x[0]):
         out_L[0] = 1.0
         return 0, 1
@@ -4372,31 +4461,45 @@ def _lagrange_stencil_index_and_weights(
         out_L[0] = 1.0
         return n - 1, 1
 
-    j = int(np.searchsorted(x, xq, side="right")) - 1
-    if j < 0:
-        j = 0
-    if j >= n - 1:
-        j = n - 2
+    if o == 1:
+        j = int(np.searchsorted(x, xq, side="right")) - 1
+        if j < 0:
+            j = 0
+        if j >= n - 1:
+            j = n - 2
+        x0 = float(x[j])
+        x1 = float(x[j + 1])
+        dx = x1 - x0
+        if dx == 0.0:
+            out_L[0] = 1.0
+            return j, 1
+        t = (xq - x0) / dx
+        out_L[0] = 1.0 - t
+        out_L[1] = t
+        return j, 2
 
-    s = j - (k - 1) // 2
-    if s < 0:
-        s = 0
-    if s + k > n:
-        s = n - k
-
+    a = float(o)
+    pf = _fractional_pixel_index(xq, x, n)
+    i0 = int(math.floor(pf)) - o + 1
+    i1 = int(math.floor(pf)) + o
+    if i0 < 0:
+        i0 = 0
+    if i1 > n - 1:
+        i1 = n - 1
+    k = i1 - i0 + 1
+    if k <= 0 or k > out_L.shape[0]:
+        return -1, 0
+    wsum = 0.0
     for m in range(k):
-        xm = float(x[s + m])
-        lm = 1.0
-        for t in range(k):
-            if t == m:
-                continue
-            xt = float(x[s + t])
-            d = xm - xt
-            if d == 0.0:
-                return -1, 0
-            lm *= (xq - xt) / d
-        out_L[m] = lm
-    return s, k
+        w = _lanczos_kernel(pf - float(i0 + m), a)
+        out_L[m] = w
+        wsum += w
+    if wsum == 0.0:
+        return -1, 0
+    inv = 1.0 / wsum
+    for m in range(k):
+        out_L[m] *= inv
+    return i0, k
 
 
 @njit(cache=True, parallel=True)
@@ -4439,11 +4542,11 @@ def _calc_mask_ccf_chunks_numba(
 
     **Flux errors:** ``e_use_2d`` holds per-pixel flux :math:`\\sigma` on the chunk grid.
     The mask statistic is linear in pixel values
-    :math:`G_m` (Lagrange interpolation of flux per line, :math:`\\mathrm{SN}_j` treated as
+    :math:`G_m` (Lanczos / linear interpolation of flux per line, :math:`\\mathrm{SN}_j` treated as
     exact on the stencil):
     :math:`C = \\sum_m c_m G_m` with
     :math:`c_m = \\sum_j (w_j/W)\\,\\mathrm{SN}_j\\,L^{(j)}_{m}` where :math:`W=\\sum_j w_j`
-    and :math:`L^{(j)}_{m}` is the Lagrange weight of pixel :math:`m` for line :math:`j`
+    and :math:`L^{(j)}_{m}` is the interpolator weight of pixel :math:`m` for line :math:`j`
     (zero outside that line's stencil). Under independent pixel noise,
     :math:`\\sigma_{\\mathrm{meas}}^2 = \\sum_m c_m^2 \\sigma_m^2`. This **co-adds** lines
     that share stencil pixels and replaces the earlier :math:`\\sum_j w_j^2\\mathrm{Var}(F_j)/W^2`
@@ -4493,7 +4596,7 @@ def _calc_mask_ccf_chunks_numba(
             centers[n] = 0.5 * (
                 left_edges_2d[ic, n] + right_edges_2d[ic, n]
             )
-        lag_L_buf = np.empty(MAX_MASK_CCF_PIXEL_INTERP_ORDER + 1, dtype=np.float64)
+        lag_L_buf = np.empty(_MAX_PIXEL_INTERP_STENCIL, dtype=np.float64)
         coef_pix = np.zeros(n_pix, dtype=np.float64)
         n_samp = int(tophat_segment_samples)
         if n_samp < 1:
@@ -4862,38 +4965,20 @@ def _rv_from_ccf_line_mask_numba_single(
     v_grid_m_s: np.ndarray,
     ccf_raw: np.ndarray,
     n_good: int,
-    n_parabolic_samples: int,
     i_peak_prior: int,
 ) -> tuple[float, float, int]:
     """
-    RV from mask-line (KPF / SPIROU-style) CCF.
+    Fast Numba seed RV from mask-line CCF (discrete peak + heuristic σ).
 
     Convention is **fixed by algorithm**, not inferred from each CCF shape: the mask weights
-    target **absorption** lines, so the weight-normalized statistic (``Σ w f·SN / Σ w``) is
-    minimized near the
-    correct Doppler shift. We therefore always work in ``-CCF`` (search maxima / parabolic
-    vertex on ``-CCF``), and ``flipped`` is always 1 so returned/preview CCF rows are negated
-    consistently across echelle orders.
+    target **absorption** lines, so the weight-normalized statistic is minimized near the
+    correct Doppler shift. We always work in ``-CCF`` (search maxima), and ``flipped`` is
+    always 1 so returned/preview CCF rows are negated consistently.
 
     ``ccf_raw`` is the weight-normalized mask CCF row from :func:`_calc_mask_ccf_chunks_numba`.
 
-    ``i_peak_prior`` : if ``0 <= i_peak_prior < n``, the LSTSQ parabolic window is centered on
-    that velocity index (e.g. nearest grid point to the Gaussian mean from :func:`fit_ccf_rv`).
-    If ``i_peak_prior < 0``, the peak index comes from a smoothed-CCF prominence search (per-chunk
-    path).
-
-    Sub-pixel RV uses a **quadratic least-squares** vertex on ``n_parabolic_samples``
-    consecutive samples (odd, :math:`\\ge 3`, caller-validated; fewer near grid edges); otherwise
-    a three-point analytic parabola (historic behaviour).
-
-    **Returned** ``rv_err`` **(heuristic):** for an accepted LSTSQ fit, uses
-    :math:`\\sigma_v^2 \\approx -\\mathrm{amp}/y''` with ``y'' = 2a`` from the LSTSQ quadratic
-    on signed ``-CCF``, but ``amp`` is still the three-point peak contrast vs the CCF median
-    baseline, then scales by :math:`1/\\sqrt{n_{\\rm good}}` (spectral pixels in the chunk).
-    That can be **much larger** than the sub-m/s bias of the vertex on synthetic tests; the
-    pipeline replaces ``RV_ERR`` on accepted parabolic windows with
-    :func:`line_mask_parabolic_vertex_rv_err_levmar_m_s` when LM ``param_cov`` is available, else
-    :func:`line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s`.
+    This estimate is only a fallback when the Gaussian CCF fit does not succeed; the pipeline
+    final RV is the Gaussian centroid from :func:`fit_ccf_rv`.
     """
     n = v_grid_m_s.size
     if ccf_raw.size != n:
@@ -4917,14 +5002,12 @@ def _rv_from_ccf_line_mask_numba_single(
     if i_peak_prior >= 0 and i_peak_prior < n:
         i_peak = i_peak_prior
     else:
-        # Low-pass filter, then choose among local maxima by integrated contrast × √prominence.
         ys = _smooth_uniform5_numba(y_work, n)
         Wprom = n // 10
         if Wprom < 80:
             Wprom = 80
         if Wprom > 2000:
             Wprom = 2000
-        # Wide window for integrated line power (~20–40 km/s at 50 m/s sampling typical).
         Wint = n // 12
         if Wint < 100:
             Wint = 100
@@ -4951,60 +5034,17 @@ def _rv_from_ccf_line_mask_numba_single(
         fl = _ccf_rv_numba_err_floor(v_step_eff)
         return v_peak, max(float(abs(v_step_eff) * 2.0), fl), flipped
 
-    y_m1 = float(sign * ccf_raw[i_peak - 1])
     y_0 = float(sign * ccf_raw[i_peak])
-    y_p1 = float(sign * ccf_raw[i_peak + 1])
     baseline = float(sign * baseline_raw)
     amp = y_0 - baseline
-    if not np.isfinite(amp) or amp <= 0.0:
-        fl = _ccf_rv_numba_err_floor(v_step_eff)
-        return v_peak, max(float(abs(v_step_eff) * 2.0), fl), flipped
-
     fl = _ccf_rv_numba_err_floor(v_step_eff)
-    rv_ls, a_ls, ok_ls = _line_mask_parabolic_vertex_lstsq_npt_numba(
-        v_grid_m_s, y_work, i_peak, int(n_parabolic_samples)
-    )
-    if ok_ls:
-        rv = float(rv_ls)
-        ypp = 2.0 * float(a_ls)
-        if not np.isfinite(ypp) or ypp >= 0.0:
-            sigma_v = float(abs(v_step_eff) * 2.0)
-        else:
-            sigma_v2 = max(float(-amp / ypp), fl * fl)
-            sigma_v = float(np.sqrt(sigma_v2))
-        n_scale = max(float(n_good), 1.0)
-        rv_err = float(max(sigma_v / np.sqrt(n_scale), fl))
-        return rv, rv_err, flipped
-
-    # Parabola y = a*v^2 + b*v + c through (v0,y_m1), (v1,y_0), (v2,y_p1); vertex at -b/(2a).
-    A = v1 * v1 - v0 * v0
-    B = v1 - v0
-    C = y_0 - y_m1
-    D = v2 * v2 - v1 * v1
-    E = v2 - v1
-    F = y_p1 - y_0
-    det = A * E - B * D
-    if not np.isfinite(det) or abs(det) < 1e-30:
-        fl = _ccf_rv_numba_err_floor(v_step_eff)
+    if not np.isfinite(amp) or amp <= 0.0:
         return v_peak, max(float(abs(v_step_eff) * 2.0), fl), flipped
-    a = (C * E - B * F) / det
-    b = (A * F - C * D) / det
-    if not np.isfinite(a) or abs(a) < 1e-30:
-        fl = _ccf_rv_numba_err_floor(v_step_eff)
-        return v_peak, max(float(abs(v_step_eff) * 2.0), fl), flipped
-    rv = -b / (2.0 * a)
-    if rv < min(v0, v2) or rv > max(v0, v2):
-        rv = v_peak
 
-    ypp = 2.0 * a
-    if not np.isfinite(ypp) or ypp >= 0.0:
-        sigma_v = float(abs(v_step_eff) * 2.0)
-    else:
-        sigma_v2 = max(float(-amp / ypp), fl * fl)
-        sigma_v = float(np.sqrt(sigma_v2))
+    # Discrete-grid peak seed; formal σ is a coarse heuristic (Gaussian fit replaces both).
     n_scale = max(float(n_good), 1.0)
-    rv_err = float(max(sigma_v / np.sqrt(n_scale), fl))
-    return float(rv), float(rv_err), flipped
+    rv_err = float(max(float(abs(v_step_eff) * 2.0) / np.sqrt(n_scale), fl))
+    return float(v_peak), float(rv_err), flipped
 
 
 @njit(parallel=True, cache=True)
@@ -5015,7 +5055,6 @@ def _rv_from_ccf_line_mask_rows_numba(
     out_rv: np.ndarray,
     out_rv_err: np.ndarray,
     out_flip: np.ndarray,
-    n_parabolic_samples: int,
     i_peak_prior: int,
 ) -> None:
     n_chunk = ccf_rows.shape[0]
@@ -5024,7 +5063,6 @@ def _rv_from_ccf_line_mask_rows_numba(
             v_grid_m_s,
             ccf_rows[i],
             int(n_good_arr[i]),
-            int(n_parabolic_samples),
             int(i_peak_prior),
         )
         out_rv[i] = rv
@@ -5048,10 +5086,10 @@ def rv_per_chunks_line_mask(
     max_cores: int | None = None,
     return_ccf: bool = False,
     min_good_pixels: int = 10,
-    ccf_parabolic_vertex_n_samples: int = 11,
     mask_ccf_pixel_interp_order: int = 3,
     window_line_by_line: bool = False,
     line_mask_line_chunk_v_center_m_s: float | None = None,
+    gaussian_seed_mean_m_s: float | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -5071,7 +5109,7 @@ def rv_per_chunks_line_mask(
     :func:`ccf_order_n_chunks_for_span` given the order span and ``window_size_um``),
     then computes chunk CCF rows in one Numba batch via :func:`_calc_mask_ccf_chunks_numba` (parallel over chunks;
     delta-line interpolation at each Doppler-shifted rest wavelength), followed by a Numba chunk-parallel
-    parabolic RV extraction. Chunks on an echelle row are iterated **longest λ first**
+    discrete-peak seed. Chunks on an echelle row are iterated **longest λ first**
     (descending chunk-center wavelength, red → blue along the row), so downstream ``RVCCF`` rows
     and mask-overlay segments follow the same ordering as ascending echelle order in the exposure.
     RV extraction assumes a
@@ -5079,12 +5117,11 @@ def rv_per_chunks_line_mask(
     data-driven emission/absorption guessing). Peak selection uses a 5-point smoothed CCF
     and a **combined score** (wide-window integrated excess above the global median times
     ``√prominence``) over strict local maxima—favoring the broad, physically coherent peak
-    at the true RV over narrow spurious maxima. A fast Numba estimate is computed first;
-    then each chunk is optionally updated with :func:`fit_ccf_rv` plus
-    :func:`_refine_ccf_rv_after_gaussian_fit_ccf_line_mask` (LSTSQ parabolic vertex with
-    ``ccf_parabolic_vertex_n_samples``, then Gaussian-smoothed coarse-grid fallback when
-    needed), matching the single-chunk order-mean path in :func:`run_ccf_line_mask_for_fiber`.
-    If that Gaussian+refine path does not return a finite RV, the Numba value is kept.
+    at the true RV over narrow spurious maxima.     A fast Numba estimate is computed first;
+    then chunk RVs are updated with a **Numba-parallel** Gaussian+fixed-baseline LM centroid
+    (:func:`~hispecdrp.primitives.utils.ccf.ccf_gauss_fit_numba.fit_ccf_rv_rows_numba`,
+    same peak-up / fixed-baseline convention as :func:`fit_ccf_rv` for line-mask rows).
+    If the Gaussian path does not return a finite RV, the Numba seed is kept.
     Returns flattened lists of chunk centers and RVs.
 
     ``ccf_2d`` is the weight-normalized mask CCF used for RV extraction and stacking;
@@ -5113,53 +5150,46 @@ def rv_per_chunks_line_mask(
     zb : float, optional
         Barycentric factor passed to the CCF shift.
     max_cores : int or None, optional
-        Numba thread count cap for chunk-parallel CCF evaluation.
+        Numba thread count cap for chunk-parallel CCF evaluation and the
+        Numba-parallel Gaussian centroid batch
+        (:func:`~hispecdrp.utils.parallelization_utils.numba_thread_scope` around
+        :func:`_calc_mask_ccf_chunks_numba` / :func:`~hispecdrp.primitives.utils.ccf.ccf_gauss_fit_numba.fit_ccf_rv_rows_numba`).
     return_ccf : bool, optional
         If True, also return mean CCF rows per chunk (stacked for preview).
     min_good_pixels : int, optional
         Minimum unmasked finite pixels required per chunk.
-    ccf_parabolic_vertex_n_samples : int, optional
-        **Odd** integer :math:`\\ge 3`: number of coarse velocity samples in the LSTSQ
-        parabolic vertex window. Per-chunk RVs center the window on the smoothed-CCF peak
-        index. Raises :class:`ValueError` if the value is even or below ``3``. Fewer samples
-        may be used automatically near the ends of the velocity grid.
     mask_ccf_pixel_interp_order : int, optional
-        Polynomial **order** for sampling flux and the per-pixel gate array onto mask-line
-        Doppler-shifted wavelengths in :func:`_calc_mask_ccf_chunks_numba` (Lagrange stencil
-        on sorted pixel centers). ``1`` is linear (legacy); clamped to
+        Lanczos parameter *a* for sampling flux onto Doppler-shifted mask
+        wavelengths (``1`` = linear; default ``3`` = Lanczos-3). Clamped to
         ``[1, MAX_MASK_CCF_PIXEL_INTERP_ORDER]``.
     window_line_by_line : bool, optional
-        When true, use :func:`build_line_mask_chunk_wavelength_intervals_line_by_line` instead of
-        equal-µm bins: chunks partition the order by observed mask-line wavelengths at
-        ``line_mask_line_chunk_v_center_m_s`` (non-overlapping intervals, midpoint boundaries).
+        When true, chunk by mask lines (requires finite
+        ``line_mask_line_chunk_v_center_m_s``).
     line_mask_line_chunk_v_center_m_s : float or None, optional
-        Required (finite) when ``window_line_by_line`` is true: pipeline velocity prior in m/s
-        (typically ``ccf_input_velocity``), defining observed-frame mask-line positions.
-        When ``window_line_by_line`` is true, spectral pixels per chunk are the intersection of
-        the line-window Voronoi interval with a symmetric band
-        :func:`mask_line_window_spectrum_band_um` about the chunk center (``window_size_um`` plus
-        :data:`LINE_MASK_LINE_WINDOW_SPEC_REL_PAD`). If that intersection has fewer than
-        ``min_good_pixels`` samples, the chunk falls back to the full Voronoi pixel set.
+        Observed-frame line-window center (m s⁻¹) for line-by-line chunking; also
+        preferred Gaussian-fit seed when set.
+    gaussian_seed_mean_m_s : float or None, optional
+        Optional Gaussian-fit seed (m s⁻¹) when
+        ``line_mask_line_chunk_v_center_m_s`` is unset (e.g. centered-grid /
+        auto-scout center).
 
     Returns
     -------
     rvs : np.ndarray
-        Per-chunk RV (m s⁻¹). After the Numba estimate, each chunk is replaced by the
-        Gaussian + :func:`_refine_ccf_rv_after_gaussian_fit_ccf_line_mask` RV when that
-        pipeline returns a finite value (``ccf_parabolic_vertex_n_samples`` controls the
-        LSTSQ window there); otherwise the Numba RV is kept.
+        Per-chunk RV (m s⁻¹). After the Numba seed, each chunk is replaced by the
+        Numba-parallel Gaussian centroid when that fit returns a finite value;
+        otherwise the Numba seed is kept.
     rv_errs : np.ndarray
-        Per-chunk RV uncertainty (m s\\ :sup:`−1`): when Gaussian+refine succeeds, its
-        reported error; else :func:`line_mask_parabolic_vertex_rv_err_levmar_m_s` when LM
-        covariance is available (else homoscedastic LSTSQ σ) on the Numba path; otherwise
-        the Numba heuristic from :func:`_rv_from_ccf_line_mask_numba_single`.
+        Per-chunk RV uncertainty (m s\\ :sup:`−1`): Gaussian fit uncertainty when that
+        path succeeds; otherwise the Numba heuristic from
+        :func:`_rv_from_ccf_line_mask_numba_single`.
     centers : np.ndarray
         Chunk center wavelength (µm).
     v_grid : np.ndarray
         Velocity grid used for the CCF.
     ccf_2d : np.ndarray or None
         If ``return_ccf``, shape ``(n_chunks, n_v)`` of weight-normalized CCF rows,
-        **sign-flipped** per chunk to match the parabolic RV extraction convention; used for
+        **sign-flipped** per chunk to match the stored absorption-peak convention; used for
         RVCCF supplements and chunk-level diagnostics. Else ``None``.
     wl_lo, wl_hi : np.ndarray
         Per-chunk wavelength bounds (µm), same length as ``rvs``.
@@ -5378,10 +5408,6 @@ def rv_per_chunks_line_mask(
     if not chunk_payloads:
         return _empty(v_grid)
 
-    n_parabolic_norm = _require_ccf_parabolic_vertex_n_samples(
-        int(ccf_parabolic_vertex_n_samples)
-    )
-
     n_chunk_valid = len(chunk_payloads)
     n_pix_max = max(len(t[0]) for t in chunk_payloads)
     n_line_max = max(len(t[5]) for t in chunk_payloads)
@@ -5458,106 +5484,120 @@ def rv_per_chunks_line_mask(
             rv_rows,
             rv_err_rows,
             flip_rows,
-            int(n_parabolic_norm),
             -1,
         )
 
     vg_cc = np.ascontiguousarray(np.asarray(v_grid, dtype=np.float64).ravel(), dtype=np.float64)
+    # Prefer Numba-parallel Gaussian fit (same peak-up / fixed-baseline convention as
+    # :func:`fit_ccf_rv` for line-mask stored rows). Keep Numba RV/σ when the fitter path
+    # does not succeed. Bisector refine is diagnostic only (Queloz BIS / BIS_ERR per chunk).
+    if (
+        line_mask_line_chunk_v_center_m_s is not None
+        and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
+    ):
+        v_seed = float(line_mask_line_chunk_v_center_m_s)
+    elif (
+        gaussian_seed_mean_m_s is not None
+        and math.isfinite(float(gaussian_seed_mean_m_s))
+    ):
+        v_seed = float(gaussian_seed_mean_m_s)
+    else:
+        v_seed = None
+
+    # Peak-up rows for the Gaussian LM (match LINE_MASK_CCF_STORED_NEGATED convention).
+    y_fit = np.empty_like(ccf_rows)
+    for i in range(n_chunk_valid):
+        if int(flip_rows[i]) == 1:
+            y_fit[i] = -ccf_rows[i]
+        else:
+            y_fit[i] = ccf_rows[i]
+    err_fit = None
+    if ccf_std_rows.size > 0 and int(ccf_std_rows.shape[1]) == int(vg_cc.size):
+        err_fit = np.ascontiguousarray(ccf_std_rows, dtype=np.float64)
+
+    cfg_fit = CCF_PREVIEW_SLOT_FIT_CONFIG
+    rv_g_arr, err_g_arr, ok_g_arr = fit_ccf_rv_rows_numba(
+        vg_cc,
+        y_fit,
+        ccf_err_rows=err_fit,
+        gaussian_seed_mean_m_s=v_seed,
+        pass1_half_width_m_s=float(cfg_fit.pass1_half_width_km_s) * 1000.0,
+        pass2_half_width_m_s=float(cfg_fit.pass2_half_width_km_s) * 1000.0,
+        initial_stddev_m_s=float(cfg_fit.initial_stddev_km_s) * 1000.0,
+        levmar_maxiter=int(cfg_fit.levmar_maxiter),
+        min_points=int(cfg_fit.min_points),
+        max_cores=max_cores,
+    )
     v_step_floor = float(effective_ccf_v_step_for_fit(vg_cc))
     for i in range(n_chunk_valid):
-        row = np.ascontiguousarray(ccf_rows[i], dtype=np.float64)
-        i_pk = int(_rv_from_ccf_line_mask_peak_index_numba(vg_cc, row, -1))
-        row_err = None
-        if ccf_std_rows.size > 0 and int(ccf_std_rows.shape[1]) == int(vg_cc.size):
-            row_err = np.ascontiguousarray(ccf_std_rows[i], dtype=np.float64)
-        sig_lm, _diag_lm = line_mask_parabolic_vertex_rv_err_levmar_m_s(
-            vg_cc,
-            row,
-            i_peak=i_pk,
-            n_pt_want=int(n_parabolic_norm),
-            v_step_m_s_for_floor=v_step_floor,
-            ccf_err=row_err,
-        )
-        if sig_lm is not None and math.isfinite(float(sig_lm)) and float(sig_lm) > 0.0:
-            rv_err_rows[i] = float(sig_lm)
-        else:
-            sig_h, _diag_h = line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s(
-                vg_cc,
-                row,
-                i_peak=i_pk,
-                n_pt_want=int(n_parabolic_norm),
-                v_step_m_s_for_floor=v_step_floor,
-            )
-            if sig_h is not None and math.isfinite(float(sig_h)) and float(sig_h) > 0.0:
-                rv_err_rows[i] = float(sig_h)
-
-    # Prefer Gaussian refine (same stack as order-mean RV when ``n_chunks_order == 1``
-    # and CCF preview slots). Keep Numba RV/σ when the fitter path does not succeed.
-    # Bisector refine is diagnostic only (Queloz BIS / BIS_ERR per chunk).
-    line_window_fit_ccf = bool(window_line_by_line)
-    v_seed = (
-        float(line_mask_line_chunk_v_center_m_s)
-        if line_mask_line_chunk_v_center_m_s is not None
-        and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
-        else None
-    )
-    bis_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
-    bis_err_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
-    for i in range(n_chunk_valid):
-        rv_nb = float(rv_rows[i])
-        if not np.isfinite(rv_nb):
+        if (
+            int(ok_g_arr[i]) == 1
+            and np.isfinite(rv_g_arr[i])
+            and np.isfinite(err_g_arr[i])
+            and float(err_g_arr[i]) > 0.0
+        ):
+            rv_rows[i] = float(rv_g_arr[i])
+            rv_err_rows[i] = float(err_g_arr[i])
             continue
-        y_stored = np.ascontiguousarray(
-            (
-                -ccf_rows[i]
-                if int(flip_rows[i]) == 1
-                else np.asarray(ccf_rows[i], dtype=np.float64).copy()
-            ),
-            dtype=np.float64,
-        )
-        wl_i = float(centers[i])
-        vsp_i = (
-            dv_per_pixel_m_s(wl_i)
-            if np.isfinite(wl_i) and wl_i > 0.0
-            else float("nan")
-        )
-        e_row = None
-        if ccf_std_rows.size > 0 and int(ccf_std_rows.shape[1]) == int(vg_cc.size):
-            e_row = np.ascontiguousarray(ccf_std_rows[i], dtype=np.float64)
+        # Rare fallback: Astropy LM when the Numba centroid fails (keeps seed otherwise).
+        if not np.isfinite(float(rv_rows[i])):
+            continue
+        e_row = err_fit[i] if err_fit is not None else None
         try:
-            rv_g, err_g, par_g, diag_g = fit_ccf_rv(
+            rv_g, err_g, _par_g, diag_g = fit_ccf_rv(
                 vg_cc,
-                y_stored,
+                y_fit[i],
                 v_step_floor,
                 n_good=int(n_good_arr[i]),
                 return_params=True,
-                vel_span_m_s_per_pixel=vsp_i if np.isfinite(vsp_i) else None,
                 ccf_err=e_row,
-                config=CCF_PREVIEW_SLOT_FIT_CONFIG,
+                config=cfg_fit,
                 ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
-                line_mask_line_window_by_line=line_window_fit_ccf,
+                line_mask_line_window_by_line=bool(window_line_by_line),
                 gaussian_seed_mean_m_s=v_seed,
             )
         except Exception:
             continue
-        if not (
+        if (
             bool(diag_g.get("fit_ok"))
             and np.isfinite(rv_g)
             and np.isfinite(err_g)
             and float(err_g) > 0.0
         ):
-            continue
-        rv_rows[i] = float(rv_g)
-        rv_err_rows[i] = float(err_g)
-        e_bis = e_row if e_row is not None else np.ones_like(y_stored)
+            rv_rows[i] = float(rv_g)
+            rv_err_rows[i] = float(err_g)
+
+    bis_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
+    bis_err_rows = np.full(n_chunk_valid, np.nan, dtype=np.float64)
+
+    def _bisector_one(i: int) -> tuple[int, float, float]:
+        if not np.isfinite(float(rv_rows[i])):
+            return i, float("nan"), float("nan")
+        y_stored = y_fit[i]
+        e_bis = (
+            err_fit[i]
+            if err_fit is not None
+            else np.ones_like(y_stored)
+        )
         try:
             bis_v, bis_e, *_rest = calc_bisector_inverse_slope(vg_cc, y_stored, e_bis)
-            if math.isfinite(float(bis_v)):
-                bis_rows[i] = float(bis_v)
-            if math.isfinite(float(bis_e)):
-                bis_err_rows[i] = float(bis_e)
+            bv = float(bis_v) if math.isfinite(float(bis_v)) else float("nan")
+            be = float(bis_e) if math.isfinite(float(bis_e)) else float("nan")
+            return i, bv, be
         except Exception:
-            pass
+            return i, float("nan"), float("nan")
+
+    n_bis_workers = resolve_numba_threads(max_cores)
+    if n_chunk_valid > 1 and n_bis_workers > 1:
+        with ThreadPoolExecutor(max_workers=min(n_bis_workers, n_chunk_valid)) as ex:
+            for i, bv, be in ex.map(_bisector_one, range(n_chunk_valid)):
+                bis_rows[i] = bv
+                bis_err_rows[i] = be
+    else:
+        for i in range(n_chunk_valid):
+            _, bv, be = _bisector_one(i)
+            bis_rows[i] = bv
+            bis_err_rows[i] = be
 
     all_bis: list[float] = []
     all_bis_errs: list[float] = []
@@ -5623,7 +5663,7 @@ def rv_per_chunks_line_mask(
 
 
 # =============================================================================
-# Line-mask LSTSQ preview metadata, post-Gaussian refine, and per-fiber driver
+# Line-mask per-fiber driver
 # =============================================================================
 
 
@@ -5649,7 +5689,6 @@ def run_ccf_line_mask_for_fiber(
     want_preview: bool = False,
     debug_ccf: bool = False,
     mask_auto_center_scout: bool = True,
-    ccf_parabolic_vertex_n_samples: int = 11,
     min_good_pixels: int = 10,
     mask_ccf_pixel_interp_order: int = 3,
     window_line_by_line: bool = False,
@@ -5666,9 +5705,12 @@ def run_ccf_line_mask_for_fiber(
 
     Reads ``SPEC_FIB*``, ``SPEC_ERR_FIB*``, ``SPEC_DQ_FIB*``, ``WAVE_FIB*`` from
     ``input_model``, resolves mask lines via :func:`~hispecdrp.utils.line_mask_utils.stellar_rv_ccf_mask_lines`, and processes
-    each requested echelle order with :func:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline.rv_per_chunks_line_mask_spline`.
-    Per-chunk CCFs use :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
-    metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
+    each requested echelle order with :func:`rv_per_chunks_line_mask`.
+    Per-chunk CCFs use Numba Lanczos / linear sampling
+    (:func:`_calc_mask_ccf_chunks_numba` / :func:`_poly_interp_sorted_1d`, controlled by
+    ``mask_ccf_pixel_interp_order`` and parallelized under ``max_cores``). Final RVs are
+    **Gaussian centroids** from :func:`fit_ccf_rv` (parabolic-vertex refine removed);
+    preview metadata use :func:`finalize_ccf_preview_dict`.
 
     Parameters
     ----------
@@ -5700,7 +5742,8 @@ def run_ccf_line_mask_for_fiber(
     zb : float, optional
         Barycentric factor for mask shift.
     max_cores : int or None, optional
-        Numba thread count cap used for chunk-parallel mask CCF evaluation.
+        Numba thread count cap forwarded to :func:`rv_per_chunks_line_mask` for
+        chunk-parallel mask CCF evaluation.
     want_preview : bool, optional
         If True, build order-averaged CCF data for Plotly preview.
     debug_ccf : bool, optional
@@ -5712,20 +5755,15 @@ def run_ccf_line_mask_for_fiber(
         :func:`build_centered_uniform_velocity_grid` at that center, and evaluate all wavelength
         sub-bins on that centered uniform grid. Multi-order runs skip this so preview stacking keeps one
         velocity axis.
-    ccf_parabolic_vertex_n_samples : int, optional
-        **Odd** integer :math:`\\ge 3` (raises if even). For the **order-mean** path, the LSTSQ
-        window is centered on the grid point nearest the Gaussian mean from :func:`fit_ccf_rv`;
-        for per-chunk Numba RVs (when the order-mean Gaussian path does not apply), the window
-        centers on the smoothed-CCF peak. Passed to :func:`rv_per_chunks_line_mask` and
-        :func:`refine_ccf_rv_line_mask_lstsq_from_stored`.
     min_good_pixels : int, optional
         Minimum unmasked finite spectral pixels required per chunk (see ``rv_per_chunks_line_mask``).
     mask_ccf_pixel_interp_order : int, optional
-        Lagrange interpolation **order** on the echelle wavelength axis when evaluating mask
-        CCFs (``1`` = linear). Forwarded to :func:`rv_per_chunks_line_mask`.
+        Lanczos parameter *a* on the echelle wavelength axis when evaluating mask
+        CCFs (``1`` = linear; default ``3`` = Lanczos-3). Forwarded to
+        :func:`rv_per_chunks_line_mask`.
     window_line_by_line : bool, optional
         When true, spectral chunks follow mask lines in the observed frame at
-        ``ccf_center_m_s`` (requires centered mode / finite ``ccf_center_m_s``).
+        ``ccf_center_m_s`` (requires finite ``ccf_center_m_s``).
         Forwarded to :func:`rv_per_chunks_line_mask`.
 
     Returns
@@ -5753,19 +5791,16 @@ def run_ccf_line_mask_for_fiber(
 
     logger.info(
         "CCF line_mask: starting fiber=%s n_do_orders=%d window_um=%.4f want_preview=%s "
-        "debug_ccf=%s (spline mask CCF + calc_ccf_metrics)",
+        "debug_ccf=%s (Lanczos mask CCF + Gaussian centroid; max_cores=%s interp_a=%d)",
         fiber,
         len(do_orders),
         window_size_um,
         want_preview,
         debug_ccf,
+        max_cores,
+        int(mask_ccf_pixel_interp_order),
     )
-    from .ccf_line_mask_spline import (
-        finalize_ccf_preview_dict_spline,
-        fit_line_mask_order_mean_rv_spline,
-        line_mask_scout_center_m_s,
-        rv_per_chunks_line_mask_spline,
-    )
+    from .ccf_line_mask_spline import line_mask_scout_center_m_s
     if not np.isfinite(window_size_um) or float(window_size_um) <= 0:
         raise ValueError("window_size_um must be finite and > 0 for ccf_line_mask")
     centered = bool(
@@ -5895,7 +5930,7 @@ def run_ccf_line_mask_for_fiber(
     all_wavelengths: list[float] = []
     all_orders: list[int] = []
 
-    # Per-chunk RVs and RVCCF table CCF rows use ``ccf_2d`` from spline mask CCF.
+    # Per-chunk RVs and RVCCF table CCF rows use ``ccf_2d`` from Lanczos mask CCF.
     want_preview_effective = bool(want_preview)
 
     order_slots: list[dict] = []
@@ -5927,10 +5962,11 @@ def run_ccf_line_mask_for_fiber(
             _win_sc = max(float(window_size_um), _span * (1.0 + 1e-12))
             _kw_sc = {
                 "min_good_pixels": int(min_good_pixels),
+                "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
                 **kw_rv_line_chunking,
             }
             try:
-                _scout = rv_per_chunks_line_mask_spline(
+                _scout = rv_per_chunks_line_mask(
                     _w_sc,
                     _s_sc,
                     _e_sc,
@@ -5941,6 +5977,7 @@ def run_ccf_line_mask_for_fiber(
                     v_max_m_s=v_max_use,
                     v_step_m_s=v_step_m_s,
                     zb=zb,
+                    max_cores=max_cores,
                     return_ccf=True,
                     **_kw_sc,
                 )
@@ -6015,6 +6052,7 @@ def run_ccf_line_mask_for_fiber(
 
         kw_rv = {
             "min_good_pixels": int(min_good_pixels),
+            "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
             **kw_rv_line_chunking,
         }
         if centered and ccf_center_m_s is not None and math.isfinite(float(ccf_center_m_s)):
@@ -6024,7 +6062,7 @@ def run_ccf_line_mask_for_fiber(
             and fiber_scout_center_m_s is not None
             and math.isfinite(float(fiber_scout_center_m_s))
         ):
-            # Seed the Gaussian/bisector at the scout center on the centered uniform grid.
+            # Seed the Gaussian at the scout center on the centered uniform grid.
             kw_rv["gaussian_seed_mean_m_s"] = float(fiber_scout_center_m_s)
         # Legacy single-order auto-center scout (when fiber-level scout did not run).
         span_um = float(w_max - w_min)
@@ -6035,7 +6073,7 @@ def run_ccf_line_mask_for_fiber(
             and not centered
             and v_auto_grid is None
         ):
-            scout = rv_per_chunks_line_mask_spline(
+            scout = rv_per_chunks_line_mask(
                 w,
                 s,
                 e,
@@ -6046,6 +6084,7 @@ def run_ccf_line_mask_for_fiber(
                 v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
+                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6106,7 +6145,7 @@ def run_ccf_line_mask_for_fiber(
                 ccf_preview_2d,
                 bis_o,
                 bis_err_o,
-            ) = rv_per_chunks_line_mask_spline(
+            ) = rv_per_chunks_line_mask(
                 w,
                 s,
                 e,
@@ -6118,6 +6157,7 @@ def run_ccf_line_mask_for_fiber(
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_grid,
                 zb=zb,
+                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6135,7 +6175,7 @@ def run_ccf_line_mask_for_fiber(
                 ccf_preview_2d,
                 bis_o,
                 bis_err_o,
-            ) = rv_per_chunks_line_mask_spline(
+            ) = rv_per_chunks_line_mask(
                 w,
                 s,
                 e,
@@ -6147,6 +6187,7 @@ def run_ccf_line_mask_for_fiber(
                 v_step_m_s=float(v_step_m_s),
                 v_grid_m_s=v_auto_grid,
                 zb=zb,
+                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6164,7 +6205,7 @@ def run_ccf_line_mask_for_fiber(
                 ccf_preview_2d,
                 bis_o,
                 bis_err_o,
-            ) = rv_per_chunks_line_mask_spline(
+            ) = rv_per_chunks_line_mask(
                 w,
                 s,
                 e,
@@ -6175,6 +6216,7 @@ def run_ccf_line_mask_for_fiber(
                 v_max_m_s=v_max_use,
                 v_step_m_s=v_step_m_s,
                 zb=zb,
+                max_cores=max_cores,
                 return_ccf=True,
                 **kw_rv,
             )
@@ -6240,27 +6282,44 @@ def run_ccf_line_mask_for_fiber(
                     ccf_err_fit = np.asarray(_ccf_std_2d[0], dtype=np.float64)
                 elif ccf_err_mean_order is not None:
                     ccf_err_fit = ccf_err_mean_order
-                rv_gf, err_gf, order_used_gaussian_mean = fit_line_mask_order_mean_rv_spline(
+                _gauss_seed = (
+                    float(ccf_center_m_s)
+                    if centered
+                    and ccf_center_m_s is not None
+                    and math.isfinite(float(ccf_center_m_s))
+                    else (
+                        float(fiber_scout_center_m_s)
+                        if order_auto_centered
+                        and fiber_scout_center_m_s is not None
+                        and math.isfinite(float(fiber_scout_center_m_s))
+                        else None
+                    )
+                )
+                vstep_fit = float(effective_ccf_v_step_for_fit(v_fit))
+                wl_c = 0.5 * (w_min + w_max)
+                vsp = dv_per_pixel_m_s(float(wl_c))
+                n_good_fit = max(int(np.nansum(order_chunk_ng)), 1)
+                rv_g, err_g, _par_g, diag_g = fit_ccf_rv(
                     v_fit,
                     ccf_mean_order,
-                    ccf_err_fit,
-                    gaussian_seed_mean_m_s=(
-                        float(ccf_center_m_s)
-                        if centered
-                        and ccf_center_m_s is not None
-                        and math.isfinite(float(ccf_center_m_s))
-                        else (
-                            float(fiber_scout_center_m_s)
-                            if order_auto_centered
-                            and fiber_scout_center_m_s is not None
-                            and math.isfinite(float(fiber_scout_center_m_s))
-                            else None
-                        )
-                    ),
-                                    )
-                if order_used_gaussian_mean:
-                    order_chunk_rvs = [rv_gf] * n_chunks_order
-                    order_chunk_errs = [err_gf] * n_chunks_order
+                    vstep_fit,
+                    n_good=n_good_fit,
+                    return_params=True,
+                    vel_span_m_s_per_pixel=vsp if np.isfinite(vsp) else None,
+                    ccf_err=ccf_err_fit,
+                    ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
+                    line_mask_line_window_by_line=bool(window_line_by_line),
+                    gaussian_seed_mean_m_s=_gauss_seed,
+                )
+                if (
+                    bool(diag_g.get("fit_ok"))
+                    and np.isfinite(rv_g)
+                    and np.isfinite(err_g)
+                    and float(err_g) > 0.0
+                ):
+                    order_chunk_rvs = [float(rv_g)] * n_chunks_order
+                    order_chunk_errs = [float(err_g)] * n_chunks_order
+                    order_used_gaussian_mean = True
 
         if order_used_gaussian_mean:
             fiber_agg_rvs.append(float(order_chunk_rvs[0]))
@@ -6406,7 +6465,7 @@ def run_ccf_line_mask_for_fiber(
             fiber,
             len(order_slots),
         )
-        preview_detail = finalize_ccf_preview_dict_spline(
+        preview_detail = finalize_ccf_preview_dict(
             order_slots,
             all_ccf_rows,
             preview_v_grid,
@@ -6414,7 +6473,9 @@ def run_ccf_line_mask_for_fiber(
             pv_max,
             pv_step,
             all_ccf_err_rows if len(all_ccf_err_rows) == len(order_slots) else None,
-            gaussian_seed_mean_m_s=(
+            ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
+            line_mask_line_window_by_line=bool(window_line_by_line),
+            line_mask_gaussian_seed_mean_m_s=(
                 float(ccf_center_m_s)
                 if centered
                 and ccf_center_m_s is not None
@@ -6426,7 +6487,7 @@ def run_ccf_line_mask_for_fiber(
                     else None
                 )
             ),
-                    )
+        )
 
     logger.info(
         "CCF line_mask: fiber=%s finished n_chunks=%d preview=%s",

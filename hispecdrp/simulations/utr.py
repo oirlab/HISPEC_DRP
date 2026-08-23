@@ -433,8 +433,24 @@ def create_ramp(
                  n_refpixs = 4)
 
     if std_1overf is not None  and std_1overf > 0:
-        noise_1overf = generate_1overf_noise_map(data_np.shape, n_channels, vertical, clock_rate, std_1overf)
-        data_np += noise_1overf
+        # 1/f is continuous; add in float space even if the shared buffer is ushort.
+        data_np = np.asarray(data_np, dtype=np.float32) + generate_1overf_noise_map(
+            data_np.shape, n_channels, vertical, clock_rate, std_1overf
+        )
+
+    if convert_to_uint16:
+        # Serial path historically did data[:] = round(...).astype(uint16) into a
+        # float32 buffer, which silently cast back to float32. Finalize as true
+        # uint16 after optional 1/f so callers match flight ADU dtype.
+        data_f = np.asarray(data_np, dtype=np.float64)
+        if np.any(data_f < 0):
+            raise ValueError(
+                "Negative value found in 'data' array before uint16 conversion. "
+                "Suggestion: Raise bias value."
+            )
+        data_np = np.clip(
+            np.round(data_f), 0, float(np.iinfo(np.uint16).max)
+        ).astype(np.uint16)
 
     _outputs = dict(data=data_np, dq_raw=dq_raw_np, meta=_meta)
 

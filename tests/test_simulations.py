@@ -61,7 +61,7 @@ def test_create_ramp_shape_and_keys(tmp_path):
 
 
 def test_create_ramp_uint16(tmp_path):
-    """create_ramp with convert_to_uint16 produces uint16 or float32 data in uint16 range."""
+    """create_ramp with convert_to_uint16 produces a true uint16 ADU cube."""
     source = np.ones((32, 32), dtype=np.float64) * 5.0
     out = simulations.create_ramp(
         source,
@@ -71,8 +71,7 @@ def test_create_ramp_uint16(tmp_path):
         convert_to_uint16=True,
         max_cores=1,
     )
-    # Implementation may return float32 buffer with uint16-range values or actual uint16
-    assert out["data"].dtype in (np.uint16, np.float32)
+    assert out["data"].dtype == np.uint16
     assert np.all(out["data"] >= 0) and np.all(out["data"] <= np.iinfo(np.uint16).max)
 
 

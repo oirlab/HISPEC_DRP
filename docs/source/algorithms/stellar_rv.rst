@@ -164,31 +164,19 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
 #. **Per-chunk RV and uncertainty**
 
-   Per-chunk RVs are initialized from a parabolic-vertex fit on the (stored-convention) CCF rows:
+   Per-chunk RVs come from a Gaussian fit to the (stored-convention) CCF:
 
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._rv_from_ccf_line_mask_rows_numba`
+   - Line-mask path: :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
+     via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`
+     (Numba Lagrange sampler; ``mask_ccf_pixel_interp_order`` / ``max_cores``)
+   - Legacy / template helpers: :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
 
-   Per-chunk ``RV_ERR`` may be replaced by the LevMar-based parabolic vertex uncertainty estimator when
-   ``ccf_err(v)`` is available; otherwise it falls back to a homoscedastic LSTSQ estimate:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_levmar_m_s`
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s`
+   The reported chunk ``RV`` / ``RV_ERR`` are the Gaussian centroid and its Gaussian uncertainty.
+   A discrete-peak Numba seed may be used only when the Gaussian fit does not succeed.
 
    **CCF sign convention:** stored CCF rows (RVCCF / preview slots) follow the negated convention
    so the absorption-like feature appears as a **peak** near the true RV (see
    :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`).
-
-#. **Optional order-mean Gaussian override**
-
-   When enabled by the driver (centered window or post-scout centered grid), an order-mean CCF is fit with a Gaussian:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
-
-   and then refined with the same mask-line parabolic machinery:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_line_mask`
-
-   On success, all chunks on that order can receive the same RV/σ (one fiber-aggregate estimate).
 
 #. **Fiber-level aggregation**
 
@@ -257,11 +245,6 @@ Useful command-line / environment overrides used by these tests include:
    Override the mask CCF interpolation order used by the tests (and reflected in the overlay
    debug spectrum interpolation trace label).
 
-``HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES``
-   Test-only hook (implemented in ``tests/test_stellar_rv.py``) to override the primitive parameter
-   ``ccf_parabolic_vertex_n_samples``. Set to an **odd** integer :math:`\ge 3` to enable post-Gaussian
-   parabolic-vertex refinement. Set to ``none`` (or ``null``) to disable refinement and keep
-   **Gaussian-only** per-chunk RV/RV_ERR for the template-CCF workflow.
 
 ``HISPEC_DRP_BSPEC_BTSETTL_ORDER``
    Which BSPEC echelle orders the BT-Settl BSPEC tests use. **Default** when unset is ``139``

@@ -48,22 +48,14 @@ information, and configuration-driven heuristics (see
 ideas appears in module docstrings and references; this repository does **not** include Keck KPF
 pipeline source.
 
-Bisector RV (default final estimate)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-After an accepted Gaussian fit, the pipeline refines the RV with
-:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv_bisector` (NEID-style weighted bisector
-midpoints at multiple depth percentiles; see :class:`~hispecdrp.primitives.utils.ccf.ccf_utils.CCFBisectorConfig`).
-The bisector RV and its uncertainty become the final ``RV``/``RV_ERR`` on each chunk when bisector
-fitting succeeds; otherwise the code falls back to the Gaussian estimate or a HWHM-style grid peak.
-
-Parabolic vertex (legacy / diagnostic)
+Gaussian CCF centroid (final estimate)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A local parabolic-vertex refinement
-(:func:`~hispecdrp.primitives.utils.ccf.ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_line_mask`) remains
-available for diagnostics and offline sweeps but is **no longer** the default final RV. The primitive
-argument ``ccf_parabolic_vertex_n_samples`` is deprecated and ignored for pipeline RVs.
+After an accepted Gaussian fit to the CCF
+(:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` or
+:func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`), the Gaussian mean
+(``v0`` / ``metrics.rv``) and its Gaussian uncertainty are the final ``RV``/``RV_ERR`` on each
+chunk. Bisector quantities remain available for diagnostics only and do not replace the reported RV.
 
 Per-chunk ``RV_ERR`` combines gradient- and covariance-based estimates (see
 :class:`~hispecdrp.primitives.utils.ccf.ccf_utils.CCFFitConfig`) and can optionally use a parametric

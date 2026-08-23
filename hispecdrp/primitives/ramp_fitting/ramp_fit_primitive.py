@@ -11,9 +11,155 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['FitRampPrimitive']
+__all__ = [
+    'FitRampPrimitive',
+    'sanitize_ramp_fit_rate_err',
+    'clip_noise_driven_poisson_variance',
+]
 
 _DO_NOT_USE = int(DQ_FLAGS["DO_NOT_USE"])
+
+# Optional detection gate for mode='detect_nsigma' (legacy empty-sky policy).
+_POISSON_DETECT_NSIGMA = 3.0
+
+# smooth_detect: gate on a spatially smoothed rate so empty sky stays RN-only
+# while faint illuminated structure (orders) keeps pixel Poisson.
+_POISSON_SMOOTH_SIGMA = 1.0
+_POISSON_SMOOTH_NSIGMA = 1.0
+
+# Default balances empty-sky pulls with faint illuminated emp/mean(err²).
+_POISSON_VARIANCE_MODE_DEFAULT = "smooth_detect"
+_POISSON_VARIANCE_MODES = frozenset({
+    "positive_only",
+    "detect_nsigma",
+    "smooth_detect",
+    "stcal",
+})
+
+
+def _nan_safe_gaussian_filter(rate: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian smooth that ignores non-finite pixels (normalized by weight)."""
+    from scipy.ndimage import gaussian_filter
+
+    sig = float(sigma)
+    if sig <= 0.0:
+        return np.asarray(rate, dtype=np.float64)
+
+    rate_a = np.asarray(rate, dtype=np.float64)
+    finite = np.isfinite(rate_a)
+    fill = np.where(finite, rate_a, 0.0)
+    weight = finite.astype(np.float64)
+    # Support 1-D unit tests and 2-D detector images.
+    num = gaussian_filter(fill, sigma=sig, mode="nearest")
+    den = gaussian_filter(weight, sigma=sig, mode="nearest")
+    out = np.zeros_like(num)
+    np.divide(num, den, out=out, where=den > 1e-6)
+    return out
+
+
+def clip_noise_driven_poisson_variance(
+    rate,
+    rate_var_poisson,
+    rate_var_rnoise,
+    *,
+    mode: str = _POISSON_VARIANCE_MODE_DEFAULT,
+    n_sigma: float = _POISSON_DETECT_NSIGMA,
+    smooth_sigma: float = _POISSON_SMOOTH_SIGMA,
+    smooth_nsigma: float = _POISSON_SMOOTH_NSIGMA,
+    rate_err=None,
+):
+    """
+    Adjust reported Poisson variance after the ramp fit.
+
+    Ramp fits (including ``stcal`` likely) evaluate photon-noise variance at a
+    non-negative function of the fitted rate (Wald plug-in). Modes:
+
+    - ``'smooth_detect'`` (default): keep the fit Poisson term where
+      ``rate > 0`` **and** a Gaussian-smoothed rate exceeds
+      ``smooth_nsigma * sqrt(rate_var_rnoise)``. Empty sky stays RN-limited
+      (isolated positive noise spikes are dropped); faint illuminated
+      structure keeps Poisson because neighbors hold the smooth rate up.
+    - ``'positive_only'``: zero Poisson only where ``rate <= 0``.
+    - ``'detect_nsigma'``: also zero Poisson unless
+      ``rate > n_sigma * sqrt(rate_var_rnoise)`` (legacy; underestimates
+      faint-source ``rate_err``).
+    - ``'stcal'``: leave ``rate_var_poisson`` unchanged; only rebuild
+      ``rate_err = sqrt(var_poisson + var_rnoise)``.
+
+    If ``rate_err`` is provided, it is preserved wherever ``var_poisson`` /
+    ``var_rnoise`` cannot form a finite rebuilt uncertainty (e.g. legacy
+    fitters that omit the variance split).
+
+    Returns
+    -------
+    rate_var_poisson_out, rate_err_out, n_clipped
+    """
+    rate_a = np.asarray(rate, dtype=np.float64)
+    vp = np.asarray(rate_var_poisson, dtype=np.float64).copy()
+    vr = np.asarray(rate_var_rnoise, dtype=np.float64)
+    if rate_a.shape != vp.shape or rate_a.shape != vr.shape:
+        raise ValueError(
+            f"shape mismatch: rate={rate_a.shape} var_poisson={vp.shape} "
+            f"var_rnoise={vr.shape}"
+        )
+
+    mode_key = str(mode).strip().lower()
+    if mode_key not in _POISSON_VARIANCE_MODES:
+        raise ValueError(
+            f"poisson variance mode must be one of {sorted(_POISSON_VARIANCE_MODES)}, "
+            f"got {mode!r}"
+        )
+
+    # Only gate / rebuild where variance planes are usable. Fitters that leave
+    # NaN var_* (historical cython_likely) must not wipe a finite rate_err.
+    var_ok = np.isfinite(vp) & np.isfinite(vr) & (vr >= 0.0) & (vp >= 0.0)
+
+    n_clipped = 0
+    if mode_key != "stcal":
+        nondetect = ~np.isfinite(rate_a) | (rate_a <= 0.0)
+        if mode_key == "detect_nsigma":
+            sig_rn = np.sqrt(np.maximum(vr, 0.0))
+            thresh = float(n_sigma) * sig_rn
+            nondetect = nondetect | ~np.isfinite(sig_rn) | (rate_a < thresh)
+        elif mode_key == "smooth_detect":
+            sig_rn = np.sqrt(np.maximum(vr, 0.0))
+            # Smooth only where rates are finite; invalid vr already in ~var_ok.
+            rate_s = _nan_safe_gaussian_filter(rate_a, smooth_sigma)
+            thresh = float(smooth_nsigma) * sig_rn
+            nondetect = (
+                nondetect
+                | ~np.isfinite(sig_rn)
+                | ~np.isfinite(rate_s)
+                | (rate_s < thresh)
+            )
+        clip_mask = nondetect & var_ok & (vp > 0.0)
+        n_clipped = int(np.count_nonzero(clip_mask))
+        vp = vp.copy()
+        vp[clip_mask] = 0.0
+
+    rebuilt = np.sqrt(np.maximum(vp, 0.0) + np.maximum(vr, 0.0))
+    rebuild_ok = var_ok & np.isfinite(rebuilt) & (rebuilt >= 0.0)
+
+    if rate_err is not None:
+        rate_err_out = np.asarray(rate_err, dtype=np.float64).copy()
+        if rate_err_out.shape != rate_a.shape:
+            raise ValueError(
+                f"shape mismatch: rate={rate_a.shape} rate_err={rate_err_out.shape}"
+            )
+        rate_err_out[rebuild_ok] = rebuilt[rebuild_ok]
+    else:
+        rate_err_out = rebuilt
+        rate_err_out = np.where(rebuild_ok, rate_err_out, np.nan)
+
+    bad = ~(np.isfinite(rate_err_out) & (rate_err_out >= 0.0))
+    rate_err_out = rate_err_out.astype(
+        np.result_type(rate_var_poisson, np.float32), copy=False
+    )
+    vp_out = vp.astype(np.asarray(rate_var_poisson).dtype, copy=False)
+    if np.any(bad):
+        rate_err_out = np.array(rate_err_out, copy=True)
+        rate_err_out[bad] = np.nan
+    return vp_out, rate_err_out, n_clipped
 
 
 def sanitize_ramp_fit_rate_err(
@@ -141,6 +287,21 @@ class FitRampPrimitive(BasePrimitive):
         Rejection threshold (approximately in signal-to-noise) above which
         discontinuities are flagged as jumps when using JWST ramp fitting methods.
         Default is 4.0.
+    poisson_variance_mode : {'smooth_detect', 'positive_only', 'detect_nsigma', 'stcal'}, optional
+        How to adjust reported ``rate_var_poisson`` / ``rate_err`` after the fit.
+        ``'smooth_detect'`` (default) gates Poisson on a smoothed rate so empty
+        sky stays RN-limited while faint illuminated structure keeps Poisson;
+        ``'positive_only'`` clears Poisson only for ``rate <= 0``;
+        ``'detect_nsigma'`` uses a per-pixel ``poisson_detect_nsigma`` gate
+        (legacy); ``'stcal'`` leaves the fit Poisson term unchanged.
+    poisson_detect_nsigma : float, optional
+        Per-pixel detection threshold for ``poisson_variance_mode='detect_nsigma'``.
+        Default is 3.0.
+    poisson_smooth_sigma : float, optional
+        Gaussian smoothing scale (pixels) for ``smooth_detect``. Default is 1.0.
+    poisson_smooth_nsigma : float, optional
+        Smoothed-rate detection threshold in RN σ for ``smooth_detect``.
+        Default is 1.0.
 
     Calibrations
     ------------
@@ -182,6 +343,10 @@ class FitRampPrimitive(BasePrimitive):
         'output_model' : 'L0Model',
         'jwst_jump_detection': False,
         'jwst_jump_rejection_threshold': 4.0,
+        'poisson_variance_mode': _POISSON_VARIANCE_MODE_DEFAULT,
+        'poisson_detect_nsigma': _POISSON_DETECT_NSIGMA,
+        'poisson_smooth_sigma': _POISSON_SMOOTH_SIGMA,
+        'poisson_smooth_nsigma': _POISSON_SMOOTH_NSIGMA,
     }
 
     CALIBRATIONS = {
@@ -287,6 +452,31 @@ class FitRampPrimitive(BasePrimitive):
         output_model.rate_var_rnoise = result['rate_var_rnoise']
         output_model.dq = result['dq']
         output_model.mid_time = result['mid_time']
+
+        # Adjust reported Poisson variance (see clip_noise_driven_poisson_variance).
+        # Default 'smooth_detect' keeps empty-sky RN pulls while preserving
+        # faint illuminated Poisson; see poisson_variance_mode for alternatives.
+        (
+            output_model.rate_var_poisson,
+            output_model.rate_err,
+            n_pois_clipped,
+        ) = clip_noise_driven_poisson_variance(
+            output_model.rate,
+            output_model.rate_var_poisson,
+            output_model.rate_var_rnoise,
+            mode=self.poisson_variance_mode,
+            n_sigma=self.poisson_detect_nsigma,
+            smooth_sigma=self.poisson_smooth_sigma,
+            smooth_nsigma=self.poisson_smooth_nsigma,
+            rate_err=output_model.rate_err,
+        )
+        if n_pois_clipped:
+            logger.info(
+                "Ramp fit: cleared Poisson variance on %d pixel(s) "
+                "(mode=%s) for reported rate_err.",
+                n_pois_clipped,
+                self.poisson_variance_mode,
+            )
 
         # Empty / unfitted pixels often return rate=0 with NaN rate_err. Fill a
         # finite rate_err (0 or RN floor) so box extract does not drop aperture

@@ -70,6 +70,7 @@ DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM = 3.0
 __all__ = [
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM",
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM",
+    "TWOMASS_VEGA_TO_AB",
     "air_wavelength_nm_to_vacuum_nm",
     "vacuum_wavelength_nm_to_air_nm",
     "delta_pix_to_delta_wave",
@@ -79,8 +80,68 @@ __all__ = [
     "get_spectrum_path",
     "load_btsettl_spectrum",
     "load_template_from_path",
+    "normalize_2mass_band",
     "resolve_stellar_template_to_log_micron",
+    "resolve_twomass_mag_ab",
+    "twomass_ab_to_vega",
+    "twomass_vega_to_ab",
 ]
+
+# 2MASS catalog magnitudes are Vega; template normalization uses AB.
+# m_AB = m_Vega + offset (Blanton & Roweis 2007).
+TWOMASS_VEGA_TO_AB = {"J": 0.910, "H": 1.390, "K": 1.850, "KS": 1.850}
+
+
+def normalize_2mass_band(band: str) -> str:
+    """Return canonical 2MASS band ``'J'``, ``'H'``, or ``'K'`` (``'Ks'`` → ``'K'``)."""
+    b = str(band).strip().upper()
+    if b == "KS":
+        return "K"
+    if b not in ("J", "H", "K"):
+        raise ValueError("band must be one of 'J', 'H', 'K', or 'Ks'")
+    return b
+
+
+def twomass_vega_to_ab(mag_vega: float, band: str) -> float:
+    """Convert a 2MASS Vega magnitude to AB using a fixed per-band offset."""
+    b = normalize_2mass_band(band)
+    return float(mag_vega) + float(TWOMASS_VEGA_TO_AB[b])
+
+
+def twomass_ab_to_vega(mag_ab: float, band: str) -> float:
+    """Convert a 2MASS AB magnitude to Vega using a fixed per-band offset."""
+    b = normalize_2mass_band(band)
+    return float(mag_ab) - float(TWOMASS_VEGA_TO_AB[b])
+
+
+def resolve_twomass_mag_ab(
+    *,
+    mag_ab: float | None = None,
+    mag_vega: float | None = None,
+    filter_band: str | None = None,
+) -> tuple[float | None, str | None]:
+    """
+    Resolve optional AB/Vega magnitudes to ``(mag_ab, band)`` for template scaling.
+
+    ``mag_vega`` overrides ``mag_ab`` when both are set. A magnitude requires
+    ``filter_band`` (2MASS ``J`` / ``H`` / ``K`` / ``Ks``).
+    """
+    if mag_vega is not None:
+        if filter_band is None:
+            raise ValueError("filter_band is required when mag_vega is set")
+        band = normalize_2mass_band(filter_band)
+        return twomass_vega_to_ab(float(mag_vega), band), band
+    if mag_ab is not None:
+        if filter_band is None:
+            raise ValueError("filter_band is required when mag_ab is set")
+        band = normalize_2mass_band(filter_band)
+        return float(mag_ab), band
+    if filter_band is not None:
+        raise ValueError(
+            "filter_band was set without mag_ab or mag_vega; "
+            "provide a magnitude or set filter_band=None"
+        )
+    return None, None
 
 
 def _edlen_refractivity_ppm_nm(wavelength_nm: np.ndarray, *, air_density: float = 1.0) -> np.ndarray:
@@ -311,9 +372,7 @@ def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
     Spanish Virtual Observatory Filter Profile Service (FPS3):
     https://svo2.cab.inta-csic.es/theory/fps3/
     """
-    band = band.upper()
-    if band not in ("J", "H", "K"):
-        raise ValueError("band must be one of 'J', 'H', 'K'")
+    band = normalize_2mass_band(band)
     url = SVO_FILTER_URL.format(band=band)
     with urllib.request.urlopen(url, timeout=30) as resp:
         data = np.loadtxt(resp, dtype=np.float64)

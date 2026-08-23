@@ -1,9 +1,10 @@
 Basic Usage
 ===========
 
-This page is a short worked example for running HISPEC DRP end-to-end from a
-1D stellar template: build a simulated BSPEC ramp, reduce it through Stage 0–2,
-and inspect the stellar-RV product.
+Short worked example for running HISPEC DRP end-to-end from a 1D stellar
+template: build a simulated BSPEC ramp, reduce it through Stage 0–2, and
+inspect the stellar-RV product using line-by-line ``ccf_line_mask`` (packaged
+ccfopt settings).
 
 .. raw:: html
 
@@ -13,25 +14,6 @@ and inspect the stellar-RV product.
         data-notebook-download="basic_usage.ipynb"
         download="basic_usage.ipynb">Download as notebook</a>
    </p>
-
-**Environment variables** (set these in your shell / notebook kernel before running):
-
-.. list-table::
-   :header-rows: 1
-   :widths: 28, 28, 44
-
-   * - Variable
-     - Required when
-     - Purpose
-   * - ``KOA_CALIBRATION_CACHE``
-     - Always
-     - Local KOA calibration cache directory (and SQLite DB)
-   * - ``KECK_OBSERVER_EMAIL``
-     - Optional remote sync
-     - Keck Observer account email
-   * - ``KECK_OBSERVER_PASSWORD``
-     - Optional remote sync
-     - Keck Observer account password
 
 If ``KOA_CALIBRATION_CACHE`` is unset, the setup cell sets it under ``OUT``.
 
@@ -43,75 +25,40 @@ Imports and output directory
    import os
    import hispecdrp
 
-   print(f"hispecdrp {hispecdrp.__version__} @ {hispecdrp.__file__}")
-
-   # OUTPUT DIRECTORY - update this to your desired output directory
    OUT = "/path/to/hispec_pipeline_example"
    os.makedirs(OUT, exist_ok=True)
-
    os.environ.setdefault(
        "KOA_CALIBRATION_CACHE",
        os.path.join(OUT, "cals", "KOA_CALIBRATION_CACHE"),
    )
-   print("output:", OUT)
-   print("KOA_CALIBRATION_CACHE:", os.environ["KOA_CALIBRATION_CACHE"])
+   print(f"OUT={OUT}")
 
-1. Sync / verify KOA caldb (BSPEC)
-----------------------------------
-
-Pull BSPEC calibration metadata into the local caldb and download any missing
-files.
+1. KOA caldb
+------------
 
 .. code-block:: python
 
    from hispecdrp.calibrations import verify_koa_calibrations
 
    SPECTROGRAPH = "BSPEC"
-
-   try:
-       summary = verify_koa_calibrations(
-           SPECTROGRAPH,
-           ignore_missing_cal_types=["lfc_wavesol"],
-       )
-   except RuntimeError as exc:
-       msg = str(exc)
-       if "Failed to query metadata" not in msg and "404" not in msg:
-           raise
-       print(
-           f"Remote KOA sync failed ({exc.__class__.__name__}); "
-           "using local cache only."
-       )
-       summary = verify_koa_calibrations(
-           SPECTROGRAPH,
-           connect_remote=False,
-           sync_remote=False,
-           ignore_missing_cal_types=["lfc_wavesol"],
-       )
-
-   print(
-       f"{summary['spectrograph']} caldb: {summary['n_records']} record(s); "
-       f"downloaded {summary['n_downloaded']}/{summary['n_missing']} "
-       f"missing file(s)"
+   summary = verify_koa_calibrations(
+       SPECTROGRAPH, ignore_missing_cal_types=["lfc_wavesol"]
    )
-   print("types:", summary["cal_types"])
+   print(f"{summary['spectrograph']}: {summary['n_records']} records")
 
-2. Simulated rate map from a 1D spectrum to ``RampModel``
----------------------------------------------------------
+2. Simulate UTR
+---------------
 
-Load a BT-Settl template, densify it, Doppler-shift the densified 1D spectrum by
-``radial_velocity_km_s`` (``inject_rv_via='spectrum'``), paint with ZEMAX, then
-build a raw UTR ``RampModel``. Stage-0 KOA masters plus simulation Stage-1
-products (packaged line-ZP WAVE, traces, fiberflat) are registered into the
-local caldb.
+Load a BT-Settl template, Doppler-shift by ``radial_velocity_km_s``, paint with
+ZEMAX, and build a raw UTR. Stage-0 KOA masters plus simulation Stage-1
+products are registered into the local caldb.
 
 .. code-block:: python
 
    from hispecdrp.simulations.simulate_up_the_ramp import create_ramp_from_spectrum
 
    FIBERS = [2]
-
-   # Injected stellar RV (km/s).
-   INJECTED_RV = 1.0
+   INJECTED_RV = 1.0  # km/s
 
    ramp, cals, rate_map = create_ramp_from_spectrum(
        OUT,
@@ -119,43 +66,62 @@ local caldb.
        fibers=FIBERS,
        template_filename="lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5",
        mag_ab=3.05,
-       filter_band="J",  # BSPEC (yJ)
+       filter_band="J",
        seed=0,
        radial_velocity_km_s=INJECTED_RV,
        barycentric_velocity_km_s=0.0,
        inject_rv_via="spectrum",
    )
+   print(f"Stage-0 cals: {sorted(cals)}")
 
-   print(f"ramp type: {ramp.meta.model_type}")
-   print(f"ramp filename: {ramp.meta.filename}")
-   print(f"ramp data shape: {ramp.data.shape}")
+3. Stage 0–2
+------------
 
-3. Stage 0 to 2 via the default pipelines
------------------------------------------
-
-Reduce the simulated ramp with the same pipeline classes used on real data.
+Same pipeline classes as real data. Stage-2 stellar RV uses line-by-line
+``ccf_line_mask`` with the packaged ``ccfopt`` mask and
+:data:`~hispecdrp.utils.line_mask_utils.CCFOPT_SINGLE_LINE_STELLAR_RV_KW`.
 
 .. code-block:: python
 
    from hispecdrp.pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline
+   from hispecdrp.utils.line_mask_utils import (
+       CCFOPT_SINGLE_LINE_STELLAR_RV_KW,
+       packaged_default_line_mask_path,
+   )
 
    l0 = Stage0Pipeline(output_dir=OUT).apply(ramp)
 
    do_fibers = [str(f) for f in FIBERS]
-   stage1_args = {
-       "spec_extract": {"do_fibers": do_fibers},
-       "set_wavesol": {"wavesol": cals["wavesol"]},
-   }
-   l1 = Stage1Pipeline(output_dir=OUT, prim_args=stage1_args).apply(l0)
+   l1 = Stage1Pipeline(
+       output_dir=OUT,
+       prim_args={
+           "spec_extract": {"do_fibers": do_fibers},
+           "set_wavesol": {"wavesol": cals["wavesol"]},
+       },
+   ).apply(l0)
 
    injected_m_s = float(INJECTED_RV) * 1000.0
+   kw = CCFOPT_SINGLE_LINE_STELLAR_RV_KW
    l2 = Stage2Pipeline(
        output_dir=OUT,
        prim_args={
            "blaze_corr": {"do_fibers": do_fibers},
+           # No sky fiber in this single-science-fiber sim; skip sky subtraction.
+           "sky_sub": {"run": False},
            "stellar_rv": {
+               "algorithm": "ccf_line_mask",
+               "mask_path": packaged_default_line_mask_path(),
                "ccf_input_velocity": injected_m_s,
                "do_fibers": list(FIBERS),
+               "window_line_by_line": True,
+               "window_size_um": float(kw["window_size_um"]),
+               "v_half_window": float(kw["v_half_window_m_s"]),
+               "v_step_coarse": float(kw["v_step_m_s"]),
+               "mask_auto_center_scout": bool(kw["mask_auto_center_scout"]),
+               "mask_ccf_pixel_interp_order": int(kw["mask_ccf_pixel_interp_order"]),
+               "ccf_min_good_pixels": int(kw["ccf_min_good_pixels"]),
+               "ccf_zb": 0.0,
+               "ccf_zb_from_barycorr": False,
                "save_preview": True,
                "preview_write_png": False,
            },
@@ -169,13 +135,10 @@ Reduce the simulated ramp with the same pipeline classes used on real data.
            rv = float(avg["RV"][0])
            err = float(avg["RV_ERR"][0])
            print(f"fiber {fib} <RV> = {rv:.4f} +/- {err:.4f} m/s")
-           print(
-               f"fiber {fib} bias = {rv - injected_m_s:.4f} m/s "
-               "(recovered - injected)"
-           )
+           print(f"fiber {fib} bias = {rv - injected_m_s:.4f} m/s")
 
-4. Stellar RV preview path
---------------------------
+4. Stellar RV preview
+---------------------
 
 The Stage-2 stellar-RV HTML preview is written next to the FITS product:
 
@@ -186,10 +149,10 @@ The Stage-2 stellar-RV HTML preview is written next to the FITS product:
    )
    print(preview)
 
-5. Alternative: an all-in-one E2E simulation
---------------------------------------------
+Alternative: all-in-one E2E simulation
+--------------------------------------
 
-To run the full end-to-end simulation from the command line interface, run:
+To run the full end-to-end simulation from the command line:
 
 .. code-block:: bash
 

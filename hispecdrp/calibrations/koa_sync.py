@@ -27,6 +27,7 @@ def verify_koa_calibrations(
     download_missing: bool = True,
     require_complete: bool = True,
     ignore_missing_cal_types: list[str] | tuple[str, ...] | None = None,
+    fallback_local: bool = True,
 ) -> dict[str, Any]:
     """
     Sync KOA catalog metadata and download missing calibration files for one spectrograph.
@@ -58,6 +59,10 @@ def verify_koa_calibrations(
         ``require_complete`` (and are skipped for download attempts). Useful for
         simulation notebooks that register a packaged ``lfc_wavesol`` instead of
         the remote geometric product. Example: ``["lfc_wavesol"]``.
+    fallback_local : bool, optional
+        If True (default) and a remote connect/sync fails with a recoverable
+        auth/network/API error, retry once with ``connect_remote=False`` and
+        ``sync_remote=False`` so notebooks need no try/except boilerplate.
 
     Returns
     -------
@@ -65,7 +70,55 @@ def verify_koa_calibrations(
         Summary with keys ``spectrograph``, ``n_records``, ``cal_types``,
         ``n_missing``, ``n_downloaded``, ``n_failed``, ``downloaded``, ``failed``,
         ``verified_paths``, ``still_missing``, ``ignored_missing``.
+        On local fallback, also ``remote_mode='local_fallback'`` and ``remote_error``.
     """
+    try:
+        summary = _verify_koa_calibrations_once(
+            spectrograph,
+            connect_remote=connect_remote,
+            sync_remote=sync_remote,
+            download_missing=download_missing,
+            require_complete=require_complete,
+            ignore_missing_cal_types=ignore_missing_cal_types,
+        )
+        summary.setdefault("remote_mode", "remote" if connect_remote else "local")
+        return summary
+    except (RuntimeError, ValueError, OSError) as exc:
+        if not (
+            fallback_local
+            and connect_remote
+            and _is_recoverable_remote_error(exc)
+        ):
+            raise
+        logger.warning(
+            "Remote KOA sync/login failed (%s: %s); "
+            "retrying with local cache only.",
+            type(exc).__name__,
+            str(exc).splitlines()[0] if str(exc) else exc,
+        )
+        summary = _verify_koa_calibrations_once(
+            spectrograph,
+            connect_remote=False,
+            sync_remote=False,
+            download_missing=download_missing,
+            require_complete=require_complete,
+            ignore_missing_cal_types=ignore_missing_cal_types,
+        )
+        summary["remote_mode"] = "local_fallback"
+        summary["remote_error"] = f"{type(exc).__name__}: {exc}"
+        return summary
+
+
+def _verify_koa_calibrations_once(
+    spectrograph: str = "BSPEC",
+    *,
+    connect_remote: bool = True,
+    sync_remote: bool = True,
+    download_missing: bool = True,
+    require_complete: bool = True,
+    ignore_missing_cal_types: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Single-pass KOA verify (no local fallback). See :func:`verify_koa_calibrations`."""
     spec = str(spectrograph).strip().upper()
     if spec not in ("BSPEC", "RSPEC"):
         raise ValueError(f"spectrograph must be BSPEC or RSPEC, got {spectrograph!r}")
@@ -229,7 +282,6 @@ def verify_koa_calibrations(
             "API, and that KOA_CALIBRATION_CACHE is writable."
         )
     return summary
-
 
 def _koa_cache_fit_count(cache_dir: str | os.PathLike[str]) -> int:
     root = os.path.join(str(cache_dir), "calibrations")
@@ -452,39 +504,13 @@ def ensure_koa_calibrations(
         sources=seed_sources,
     )
 
-    try:
-        summary = verify_koa_calibrations(
-            spectrograph,
-            connect_remote=bool(connect_remote),
-            sync_remote=bool(connect_remote),
-            ignore_missing_cal_types=ignore_missing_cal_types,
-            require_complete=require_complete,
-        )
-        summary["seed"] = seed_info
-        summary["remote_mode"] = "remote" if connect_remote else "local"
-        return summary
-    except (RuntimeError, ValueError, OSError) as exc:
-        if connect_remote and _is_recoverable_remote_error(exc):
-            logger.warning(
-                "Remote KOA sync/login failed (%s: %s); "
-                "retrying with local cache only.",
-                type(exc).__name__,
-                str(exc).splitlines()[0] if str(exc) else exc,
-            )
-            # Re-seed in case the failed remote path left the cache empty.
-            seed_info = seed_koa_calibration_cache(
-                os.environ["KOA_CALIBRATION_CACHE"],
-                sources=seed_sources,
-            )
-            summary = verify_koa_calibrations(
-                spectrograph,
-                connect_remote=False,
-                sync_remote=False,
-                ignore_missing_cal_types=ignore_missing_cal_types,
-                require_complete=require_complete,
-            )
-            summary["seed"] = seed_info
-            summary["remote_mode"] = "local_fallback"
-            summary["remote_error"] = f"{type(exc).__name__}: {exc}"
-            return summary
-        raise
+    summary = verify_koa_calibrations(
+        spectrograph,
+        connect_remote=bool(connect_remote),
+        sync_remote=bool(connect_remote),
+        ignore_missing_cal_types=ignore_missing_cal_types,
+        require_complete=require_complete,
+        fallback_local=bool(connect_remote),
+    )
+    summary["seed"] = seed_info
+    return summary

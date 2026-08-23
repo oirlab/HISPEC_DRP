@@ -186,6 +186,12 @@ class HISPECCalibrationStore(CalibrationStore):
         """
         if not existing:
             return None, None
+        # rows_where / some cache lookups can yield a generator or other iterable.
+        if not isinstance(existing, (dict, list)):
+            try:
+                existing = list(existing)
+            except TypeError:
+                return None, None
         if isinstance(existing, list):
             chosen = None
             for row in existing:
@@ -195,14 +201,16 @@ class HISPECCalibrationStore(CalibrationStore):
             existing = chosen or (existing[0] if existing else None)
             if not isinstance(existing, dict):
                 return None, None
+        if not isinstance(existing, dict):
+            return None, None
         try:
             path = self.calibration_file_in_cache(existing)
         except Exception:  # noqa: BLE001 - missing/null filename should not crash callers
             logger.warning(
                 "Existing calibration record is not usable (filename=%r).",
-                existing.get("filename"),
+                existing.get("filename") if isinstance(existing, dict) else None,
             )
-            return None, existing
+            return None, existing if isinstance(existing, dict) else None
         if path and existing.get("filename"):
             return path, existing
         return None, existing

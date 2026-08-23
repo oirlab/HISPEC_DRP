@@ -1,4 +1,4 @@
-"""Tests for spline mask CCF RV selection (Gaussian + peak fallback)."""
+"""Tests for spline mask CCF RV selection (Gaussian only; no discrete-peak snap-back)."""
 from __future__ import annotations
 
 import numpy as np
@@ -6,7 +6,6 @@ import numpy as np
 from hispecdrp.primitives.utils.ccf.ccf_fitting import CCFMetrics
 from hispecdrp.primitives.utils.ccf.ccf_line_mask_spline import (
     _ALIAS_PRIOR_RECENTER_GATE_M_S,
-    _FIT_VS_PEAK_DISAGREE_MIN_M_S,
     _pipeline_rv_from_metrics,
     _resolve_spline_mask_metrics_center_m_s,
 )
@@ -56,46 +55,45 @@ def test_pipeline_rv_ignores_bisector_far_from_gaussian():
     assert err == 7.5
 
 
-def test_pipeline_rv_falls_back_to_peak_on_fit_disagreement():
-    """Biased Gaussian yields to the local discrete/parabolic CCF peak."""
+def test_pipeline_rv_never_snaps_to_discrete_peak():
+    """Biased Gaussian must not be replaced by a local discrete/parabolic peak."""
     inj = -110_000.0
     v = np.arange(inj - 5_000.0, inj + 5_000.0 + 25.0, 50.0)
     stored = np.exp(-0.5 * ((v - inj) / 800.0) ** 2)
     raw = -stored
-    biased = inj + (_FIT_VS_PEAK_DISAGREE_MIN_M_S + 50.0)
+    biased = inj + 100.0
     rv, err = _pipeline_rv_from_metrics(
-        _metrics(rv=biased, bis_rv=biased + 10.0, fwhm=4_000.0),
+        _metrics(rv=biased, bis_rv=biased + 10.0, fwhm=4_000.0, rv_err=3.0),
         vel_grid=v,
         ccf_raw=raw,
     )
-    assert abs(rv - inj) < 25.0
-    assert err > 0.0
+    assert abs(rv - biased) < 1e-6
+    assert abs(err - 3.0) < 1e-6
 
 
-def test_pipeline_rv_ignores_distant_alias_peak():
-    """Local peak window must not jump to a stronger distant alias on a broad grid."""
+def test_pipeline_rv_keeps_gaussian_even_with_stronger_alias_peak():
+    """A stronger distant alias on the CCF must not override the Gaussian RV."""
     inj = -110_000.0
     alias = inj - 8_000.0
     v = np.arange(inj - 20_000.0, inj + 20_000.0 + 25.0, 50.0)
     stored = np.exp(-0.5 * ((v - inj) / 800.0) ** 2)
-    stored += 1.5 * np.exp(-0.5 * ((v - alias) / 800.0) ** 2)  # stronger alias
+    stored += 1.5 * np.exp(-0.5 * ((v - alias) / 800.0) ** 2)
     raw = -stored
+    gauss = inj + 5.0
     rv, _ = _pipeline_rv_from_metrics(
-        _metrics(rv=inj + 5.0, bis_rv=inj - 3.0, fwhm=4_000.0),
+        _metrics(rv=gauss, bis_rv=inj - 3.0, fwhm=4_000.0),
         vel_grid=v,
         ccf_raw=raw,
     )
-    # Stay with Gaussian near the true core — do not fall back to alias.
-    assert abs(rv - inj) < 50.0
+    assert abs(rv - gauss) < 1e-6
 
 
-def test_pipeline_rv_rejects_alias_peak_far_from_prior():
-    """FWHM-local peak fallback must not jump from a near-prior fit to a far alias."""
+def test_pipeline_rv_keeps_gaussian_near_prior_despite_far_alias():
+    """Near-prior Gaussian is kept even if a far alias peak is deeper."""
     prior = 0.0
     shoulder = -150.0
     alias = 284.0
     v = np.arange(-5_000.0, 5_000.0 + 25.0, 25.0)
-    # Sloped shoulder into a deeper alias (no local trough at the prior).
     stored = 0.3 * np.exp(-0.5 * ((v - prior) / 400.0) ** 2)
     stored += 1.2 * np.exp(-0.5 * ((v - alias) / 200.0) ** 2)
     raw = -stored
@@ -105,20 +103,17 @@ def test_pipeline_rv_rejects_alias_peak_far_from_prior():
         ccf_raw=raw,
         peak_anchor_m_s=prior,
     )
-    assert abs(rv - shoulder) < 1.0
+    assert abs(rv - shoulder) < 1e-6
     assert abs(err - 0.8) < 1e-6
 
 
-def test_pipeline_rv_prior_anchor_recovers_alias_locked_gaussian():
-    """When Gaussian locks onto an alias, prior-anchored peak guard recovers the core."""
+def test_pipeline_rv_keeps_alias_locked_gaussian_without_peak_snap():
+    """Alias-locked Gaussian is reported as-is (no discrete-peak recovery snap)."""
     from hispecdrp.primitives.utils.ccf.ccf_line_mask_spline import (
         _ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S,
     )
 
     inj = 0.0
-    # Dense-mask alias class (~BSPEC 145): beyond the recenter gate and outside
-    # the tight prior-search window. Use narrow cores so the alias wing does not
-    # dominate the prior-local disc-max at the window edge.
     alias = 480.0
     assert abs(alias) > _ALIAS_PRIOR_RECENTER_GATE_M_S
     assert abs(alias) > _ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S
@@ -126,13 +121,14 @@ def test_pipeline_rv_prior_anchor_recovers_alias_locked_gaussian():
     stored = np.exp(-0.5 * ((v - inj) / 120.0) ** 2)
     stored += 1.2 * np.exp(-0.5 * ((v - alias) / 120.0) ** 2)
     raw = -stored
-    rv, _ = _pipeline_rv_from_metrics(
-        _metrics(rv=alias, bis_rv=alias, fwhm=1_500.0),
+    rv, err = _pipeline_rv_from_metrics(
+        _metrics(rv=alias, bis_rv=alias, fwhm=1_500.0, rv_err=2.5),
         vel_grid=v,
         ccf_raw=raw,
         peak_anchor_m_s=inj,
     )
-    assert abs(rv - inj) < 50.0
+    assert abs(rv - alias) < 1e-6
+    assert abs(err - 2.5) < 1e-6
 
 
 def test_resolve_metrics_center_recenters_on_competitive_prior_peak():

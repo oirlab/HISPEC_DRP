@@ -102,10 +102,11 @@ class StellarRVPrimitive(BasePrimitive):
     **Algorithms**
 
     * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
-      two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
-      :mod:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline`). Per-chunk CCFs use
-      :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
-      metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
+      two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils`). Per-chunk
+      CCFs use Numba Lanczos / linear spectrum sampling
+      (:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask` /
+      ``mask_ccf_pixel_interp_order``; default Lanczos-3); final RVs are Gaussian centroids from
+      :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
@@ -153,13 +154,12 @@ class StellarRVPrimitive(BasePrimitive):
     mask_weight : array-like or None
         **Default:** ``None``. Weights matching ``mask_wavelength`` (same length).
     mask_ccf_pixel_interp_order : int
-        **Default:** ``3``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
-        for sampling flux and the per-pixel gate onto Doppler-shifted mask-line wavelengths in
+        **Default:** ``3``. **Mask algorithm only:** Lanczos parameter *a* (``1`` = linear;
+        ``3`` = Lanczos-3 windowed-sinc in pixel-index space) for sampling flux and the
+        per-pixel gate onto Doppler-shifted mask-line wavelengths in
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
-        to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Orders **greater than 1** are not
-        equivalent to the historical linear scheme: polynomial overshoot between pixels can bias
-        mask CCF shapes and aggregate RVs compared to ``order=1``; use for experiments only unless
-        you revalidate tolerances on your science cases.
+        to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Values **greater than 1** use
+        Lanczos-*a* (not historical Lagrange polynomials).
     mask_auto_center_scout : bool
         **Default:** ``False``. **Mask algorithm only.** When ``True`` and ``ccf_input_velocity``
         is unset, a scout CCF on the broad uniform grid finds a coarse peak, then the fiber
@@ -206,11 +206,6 @@ class StellarRVPrimitive(BasePrimitive):
     v_half_window : float
         **Default:** ``15000.0``. Half-width (m/s) of the centered uniform velocity window
         (±this value around ``ccf_input_velocity`` or the auto-scout center).
-    ccf_parabolic_vertex_n_samples : int or None
-        **Deprecated (ignored for final RV).** Final chunk RVs use the Gaussian fit from
-        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` /
-        :class:`~hispecdrp.primitives.utils.ccf.ccf_fitting.CCFMetrics`. Retained for
-        backward-compatible constructor kwargs only.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
@@ -291,7 +286,6 @@ class StellarRVPrimitive(BasePrimitive):
         "v_step_coarse": 25.0,  # m/s; None -> ccf_common.V_STEP_DEFAULT_M_S
         "ccf_input_velocity": None,  # m/s; center of uniform velocity window when set
         "v_half_window": 15000.0,  # m/s; ± half-width of centered uniform grid
-        "ccf_parabolic_vertex_n_samples": 31,
         "ccf_zb": 0.0,
         "ccf_zb_from_barycorr": True,
         "ccf_min_good_pixels": 9,
@@ -834,9 +828,6 @@ class StellarRVPrimitive(BasePrimitive):
             mask_auto_center_scout=bool(
                 getattr(self, "mask_auto_center_scout", True)
             ),
-            ccf_parabolic_vertex_n_samples=int(
-                getattr(self, "ccf_parabolic_vertex_n_samples", 31)
-            ),
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             mask_ccf_pixel_interp_order=int(
                 getattr(self, "mask_ccf_pixel_interp_order", 3)
@@ -1149,9 +1140,6 @@ class StellarRVPrimitive(BasePrimitive):
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
-                            ccf_parabolic_vertex_n_samples=getattr(
-                                self, "ccf_parabolic_vertex_n_samples", 31
-                            ),
                             return_ccf=True,
                         )
                     else:
@@ -1168,9 +1156,6 @@ class StellarRVPrimitive(BasePrimitive):
                             zb=self._fiber_ccf_zb(fiber),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
-                            ),
-                            ccf_parabolic_vertex_n_samples=getattr(
-                                self, "ccf_parabolic_vertex_n_samples", 31
                             ),
                             return_ccf=True,
                         )
@@ -1304,9 +1289,6 @@ class StellarRVPrimitive(BasePrimitive):
             return_ccf=True,
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             zb=self._fiber_ccf_zb(fiber),
-            ccf_parabolic_vertex_n_samples=getattr(
-                self, "ccf_parabolic_vertex_n_samples", 31
-            ),
             **(
                 dict(
                     ccf_center_m_s=ccf_center_m_s,

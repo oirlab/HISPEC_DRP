@@ -92,10 +92,6 @@ from ..rv_combine_utils import (
     combine_rv_estimates_median_mad_weighted,
     combine_rvs_median_mad,
 )
-from ...utils.ccf.ccf_parabolic import (
-    ensure_line_mask_lstsq_preview_plot_metadata,
-    refine_ccf_rv_coarse_grid_parabolic,
-)
 from ...utils.ccf.ccf_utils import (
     CCFFitConfig,
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
@@ -645,16 +641,11 @@ def _line_mask_preview_gaussian_overlay_params(
     """
     Display-only Gaussian (amplitude, v0, sigma, baseline) for line-mask CCF previews.
 
-    LevMar ``params`` can carry a near-zero ``amplitude`` while the reported RV uses
-    ``line_mask_refine_rmeta`` (LSTSQ parabolic vertex). The overlay uses ``rv_refined_m_s``
-    as ``v0`` when present, applies the same ``sigma`` sanity caps as before, then solves for
-    **(amplitude, baseline)** by linear least squares on the slot CCF:
+    Uses the LevMar Gaussian centroid ``params["v0"]`` as the final RV, applies the same
+    ``sigma`` sanity caps as before, then solves for **(amplitude, baseline)** by linear
+    least squares on the slot CCF:
 
     ``ccf ≈ amplitude * exp(-0.5 * ((v - v0) / sigma)^2) + baseline``.
-
-    That keeps the crimson curve and its asymptote aligned with the green data for the
-    chosen ``(v0, sigma)`` (the LevMar baseline alone is not re-used when it would leave a
-    vertical offset after changing ``v0``/``sigma`` for display).
     """
     if not params or not (diag or {}).get("fit_ok"):
         return None
@@ -662,11 +653,6 @@ def _line_mask_preview_gaussian_overlay_params(
     amp_lm = float(params["amplitude"])
     sig = float(params["sigma"])
     base_lm = float(params["baseline"])
-    rmeta = sl.get("line_mask_refine_rmeta") if isinstance(sl, dict) else None
-    if isinstance(rmeta, dict) and rmeta.get("ok"):
-        rv_r = rmeta.get("rv_refined_m_s")
-        if rv_r is not None and math.isfinite(float(rv_r)):
-            v0 = float(rv_r)
     vg_a = np.asarray(vg, dtype=np.float64).ravel()
     ccf_a = np.asarray(ccf, dtype=np.float64).ravel()
     if vg_a.size == 0 or ccf_a.size == 0 or vg_a.size != ccf_a.size:
@@ -714,11 +700,10 @@ def _line_mask_refine_plotly_traces_from_cached_rmeta(
     bisector_fit: dict | None = None,
 ) -> list[int]:
     """
-    Build five line-mask refine overlay traces from ``rmeta`` (no parabolic solve).
+    Build five line-mask refine overlay traces from ``rmeta`` (Gaussian final RV).
 
     Slots: (0) smoothed ±1σ band, (1) smoothed CCF, (2–3) reserved placeholders
-    (formerly parabolic diagnostics; left empty), (4) final Gaussian RV line.
-    When the slot carries ``line_mask_refine_rmeta``, that result is reused.
+    (formerly diagnostic overlays; left empty), (4) final Gaussian RV line.
     """
     trace_indices: list[int] = []
 
@@ -1017,16 +1002,13 @@ def _line_mask_refine_ccf_add_plotly_traces(
     ylim_hi: float,
 ) -> list[int]:
     """
-    For ``ccf_line_mask``, overlay diagnostic refine curves on the CCF panel
-    (smoothed CCF ±1σ when available) plus a vertical line at the **pipeline**
-    final RV (Gaussian fit).
+    For ``ccf_line_mask``, overlay a vertical line at the **pipeline** final RV
+    (Gaussian fit centroid) plus bisector diagnostic traces.
 
-    When the slot carries ``line_mask_refine_rmeta``, that result is reused so
-    Plotly does not recompute the diagnostic curves.
-
-    Always appends **five** refine traces (real overlays or empty placeholders),
+    Always appends **five** refine traces (final RV line or empty placeholders),
     then **two** bisector traces, so dropdown indices stay aligned.
     """
+    del params, diag  # reserved for future display-only overlays
     trace_indices: list[int] = []
 
     def _placeholder() -> None:
@@ -1037,122 +1019,21 @@ def _line_mask_refine_ccf_add_plotly_traces(
         )
         trace_indices.append(len(fig.data) - 1)
 
-    cached = sl.get("line_mask_refine_rmeta")
     gaussian = sl.get("gaussian_fit")
     bisector = sl.get("bisector_fit")
     rv_slot = None
+    rv_err = float("nan")
     if isinstance(gaussian, dict):
         rv_g = gaussian.get("rv")
         if rv_g is not None and np.isfinite(float(rv_g)):
             rv_slot = float(rv_g)
-            cached_err = (
-                float(gaussian["rv_err"])
-                if gaussian.get("rv_err") is not None
+            if (
+                gaussian.get("rv_err") is not None
                 and np.isfinite(float(gaussian["rv_err"]))
-                else float("nan")
-            )
-            if isinstance(cached, dict) and math.isfinite(cached_err):
-                cached = {**cached, "rv_err_m_s": cached_err}
-    if rv_slot is None and isinstance(bisector, dict):
-        rv_bi = bisector.get("rv")
-        if rv_bi is not None and np.isfinite(float(rv_bi)):
-            rv_slot = float(rv_bi)
-    if (
-        isinstance(cached, dict)
-        and cached.get("ok")
-        and rv_slot is not None
-    ):
-        rmeta_use = ensure_line_mask_lstsq_preview_plot_metadata(cached, vg, ccf)
-        if rmeta_use is None:
-            rmeta_use = cached
-        refine_idx = _line_mask_refine_plotly_traces_from_cached_rmeta(
-            fig,
-            row,
-            rv_r_m_s=float(rv_slot),
-            rmeta=rmeta_use,
-            visible=visible,
-            show_legend=show_legend,
-            ylim_lo=ylim_lo,
-            ylim_hi=ylim_hi,
-            bisector_fit=bisector if isinstance(bisector, dict) else None,
-        )
-        bis_idx = _bisector_preview_plotly_traces(
-            fig,
-            row,
-            sl=sl,
-            vg=vg,
-            ccf=ccf,
-            visible=visible,
-            show_legend=show_legend,
-        )
-        return refine_idx + bis_idx
-
-    try:
-        v_step_eff = float(effective_ccf_v_step_for_fit(vg))
-        sig_opt: float | None = None
-        if params and (diag or {}).get("fit_ok"):
-            s = params.get("sigma")
-            if s is not None:
-                sf = float(s)
-                if math.isfinite(sf) and sf > 0:
-                    sig_opt = sf
-        _ce = sl.get("ccf_err")
-        _ce_arr = (
-            np.asarray(_ce, dtype=np.float64).ravel()
-            if _ce is not None
-            else None
-        )
-        if _ce_arr is not None and _ce_arr.size != vg.size:
-            _ce_arr = None
-        rv_r, rmeta = refine_ccf_rv_coarse_grid_parabolic(
-            vg,
-            ccf,
-            v_step_eff,
-            ccf_err=_ce_arr,
-            gaussian_sigma_m_s=sig_opt,
-            mask_method="stellar",
-            config=CCFFitConfig(),
-        )
-        if not rmeta.get("ok"):
-            for _ in range(5):
-                _placeholder()
-            bis_idx = _bisector_preview_plotly_traces(
-                fig,
-                row,
-                sl=sl,
-                vg=vg,
-                ccf=ccf,
-                visible=visible,
-                show_legend=show_legend,
-            )
-            return trace_indices + bis_idx
-
-        rv_line = float(rv_slot) if rv_slot is not None else float(rv_r)
-        refine_idx = _line_mask_refine_plotly_traces_from_cached_rmeta(
-            fig,
-            row,
-            rv_r_m_s=rv_line,
-            rmeta=rmeta,
-            visible=visible,
-            show_legend=show_legend,
-            ylim_lo=ylim_lo,
-            ylim_hi=ylim_hi,
-            bisector_fit=bisector if isinstance(bisector, dict) else None,
-        )
-        bis_idx = _bisector_preview_plotly_traces(
-            fig,
-            row,
-            sl=sl,
-            vg=vg,
-            ccf=ccf,
-            visible=visible,
-            show_legend=show_legend,
-        )
-        return refine_idx + bis_idx
-
-    except Exception as e:
-        logger.debug("mask-line preview: refine_ccf_rv_coarse_grid_parabolic failed: %s", e)
-        while len(trace_indices) < 5:
+            ):
+                rv_err = float(gaussian["rv_err"])
+    if rv_slot is None:
+        for _ in range(5):
             _placeholder()
         bis_idx = _bisector_preview_plotly_traces(
             fig,
@@ -1164,6 +1045,32 @@ def _line_mask_refine_ccf_add_plotly_traces(
             show_legend=show_legend,
         )
         return trace_indices + bis_idx
+
+    rmeta = {
+        "ok": True,
+        "rv_err_m_s": float(rv_err),
+    }
+    refine_idx = _line_mask_refine_plotly_traces_from_cached_rmeta(
+        fig,
+        row,
+        rv_r_m_s=float(rv_slot),
+        rmeta=rmeta,
+        visible=visible,
+        show_legend=show_legend,
+        ylim_lo=ylim_lo,
+        ylim_hi=ylim_hi,
+        bisector_fit=bisector if isinstance(bisector, dict) else None,
+    )
+    bis_idx = _bisector_preview_plotly_traces(
+        fig,
+        row,
+        sl=sl,
+        vg=vg,
+        ccf=ccf,
+        visible=visible,
+        show_legend=show_legend,
+    )
+    return refine_idx + bis_idx
 
 
 def _format_rv_value(v: float, *, kind: str) -> str:

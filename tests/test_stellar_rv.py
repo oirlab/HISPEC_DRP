@@ -78,7 +78,6 @@ predicted observed mask line, see
 :data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE` m/s. The CCF ``v`` grid is **uniform** at that step
 around ``ccf_input_velocity`` (``v_half_window``).
 (line-window mode still requires ``ccf_input_velocity`` for chunking; see ``run_ccf_line_mask_for_fiber``).
-It uses ``ccf_parabolic_vertex_n_samples`` = :data:`_BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES` and
 ``mask_ccf_pixel_interp_order`` = :data:`_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER` (tests do not rely on
 ``HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER`` for these two line-window tests).
 The post-run recovery table prints **every chunk row** from ``RVCCF`` (ascending echelle order,
@@ -178,7 +177,6 @@ from hispecdrp.primitives.stellar_rv.stellar_rv_primitive import (
 from hispecdrp.primitives.utils.ccf.ccf_common import V_MAX_DEFAULT_M_S, V_MIN_DEFAULT_M_S
 from hispecdrp.primitives.utils.ccf.ccf_utils import (
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
-    _require_ccf_parabolic_vertex_n_samples,
     build_line_mask_chunk_wavelength_intervals_line_by_line,
     ccf_order_n_chunks_for_span,
     line_mask_n_chunks_for_order_line_by_line,
@@ -216,14 +214,10 @@ WINDOW_UM = 0.3
 # Line-window ``ccf_line_mask`` tests (:func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel`,
 # :func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan`): symmetric spectral band
 # about each predicted observed mask line (Voronoi chunk boundaries); coarse CCF ± span (km/s) and step (m/s);
-# LSTSQ parabolic-vertex window (odd, ≥ 3); Lagrange stencil for mask CCF on the L2 wavelength grid.
 # Values from optimized MCMC (``examples/mcmc_line_window_beta0_sigma.py``).
 _BTSETTL_LINE_WINDOW_N1_WINDOW_UM = 5.648870581175803e-05
 _BTSETTL_LINE_WINDOW_N1_V_COARSE_HALF_SPAN_KM_S = 9.245174152881138
 _BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE = 3.473801843213507
-_BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES = _require_ccf_parabolic_vertex_n_samples(
-    1447
-)
 _BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER = 3
 _BTSETTL_WL_RANGE_UM = (0.95, 1.4)
 
@@ -237,32 +231,6 @@ _BTSETTL_LTE049_POLY_COEFS = np.array([0.0001, -0.001, 0.01, 0.05, 1.0])
 # these unit tests calibrate chunk counts and RV recovery on that mask.
 LTE049_BTSETTL_SPEC_H5 = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
 LTE049_BTSETTL_MASK_MAS = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"
-
-# ``ccf_parabolic_vertex_n_samples`` (odd, LSTSQ parabolic vertex on the mask CCF).
-# Offline sweep: ``python tests/_scan_btsettl_parabolic_vertex_n_samples.py`` on the default
-# BSPEC lte049 order(s), 50 m/s grid, :data:`WINDOW_UM`. Among odd *n* in 11..71, *n* = 31
-# minimizes |RVCCFAVG − injected RV| with |bias| < 1 m/s. Very small *n* (3–9) use a
-# degenerate sampling window and report ~0 bias; they are not used as pipeline defaults.
-# Line-window chunking (``test_fit_..._line_window_n1_parallel``): per-chunk bias vs *n* is
-# diagnostic-only; see ``tests/_scan_line_window_n1_parabolic_vertex_n_samples.py``.
-_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES = 31
-
-
-def _btsettl_line_mask_parabolic_vertex_n_samples_for_test() -> int:
-    """
-    Odd ``ccf_parabolic_vertex_n_samples`` for
-``test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask``.
-
-    If ``HISPEC_DRP_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES`` is set to a decimal integer,
-    it is validated with :func:`_require_ccf_parabolic_vertex_n_samples` and used (see
-    ``examples/sweep_btsettl_line_mask_parabolic_vertex_n_samples.py``). Otherwise
-    :data:`_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES` is used.
-    """
-    raw = os.environ.get("HISPEC_DRP_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES", "").strip()
-    if not raw:
-        return _BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES
-    return _require_ccf_parabolic_vertex_n_samples(int(raw))
-
 
 def _lte049_btsettl_spec_h5_path() -> str:
     return get_spectrum_path(LTE049_BTSETTL_SPEC_H5, base_dir=TEMPLATE_DIR)
@@ -336,37 +304,6 @@ def _mask_ccf_pixel_interp_order_from_env() -> int:
     from hispecdrp.primitives.utils.ccf.ccf_utils import MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
     return max(1, min(v, MAX_MASK_CCF_PIXEL_INTERP_ORDER))
-
-
-def _ccf_parabolic_vertex_n_samples_from_env() -> int | None:
-    """
-    Override ``StellarRVPrimitive.ccf_parabolic_vertex_n_samples`` from the environment.
-
-    Reads ``HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES``.
-
-    - unset/empty -> returns default ``31``
-    - ``none``/``null`` (case-insensitive) -> returns ``None`` (Gaussian-only; disables refinement)
-    - otherwise -> odd integer >= 3
-    """
-    raw = os.environ.get("HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES", "").strip()
-    if not raw:
-        return 31
-    s = raw.strip().lower()
-    if s in ("none", "null"):
-        return None
-    try:
-        n = int(s)
-    except ValueError:
-        raise ValueError(
-            "HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES must be an odd integer >= 3, or 'none'; "
-            f"got {raw!r}"
-        )
-    if n < 3 or (n % 2) == 0:
-        raise ValueError(
-            "HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES must be an odd integer >= 3, or 'none'; "
-            f"got {raw!r}"
-        )
-    return n
 
 
 def _want_bspec_btsettl_previews() -> bool:
@@ -1199,7 +1136,6 @@ def _run_lte049_k2all_line_mask_previews(
     serialize_only: bool = False,
     window_size_um: float | None = None,
     l2_model: datamodels.L2Model | None = None,
-    ccf_parabolic_vertex_n_samples: int = _BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES,
     window_line_by_line: bool = False,
     ccf_input_velocity_m_s: float | None = None,
     v_min_coarse: float | None = None,
@@ -1386,7 +1322,6 @@ def _run_lte049_k2all_line_mask_previews(
             window_size_um=w_um,
             v_step_coarse=v_step_c,
             mask_auto_center_scout=False,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             mask_ccf_pixel_interp_order=_pio_preview,
             show_preview=False,
             save_preview=True,
@@ -1412,7 +1347,6 @@ def _run_lte049_k2all_line_mask_previews(
             window_size_um=w_um,
             v_step_coarse=v_step_c,
             mask_auto_center_scout=False,
-            ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
             mask_ccf_pixel_interp_order=_pio_preview,
             show_preview=False,
             save_preview=True,
@@ -1665,7 +1599,6 @@ def test_stellar_rv_recovers_rv_per_chunk(spectrograph):
         window_size_um=WINDOW_UM,
         debug_ccf=False,
         algorithm=algorithm,
-        ccf_parabolic_vertex_n_samples=_ccf_parabolic_vertex_n_samples_from_env(),
         show_preview=show,
         save_preview=save_plots or show,
         output_dir=plot_out_dir,
@@ -1735,9 +1668,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
     ``v_step_coarse``); there is no centered window override (``ccf_input_velocity`` unset;
     ``mask_auto_center_scout=False`` in this test).
 
-    Line-mask sub-pixel refinement uses :data:`_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES` (31)
-    for ``ccf_parabolic_vertex_n_samples`` unless
-    ``HISPEC_DRP_BTSETTL_LINE_MASK_PARABOLIC_VERTEX_N_SAMPLES`` is set (odd, :math:`\\ge 3`).
+    Chunk RVs use the Gaussian CCF centroid from :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
+    / spline :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
     With default **linear** mask pixel interpolation
     (``mask_ccf_pixel_interp_order=1`` / unset ``HISPEC_DRP_MASK_CCF_PIXEL_INTERP_ORDER``), the
     test asserts ``|RVCCFAVG − injected RV| < 1`` m/s. Higher Lagrange orders change sampled flux
@@ -1914,7 +1846,6 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         window_size_um=window_um_eff,
         v_step_coarse=50.0,
         mask_auto_center_scout=False,
-        ccf_parabolic_vertex_n_samples=_btsettl_line_mask_parabolic_vertex_n_samples_for_test(),
         mask_ccf_pixel_interp_order=_mask_ccf_pixel_interp_order_from_env(),
         outlier_sigma=4.0,
         max_cores=6,
@@ -1957,7 +1888,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         assert _rvccfavg_bias < _rvccfavg_tol_m_s, (
             "line-mask aggregate RV vs injected: expect |bias| < "
             f"{_rvccfavg_tol_m_s:g} m/s (mask_ccf_pixel_interp_order={_pio}; "
-            f"ccf_parabolic_vertex_n_samples={_btsettl_line_mask_parabolic_vertex_n_samples_for_test()}) "
+            f""
             f"(got RVCCFAVG={rv_ccfavg:.4f} m/s, injected={input_rv_m_s:.4f} m/s)"
         )
     elif _rvccfavg_bias >= _rvccfavg_tol_m_s:
@@ -2341,7 +2272,7 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     the observed frame (spectrum outside those intervals is unused).
 
     Uses :data:`_BTSETTL_LINE_WINDOW_N1_WINDOW_UM`, :data:`_BTSETTL_LINE_WINDOW_N1_V_COARSE_HALF_SPAN_KM_S`,
-    :data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE`, :data:`_BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES`, and
+    :data:`_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE`, and
     :data:`_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER` (MCMC-tuned in ``examples/mcmc_line_window_beta0_sigma.py``).
     The velocity grid is **uniform** at ``v_step_coarse`` in a centered ``v_half_window``.
 
@@ -2475,9 +2406,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         v_max_coarse=v_max_coarse_m_s,
         v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
         mask_auto_center_scout=False,
-        ccf_parabolic_vertex_n_samples=int(
-            _BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES
-        ),
         mask_ccf_pixel_interp_order=int(_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER),
         outlier_sigma=4.0,
         max_cores=6,
@@ -2547,9 +2475,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
             v_min_coarse=v_min_coarse_m_s,
             v_max_coarse=v_max_coarse_m_s,
             v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-            ccf_parabolic_vertex_n_samples=int(
-                _BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES
-            ),
             mask_ccf_pixel_interp_order=int(_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER),
             serialize_only=(
                 (
@@ -2795,9 +2720,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
             v_max_coarse=v_max_c,
             v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
             mask_auto_center_scout=False,
-            ccf_parabolic_vertex_n_samples=int(
-                _BTSETTL_LINE_WINDOW_N1_CCF_PARABOLIC_VERTEX_N_SAMPLES
-            ),
             mask_ccf_pixel_interp_order=int(_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER),
             outlier_sigma=4.0,
             max_cores=6,
@@ -2879,7 +2801,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
 
     Unlike :func:`test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan`,
     this uses **current** :class:`~hispecdrp.primitives.StellarRVPrimitive` defaults for the
-    revised CCF path (wavelength ``window_size_um`` chunks, auto-center velocity scout, parabolic
+    revised CCF path (wavelength ``window_size_um`` chunks, auto-center velocity scout, Gaussian
     vertex ``n=31``, Lagrange order 3). Reads ``RVCCFAVG``, fits ``RV_rec ≈ RV_inj + β₀``, and
     writes a Matplotlib PNG under ``tmp_path``.
 

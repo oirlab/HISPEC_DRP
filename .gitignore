@@ -96,8 +96,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 docs/build/
-# Generated at Sphinx conf import from _static/notebooks/basic_usage.ipynb
+# Generated at Sphinx conf import from _static/notebooks/*.ipynb
 docs/source/_static/basic_usage_notebook_embed.js
+docs/source/_static/notebook_embeds.*.js
 docs/html
 docs/doctrees
 **/api/generated/**
