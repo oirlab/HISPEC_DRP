@@ -36,17 +36,17 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
         The derived detector flat calibration model containing the normalized flat field map and updated DQ array.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'DetectorFlatModel',
         'max_cores' : 1,
         'cold_pixel_threshold' : 0.9,  # Threshold below which pixels are
     }
 
     def _perform(self):
-        if  isinstance(self.input, Sequence):
+        if  isinstance(self.dataset, Sequence):
             raise ValueError("Rate maps must be combined before computing the detector flat. Input should not be a list.")
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         # Define output model from inputs
         output_detflat = self.get_output_model(input_model)
 

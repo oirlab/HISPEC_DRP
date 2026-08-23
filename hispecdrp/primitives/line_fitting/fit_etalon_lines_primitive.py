@@ -44,7 +44,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
         The input model with the Table attribute ``etalon_fitparams_fib#`` populated.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'etalon_fit',
         'fwhm_bounds' : None,
         'mu_bounds' : (-1, 1),
@@ -56,7 +56,7 @@ class FitEtalonLinesPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         output_model = self.get_output_model(input_model)
 
         # Which traces to process

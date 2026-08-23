@@ -1,0 +1,5 @@
+class: ProcessDarksPipeline
+description: Standard process darks pipeline configuration.
+context: {}
+parameters: {}
+primitives: {}

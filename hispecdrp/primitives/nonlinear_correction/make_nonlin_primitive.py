@@ -124,7 +124,7 @@ class MakeNonLinPrimitive(BasePrimitive):
     """
 
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model': 'NonlinearCorrectionModel',
         'max_cores' : 1,
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
@@ -170,10 +170,10 @@ class MakeNonLinPrimitive(BasePrimitive):
             logger.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
 
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector non linearity polynomial coefficients from a list of {nfiles} inputs.")
 

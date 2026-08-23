@@ -30,8 +30,9 @@ def test_coadd_frames(tmp_path, datadir):
         input_models.append(model)
 
     # Setup and call the coadd primitive
-    prim = CoaddFramesPrimitive()
-    result = prim.apply(input_models)
+    result = CoaddFramesPrimitive.call(
+        input_models
+    )
     model_coadded = result[0]
 
     rel_residuals = np.abs(model_coadded.rate - data_true) / model_coadded.rate_err
@@ -45,8 +46,7 @@ def test_coadd_frames(tmp_path, datadir):
     assert len(model_coadded.data_ancestors) == n
 
     # Try again with sigma clipping
-    prim = CoaddFramesPrimitive(do_sigma_clip=True, sigma_thresh_low=4.0, sigma_thresh_high=4.0)
-    result = prim.apply(input_models)
+    result = CoaddFramesPrimitive.call(input_models, do_sigma_clip=True, sigma_thresh_low=4.0, sigma_thresh_high=4.0)
     model_coadded = result[0]
 
     rel_residuals = np.abs(model_coadded.rate - data_true) / model_coadded.rate_err

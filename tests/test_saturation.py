@@ -39,12 +39,7 @@ def test_saturation_primitive():
         dq=sat_dq,
     )
 
-    primitive = CheckSaturationPrimitive()
-    primitive.saturation = saturation_model
-
-    result = primitive.apply(ramp_model)
-
-    out = result  # apply() returns the main output model directly
+    out = CheckSaturationPrimitive.call(ramp_model, saturation=saturation_model)
     assert out is not None
     assert out.data.shape == (n_reads, ny, nx)
     assert out.dq_raw.shape == (n_reads, ny, nx)

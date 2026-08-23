@@ -22,7 +22,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or L0Model
+    dataset : str or L0Model
         Input file path or data model to process. Currently, this is expected
         to be a level 0 (rate map) data product.
     suffix : str or None, optional
@@ -40,7 +40,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     output
         The dark-subtracted data model with updated error and data quality arrays.
     """
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'darksub',
         'max_cores' : 1,
     }
@@ -55,7 +55,7 @@ class DarkSubtractionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the dark model
         dark, _ = self.get_calibration(input_model, 'dark')

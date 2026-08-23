@@ -266,7 +266,7 @@ class FitRampPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. This must be a raw
         up-the-ramp (UTR) ramp data product in which ramps are to be fitted.
     suffix : str or None, optional
@@ -335,7 +335,7 @@ class FitRampPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'rampfit',
         'method' : 'cython_likely',
         'mcds_num_coadd' : None,
@@ -369,7 +369,7 @@ class FitRampPrimitive(BasePrimitive):
             raise ValueError("JWST jump detection is only for shared memory optimization in combination with JWST ramp fitting methods. "
                              "Please set jwst_jump_detection to False or change ramp fitting algorithm.")
 
-        input_model = datamodels.open(self.input, copy=False)
+        input_model = datamodels.open(self.dataset, copy=False)
         logger.info(f"Fitting ramp to {input_model} with method={self.method.lower()}")
 
         gain_cal, _ = self.get_calibration(input_model, 'gain')

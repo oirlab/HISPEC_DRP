@@ -1,0 +1,6 @@
+class: Stage0Pipeline
+description: Quicklook Stage 0 Pipeline configuration.
+context:
+  quicklook: true
+parameters: {}
+steps: {}

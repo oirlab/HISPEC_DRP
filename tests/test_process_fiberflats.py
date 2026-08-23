@@ -31,7 +31,7 @@ def test_process_fiberflats(tmp_path, datadir):
         'RSPEC' : (100, 4050) # Which orders to consider (XD direction)
     }
 
-    prim_args = {
+    primitives = {
         'trace_pos' : {
             'deg_pos' : deg_pos,
             'deg_width' : deg_width,
@@ -56,8 +56,7 @@ def test_process_fiberflats(tmp_path, datadir):
         }
     }
 
-    pipe = ProcessFiberflatsPipeline(prim_args=prim_args, output_dir=str(tmp_path))
-    ff_results = pipe.apply(ff_models)
+    ff_results = ProcessFiberflatsPipeline.call(ff_models, primitives=primitives, output_dir=str(tmp_path))
 
     assert isinstance(ff_results, dict)
     assert isinstance(ff_results['trace_pos'], datamodels.TracePosModel)

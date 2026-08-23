@@ -45,8 +45,12 @@ def test_sky_subtraction():
     science_model.meta.distance_fiber2 = 0.7
     science_model.meta.distance_fiber3 = 2.07
 
-    prim = SkySubtractionPrimitive()
-    sky_subtracted = prim.apply(science_model, fiberflat=fiberflat_model, save_preview=False, show_preview=False)
+    sky_subtracted = SkySubtractionPrimitive.call(
+        science_model,
+        fiberflat=fiberflat_model,
+        save_preview=False,
+        show_preview=False,
+    )
 
     step_time = time.time()
     print(f"Sky subtraction, elapsed: {step_time - start_time:.2f}s")

@@ -11,6 +11,8 @@ from datetime import datetime
 import os
 import sys
 
+from .config import get_config_dir, load_config_file
+
 _QUEUE: mp.queues.Queue | None = None
 _LISTENER: QueueListener | None = None
 
@@ -262,9 +264,10 @@ def setup_default_logging() -> None:
     if hispecdrp_logger.handlers:
         return
 
-    from .config import get_config_path, read_config_file
+    logging_config_path = os.path.join(get_config_dir(), "logging.yaml")
+
     try:
-        cfg_dict = read_config_file(get_config_path("logging.yaml"))
+        cfg_dict = load_config_file(logging_config_path)
     except FileNotFoundError:
         cfg_dict = {}
 

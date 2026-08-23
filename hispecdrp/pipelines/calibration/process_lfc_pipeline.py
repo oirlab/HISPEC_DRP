@@ -28,7 +28,7 @@ class ProcessLFCPipeline(CalibrationPipeline):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         line_fit_result = self.fit_lfc_lines.apply(input_model)
         wavesol_result = self.lfc_wavesol.apply(line_fit_result)
         self.register_wave_cal.apply(wavesol_result)

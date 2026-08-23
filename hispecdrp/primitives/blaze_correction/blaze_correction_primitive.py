@@ -17,7 +17,7 @@ __all__ = ['BlazeCorrectionPrimitive']
 
 class BlazeCorrectionPrimitive(BasePrimitive):
     
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'blaze_correct',
         'max_cores' : 1,
         'do_fibers' : None,
@@ -38,12 +38,12 @@ class BlazeCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            input = [self.input]
-        elif isinstance(self.input, Sequence):
+            input = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            input = self.input
+            input = self.dataset
 
         # Loop over inputs (now a list)
         for _input in input:

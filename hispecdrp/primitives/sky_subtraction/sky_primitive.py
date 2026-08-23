@@ -46,7 +46,7 @@ class SkySubtractionPrimitive(BasePrimitive):
     output
         The sky-subtracted level 2 data model with updated error and data quality arrays.
     """
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'skysub',
         'do_orders' : None,
         'sky_fiber' : None,
@@ -63,12 +63,12 @@ class SkySubtractionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            input = [self.input]
-        elif isinstance(self.input, Sequence):
+            input = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            input = self.input
+            input = self.dataset
 
         # Loop over inputs (now a list)
         for _input in input:

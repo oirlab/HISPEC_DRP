@@ -16,21 +16,21 @@ class TraceProfilePrimitive(BasePrimitive):
         Input data. Can be a single DataModel or filename, a sequence of DataModels or filenames, or a dict mapping fiber numbers to DataModels or filenames.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'TraceProfModel',
     }
 
     def _perform(self):
         
         # Associate inputs by fiber number
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            input = datamodels.group_by_illuminated_fiber([self.input])
-        if  isinstance(self.input, Sequence):
-            input = datamodels.group_by_illuminated_fiber(self.input)
-        elif isinstance(self.input, dict):
-            input = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            input = datamodels.group_by_illuminated_fiber([self.dataset])
+        if  isinstance(self.dataset, Sequence):
+            input = datamodels.group_by_illuminated_fiber(self.dataset)
+        elif isinstance(self.dataset, dict):
+            input = self.dataset
         else:
-            raise ValueError(f"Unsupported input type: {type(self.input)}")
+            raise ValueError(f"Unsupported input type: {type(self.dataset)}")
         
         first_key = next(iter(input))
 

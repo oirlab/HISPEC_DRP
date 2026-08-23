@@ -35,7 +35,7 @@ import os
 import sys
 
 from .. import datamodels
-from ..utils.logging import ROOT_LOGGER, setup_default_logging
+from ..driver.logging import ROOT_LOGGER, setup_default_logging
 from . import (
     HISPECCalibrationStore,
     DQSelector,

@@ -1,0 +1,4 @@
+class: BlazeCorrectionPrimitive
+description: Standard blaze correction primitive.
+context: {}
+parameters: {}

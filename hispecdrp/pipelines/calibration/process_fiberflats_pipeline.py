@@ -13,7 +13,7 @@ __all__ = ['ProcessFiberflatsPipeline']
 
 class ProcessFiberflatsPipeline(CalibrationPipeline):
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'use_pipeline_trace_cals' : True # True for boostrapping until we have good trace cals
     }
 
@@ -33,7 +33,7 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
 
         # Coadd individual fiberflat frames for each fiber individually
         # Models split by fiber
-        ff_coadded_models_L0 = self.coadd_frames.apply(self.input)
+        ff_coadded_models_L0 = self.coadd_frames.apply(self.dataset)
 
         ff_coadded_models_L0 = datamodels.group_by_fiber_combination(ff_coadded_models_L0)
         

@@ -11,12 +11,21 @@ def test_stage1_hispec(tmp_path, datadir):
     telluric_L0_file = download_gdrive_file('HR.20231006.00000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
 
     for method in ('box', 'optimal'):
-        pipe = Stage1Pipeline(save_result=False)
-        pipe.spec_extract.method = method
-        pipe.spec_extract.tracepos = trace_pos_cal
-        pipe.spec_extract.traceprof = trace_prof_cal
-        pipe.set_wavesol.wavesol = wave_cal
-        spec_model = pipe.apply(telluric_L0_file)
+        primitives = {
+            'spec_extract' : {
+                'method' : method,
+                'tracepos' : trace_pos_cal,
+                'traceprof' : trace_prof_cal,
+            },
+            'set_wavesol' : {
+                'wavesol' : wave_cal,
+            },
+        }
+        spec_model = Stage1Pipeline.call(
+            telluric_L0_file,
+            primitives=primitives,
+            save_result=False
+        )
         fiber = '1'
         do_orders = spec_model.make_order_vec()
         for i, order in enumerate(do_orders):

@@ -1,244 +1,104 @@
 from hispecdrp import Stage0Pipeline
-from hispecdrp import datamodels
-import hispecdrp.simulations as simu
 import numpy as np
-import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
-import time
+
+from .utils import make_stage0_cals, make_ramp_model
 
 def test_stage0(tmp_path):
     np.random.seed(12345)
-    start_time = time.time()
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # --- Define parameters for the simulated ramp ---
-    max_cores = 2
     max_slope = 50  # e-/s
     readtime = 1.7  # seconds
     n_reads = 10
-    ny, nx = 10, 10 # size of the detector
-
-    step_time = time.time();
-    print(f"Overheads, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
+    read_noise = 20.0
+    gain = 1.0
+    bias = 1000.0
+    dark_current = 10.0  # e-/s
+    kTC_noise = 1.0
+    shape = (10, 10) # size of the detector
 
     # --- Non-linearity and its inverse polynomial coefficients ---
-
-    # Create an ideal ramp (1D array for demonstration)
+    
+    # Create an ideal ramp
     ideal_ramp = np.linspace(0, 1.5*np.iinfo(np.uint16).max, 1001, endpoint=True)
-    nonlin_coeffs = [-1e-6, 1, 0]  # Example coefficients for a cubic non-linearity
-    # nonlin_coeffs = [ 1, 0]  # Example coefficients for a cubic non-linearity
-    nonlinear_ramp = np.polyval(nonlin_coeffs, ideal_ramp)
 
-    # Fit inverse polynomial (correction) coefficients
-    nonlin_correction_coefs = np.polyfit(nonlinear_ramp, ideal_ramp, deg=5)
-    print("Fitted correction coefficients:", nonlin_correction_coefs)
+    # Polynomial coeffs such that read_out = P(read_true)
+    nonlin_coeffs_inject = np.array([-1e-6, 1, 0]) # c2, c1, c0
+    ramp_nonlinear = np.polyval(nonlin_coeffs_inject, ideal_ramp)
 
-    # Apply correction and check accuracy
-    nonlin_corrected_ramp = np.polyval(nonlin_correction_coefs, nonlinear_ramp)
+    # Polynomial coeffs such that read_true = P(read_out)
+    nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
-    coeffs = np.broadcast_to(nonlin_correction_coefs[::-1, None, None], (np.size(nonlin_correction_coefs), ny, nx))
-    thresh = np.zeros(shape=(ny, nx), dtype=np.uint16)
-    max = np.full(shape=(ny, nx), fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
-    nonlin_dq = np.zeros(shape=(ny,nx), dtype=np.uint32)
-    nonlin_model = datamodels.NonlinearCorrectionModel(
-        coeffs=coeffs,
-        nonlin_thresh=thresh,
-        nonlin_max=max,
-        dq=nonlin_dq
+    cals = make_stage0_cals(
+        shape=shape,
+        nonlin_coeffs=nonlin_coeffs_correct,
+        read_noise=read_noise,
+        gain=gain,
+        bias=bias,
+        kTC_noise=kTC_noise,
+        dark_current=dark_current,
+        flat_level=1.0,
     )
 
-    step_time = time.time();
-    print(f"Step: defining nonlin coefficients, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create DQ init map ---
-    dqinit_map = np.zeros((ny, nx), dtype=np.uint32)
-    # set row to bad
-    dqinit_map[5, :] |= DQ_FLAGS["DO_NOT_USE"]
-    dqinit_model = datamodels.DQModel(dq=dqinit_map)
-
-    step_time = time.time();
-    print(f"Step: defining DQ init calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create saturation threshold map ---
-    saturation_threshold = np.iinfo(np.uint16).max  # DN
-    saturation_map = np.full((ny, nx), saturation_threshold, dtype=np.float32)
-    saturation_model = datamodels.SaturationModel(
-        sat_thresh=saturation_map,
-        dq=np.zeros_like(saturation_map, dtype=np.uint32)
-    )
-
-    step_time = time.time();
-    print(f"Step: defining saturation calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create random gain map ---
-    gain = 1.0  # e-/ADU
-    gain_map = np.full((ny, nx), gain, dtype=np.float32)
-    gain_model = datamodels.GainModel(
-        gain=gain_map,
-        rn=np.full_like(gain_map, 0.0),
-        cov=np.full((2, 2, ny, nx), 0, dtype=np.float32),
-        dq=np.zeros_like(gain_map, dtype=np.uint32)
-    )
-
-    step_time = time.time();
-    print(f"Step: defining gain calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create random dark map ---
-    dark_current = 10  # e-/s
-    dark_map = np.random.normal(loc=dark_current, scale=dark_current / 10, size=(ny, nx)).astype(np.float32)
-    dark_model = datamodels.DarkModel(
-        rate=dark_map / gain_map,  # dark in DN/s
-        rate_err=np.zeros_like(dark_map),
-        rate_var_rnoise=np.zeros_like(dark_map),
-        rate_var_poisson=np.zeros_like(dark_map),
-        dq=np.zeros_like(dark_map, dtype=np.uint32)
-    )
-
-    step_time = time.time();
-    print(f"Step: defining dark calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create bias map ---
-    bias = 1000  # e-/s
-    bias_map = np.full((ny, nx), bias, dtype=np.float32)
-    bias_model = datamodels.BiasModel(
-        bias=bias_map / gain_map,  # bias in DN
-        ktc=np.zeros_like(bias_map),  # kTC in DN
-        dq=np.zeros_like(bias_map, dtype=np.uint32)
-    )
-
-    step_time = time.time();
-    print(f"Step: defining bias calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create random flat map ---
-    detflat_map = np.random.normal(loc=1, scale=0.1, size=(ny, nx)).astype(np.float32)
-    detflat_model = datamodels.DetectorFlatModel(
-        flat=detflat_map,
-        flat_err=np.zeros_like(detflat_map),
-        flat_var_rnoise=np.zeros_like(detflat_map),
-        flat_var_poisson=np.zeros_like(detflat_map),
-        dq=np.zeros_like(detflat_map, dtype=np.uint32)
-    )
-
-    step_time = time.time();
-    print(f"Step: defining flat calibration, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # --- Create random read noise map ---
-    RN = 20.0  # e-
-    rn_map = np.full((ny, nx), RN, dtype=np.float32)
-    rn_model = datamodels.ReadNoiseModel(
-        rn=rn_map / gain_map,
-        rn_err=np.zeros_like(rn_map),
-        dq=np.zeros_like(gain_map, dtype=np.uint32)
-    )
+    # Set one row to bad
+    cals['dq'].dq[5, :] |= DQ_FLAGS["DO_NOT_USE"]
 
     # --- Create a fake UTR cube ---
-    electron_rate_map = np.linspace(0, max_slope, nx, dtype=np.float32)[None, :] * np.ones((ny, 1), dtype=np.float32)
-    start_time = time.time()
-    ramp_data = simu.create_ramp(
-        electron_rate_map,  # in e-/s
-        readtime=readtime, n_reads=n_reads,
-        nonlin_coeffs=nonlin_coeffs,
-        gain=gain_map,  # in e-/s
-        flat=detflat_map,
-        dark=dark_map,  # in e-/s
-        bias=bias_map,  # in e-/s
-        kTC_noise=50,  # in e-/s
-        poisson_noise=False, read_noise=0,  # in e-/s
-        convert_to_uint16=False, clip_ramps=True,
-        max_cores=max_cores
+    electron_rate_map = np.linspace(0, max_slope, shape[1], dtype=np.float32)[None, :] * np.ones((shape[0], 1), dtype=np.float32)
+
+    ramp_model = make_ramp_model(
+        source=electron_rate_map,
+        gain=cals['gain'].gain,
+        bias=cals['bias'].bias,
+        kTC_noise=cals['bias'].ktc,
+        nonlin_coeffs=nonlin_coeffs_inject,
+        dark=cals['dark'].rate,
+        flat=cals['detflat'].flat,
+        n_reads=n_reads,
+        readtime=readtime,
+        poisson_noise=False,
+        read_noise=0,
+        convert_to_uint16=False,
+        clip_ramps=True,
     )
 
     #adding a jump
-    ramp_data['data'][4::,:,0:nx//2] += 1000
-
-    step_time = time.time();
-    print(f"Step: creating ramp (new), elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    ramp_model = datamodels.RampModel(
-        data=ramp_data['data'],
-        dq_raw=ramp_data['dq_raw'],
-        meta=ramp_data['meta']
-    )
+    ramp_model.data[4::, :, 0:shape[1]//2] += 1000
     ramp_model.meta.filename = "simulated_ramp.fits"
-    print(ramp_model.meta.clock_rate)
-
-    step_time = time.time();
-    print(f"Step: creating ramp, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    pipe_max_cores = max_cores
-    # --- Specify the primitive arguments here ---
-    prim_args = {
-        'dq_init': {
-            'max_cores': pipe_max_cores,
-        },
-        'saturation_check': {
-            'max_cores': pipe_max_cores,
-        },
-        'bias_sub': {
-            'run': False,
-            # 'save_result':True,
-            # # 'output_path': os.path.join(tmp_path,"bias_subtracted2.fits"),
-            # 'output_dir': tmp_path,
-            'max_cores': pipe_max_cores,
-        },
-        'nonlin_corr': {
-            'max_cores': pipe_max_cores,
-        },
-        'jump_detec' : {
-            'run': False,
-            'method': 'tpd',
-            'max_cores': pipe_max_cores,
-            'rejection_threshold': 4.0,
-        },
-        'ramp_fit' : {
-            'method': 'jwst_likely', # 'ols', 'mcds', 'cds', 'jwst_ols', 'jwst_likely'
-            'max_cores': pipe_max_cores,
-            'jwst_jump_detection': True,
-            'jwst_jump_rejection_threshold': 4.0,
-        },
-        'dark_sub': {
-            'max_cores': pipe_max_cores,
-        },
-        'gain_corr': {
-            'max_cores': pipe_max_cores,
-        },
-        'detflat_corr': {
-            'max_cores': pipe_max_cores,
-        },
-    }
 
     # Setup and call the stage 0 pipeline
-    stage0_pipe = Stage0Pipeline()
-
-    # Set any primitive args
-
-    stage0_pipe.dq_init.dq = dqinit_model
-    stage0_pipe.saturation_check.saturation = saturation_model
-    stage0_pipe.bias_sub.bias = bias_model
-    stage0_pipe.nonlin_corr.nonlin = nonlin_model
-    stage0_pipe.ramp_fit.gain = gain_model
-    stage0_pipe.ramp_fit.rn = rn_model
-    stage0_pipe.dark_sub.dark = dark_model
-    stage0_pipe.gain_corr.gain = gain_model
-    stage0_pipe.detflat_corr.detflat = detflat_model
-
-    step_time = time.time();
-    print(f"Step: defining pipeline, elapsed: {step_time - start_time:.2f}s")
-    start_time = time.time()
-
-    # Run pipeline
-    model_result = stage0_pipe.apply(ramp_model, prim_args=prim_args, output_dir=tmp_path)  #
-
-    where_good = np.where(~(model_result.dq & np.full((ny, nx), DQ_FLAGS["DO_NOT_USE"])).astype(bool))
+    primitives = {
+        'dq_init': {
+            'dq': cals['dq'],
+        },
+        'saturation_check': {
+            'saturation': cals['saturation'],
+        },
+        'bias_sub': {
+            'bias': cals['bias'],
+        },
+        'nonlin_corr': {
+            'nonlin': cals['nonlin'],
+        },
+        'jump_detec': {
+            'rn': cals['rn'],
+            'gain': cals['gain'],
+        },
+        'ramp_fit': {
+            'rn': cals['rn'],
+            'gain': cals['gain'],
+        },
+        'dark_sub' : {
+            'dark': cals['dark'],
+        },
+        'gain_corr' : {
+            'gain': cals['gain'],
+        },
+        'detflat_corr' : {
+            'detflat': cals['detflat'],
+        }
+    }
+    model_result = Stage0Pipeline.call(ramp_model, primitives=primitives, output_dir=tmp_path)
+    where_good = np.where(~(model_result.dq & np.full(shape, DQ_FLAGS["DO_NOT_USE"])).astype(bool))
     np.testing.assert_allclose(model_result.rate[where_good], electron_rate_map[where_good], rtol=1e-6, atol=1)

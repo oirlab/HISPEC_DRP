@@ -1,0 +1,4 @@
+class: MakeDetectorFlatPrimitive
+description: Standard make detector flat configuration.
+context: {}
+parameters: {}

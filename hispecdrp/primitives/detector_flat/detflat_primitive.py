@@ -25,7 +25,7 @@ class DetectorFlatCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or L0Model
+    dataset : str or L0Model
         Input file path or data model to process. This is expected to be a
         level 0 (rate map) data product.
     suffix : str or None, optional
@@ -45,7 +45,7 @@ class DetectorFlatCorrectionPrimitive(BasePrimitive):
         arrays.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'detflatcorr',
         'max_cores' : 1,
     }
@@ -60,7 +60,7 @@ class DetectorFlatCorrectionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the detflat model
         detflat, _ = self.get_calibration(input_model, 'detflat')

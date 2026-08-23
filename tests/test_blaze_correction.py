@@ -25,8 +25,10 @@ def test_blaze_correction():
         setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", np.ones((39,4096))/100)
         setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((39, 4096), dtype=np.uint32))
 
-    prim = BlazeCorrectionPrimitive()
-    blaze_corrected = prim.apply(science_model, fiberflat=fiberflat_model)
+    blaze_corrected = BlazeCorrectionPrimitive.call(
+        science_model,
+        fiberflat=fiberflat_model
+    )
 
     step_time = time.time()
     print(f"Native rate map, elapsed: {step_time - start_time:.2f}s")
@@ -62,8 +64,7 @@ def test_blaze_correction_error_propagation_after_normalize():
         setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", flat_err)
         setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))
 
-    prim = BlazeCorrectionPrimitive()
-    out = prim.apply(science_model, fiberflat=fiberflat_model)
+    out = BlazeCorrectionPrimitive.call(science_model, fiberflat=fiberflat_model)
     corr_err = getattr(out, "SPEC_ERR_FIB1")
     corr_spec = getattr(out, "SPEC_FIB1")
     ok = np.isfinite(corr_spec) & np.isfinite(corr_err) & (corr_spec > 0) & (corr_err > 0)

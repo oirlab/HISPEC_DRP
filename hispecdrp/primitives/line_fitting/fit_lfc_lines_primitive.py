@@ -59,7 +59,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'fwhm_bounds' : (1.0, 3.0),
         'mu_bounds' : (-1.0, 1.0),
         'max_fit_window' : 14,
@@ -74,7 +74,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         output_model = datamodels.LFCFitParamsModel.from_datamodels(
             input_model, include_data=True,
             primitive=self

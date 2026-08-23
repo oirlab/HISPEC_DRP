@@ -8,15 +8,16 @@ def test_dark_level0(tmp_path, datadir):
 
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
-    shape = (4096, 4096+64)
+    shape = (10, 10)
 
     # Science
-    input_model = datamodels.L0Model()
-    input_model.rate = np.abs(np.random.randn(*shape) * 0.01 + 1).astype(np.float32)
-    input_model.rate_err = np.full(shape, 0.01, dtype=np.float32)
-    input_model.rate_var_poisson = np.abs(np.random.randn(*shape).astype(np.float32))
-    input_model.rate_var_rnoise = np.abs(np.random.randn(*shape).astype(np.float32))
-    input_model.dq = np.zeros(shape, dtype=np.uint32)
+    input_model = datamodels.L0Model(
+        rate=np.abs(np.random.randn(*shape) * 0.01 + 1).astype(np.float32),
+        rate_err=np.full(shape, 0.01, dtype=np.float32),
+        rate_var_poisson=np.abs(np.random.randn(*shape).astype(np.float32)),
+        rate_var_rnoise=np.abs(np.random.randn(*shape).astype(np.float32)),
+        dq=np.zeros(shape, dtype=np.uint32)
+    )
     
     # Dark
     dark_model = datamodels.DarkModel()
@@ -29,8 +30,11 @@ def test_dark_level0(tmp_path, datadir):
     dark_filepath = dark_model.save(output_dir=tmp_path)
 
     # Setup and call the dark primitive
-    dark_prim = DarkSubtractionPrimitive(dark=dark_filepath)
-    model_result = dark_prim.apply(input_model.copy(), output_dir=tmp_path, dark=dark_filepath)
+    model_result = DarkSubtractionPrimitive.call(
+        input_model.copy(),
+        output_dir=tmp_path,
+        dark=dark_filepath
+    )
     
     # Test against manual correction
     np.testing.assert_array_equal(
@@ -53,8 +57,11 @@ def test_dark_level0(tmp_path, datadir):
     assert model_result.calibrations[index]['FILENAME'] == os.path.basename(dark_filepath), "Dark calibration path does not match expected value."
 
     # Setup and call the dark primitive again to ensure the calibrations table works as expected.
-    dark_prim = DarkSubtractionPrimitive()
-    model_result = dark_prim.apply(input_model.copy(), output_dir=tmp_path, dark=dark_filepath)
+    model_result = DarkSubtractionPrimitive.call(
+        input_model.copy(),
+        output_dir=tmp_path,
+        dark=dark_filepath
+    )
 
     # Check the calibrations used
     dark_cal_row = model_result.get_calibration_from_role('dark')

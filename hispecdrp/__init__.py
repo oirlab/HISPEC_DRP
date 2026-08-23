@@ -4,7 +4,7 @@ from .primitives import * # Import all primitives
 from .pipelines import * # Import all pipelines
 from . import datamodels
 from . import calibrations
-from . import keck
+from . import driver
 
 # ``from .primitives import *`` re-exports the ``utils`` submodule
 # (``hispecdrp.primitives.utils``), which shadows this package's ``utils``.
@@ -12,7 +12,7 @@ from . import keck
 globals().pop("utils", None)
 from . import utils
 
-from .utils.logging import setup_default_logging
+from .driver.logging import setup_default_logging
 setup_default_logging()
 
 
