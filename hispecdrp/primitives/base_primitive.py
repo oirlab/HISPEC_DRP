@@ -382,6 +382,7 @@ class BasePrimitive(ProcessingComponent):
         config : dict | str | ConfigFile | None = None,
         context : dict | None = None,
         parent : BasePipeline | None = None,
+        log_config : dict | str | None = None,
         return_instance : bool = False,
         **kwargs
     ):
@@ -398,6 +399,8 @@ class BasePrimitive(ProcessingComponent):
             The configuration to use for the primitive. Can be a dict, a config file path, or a ConfigFile object.
         parent : BasePipeline, optional
             The parent pipeline of this primitive.
+        log_config : dict, str, or None, optional
+            The logging configuration to use for the primitive.
         return_instance : bool, optional
             If True, return a tuple of (result, primitive_instance).
             If False, return only the result.
@@ -414,6 +417,7 @@ class BasePrimitive(ProcessingComponent):
             config=config,
             parent=parent,
             context=context,
+            log_config=log_config,
             **kwargs
         )
         result = prim.apply()

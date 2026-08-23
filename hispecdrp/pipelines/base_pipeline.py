@@ -137,6 +137,7 @@ class BasePipeline(ProcessingComponent):
                 parent=self,
                 context=prim_context,
                 config=None,
+                log_config=self.log_config,
                 **prim_pars
             )
 
@@ -193,6 +194,7 @@ class BasePipeline(ProcessingComponent):
         cls,
         config : ConfigFile | str,
         dataset : Any = None,
+        log_config : dict | str | None = None,
         **kwargs
     ):
         """
@@ -210,6 +212,8 @@ class BasePipeline(ProcessingComponent):
 
             If not provided, the pipeline will attempt to auto-configure based on the input dataset and context.
             If the dataset is required for auto-configuration, it must be provided.
+        log_config : dict, str, or None, optional
+            The logging configuration to use for the pipeline.
         kwargs : dict
             Additional keyword arguments to pass to the pipeline constructor.
 
@@ -249,6 +253,7 @@ class BasePipeline(ProcessingComponent):
         return pipe_class(
             dataset=dataset,
             config=config_file,
+            log_config=log_config,
             **kwargs
         )
 
