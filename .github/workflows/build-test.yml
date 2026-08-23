@@ -38,5 +38,7 @@ jobs:
     - name: Run tests
       # pyproject.toml addopts ignores optional/slow modules (stage1, LFC,
       # wavesol geometry, …). Do not pass paths that would re-enable them.
+      # --durations=0 prints every test's wall time at the end of the job log
+      # (download the raw log to compare CI vs local timings).
       run: |
-          pytest
+          pytest --durations=0
