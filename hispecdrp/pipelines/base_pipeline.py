@@ -256,7 +256,12 @@ class BasePipeline(ProcessingComponent):
     #### MAIN API ####
     ##################
 
-    def apply(self, dataset : Any | None = None, **kwargs):
+    def apply(
+        self,
+        dataset : Any | None = None,
+        primitives: dict | None = None,
+        **kwargs
+    ):
         """
         The main method a user calls to run a pipeline.
 
@@ -264,6 +269,8 @@ class BasePipeline(ProcessingComponent):
         ----------
         dataset
             The dataset to process and is up to the subclass to decide what this represents, but is typically a datamodel, or simple containers of datamodels (or filepaths).
+        primitives : dict | None
+            A dictionary of primitive aliases and user-specified parameters to override the default primitive parameters for this pipeline.
         **kwargs
             Additional keyword arguments to set or override for this pipeline. These will override any arguments set during initialization.
 
@@ -281,6 +288,35 @@ class BasePipeline(ProcessingComponent):
 
                 self.set_pars(**kwargs)
 
+                # Set additional parameters from the primitives dict.
+                if primitives is not None:
+                    for prim_alias, prim_config in primitives.items():
+                        if prim_alias not in self.PRIMITIVES:
+                            raise ValueError(f"Invalid primitive alias '{prim_alias}' for pipeline {self.__class__.__name__}. Valid primitive aliases are: {list(self.PRIMITIVES.keys())}")
+                        if 'parameters' in prim_config:
+                            prim_pars = prim_config['parameters']
+                        else:
+                            prim_pars = prim_config
+                        prim_pars.pop('context', None)
+                        prim_instance = getattr(self, prim_alias)
+                        prim_instance.set_pars(**prim_pars)
+
+                for prim_alias in self.PRIMITIVES:
+                    prim_instance = getattr(self, prim_alias)
+
+                    # Forward output_dir to primitives.
+                    if (
+                        prim_instance.output_dir is None
+                        and (prim_instance.save_result or prim_instance.output_file is not None)
+                    ):
+                        prim_instance.output_dir = self.output_dir
+
+                    # Forward max_cores to primitives
+                    if prim_instance.max_cores is None:
+                        prim_instance.max_cores = self.max_cores
+                    
+
+
                 #input_dir = self.get_input_dir()
                 #if self.save_result in (None, False) and self.output_dir is not None:
                 #if self.save_result is None and self.output_dir is not None:
@@ -288,9 +324,7 @@ class BasePipeline(ProcessingComponent):
                 #if self.save_result and self.output_dir is None:
                 #    self.output_dir = input_dir
 
-                #self.set_prim_args(prim_args)
-
-                logger.info(f"Applying {self.__class__.__name__} with arguments:\n{self.pars_str}")
+                logger.info(f"Applying {self.__class__.__name__} with parameters:\n{self.pars_str}")
 
                 self._output = self._perform()
 
@@ -359,44 +393,6 @@ class BasePipeline(ProcessingComponent):
             return result, pipe
         else:
             return result
-
-    #############################
-    #### PARAMETER UTILITIES ####
-    #############################
-    
-    # def set_primitive_parameters(self, primitives : dict | None = None):
-    #     """
-    #     Set the primitive arguments for this pipeline.
-        
-    #     Parameters
-    #     ----------
-    #     primitives : dict | None, optional
-    #         A dictionary of primitive-specific arguments. Keys must match the PRIMITIVES dictionary keys.
-    #     """
-
-    #     if primitives is not None:
-    #         for prim_alias in primitives:
-    #             if prim_alias in self.PRIMITIVES:
-    #                 prim_instance = getattr(self, prim_alias)
-    #             else:
-    #                 raise ValueError(f"Invalid primitive alias '{prim_alias}'. Valid primitive aliases are: {list(self.PRIMITIVES.keys())}")
-                
-    #             valid_pars = prim_instance.allowed_parameters
-    #             for par_name in primitives[prim_alias]:
-    #                 if par_name in valid_pars:
-    #                     prim_instance.set_parameters(**{par_name: primitives[prim_alias][par_name]})
-    #                 else:
-    #                     raise ValueError(f"Invalid argument '{par_name}' for primitive {prim_alias}. Valid arguments are: {valid_pars}")
-            
-    #     # Propagate output directory to primitives
-    #     input_dir = self.get_input_dir()
-    #     for prim_alias in self.PRIMITIVES:
-    #         prim_instance = getattr(self, prim_alias)
-    #         if (prim_instance.save_result or prim_instance.save_preview) and prim_instance.output_dir is None:
-    #             if self.output_dir is not None:
-    #                 prim_instance.output_dir = self.output_dir
-    #             elif input_dir is not None:
-    #                 prim_instance.output_dir = input_dir
 
     ###################
     #### UTILITIES ####
