@@ -26,7 +26,7 @@ from .utils import (
 
 from .meta_data import MetaModel, merge_meta, get_meta_schema
 from ..utils import convert_endianness
-from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS
+from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS, migrate_receipt_table
 from .utils import _set_datetime_meta, _set_koa_meta, _set_target_meta
 
 from koa_middleware import CalibrationStore
@@ -261,6 +261,8 @@ class DataModel:
                 data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
             data = Table(data)
+            if getattr(hdu, "name", None) == "RECEIPT":
+                data = migrate_receipt_table(data)
         return data
 
     def save(
@@ -621,6 +623,8 @@ class DataModel:
             val = kwargs[key]
             if keyu in self.EXTENSIONS:
                 if isinstance(val, Table):
+                    if keyu == "RECEIPT":
+                        val = migrate_receipt_table(val)
                     setattr(self, keyl, val)
                 elif isinstance(val, np.ndarray):
                     if correct_dtypes:

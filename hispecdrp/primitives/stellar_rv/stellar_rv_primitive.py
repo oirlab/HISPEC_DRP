@@ -111,8 +111,8 @@ class StellarRVPrimitive(BasePrimitive):
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
 
-    All constructor arguments list their **default** from :attr:`ARGUMENTS`; override per run as
-    needed. Order matches the grouped layout in :attr:`ARGUMENTS`.
+    All constructor arguments list their **default** from :attr:`PARAMETERS`; override per run as
+    needed. Order matches the grouped layout in :attr:`PARAMETERS`.
 
     Parameters
     ----------

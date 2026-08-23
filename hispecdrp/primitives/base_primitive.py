@@ -11,6 +11,7 @@ from koa_middleware.utils import is_valid_uuid
 import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
+from ..datamodels.extensions import migrate_receipt_table
 from ..driver.logging import logging_context
 from ..calibrations.utils import get_calibration_selector_type
 from ..calibrations import HISPECCalibrationStore
@@ -664,6 +665,9 @@ class BasePrimitive(ProcessingComponent):
             The data model to add the receipt entry to.
         """
         config_filename = self.config.filename or self.config.name or "InMemoryConfigFile"
+
+        # Ensure RECEIPT matches the current schema (legacy FITS used ARGUMENTS).
+        model.receipt = migrate_receipt_table(model.receipt)
 
         row = {
             'PROC_START_TIME' : self._datetime_start,

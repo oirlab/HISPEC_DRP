@@ -228,15 +228,15 @@ Additional notes (primitive behavior and details)
 Unit tests and command-line overrides
 -------------------------------------
 
-The main integration tests for stellar RV live in ``tests/test_stellar_rv.py``.
+The main integration tests for stellar RV live in ``tests/stage2/test_stellar_rv_primitive.py``.
 
 Useful command-line / environment overrides used by these tests include:
 
 ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1``
-   Single switch for optional stellar-RV previews in ``tests/test_stellar_rv.py``: after BT-Settl BSPEC
+   Single switch for optional stellar-RV previews in ``tests/stage2/test_stellar_rv_primitive.py``: after BT-Settl BSPEC
    integration tests, write and open preview HTML (mask-overlay + unified Plotly for ``ccf_line_mask``,
    and unified Plotly + template-overlay HTML for ``ccf_stellar_template`` when that optional leg runs).
-   Also enables the unified Plotly preview in ``test_stellar_rv_recovers_rv_per_chunk``. Forces
+   Also enables the unified Plotly preview in ``test_stellar_rv_primitive_recovers_rv_per_chunk``. Forces
    HTML-only behavior for the unified Plotly preview (skips Kaleido PNG export when this env is set;
    see :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`). When unset, those optional
    preview legs are skipped.

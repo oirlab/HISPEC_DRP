@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from astropy.io import fits
+from astropy.table import Column, Table
 import numpy as np
 
 # NOTE:
@@ -30,6 +33,72 @@ RECEIPT = {
         }
     }
 }
+
+# Pre-config-files RECEIPT used column name ARGUMENTS instead of PARAMETERS and
+# lacked CONFIG_FILE. Migrated on open so older FITS products remain writable.
+_RECEIPT_LEGACY_COLUMN_MAP = {
+    'ARGUMENTS': 'PARAMETERS',
+}
+
+
+def migrate_receipt_table(table: Table | None) -> Table | None:
+    """
+    Upgrade a RECEIPT table to the current schema.
+
+    Renames legacy ``ARGUMENTS`` → ``PARAMETERS`` and adds any missing columns
+    defined in :data:`RECEIPT` (e.g. ``CONFIG_FILE``). Empty tables are rebuilt
+    from the current schema when the column set does not match.
+    """
+    if table is None:
+        return None
+    if not isinstance(table, Table):
+        return table
+
+    expected = list(RECEIPT['RECEIPT']['columns'].keys())
+    colnames = list(table.colnames)
+
+    # Rename legacy columns in place (copy to avoid mutating shared views unexpectedly).
+    renamed = False
+    for old, new in _RECEIPT_LEGACY_COLUMN_MAP.items():
+        if old in colnames and new not in colnames:
+            table = table.copy()
+            table.rename_column(old, new)
+            colnames = list(table.colnames)
+            renamed = True
+            break
+    if not renamed and any(
+        old in colnames and new in colnames
+        for old, new in _RECEIPT_LEGACY_COLUMN_MAP.items()
+    ):
+        # Both present: drop legacy name.
+        table = table.copy()
+        for old, new in _RECEIPT_LEGACY_COLUMN_MAP.items():
+            if old in table.colnames and new in table.colnames:
+                table.remove_column(old)
+        colnames = list(table.colnames)
+
+    missing = [c for c in expected if c not in colnames]
+    extra = [c for c in colnames if c not in expected]
+    if not missing and not extra:
+        return table
+
+    if len(table) == 0:
+        # Rebuild empty table with the current schema (avoids add_row key errors).
+        cols = []
+        for name, dtype in RECEIPT['RECEIPT']['columns'].items():
+            cols.append(Column(name=name, data=np.empty(0, dtype=dtype)))
+        return Table(cols)
+
+    out = table.copy()
+    for name in missing:
+        dtype = RECEIPT['RECEIPT']['columns'][name]
+        out.add_column(Column(name=name, data=np.full(len(out), '', dtype=dtype)))
+    for name in extra:
+        if name in out.colnames:
+            out.remove_column(name)
+    # Stable column order matching the schema.
+    return out[expected] if set(out.colnames) >= set(expected) else out
+
 
 CALIBRATIONS = {
     'CALIBRATIONS': {

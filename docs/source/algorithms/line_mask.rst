@@ -70,10 +70,10 @@ See ``hispecdrp/data/masks/README.md`` and ``hispecdrp/data/atmosphere/README.md
 and transmission-file notes.
 
 
-Unit tests (``tests/test_line_mask_utils.py``)
+Unit tests (``tests/stage2/test_line_mask_utils.py``)
 ----------------------------------------------
 
-The unit tests in ``tests/test_line_mask_utils.py`` validate both small mathematical helpers and
+The unit tests in ``tests/stage2/test_line_mask_utils.py`` validate both small mathematical helpers and
 end-to-end mask I/O behaviors. Highlights:
 
 - **Bundled data access (optional)**

@@ -9,6 +9,7 @@ the Stage 0 and fiberflat pipelines. Master calibrations come from
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
@@ -217,6 +218,7 @@ __all__ = [
     "sim_stage1_masters_exist",
     "load_cached_sim_stage1_masters",
     "save_sim_stage1_masters",
+    "get_default_stage0_primitives",
     "get_default_stage0_prim_args",
     "run_stage0_simulation",
     "run_fiberflat_pipeline",
@@ -225,6 +227,7 @@ __all__ = [
     "register_sim_matched_nonlin",
     "register_sim_stage1_calibrations",
     "prepare_fiberflat_models",
+    "get_fiberflat_primitives",
     "get_fiberflat_prim_args",
 ]
 
@@ -301,7 +304,7 @@ def register_sim_lfc_wavesol(
     Prefers the packaged sim-HDF **line-ZP** WAVE under ``hispecdrp/data/wavesol/``
     when present (``prefer_packaged_line_zp=True``); otherwise falls back to the
     geometric HDF deposit-inverse WAVE. The model uses ``cal_type='lfc_wavesol'``,
-    so Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides.
+    so Stage 1 ``set_wavesol`` can select it without ``primitives`` overrides.
 
     Packaged line-ZP registration defaults to ``new_version=True`` and tags
     ``meta.note`` so :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector`
@@ -393,8 +396,8 @@ def register_sim_matched_nonlin(
     Tags ``meta.note`` with :data:`~hispecdrp.simulations.e2e_support.SIM_MATCHED_NONLIN_NOTE`
     so :class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
     prefers it over KOA masters. Call this when the ramp was simulated with an
-    explicit ``nonlin_coeffs`` so ``Stage0Pipeline().apply(ramp)`` applies the
-    matching inverse without prim_args overrides.
+    explicit ``nonlin_coeffs`` so ``Stage0Pipeline.call(ramp)`` applies the
+    matching inverse without ``primitives`` overrides.
     """
     from ..calibrations import HISPECCalibrationStore
 
@@ -576,9 +579,14 @@ def _merge_ramp_meta_into_cal(model: datamodels.DataModel, ramp_meta, spectrogra
     # Stage-1 selector prefers a same-night geometric lfc_wavesol instead.
     mjd = getattr(meta, "mjd_start", None)
     if mjd is not None and getattr(meta, "datetime_obs", None) in (None, "", "1858-11-17T00:00:00.000"):
-        import astropy.time
+        import warnings
 
-        meta.datetime_obs = astropy.time.Time(float(mjd), format="mjd", scale="utc").isot
+        import astropy.time
+        from erfa import ErfaWarning
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ErfaWarning, message=r".*dubious year.*")
+            meta.datetime_obs = astropy.time.Time(float(mjd), format="mjd", scale="utc").isot
 
 
 def register_sim_stage1_calibrations(
@@ -1016,7 +1024,7 @@ def simulate_ramp_from_rate_map(
     return ramp_model
 
 
-def get_default_stage0_prim_args(
+def get_default_stage0_primitives(
     *,
     max_cores: int | None = 1,
     ramp_fit_method: str = "jwst_likely",
@@ -1025,7 +1033,7 @@ def get_default_stage0_prim_args(
     run_jump_detec: bool = False,
 ) -> dict:
     """
-    Return default primitive arguments for the Stage 0 pipeline.
+    Return default ``primitives`` for the Stage 0 pipeline.
 
     Parameters
     ----------
@@ -1041,13 +1049,13 @@ def get_default_stage0_prim_args(
     run_jump_detec : bool, optional
         Whether to run the standalone jump-detection primitive. Default False.
         Independent of ``ramp_fit``'s in-ramp ``jwst_jump_detection``, which is
-        also False by default in these prim args (enable explicitly for CR work).
+        also False by default in these primitives (enable explicitly for CR work).
 
     Returns
     -------
     dict
-        Nested dict of primitive names to keyword arguments for
-        Stage0Pipeline.apply(..., prim_args=...).
+        Nested dict of primitive names to parameters for
+        ``Stage0Pipeline.call(..., primitives=...)``.
     """
     mc = max_cores if max_cores is not None else 1
     return {
@@ -1074,6 +1082,9 @@ def get_default_stage0_prim_args(
         "gain_corr": {"max_cores": mc},
         "detflat_corr": {"max_cores": mc},
     }
+
+
+get_default_stage0_prim_args = get_default_stage0_primitives
 
 
 def _build_fiberflat_rate_map(
@@ -1120,7 +1131,7 @@ def create_dummy_fiberflat_rate_files(
     readtime: float = 1.7,
     n_reads: int = 10,
     max_cores: int = 1,
-    stage0_prim_args: dict | None = None,
+    stage0_primitives: dict | None = None,
     fiberflat_filename: callable | None = None,
     fiberflat_coadd_exposures: int = 1,
     fiberflat_duplicate_single_reduction: bool = False,
@@ -1146,8 +1157,8 @@ def create_dummy_fiberflat_rate_files(
     import astropy.units as u
     from astropy.modeling.models import BlackBody
 
-    if stage0_prim_args is None:
-        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
+    if stage0_primitives is None:
+        stage0_primitives = get_default_stage0_primitives(max_cores=max_cores)
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
     if fiberflat_coadd_exposures < 1:
@@ -1250,7 +1261,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             paths.append(_finalize_and_save(rate_model, 1))
@@ -1271,7 +1282,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             primary_path = _finalize_and_save(rate_model, 1)
@@ -1299,7 +1310,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             paths.append(_finalize_and_save(rate_model, exposure))
@@ -1317,8 +1328,9 @@ def run_stage0_simulation(
     ramp_model: datamodels.RampModel,
     calibration_models: dict[str, datamodels.CalibrationModel],
     output_dir: str = ".",
-    prim_args: dict | None = None,
+    primitives: dict | None = None,
     *,
+    prim_args: dict | None = None,
     max_cores: int | None = None,
 ) -> datamodels.DataModel:
     """
@@ -1333,21 +1345,25 @@ def run_stage0_simulation(
         ``dq``, ``saturation``, ``bias``, ``gain``, ``rn``, ``dark``, ``detflat``.
     output_dir : str, optional
         Directory for pipeline outputs. Default is ".".
-    prim_args : dict or None, optional
-        Primitive arguments for the pipeline. If None, use
-        :func:`get_default_stage0_prim_args`(). Default is None.
+    primitives : dict or None, optional
+        Per-primitive parameters for ``Stage0Pipeline.call``. If None, use
+        :func:`get_default_stage0_primitives`(). Default is None.
 
     Returns
     -------
     DataModel
-        Result of Stage0Pipeline.apply (e.g. rate or slope model).
+        Result of ``Stage0Pipeline.call`` (e.g. rate or slope model).
     """
-    if prim_args is None:
-        prim_args = get_default_stage0_prim_args()
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
+    if primitives is None:
+        primitives = get_default_stage0_primitives()
+    else:
+        primitives = copy.deepcopy(primitives)
     if max_cores is not None:
-        prim_args = e2e_support.apply_max_cores_to_stage0_prim_args(prim_args, max_cores)
-    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
-        prim_args, Stage0Pipeline.PRIMITIVES
+        primitives = e2e_support.apply_max_cores_to_stage0_primitives(primitives, max_cores)
+    primitives = e2e_support.apply_e2e_save_and_preview_flags(
+        primitives, Stage0Pipeline.PRIMITIVES
     )
 
     output_dir = e2e_support.ensure_output_directory(output_dir)
@@ -1357,20 +1373,24 @@ def run_stage0_simulation(
         ny, nx
     )
 
-    pipe = Stage0Pipeline()
-    pipe.dq_init.dq = calibration_models["dq"]
-    pipe.saturation_check.saturation = calibration_models["saturation"]
-    pipe.bias_sub.bias = calibration_models["bias"]
-    pipe.nonlin_corr.nonlin = nonlin_model
-    pipe.jump_detec.gain = calibration_models["gain"]
-    pipe.jump_detec.rn = calibration_models["rn"]
-    pipe.ramp_fit.gain = calibration_models["gain"]
-    pipe.ramp_fit.rn = calibration_models["rn"]
-    pipe.dark_sub.dark = calibration_models["dark"]
-    pipe.gain_corr.gain = calibration_models["gain"]
-    pipe.detflat_corr.detflat = calibration_models["detflat"]
+    primitives = copy.deepcopy(primitives)
+    primitives.setdefault("dq_init", {})["dq"] = calibration_models["dq"]
+    primitives.setdefault("saturation_check", {})["saturation"] = calibration_models[
+        "saturation"
+    ]
+    primitives.setdefault("bias_sub", {})["bias"] = calibration_models["bias"]
+    primitives.setdefault("nonlin_corr", {})["nonlin"] = nonlin_model
+    primitives.setdefault("jump_detec", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("jump_detec", {})["rn"] = calibration_models["rn"]
+    primitives.setdefault("ramp_fit", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("ramp_fit", {})["rn"] = calibration_models["rn"]
+    primitives.setdefault("dark_sub", {})["dark"] = calibration_models["dark"]
+    primitives.setdefault("gain_corr", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("detflat_corr", {})["detflat"] = calibration_models["detflat"]
 
-    return pipe.apply(ramp_model, prim_args=prim_args, output_dir=output_dir)
+    return Stage0Pipeline.call(
+        ramp_model, primitives=primitives, output_dir=output_dir
+    )
 
 
 def create_ramp_and_calibrations(
@@ -1482,7 +1502,7 @@ def create_ramp_and_calibrations(
         (:data:`~hispecdrp.simulations.e2e_support.IDENTITY_UTR_FORWARD_NONLIN_POLY`).
         Whatever poly is used is applied to the UTR and a matching Stage-0
         ``nonlin`` cal is registered in the local caldb (tagged
-        ``sim_matched_nonlin``) so ``Stage0Pipeline().apply(ramp)`` applies the
+        ``sim_matched_nonlin``) so ``Stage0Pipeline.call(ramp)`` applies the
         inverse by default. Pass
         :data:`~hispecdrp.simulations.e2e_support.DEFAULT_UTR_FORWARD_NONLIN_POLY`
         for a small quadratic forward nonlin with a matched inverse.
@@ -2080,7 +2100,7 @@ _DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
 _DEFAULT_FIBERFLAT_PROMINENCE = 0.02
 
 
-def get_fiberflat_prim_args(
+def get_fiberflat_primitives(
     ff_models: list[datamodels.DataModel],
     *,
     disp_range: tuple[int, int] | None = None,
@@ -2090,9 +2110,9 @@ def get_fiberflat_prim_args(
     extraction_aperture: int = 10,
     prominence_factor: float | dict[str, float] | None = None,
 ) -> dict:
-    """Build default primitive arguments for ProcessFiberflatsPipeline from opened fiberflat models."""
+    """Build default ``primitives`` for ProcessFiberflatsPipeline from opened fiberflat models."""
     do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
-    # Multiple rate files per fiber (for coadd) share the same illumination pattern; prim_args
+    # Multiple rate files per fiber (for coadd) share the same illumination pattern; primitives
     # only need the distinct fiber ids, not one model per fiber.
     do_fibers: list[str] = []
     seen: set[str] = set()
@@ -2133,10 +2153,14 @@ def get_fiberflat_prim_args(
     }
 
 
+get_fiberflat_prim_args = get_fiberflat_primitives
+
+
 def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
-    prim_args: dict | None = None,
+    primitives: dict | None = None,
     *,
+    prim_args: dict | None = None,
     output_dir: str | None = None,
     disp_range: tuple[int, int] | None = None,
     xdisp_range: tuple[int, int] | None = None,
@@ -2153,8 +2177,8 @@ def run_fiberflat_pipeline(
     fiberflat_filepaths : list of str
         Paths to fiberflat rate FITS files. Multiple paths with the same fiber
         illumination pattern are coadded before trace finding.
-    prim_args : dict or None, optional
-        Primitive arguments. If None, built from the other keyword arguments.
+    primitives : dict or None, optional
+        Per-primitive parameters. If None, built from the other keyword arguments.
         Default is None.
     output_dir : str or None, optional
         If set, pipeline products are written under this directory. Default is None.
@@ -2174,12 +2198,14 @@ def run_fiberflat_pipeline(
     dict
         Pipeline results with keys such as ``trace_pos``, ``trace_prof``.
     """
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
     if output_dir is not None:
         e2e_support.ensure_koa_calibration_cache_env(output_dir)
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
     ff_models = prepare_fiberflat_models(fiberflat_filepaths)
-    if prim_args is None:
-        prim_args = get_fiberflat_prim_args(
+    if primitives is None:
+        primitives = get_fiberflat_primitives(
             ff_models,
             disp_range=disp_range,
             xdisp_range=xdisp_range,
@@ -2188,11 +2214,10 @@ def run_fiberflat_pipeline(
             extraction_aperture=extraction_aperture,
             prominence_factor=prominence_factor,
         )
-    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
-        prim_args, ProcessFiberflatsPipeline.PRIMITIVES
+    primitives = e2e_support.apply_e2e_save_and_preview_flags(
+        primitives, ProcessFiberflatsPipeline.PRIMITIVES
     )
-    pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
-    apply_kw: dict = {}
+    call_kw: dict = {"primitives": primitives}
     if output_dir is not None:
-        apply_kw["output_dir"] = e2e_support.ensure_output_directory(output_dir)
-    return pipe.apply(ff_models, **apply_kw)
+        call_kw["output_dir"] = e2e_support.ensure_output_directory(output_dir)
+    return ProcessFiberflatsPipeline.call(ff_models, **call_kw)

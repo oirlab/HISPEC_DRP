@@ -393,8 +393,12 @@ def _as_model_list(other: DataModel | list[DataModel] | dict[DataModel]) -> list
     raise ValueError(f"Expected DataModel, list, or dict — got {type(other).__name__}")
 
 def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    from .extensions import migrate_receipt_table
+
+    target.receipt = migrate_receipt_table(target.receipt)
     for model in _as_model_list(other):
-        for row in model.receipt:
+        src = migrate_receipt_table(model.receipt)
+        for row in src:
             target.receipt.add_row(row)
 
 def append_calibrations(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:

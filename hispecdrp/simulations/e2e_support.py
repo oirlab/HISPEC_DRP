@@ -22,11 +22,6 @@ from .. import datamodels
 from ..pipelines.stage0 import stage0_pipeline as _stage0_pipeline
 from ..pipelines.stage1 import stage1_pipeline as _stage1_pipeline
 from ..pipelines.stage2 import stage2_pipeline as _stage2_pipeline
-from ..primitives import (
-    BarycenterCorrectionPrimitive,
-    BlazeCorrectionPrimitive,
-    StellarRVPrimitive,
-)
 from ..utils.line_mask_utils import packaged_default_line_mask_path
 
 logger = logging.getLogger(__name__)
@@ -36,12 +31,11 @@ DEFAULT_RATE_MAP_FIBERS: list[int] = [1, 2, 3]
 # HISPEC detector (ny, nx); matches datamodel ramp/calibration image sizes.
 DEFAULT_HISPEC_DETECTOR_SHAPE: tuple[int, int] = (4096, 4160)
 
-# E2E Stage 2 runs barycenter correction between blaze correction and stellar RV.
-E2E_STAGE2_PRIMITIVES: dict[str, type] = {
-    "blaze_corr": BlazeCorrectionPrimitive,
-    "barycorr": BarycenterCorrectionPrimitive,
-    "stellar_rv": StellarRVPrimitive,
-}
+# Alias of Stage2Pipeline.PRIMITIVES for E2E helpers / tests.
+E2E_STAGE2_PRIMITIVES: dict[str, type] = dict(_stage2_pipeline.Stage2Pipeline.PRIMITIVES)
+
+# Keys copied from class PARAMETERS into default ``primitives`` dicts for E2E.
+_E2E_PARAM_SKIP = frozenset({"output_dir", "output_file", "output_path", "suffix"})
 
 
 def repository_root() -> Path:
@@ -251,8 +245,8 @@ def open_cached_stage0_calibration(
 
 
 def apply_e2e_save_and_preview_flags(
-    prim_args: dict,
-    primitives: dict[str, type],
+    primitives: dict,
+    primitive_classes: dict[str, type],
 ) -> dict:
     """
     Enable ``save_result`` and ``save_preview`` on every primitive that supports them.
@@ -260,93 +254,111 @@ def apply_e2e_save_and_preview_flags(
     Used by E2E simulation runners so each pipeline step writes FITS products and
     generates available previews under ``output_dir``.
     """
-    out = copy.deepcopy(prim_args)
-    for name, cls in primitives.items():
+    out = copy.deepcopy(primitives)
+    for name, cls in primitive_classes.items():
         flags: dict[str, bool] = {}
-        if "save_result" in cls.ARGUMENTS:
+        if "save_result" in cls.PARAMETERS:
             flags["save_result"] = True
-        if "save_preview" in cls.ARGUMENTS:
+        if "save_preview" in cls.PARAMETERS:
             flags["save_preview"] = True
         if name == "stellar_rv":
             existing = out.get(name, {})
-            if "save_overlay_debug" in cls.ARGUMENTS and "save_overlay_debug" not in existing:
+            if "save_overlay_debug" in cls.PARAMETERS and "save_overlay_debug" not in existing:
                 flags["save_overlay_debug"] = True
             # HTML preview only: Kaleido PNG of multi-fiber line-mask CCF figures (hundreds of
             # traces) can hang or run for many minutes in headless Chrome. Always override the
-            # primitive default (True) even when get_default_stage*_prim_args already copied it.
-            if "preview_write_png" in cls.ARGUMENTS:
+            # primitive default (True) even when get_default_stage*_primitives already copied it.
+            if "preview_write_png" in cls.PARAMETERS:
                 flags["preview_write_png"] = False
         if flags:
             out.setdefault(name, {}).update(flags)
     return out
 
 
-def apply_max_cores_to_stage0_prim_args(prim_args: dict, max_cores: int) -> dict:
-    out = copy.deepcopy(prim_args)
+def apply_max_cores_to_stage0_primitives(primitives: dict, max_cores: int) -> dict:
+    out = copy.deepcopy(primitives)
     for name, cls in _stage0_pipeline.Stage0Pipeline.PRIMITIVES.items():
-        if "max_cores" not in cls.ARGUMENTS:
+        if "max_cores" not in cls.PARAMETERS:
             continue
         out.setdefault(name, {})["max_cores"] = max_cores
     return out
 
-def apply_max_cores_to_stage1_prim_args(prim_args: dict, max_cores: int) -> dict:
-    out = copy.deepcopy(prim_args)
+
+def apply_max_cores_to_stage1_primitives(primitives: dict, max_cores: int) -> dict:
+    out = copy.deepcopy(primitives)
     for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
-        if "max_cores" not in cls.ARGUMENTS:
+        if "max_cores" not in cls.PARAMETERS:
             continue
         out.setdefault(name, {})["max_cores"] = max_cores
     return out
 
-def apply_max_cores_to_stage2_prim_args(prim_args: dict, max_cores: int) -> dict:
-    out = copy.deepcopy(prim_args)
+
+def apply_max_cores_to_stage2_primitives(primitives: dict, max_cores: int) -> dict:
+    out = copy.deepcopy(primitives)
     for name, cls in E2E_STAGE2_PRIMITIVES.items():
-        if "max_cores" not in getattr(cls, "ARGUMENTS", {}):
+        if "max_cores" not in cls.PARAMETERS:
             continue
         out.setdefault(name, {})["max_cores"] = max_cores
     return out
 
-def get_default_stage1_prim_args(*, max_cores: int | None = None) -> dict:
-    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`.
 
-    Optional ``max_cores`` is written into each primitive's args when provided.
+def get_default_stage1_primitives(*, max_cores: int | None = None) -> dict:
+    """Default ``primitives`` for :class:`~hispecdrp.pipelines.stage1.stage1_pipeline.Stage1Pipeline`.
+
+    Optional ``max_cores`` is written into each primitive's parameters when provided.
     """
-    _skip = frozenset({"input", "output_path", "output_dir"})
     out: dict[str, dict] = {}
     for name, cls in _stage1_pipeline.Stage1Pipeline.PRIMITIVES.items():
-        args = {k: v for k, v in cls.ARGUMENTS.items() if k not in _skip}
+        args = {k: v for k, v in cls.PARAMETERS.items() if k not in _E2E_PARAM_SKIP}
         if max_cores is not None and "max_cores" in args:
             args["max_cores"] = max_cores
         out[name] = args
     return out
 
 
-def get_default_stage2_prim_args(*, max_cores: int | None = None) -> dict:
-    """Default ``prim_args`` for :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
+def get_default_stage2_primitives(*, max_cores: int | None = None) -> dict:
+    """Default ``primitives`` for :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`.
 
-    Optional ``max_cores`` is written into each primitive's args when provided.
+    Optional ``max_cores`` is written into each primitive's parameters when provided.
+    E2E defaults leave ``sky_sub`` off (no sky fiber in many sims); enable explicitly.
     """
-    _skip = frozenset({"input", "output_path", "output_dir"})
     out: dict[str, dict] = {}
     for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
-        args = {k: v for k, v in cls.ARGUMENTS.items() if k not in _skip}
+        args = {k: v for k, v in cls.PARAMETERS.items() if k not in _E2E_PARAM_SKIP}
         if max_cores is not None and "max_cores" in args:
             args["max_cores"] = max_cores
         out[name] = args
+    if "sky_sub" in out:
+        out["sky_sub"]["run"] = False
     if "barycorr" not in out:
         out["barycorr"] = {}
-    if max_cores is not None and "max_cores" in BarycenterCorrectionPrimitive.ARGUMENTS:
+    bary_cls = E2E_STAGE2_PRIMITIVES.get("barycorr")
+    if (
+        max_cores is not None
+        and bary_cls is not None
+        and "max_cores" in bary_cls.PARAMETERS
+    ):
         out["barycorr"]["max_cores"] = max_cores
     if "stellar_rv" in out:
         out["stellar_rv"]["mask_path"] = packaged_default_line_mask_path()
     return out
 
 
+# Backward-compatible aliases (pre config-files naming).
+apply_max_cores_to_stage0_prim_args = apply_max_cores_to_stage0_primitives
+apply_max_cores_to_stage1_prim_args = apply_max_cores_to_stage1_primitives
+apply_max_cores_to_stage2_prim_args = apply_max_cores_to_stage2_primitives
+get_default_stage1_prim_args = get_default_stage1_primitives
+get_default_stage2_prim_args = get_default_stage2_primitives
+
+
 def run_stage1_simulation(
     rate_model: datamodels.DataModel,
     trace_pos_model: datamodels.DataModel,
     trace_prof_model: datamodels.DataModel,
-    prim_args: dict | None = None,
+    primitives: dict | None = None,
     *,
+    prim_args: dict | None = None,
     wavesol_model: datamodels.DataModel | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
@@ -355,6 +367,8 @@ def run_stage1_simulation(
     do_fibers: list[str] | None = None,
 ) -> datamodels.DataModel:
     """Run Stage 1 on a rate/slope model with trace calibrations and optional wavelength solution."""
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
     if do_orders is None and hasattr(rate_model, "make_order_vec"):
         do_orders = rate_model.make_order_vec()
     if do_orders is None:
@@ -362,8 +376,8 @@ def run_stage1_simulation(
     if do_fibers is None:
         do_fibers = ["1", "2", "3"]
 
-    if prim_args is not None:
-        method = prim_args.get("spec_extract", {}).get("method", "box")
+    if primitives is not None:
+        method = primitives.get("spec_extract", {}).get("method", "box")
     else:
         method = "box"
 
@@ -374,93 +388,85 @@ def run_stage1_simulation(
         method,
     )
 
-    if prim_args is None:
-        prim_args = get_default_stage1_prim_args(max_cores=max_cores)
-        prim_args["spec_extract"]["method"] = method
-        prim_args["spec_extract"]["extraction_aperture"] = extraction_aperture
-        prim_args["spec_extract"]["do_orders"] = do_orders
-        prim_args["spec_extract"]["do_fibers"] = do_fibers
+    if primitives is None:
+        primitives = get_default_stage1_primitives(max_cores=max_cores)
+        primitives["spec_extract"]["method"] = method
+        primitives["spec_extract"]["extraction_aperture"] = extraction_aperture
+        primitives["spec_extract"]["do_orders"] = do_orders
+        primitives["spec_extract"]["do_fibers"] = do_fibers
     else:
-        prim_args = copy.deepcopy(prim_args)
+        primitives = copy.deepcopy(primitives)
         if max_cores is not None:
-            prim_args = apply_max_cores_to_stage1_prim_args(prim_args, max_cores)
+            primitives = apply_max_cores_to_stage1_primitives(primitives, max_cores)
 
-    prim_args.setdefault("spec_extract", {})
-    prim_args["spec_extract"]["tracepos"] = trace_pos_model
-    prim_args["spec_extract"]["traceprof"] = trace_prof_model
+    primitives.setdefault("spec_extract", {})
+    primitives["spec_extract"]["tracepos"] = trace_pos_model
+    primitives["spec_extract"]["traceprof"] = trace_prof_model
 
-    prim_args.setdefault("set_wavesol", {})
+    primitives.setdefault("set_wavesol", {})
     if wavesol_model is None:
-        prim_args["set_wavesol"]["run"] = False
+        primitives["set_wavesol"]["run"] = False
     else:
-        prim_args["set_wavesol"].pop("run", None)
-        prim_args["set_wavesol"]["wavesol"] = wavesol_model
+        primitives["set_wavesol"].pop("run", None)
+        primitives["set_wavesol"]["wavesol"] = wavesol_model
 
-    prim_args = apply_e2e_save_and_preview_flags(
-        prim_args, _stage1_pipeline.Stage1Pipeline.PRIMITIVES
+    primitives = apply_e2e_save_and_preview_flags(
+        primitives, _stage1_pipeline.Stage1Pipeline.PRIMITIVES
     )
 
-    pipe = _stage1_pipeline.Stage1Pipeline(prim_args=prim_args)
-    apply_kw: dict = {}
+    call_kw: dict = {"primitives": primitives}
     if output_dir is not None:
-        apply_kw["output_dir"] = ensure_output_directory(output_dir)
-    return pipe.apply(rate_model, **apply_kw)
-
-
-def _init_e2e_primitive(prim_cls: type, prim_arg_dict: dict, output_dir: str | None):
-    """Construct a primitive with E2E ``prim_args`` and optional output directory."""
-    prim = prim_cls()
-    valid = prim.ARGUMENTS | prim.CALIBRATIONS
-    prim.init_args(**{k: v for k, v in prim_arg_dict.items() if k in valid})
-    if output_dir is not None and (prim.save_result or prim.save_preview):
-        prim.set_args(output_dir=output_dir)
-    return prim
+        call_kw["output_dir"] = ensure_output_directory(output_dir)
+    return _stage1_pipeline.Stage1Pipeline.call(rate_model, **call_kw)
 
 
 def run_stage2_simulation(
     stage1_output: datamodels.DataModel,
     *,
     fiberflat_model: datamodels.DataModel | None = None,
+    primitives: dict | None = None,
     prim_args: dict | None = None,
     output_dir: str | None = None,
     max_cores: int | None = None,
     stellar_rv_mask_path: str | None = None,
     stellar_rv_ccf_input_velocity_m_s: float | None = None,
 ) -> datamodels.DataModel:
-    """Run Stage 2 (blaze + barycenter correction + stellar RV) on the Stage 1 product."""
-    if prim_args is None:
-        prim_args = get_default_stage2_prim_args(max_cores=max_cores)
+    """Run Stage 2 (blaze + sky + barycenter + stellar RV) via :meth:`Stage2Pipeline.call`."""
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
+    if primitives is None:
+        primitives = get_default_stage2_primitives(max_cores=max_cores)
     else:
-        prim_args = copy.deepcopy(prim_args)
+        primitives = copy.deepcopy(primitives)
         if max_cores is not None:
-            prim_args = apply_max_cores_to_stage2_prim_args(prim_args, max_cores)
+            primitives = apply_max_cores_to_stage2_primitives(primitives, max_cores)
 
-    if stellar_rv_mask_path is not None and "stellar_rv" in prim_args:
-        prim_args["stellar_rv"]["mask_path"] = stellar_rv_mask_path
+    if fiberflat_model is not None:
+        primitives.setdefault("blaze_corr", {})["fiberflat"] = fiberflat_model
+    if stellar_rv_mask_path is not None and "stellar_rv" in primitives:
+        primitives["stellar_rv"]["mask_path"] = stellar_rv_mask_path
     if (
         stellar_rv_ccf_input_velocity_m_s is not None
         and np.isfinite(float(stellar_rv_ccf_input_velocity_m_s))
-        and "stellar_rv" in prim_args
+        and "stellar_rv" in primitives
     ):
-        prim_args["stellar_rv"]["ccf_input_velocity"] = float(stellar_rv_ccf_input_velocity_m_s)
+        primitives["stellar_rv"]["ccf_input_velocity"] = float(
+            stellar_rv_ccf_input_velocity_m_s
+        )
 
-    prim_args = apply_e2e_save_and_preview_flags(prim_args, E2E_STAGE2_PRIMITIVES)
+    primitives = apply_e2e_save_and_preview_flags(primitives, E2E_STAGE2_PRIMITIVES)
 
-    out_dir = ensure_output_directory(output_dir) if output_dir is not None else None
-    model = stage1_output
-    for prim_name, prim_cls in E2E_STAGE2_PRIMITIVES.items():
-        prim = _init_e2e_primitive(prim_cls, prim_args.get(prim_name, {}), out_dir)
-        if prim_name == "blaze_corr" and fiberflat_model is not None:
-            prim.fiberflat = fiberflat_model
-        model = prim.apply(model)
-    return model
+    call_kw: dict = {"primitives": primitives}
+    if output_dir is not None:
+        call_kw["output_dir"] = ensure_output_directory(output_dir)
+    return _stage2_pipeline.Stage2Pipeline.call(stage1_output, **call_kw)
 
 
 def ensure_e2e_console_logging() -> None:
     """
     Ensure E2E summary messages reach the terminal after pipeline logging stops.
 
-    Pipeline primitives use :func:`~hispecdrp.utils.logging.logging_context`, which
+    Pipeline primitives use :func:`~hispecdrp.driver.logging.logging_context`, which
     routes the root logger through a multiprocessing queue. When the last pipeline
     exits, the queue listener is stopped, so later ``logger.info`` calls on
     ``hispecdrp.simulations.*`` would otherwise be discarded.

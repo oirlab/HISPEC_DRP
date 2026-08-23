@@ -29,10 +29,13 @@ _GAIA_EPOCHS = {
 }
 
 # VizieR mirror servers (hostnames only); tried in order when a query fails.
+# Prefer CfA first: it is typically the fastest reachable mirror from US networks,
+# and CDS sometimes returns an empty table for Gaia DR3 constraint queries (which
+# silently falls through and then burns the full connect timeout on a dead mirror).
 VIZIER_MIRRORS = [
+    "vizier.cfa.harvard.edu",  # CfA / Harvard, USA
     "vizier.cds.unistra.fr",   # CDS / Strasbourg, France
     "vizier.nao.ac.jp",        # ADAC / Tokyo, Japan
-    "vizier.cfa.harvard.edu",  # CfA / Harvard, USA
     "vizier.inasan.ru",        # INASAN / Moscow, Russia
     "vizier.iucaa.in",         # IUCAA / Pune, India
     "vizier.idia.ac.za",       # IDIA / South Africa

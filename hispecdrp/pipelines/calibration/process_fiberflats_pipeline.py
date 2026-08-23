@@ -63,14 +63,14 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         trace_prof_reg = self.register_traceprof_cal.apply(trace_profile_model)
         
         # Set the trace pos and prof cals in the spectral extraction primitive
-        # NOTE: Final behavior TBD - sometimes we want to sue the these trace cals, sometimes we want older trace cals.
+        # NOTE: Final behavior TBD - sometimes we want to use these trace cals, sometimes we want older trace cals.
         if self.use_pipeline_trace_cals:
-            if self.spec_extract.tracepos is not None:
+            if getattr(self.spec_extract, 'tracepos', None) is not None:
                 logger.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
-                self.spec_extract.tracepos = trace_pos_reg
-            if self.spec_extract.traceprof is not None:
+            self.spec_extract.tracepos = trace_pos_reg
+            if getattr(self.spec_extract, 'traceprof', None) is not None:
                 logger.warning(f"Overriding spec_extract.traceprof with {trace_prof_reg}.")
-                self.spec_extract.traceprof = trace_prof_reg
+            self.spec_extract.traceprof = trace_prof_reg
 
         # Extract the coadded fiberflats (models split by fiber)
         ff_coadded_models_L1 = self.spec_extract.apply(ff_coadded_models_L0)

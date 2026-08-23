@@ -1,7 +1,20 @@
+from pathlib import Path
+
 import numpy as np
 import yaml
 from hispecdrp import datamodels
 from hispecdrp.simulations.utr import create_ramp
+
+
+def repo_root() -> Path:
+    """Repository root (parent of ``tests/``)."""
+    return Path(__file__).resolve().parents[1]
+
+
+# Fixed epoch for cal-db / sim metadata in tests: inside IERS leap-second tables
+# so Astropy/ERFA does not emit "dubious year" warnings (unlike Time.now() in 2026+
+# or packaged wavesol placeholder MJD 0 / 1858-11-17).
+SAFE_TEST_MJD = 60000.0  # 2023-02-25 UTC
 
 
 def save_config_yaml(config_dict : dict, config_path : str):
@@ -137,3 +150,13 @@ def make_stage0_cals(
         cals['detflat'] = flat_model
 
     return cals
+
+def fast_ccf_orders(spectrograph: str) -> list[int]:
+    """Three mid-band echelle orders for fast RV-recovery unit tests."""
+    from hispecdrp.datamodels import hispec_config
+
+    orders = list(hispec_config.HISPECConfig.get_order_list(spectrograph))
+    if len(orders) <= 3:
+        return orders
+    mid = len(orders) // 2
+    return [orders[mid - 1], orders[mid], orders[mid + 1]]

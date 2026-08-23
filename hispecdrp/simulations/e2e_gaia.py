@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TELESCOPE = "Keck-II"
 
-# Fixed first-read MJD for reproducible E2E runs (UTC mid-2026). Exposure mid-time and
-# BERV are derived deterministically from this value plus ``n_reads`` / ``readtime``.
-DEFAULT_E2E_MJD_START = 61210.0
+# Fixed first-read MJD for reproducible E2E runs (UTC 2024-09-24). Kept inside the
+# IERS leap-second table so Astropy/ERFA does not emit "dubious year" warnings.
+# Exposure mid-time and BERV are derived from this value plus ``n_reads`` / ``readtime``.
+DEFAULT_E2E_MJD_START = 60577.0
 
 # Approximate mean epoch of 2MASS observations (J2000); Gaia positions are propagated
 # back to this epoch before the 2MASS cone search to handle high-proper-motion stars.
@@ -194,7 +195,7 @@ def build_target_meta_from_gaia(
     target_name: str | None = None,
     telescope: str = DEFAULT_TELESCOPE,
 ) -> dict:
-    """Build target metadata dict (same fields as ``tests/test_barycorr.py``)."""
+    """Build target metadata dict (same fields as ``tests/stage2/test_barycenter_correction.py``)."""
     sid = str(star_data["source_id"])
     name = target_name or f"Gaia_{sid}"
     return {
@@ -236,7 +237,7 @@ def resolve_e2e_gaia_target(
 
     Stellar properties are loaded with
     :func:`~hispecdrp.primitives.utils.get_stellar_data_gaia_from_source_id`
-    (same as ``tests/test_barycorr.py``).
+    (same as ``tests/stage2/test_barycenter_correction.py``).
     """
     if source_id is None:
         source_id = query_random_bright_gaia_source_id(
