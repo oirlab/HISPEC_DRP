@@ -86,10 +86,11 @@ class DetectorFlatCorrectionPrimitive(BasePrimitive):
         logger.info(f"Applying detector flat correction with {detflat} to {input_model}")
 
         # Perform detector flat correction in place
+        max_cores = self.max_cores or 1
         detector_flat_correction(
             result.rate, result.rate_err, result.dq,
             detflat_model.flat, detflat_model.flat_err, detflat_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

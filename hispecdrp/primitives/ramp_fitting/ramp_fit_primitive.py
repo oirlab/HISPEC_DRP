@@ -220,6 +220,7 @@ class FitRampPrimitive(BasePrimitive):
         delta_readtimes = input_model.get_delta_readtimes()
         first_read_mjd = input_model.get_first_read_mjd()
 
+        max_cores = self.max_cores or 1
         if self.method.lower() == 'ols':
             result = fit_ramps_ols(
                 delta_readtimes,
@@ -230,7 +231,7 @@ class FitRampPrimitive(BasePrimitive):
                 gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None,  # Not used because we assume dark subtraction is done in rate maps.
-                max_cores=self.max_cores
+                max_cores=max_cores
             )
         elif self.method.lower() in ('cds'):
             result = fit_ramps_mcds(
@@ -243,7 +244,7 @@ class FitRampPrimitive(BasePrimitive):
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                 num_coadd=1,
-                max_cores=self.max_cores
+                max_cores=max_cores
             )
         elif self.method.lower() in ('mcds'):
             if _mcds_num_coadd is None:
@@ -259,7 +260,7 @@ class FitRampPrimitive(BasePrimitive):
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
                 num_coadd=_mcds_num_coadd,
-                max_cores=self.max_cores
+                max_cores=max_cores
             )
 
         elif self.method.lower() in ('jwst_likely', 'jwst_fixsen', 'cython_likely'):
@@ -271,7 +272,7 @@ class FitRampPrimitive(BasePrimitive):
                 gain=gain_model.gain,
                 start_times=first_read_mjd,
                 dark_current=None, # Not used because we assume dark subtraction is done in rate maps.
-                max_cores=self.max_cores,
+                max_cores=max_cores,
                 algorithm=self.method.lower(),
                 jump_detection = self.jwst_jump_detection,
                 jump_rejection_threshold = self.jwst_jump_rejection_threshold

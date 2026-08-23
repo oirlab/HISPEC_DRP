@@ -61,7 +61,8 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
         output_detflat.flat_var_poisson = input_model.rate_var_poisson/median_flat_whitelamp_intensity**2
         output_detflat.dq = copy(input_model.dq)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _detect_cold_pixels(output_detflat.flat, output_detflat.dq,self.cold_pixel_threshold)
 
         return dict(output=output_detflat)

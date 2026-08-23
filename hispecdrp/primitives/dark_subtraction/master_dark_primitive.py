@@ -76,7 +76,8 @@ class MakeMasterDarkPrimitive(BasePrimitive):
                 primitive=self
             )
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _detect_hot_pixels(output_dark.rate, output_dark.dq, self.hot_pixel_threshold)
 
         mask = output_dark.dq == 0

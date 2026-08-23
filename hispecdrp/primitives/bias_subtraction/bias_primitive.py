@@ -84,10 +84,11 @@ class BiasSubtractionPrimitive(BasePrimitive):
             result.data = result.data.astype(np.float32)
 
         # Perform bias subtraction
+        max_cores = self.max_cores or 1
         _bias_subtraction(
             result.data, result.dq,
             bias_model.bias, bias_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

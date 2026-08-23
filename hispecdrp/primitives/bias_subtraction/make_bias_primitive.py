@@ -67,12 +67,18 @@ class MakeBiasPrimitive(BasePrimitive):
             bias_arr.append(_input.data[0,:,:])
         bias_arr = np.array(bias_arr)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             output_bias.bias = median_axis0_3d(bias_arr)
-            output_bias.ktc = std_axis0_3d_sigclip(bias_arr,nsig=5,min_keep=10)
+            output_bias.ktc = std_axis0_3d_sigclip(bias_arr, nsig=5, min_keep=10)
             output_bias.dq = copy(input_models[0].dq)
-            _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
-                                    self.kTC_threshold, self.bias_threshold)
+            _find_bad_pixels_bias(
+                output_bias.bias,
+                output_bias.ktc,
+                output_bias.dq,
+                self.kTC_threshold,
+                self.bias_threshold
+            )
 
         median_bias_level = np.nanmedian(output_bias.bias)
         output_bias.meta.median_bias_level = median_bias_level

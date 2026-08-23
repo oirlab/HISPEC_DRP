@@ -23,7 +23,7 @@ class ProcessingComponent(_BasePrimitive):
         'output_file' : None,
         'output_dir': None,
         'suffix': None,
-        'max_cores' : 1,
+        'max_cores' : None,
         'save_preview' : False,
         'show_preview' : False,
     }
