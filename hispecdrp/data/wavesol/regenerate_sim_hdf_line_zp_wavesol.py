@@ -253,7 +253,7 @@ def _ccf_refine(
         w = np.asarray(getattr(wavesol, f"wave_fib{fiber}"), dtype=np.float64)
         setattr(mm, f"wave_fib{fiber}", w)
         mm.save(str(dest))
-        prim_args = {
+        primitives = {
             "blaze_corr": {"run": False},
             "barycorr": {"run": False},
             "stellar_rv": {
@@ -278,7 +278,7 @@ def _ccf_refine(
         e2e_support.run_stage2_simulation(
             datamodels.open(str(dest)),
             fiberflat_model=datamodels.open(str(unity)),
-            prim_args=prim_args,
+            primitives=primitives,
             stellar_rv_mask_path=str(mask_path),
             stellar_rv_ccf_input_velocity_m_s=float(known_rv_m_s),
             output_dir=str(output_dir),

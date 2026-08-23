@@ -118,24 +118,24 @@ def reextract_blaze_with_wavesol(
             cals[key] = bundle[key]
 
     do_fibers = [str(f) for f in fibs]
-    l0 = Stage0Pipeline(output_dir=str(out)).apply(ramp)
-    stage1_args = {
+    l0 = Stage0Pipeline.call(ramp, output_dir=str(out))
+    stage1_primitives = {
         "spec_extract": {"do_fibers": do_fibers},
         "set_wavesol": {"wavesol": wavesol},
     }
     if "trace_pos" in cals:
-        stage1_args["spec_extract"]["tracepos"] = cals["trace_pos"]
+        stage1_primitives["spec_extract"]["tracepos"] = cals["trace_pos"]
     if "trace_prof" in cals:
-        stage1_args["spec_extract"]["traceprof"] = cals["trace_prof"]
-    l1 = Stage1Pipeline(output_dir=str(out), prim_args=stage1_args).apply(l0)
-    stage2_args = {
+        stage1_primitives["spec_extract"]["traceprof"] = cals["trace_prof"]
+    l1 = Stage1Pipeline.call(l0, output_dir=str(out), primitives=stage1_primitives)
+    stage2_primitives = {
         "blaze_corr": {"do_fibers": do_fibers},
         "barycorr": {"run": False},
         "stellar_rv": {"run": False},
     }
     if "fiberflat" in cals:
-        stage2_args["blaze_corr"]["fiberflat"] = cals["fiberflat"]
-    Stage2Pipeline(output_dir=str(out), prim_args=stage2_args).apply(l1)
+        stage2_primitives["blaze_corr"]["fiberflat"] = cals["fiberflat"]
+    Stage2Pipeline.call(l1, output_dir=str(out), primitives=stage2_primitives)
 
     blaze = _blaze_spectrum_path(out)
     ref = out / "reference_spec-blaze_correct.fits"
@@ -216,25 +216,25 @@ def ensure_fiber_pipeline_products(
             reuse_stage1_sims=True,
         )
     do_fibers = [str(f) for f in fibs]
-    l0 = Stage0Pipeline(output_dir=str(out)).apply(ramp)
-    stage1_args = {"spec_extract": {"do_fibers": do_fibers}}
+    l0 = Stage0Pipeline.call(ramp, output_dir=str(out))
+    stage1_primitives = {"spec_extract": {"do_fibers": do_fibers}}
     # Prefer in-memory sim cals when present (avoids KOA geometric WAVE for bake).
     if "trace_pos" in cals:
-        stage1_args["spec_extract"]["tracepos"] = cals["trace_pos"]
+        stage1_primitives["spec_extract"]["tracepos"] = cals["trace_pos"]
     if "trace_prof" in cals:
-        stage1_args["spec_extract"]["traceprof"] = cals["trace_prof"]
+        stage1_primitives["spec_extract"]["traceprof"] = cals["trace_prof"]
     if "wavesol" in cals:
-        stage1_args["set_wavesol"] = {"wavesol": cals["wavesol"]}
-    l1 = Stage1Pipeline(output_dir=str(out), prim_args=stage1_args).apply(l0)
+        stage1_primitives["set_wavesol"] = {"wavesol": cals["wavesol"]}
+    l1 = Stage1Pipeline.call(l0, output_dir=str(out), primitives=stage1_primitives)
     # Only blaze is required for WAVE bake; skip stellar_rv (and its preview imports).
-    stage2_args = {
+    stage2_primitives = {
         "blaze_corr": {"do_fibers": do_fibers},
         "barycorr": {"run": False},
         "stellar_rv": {"run": False},
     }
     if "fiberflat" in cals:
-        stage2_args["blaze_corr"]["fiberflat"] = cals["fiberflat"]
-    l2 = Stage2Pipeline(output_dir=str(out), prim_args=stage2_args).apply(l1)
+        stage2_primitives["blaze_corr"]["fiberflat"] = cals["fiberflat"]
+    l2 = Stage2Pipeline.call(l1, output_dir=str(out), primitives=stage2_primitives)
 
     rate = out / "rate_map.fits"
     if not rate.is_file():

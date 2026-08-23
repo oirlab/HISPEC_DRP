@@ -89,22 +89,24 @@ Same pipeline classes as real data. Stage-2 stellar RV uses line-by-line
        packaged_default_line_mask_path,
    )
 
-   l0 = Stage0Pipeline(output_dir=OUT).apply(ramp)
+   l0 = Stage0Pipeline.call(ramp, output_dir=OUT)
 
    do_fibers = [str(f) for f in FIBERS]
-   l1 = Stage1Pipeline(
+   l1 = Stage1Pipeline.call(
+       l0,
        output_dir=OUT,
-       prim_args={
+       primitives={
            "spec_extract": {"do_fibers": do_fibers},
            "set_wavesol": {"wavesol": cals["wavesol"]},
        },
-   ).apply(l0)
+   )
 
    injected_m_s = float(INJECTED_RV) * 1000.0
    kw = CCFOPT_SINGLE_LINE_STELLAR_RV_KW
-   l2 = Stage2Pipeline(
+   l2 = Stage2Pipeline.call(
+       l1,
        output_dir=OUT,
-       prim_args={
+       primitives={
            "blaze_corr": {"do_fibers": do_fibers},
            # No sky fiber in this single-science-fiber sim; skip sky subtraction.
            "sky_sub": {"run": False},
@@ -126,7 +128,7 @@ Same pipeline classes as real data. Stage-2 stellar RV uses line-by-line
                "preview_write_png": False,
            },
        },
-   ).apply(l1)
+   )
 
    print(f"L2: {l2.meta.model_type}  {l2.meta.filename}")
    for fib in FIBERS:

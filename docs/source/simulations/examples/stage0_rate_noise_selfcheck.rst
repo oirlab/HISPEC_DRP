@@ -93,8 +93,8 @@ Imports and output directory
 3. Stage 0
 ----------
 
-Same path as basic usage: ``Stage0Pipeline(output_dir=OUT).apply(ramp)`` with
-pipeline defaults (no custom ``prim_args``). Products land under ``OUT``.
+Same path as basic usage: ``Stage0Pipeline.call(ramp, output_dir=OUT)`` with
+pipeline defaults (no custom ``primitives``). Products land under ``OUT``.
 ``create_ramp_from_spectrum`` defaults to identity forward nonlin and registers
 the matching Stage-0 nonlin cal automatically.
 
@@ -103,7 +103,7 @@ the matching Stage-0 nonlin cal automatically.
    from hispecdrp.pipelines import Stage0Pipeline
 
    l0s = {
-       label: Stage0Pipeline(output_dir=OUT).apply(ramp)
+       label: Stage0Pipeline.call(ramp, output_dir=OUT)
        for label, ramp in ramps.items()
    }
 

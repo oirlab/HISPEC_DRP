@@ -2280,7 +2280,6 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
     )
 
 
-@pytest.mark.slow
 def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
     tmp_path, lte049_btsettl_session_cache
 ):
@@ -2636,7 +2635,6 @@ def _save_line_window_injected_rv_scan_plot(
     plt.close(fig)
 
 
-@pytest.mark.slow
 def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv_scan(
     tmp_path, lte049_btsettl_session_cache,
 ):
@@ -2982,7 +2980,6 @@ def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
     assert mad_resid_m_s < 30.0, f"MAD(rec − inj − β₀): {mad_resid_m_s:g} m/s"
 
 
-@pytest.mark.slow
 def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
     tmp_path, lte049_btsettl_session_cache
 ):

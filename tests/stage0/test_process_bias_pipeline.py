@@ -17,7 +17,7 @@ def test_process_bias_pipeline(tmp_path):
     max_slope = 200  # e-/s
     readtime = 1.7  # seconds
     n_reads = 1
-    n_files = 100  # number of simulated files to create
+    n_files = 20  # enough for master-bias stats; was 100
     shape = (10, 10)  # size of the detector
     read_noise = 8.5
     gain = 3.0

@@ -10,6 +10,8 @@ import astropy.time
 import numpy as np
 import os
 
+from tests.utils import SAFE_TEST_MJD
+
 # Fixed epoch for cal-db ordering tests: spread over ~4 years without entering
 # ERFA "dubious year" territory (IERS leap-second tables are unreliable past ~2028).
 _CALDB_TEST_BASE_MJD = 60200.0  # 2023-10-27 UTC
@@ -131,7 +133,7 @@ def test_calibration_versioning_with_datamodels(tmp_path):
     os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # Create N dark models
-    mjd = astropy.time.Time.now().mjd
+    mjd = SAFE_TEST_MJD
     for i in range(N):
         dark_model = datamodels.DarkModel(
             meta={

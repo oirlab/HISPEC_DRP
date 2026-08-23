@@ -35,7 +35,7 @@ from .simulate_up_the_ramp import (
     create_dummy_fiberflat_rate_files,
     create_ramp_and_calibrations,
     create_wavelength_solution_model_from_sim,
-    get_default_stage0_prim_args,
+    get_default_stage0_primitives,
     run_fiberflat_pipeline,
     run_stage0_simulation,
 )
@@ -100,10 +100,10 @@ class E2EConfig:
     template_mag_from_2mass: bool = True
     template_filename: str | None = None
     stellar_rv_mask_path: str | None = None
-    # Optional Stage-2 primitive overrides merged on top of defaults (e.g. stellar_rv
+    # Optional Stage-2 ``primitives`` overrides merged on top of defaults (e.g. stellar_rv
     # ``v_step_coarse``, ``ccf_zb_from_barycorr``). Nested dicts are shallow-merged per
     # primitive name.
-    stage2_prim_args: dict[str, Any] | None = None
+    stage2_primitives: dict[str, Any] | None = None
     overwrite_ramp: bool = True
     make_preview_html: bool = True
     # Dummy fiberflat simulation (ProcessFiberflatsPipeline input)
@@ -231,7 +231,7 @@ def _fiberflat_rate_paths_for_stage1(
     cal_bundle: e2e_calibrations.E2ECalibrationBundle,
     calibration_models: dict,
     out_dir_abs: str,
-    stage0_prim_args: dict,
+    stage0_primitives: dict,
     ff_list: list[int],
     *,
     record_sources: bool,
@@ -258,7 +258,7 @@ def _fiberflat_rate_paths_for_stage1(
         readtime=config.readtime,
         n_reads=config.n_reads,
         max_cores=config.max_cores,
-        stage0_prim_args=stage0_prim_args,
+        stage0_primitives=stage0_primitives,
         flat_scale=config.flat_scale,
         flat_temperature_k=config.flat_temperature_k,
         fiberflat_coadd_exposures=config.fiberflat_coadd_exposures,
@@ -287,7 +287,7 @@ def _simulate_fiberflats_and_run_pipeline(
     calibration_models: dict,
     out_dir_abs: str,
     cal_dir: str,
-    stage0_prim_args: dict,
+    stage0_primitives: dict,
     ff_list: list[int],
     *,
     record_sources: bool,
@@ -312,7 +312,7 @@ def _simulate_fiberflats_and_run_pipeline(
         cal_bundle,
         calibration_models,
         out_dir_abs,
-        stage0_prim_args,
+        stage0_primitives,
         ff_list,
         record_sources=record_sources,
     )
@@ -372,14 +372,14 @@ def materialize_stage1_calibrations(
         if not ff_list:
             logger.warning("E2E: no fiberflat_fibers configured; skipping Stage 1 trace materialization.")
         else:
-            stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
+            stage0_primitives = get_default_stage0_primitives(max_cores=config.max_cores)
             if stage1_uses_sim_hdf_trace(config):
 
                 extraction_aperture = 10.0
                 if config.infinite_snr_rv_validation:
 
                     extraction_aperture = float(
-                        merge_infinite_snr_stage1_prim_args({})
+                        merge_infinite_snr_stage1_primitives({})
                         .get("spec_extract", {})
                         .get("extraction_aperture", extraction_aperture)
                     )
@@ -393,7 +393,7 @@ def materialize_stage1_calibrations(
                     cal_bundle,
                     calibration_models,
                     out_dir_abs,
-                    stage0_prim_args,
+                    stage0_primitives,
                     ff_list,
                     record_sources=True,
                 )
@@ -435,7 +435,7 @@ def materialize_stage1_calibrations(
                     calibration_models,
                     out_dir_abs,
                     cal_dir,
-                    stage0_prim_args,
+                    stage0_primitives,
                     ff_list,
                     record_sources=True,
                 )
@@ -451,7 +451,7 @@ def materialize_stage1_calibrations(
                     calibration_models,
                     out_dir_abs,
                     cal_dir,
-                    stage0_prim_args,
+                    stage0_primitives,
                     ff_list,
                     record_sources=True,
                 )
@@ -464,7 +464,7 @@ def materialize_stage1_calibrations(
         ff_list = config.fiberflat_fibers if config.fiberflat_fibers is not None else [1, 2, 3]
         ff_list = [f for f in ff_list if f in (1, 2, 3)]
         if extra_specs and ff_list:
-            stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
+            stage0_primitives = get_default_stage0_primitives(max_cores=config.max_cores)
             for spec in extra_specs:
                 logger.info(
                     "E2E: simulating fiber flats + fiber flat pipeline for additional "
@@ -478,7 +478,7 @@ def materialize_stage1_calibrations(
                     calibration_models,
                     out_dir_abs,
                     cal_dir,
-                    stage0_prim_args,
+                    stage0_primitives,
                     ff_list,
                     record_sources=False,
                 )
@@ -732,32 +732,32 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     for k in calibration_models:
         cal_bundle.sources.setdefault(k, "simulated")
 
-    stage0_prim_args = get_default_stage0_prim_args(max_cores=config.max_cores)
-    stage1_prim_args = None
-    stage2_prim_args = None
+    stage0_primitives = get_default_stage0_primitives(max_cores=config.max_cores)
+    stage1_primitives = None
+    stage2_primitives = None
     if config.infinite_snr_rv_validation:
 
-        stage1_prim_args = merge_infinite_snr_stage1_prim_args(None)
-        stage2_prim_args = merge_infinite_snr_stage2_prim_args(None)
-    elif config.stage2_prim_args:
+        stage1_primitives = merge_infinite_snr_stage1_primitives(None)
+        stage2_primitives = merge_infinite_snr_stage2_primitives(None)
+    elif config.stage2_primitives:
         import copy
 
         # Merge overrides onto Stage-2 defaults so blaze/barycorr still run.
-        stage2_prim_args = e2e_support.get_default_stage2_prim_args(
+        stage2_primitives = e2e_support.get_default_stage2_primitives(
             max_cores=config.max_cores
         )
-        for prim_name, overrides in config.stage2_prim_args.items():
-            stage2_prim_args.setdefault(prim_name, {})
+        for prim_name, overrides in config.stage2_primitives.items():
+            stage2_primitives.setdefault(prim_name, {})
             if isinstance(overrides, dict):
-                stage2_prim_args[prim_name].update(copy.deepcopy(overrides))
+                stage2_primitives[prim_name].update(copy.deepcopy(overrides))
             else:
-                stage2_prim_args[prim_name] = overrides
+                stage2_primitives[prim_name] = overrides
     logger.info("E2E: Stage 0 (ramp → rate/slope).")
     stage0_model = run_stage0_simulation(
         ramp_model,
         calibration_models,
         output_dir=out_dir_abs,
-        prim_args=stage0_prim_args,
+        primitives=stage0_primitives,
         max_cores=config.max_cores,
     )
 
@@ -789,7 +789,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
                     stage0_model,
                     ff_bundle["trace_pos"],
                     ff_bundle["trace_prof"],
-                    prim_args=stage1_prim_args,
+                    primitives=stage1_primitives,
                     wavesol_model=wavesol_model,
                     output_dir=out_dir_abs,
                     max_cores=config.max_cores,
@@ -810,7 +810,7 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
         stage2_model = e2e_support.run_stage2_simulation(
             stage1_model,
             fiberflat_model=ff_bundle["fiberflat"],
-            prim_args=stage2_prim_args,
+            primitives=stage2_primitives,
             output_dir=out_dir_abs,
             max_cores=config.max_cores,
             stellar_rv_mask_path=config.stellar_rv_mask_path,
@@ -929,7 +929,7 @@ def run_pipeline_example(
         run_stage2=True,
         make_preview_html=True,
         overwrite_ramp=True,
-        stage2_prim_args={
+        stage2_primitives={
             "stellar_rv": {
                 "do_fibers": list(fibs),
                 "ccf_input_velocity": 0.0,
@@ -1005,7 +1005,7 @@ def prepare_pipeline_example_stage1(
         }
 
     calibration_models = create_simulated_calibration_models(rate.shape)
-    stage0_prim_args = get_default_stage0_prim_args(max_cores=1)
+    stage0_primitives = get_default_stage0_primitives(max_cores=1)
     # Use native PRF (same as science paint). pyechelle + continuous R~3e5
     # continuum can hang for tens of minutes with no FITS progress.
     ff_paths = create_dummy_fiberflat_rate_files(
@@ -1016,7 +1016,7 @@ def prepare_pipeline_example_stage1(
         readtime=1.7,
         n_reads=10,
         max_cores=1,
-        stage0_prim_args=stage0_prim_args,
+        stage0_primitives=stage0_primitives,
         reuse_existing=bool(reuse_existing),
         rate_map_method="native",
     )
@@ -1279,16 +1279,14 @@ def create_tracepos_model_from_fiberflat_rates(
         models_by_fiber[fib] = model
     if not models_by_fiber:
         raise ValueError("No fiberflat rate paths with inferable fiber labels.")
-    prim = TracePositionPrimitive()
-    prim.init_args(
+    trace_pos: TracePosModel = TracePositionPrimitive.call(
+        models_by_fiber,
         deg_pos=4,
         deg_width=2,
         disp_range=_DEFAULT_FIBERFLAT_DISP_RANGE.get(spectrograph, (500, 4000)),
         xdisp_range=_DEFAULT_FIBERFLAT_XDISP_RANGE.get(spectrograph, (100, 4050)),
         prominence_factor=prominence_factor,
-        output_model=TracePosModel,
     )
-    trace_pos: TracePosModel = prim.apply(models_by_fiber)
     model_meta = {"spectrograph": spectrograph}
     if meta:
         model_meta.update(meta)
@@ -3993,27 +3991,31 @@ def apply_infinite_snr_rv_e2e_config(config: E2EConfig) -> E2EConfig:
     )
 
 
-def merge_infinite_snr_stage1_prim_args(
-    prim_args: dict | None,
+def merge_infinite_snr_stage1_primitives(
+    primitives: dict | None,
     *,
     extraction_aperture: int = 10,
 ) -> dict:
     import copy
 
-    out = copy.deepcopy(prim_args or {})
+    out = copy.deepcopy(primitives or {})
     out.setdefault("spec_extract", {})
     out["spec_extract"]["method"] = "box"
     out["spec_extract"]["extraction_aperture"] = int(extraction_aperture)
     return out
 
 
-def merge_infinite_snr_stage2_prim_args(prim_args: dict | None) -> dict:
+def merge_infinite_snr_stage2_primitives(primitives: dict | None) -> dict:
     import copy
 
-    out = copy.deepcopy(prim_args or {})
+    out = copy.deepcopy(primitives or {})
     out.setdefault("stellar_rv", {})
     out["stellar_rv"].update(HIGH_PRECISION_STELLAR_RV_ARGS)
     return out
+
+
+merge_infinite_snr_stage1_prim_args = merge_infinite_snr_stage1_primitives
+merge_infinite_snr_stage2_prim_args = merge_infinite_snr_stage2_primitives
 
 
 def evaluate_infinite_snr_rv_recovery(

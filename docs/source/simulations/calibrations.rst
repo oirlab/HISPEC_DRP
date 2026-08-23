@@ -134,7 +134,7 @@ Wavelength solution
 Default E2E uses :func:`~hispecdrp.simulations.simulate_up_the_ramp.create_wavelength_solution_model_from_sim`,
 which copies the HDF trace solution into an in-memory
 :class:`~hispecdrp.datamodels.lfcwavesol.LFCWavesolModel`. Stage 1 ``set_wavesol`` is
-configured with ``run=False``; wavelengths are attached via ``prim_args`` instead of a
+configured with ``run=False``; wavelengths are attached via ``primitives`` instead of a
 separate FITS product.
 
 If ``wavesol`` is resolved from KOA or YAML, that model is used instead.

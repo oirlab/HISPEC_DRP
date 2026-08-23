@@ -13,6 +13,7 @@ from hispecdrp.simulations.simulate_up_the_ramp import (
     create_wavelength_solution_model_from_sim,
     register_sim_lfc_wavesol,
 )
+from tests.utils import SAFE_TEST_MJD, repo_root
 
 
 @pytest.fixture
@@ -23,18 +24,29 @@ def caldb_cache(tmp_path, monkeypatch):
     return cache
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def bspec_geometric_wavesol():
-    """Build geometric BSPEC wavesol once per module (HDF load is expensive)."""
-    return create_wavelength_solution_model_from_sim(
-        "BSPEC", meta={"spectrograph": "BSPEC", "instrument_era": "0.0.1"}
+    """Geometric BSPEC wavesol; session-cached under ``test_data/`` (HDF load is expensive)."""
+    cache_path = repo_root() / "test_data" / "caldb_wavesol_cache" / "bspec_geometric_lfc_wavesol.fits"
+    if cache_path.is_file():
+        return datamodels.open(str(cache_path))
+    model = create_wavelength_solution_model_from_sim(
+        "BSPEC",
+        meta={
+            "spectrograph": "BSPEC",
+            "instrument_era": "0.0.1",
+            "mjd_start": SAFE_TEST_MJD,
+        },
     )
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(cache_path))
+    return model
 
 
 def test_register_calibration_stores_non_null_filename(caldb_cache):
     """DB row must record the saved FITS basename (koa_middleware used to store None)."""
     dark = datamodels.DarkModel(
-        meta={"mjd_start": astropy.time.Time.now().mjd, "master_cal": True}
+        meta={"mjd_start": SAFE_TEST_MJD, "master_cal": True}
     )
     with HISPECCalibrationStore(connect_remote=False, sync_on_init=False) as store:
         path, rec = store.register_calibration(dark, origin="LOCAL", new_version=True)
@@ -62,7 +74,7 @@ def test_register_sim_lfc_wavesol_usable_by_select_and_get(caldb_cache):
     meta = {
         "spectrograph": "BSPEC",
         "instrument_era": "0.0.1",
-        "mjd_start": 61210.0,
+        "mjd_start": SAFE_TEST_MJD,
     }
     path, rec = register_sim_lfc_wavesol("BSPEC", meta=meta, origin="LOCAL", new_version=True)
 
@@ -88,7 +100,7 @@ def test_register_sim_lfc_wavesol_idempotent_version_family(caldb_cache):
     meta = {
         "spectrograph": "BSPEC",
         "instrument_era": "0.0.1",
-        "mjd_start": 61210.0,
+        "mjd_start": SAFE_TEST_MJD,
     }
     path1, rec1 = register_sim_lfc_wavesol(
         "BSPEC", meta=meta, origin="LOCAL", new_version=True
@@ -141,8 +153,8 @@ def test_packaged_line_zp_preferred_over_geometric_lfc_wavesol(
     meta = {
         "spectrograph": "BSPEC",
         "instrument_era": "0.0.1",
-        "mjd_start": 60577.0,
-        "datetime_obs": astropy.time.Time(60577.0, format="mjd", scale="utc").isot,
+        "mjd_start": SAFE_TEST_MJD,
+        "datetime_obs": astropy.time.Time(SAFE_TEST_MJD, format="mjd", scale="utc").isot,
     }
     # Geometric competitor registered first (same night / version family).
     geometric = bspec_geometric_wavesol.copy()

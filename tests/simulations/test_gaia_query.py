@@ -251,3 +251,33 @@ def test_importing_hispecdrp_does_not_import_astroquery_vizier():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert out.stdout.strip().endswith("False")
+
+def test_linear_pm_epoch_shift_offline():
+    """First-order PM shift is pure arithmetic (no network / ERFA)."""
+    import math
+
+    ra0, dec0 = 10.0, 20.0
+    pmra, pmdec = 1000.0, -500.0  # mas/yr
+    dt = 2.0  # yr
+    ra1, dec1 = gaia_query._linear_pm_epoch_shift(ra0, dec0, pmra, pmdec, dt)
+    expected_dra = (1000.0 * 2.0 / (3600.0 * 1000.0)) / math.cos(math.radians(dec0))
+    expected_ddec = -500.0 * 2.0 / (3600.0 * 1000.0)
+    assert ra1 == pytest.approx(ra0 + expected_dra)
+    assert dec1 == pytest.approx(dec0 + expected_ddec)
+
+
+def test_convert_epoch_gaia_linear_fallback_without_parallax():
+    """px<=0 uses the linear PM path (avoids ERFA pmsafe without distance)."""
+    ra, dec = gaia_query._convert_epoch_gaia(
+        180.0,
+        0.0,
+        epoch=2000.0,
+        pmra=10.0,
+        pmdec=0.0,
+        px=0.0,
+        to_gaia=True,
+        release="DR3",
+    )
+    # DR3 epoch 2016 → dt=16 yr; 10 mas/yr → 0.16" at dec=0.
+    assert ra == pytest.approx(180.0 + 16.0 * 10.0 / (3600.0 * 1000.0))
+    assert dec == pytest.approx(0.0)

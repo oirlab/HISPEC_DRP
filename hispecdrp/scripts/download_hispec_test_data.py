@@ -30,7 +30,7 @@ except ImportError:
     logger.error("This script requires gdown. Install with: pip install gdown")
     sys.exit(1)
 
-from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
+from hispecdrp.driver.logging import LogConfig, ROOT_LOGGER
 
 
 def _load_gdrive_files(project_root: str) -> dict[str, str]:

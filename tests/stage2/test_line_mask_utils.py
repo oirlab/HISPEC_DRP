@@ -268,7 +268,10 @@ def test_build_line_mask_from_template_two_columns(tmp_path, template_basename):
     if not os.path.isfile(tpl):
         pytest.skip(f"missing template: {tpl}")
     out = tmp_path / "out.mas"
-    build_line_mask_from_template(tpl, output_path=str(out))
+    # Narrow band keeps the full mask-build path but cuts wall time ~5-10x.
+    build_line_mask_from_template(
+        tpl, output_path=str(out), wl_min_um=1.45, wl_max_um=1.55
+    )
     text = out.read_text(encoding="utf-8")
     assert "wavelength_vac_nm" in text
     meta = read_mask_generation_meta(str(out))
@@ -295,7 +298,11 @@ def test_build_line_mask_from_template_default_output_includes_mask_style(
     if not os.path.isfile(tpl):
         pytest.skip(f"missing template: {tpl}")
     path_written, _entries = build_line_mask_from_template(
-        tpl, masks_directory=str(tmp_path), output_path=None
+        tpl,
+        masks_directory=str(tmp_path),
+        output_path=None,
+        wl_min_um=1.45,
+        wl_max_um=1.55,
     )
     expect = tmp_path / f"{Path(tpl).stem}.{MASK_STYLE_DELTA}.mas"
     assert Path(path_written) == expect.resolve()

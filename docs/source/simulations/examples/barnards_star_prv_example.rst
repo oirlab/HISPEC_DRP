@@ -185,21 +185,22 @@ Reduce the simulated ramp with the same pipeline classes used on real data.
 
    from hispecdrp.pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline
 
-   l0 = Stage0Pipeline(output_dir=OUT).apply(ramp)
+   l0 = Stage0Pipeline.call(ramp, output_dir=OUT)
 
    do_fibers = [str(f) for f in FIBERS]
    # Fixed packaged line-ZP WAVE from create_ramp_from_spectrum
    # (unscaled for spectrum paint)
-   stage1_args = {
+   stage1_primitives = {
        "spec_extract": {"do_fibers": do_fibers},
        "set_wavesol": {"wavesol": cals["wavesol"]},
    }
-   l1 = Stage1Pipeline(output_dir=OUT, prim_args=stage1_args).apply(l0)
+   l1 = Stage1Pipeline.call(l0, output_dir=OUT, primitives=stage1_primitives)
 
    injected_m_s = float(STELLAR_RV) * 1000.0
-   l2 = Stage2Pipeline(
+   l2 = Stage2Pipeline.call(
+       l1,
        output_dir=OUT,
-       prim_args={
+       primitives={
            "blaze_corr": {"do_fibers": do_fibers},
            "sky_sub": {"run": True},
            "stellar_rv": {
@@ -209,7 +210,7 @@ Reduce the simulated ramp with the same pipeline classes used on real data.
                "preview_write_png": False,
            },
        },
-   ).apply(l1)
+   )
 
    print(f"L0 type: {l0.meta.model_type}")
    print(f"L0 filename: {l0.meta.filename}")
@@ -324,26 +325,28 @@ product.
        )
 
        do_fibers = [str(f) for f in FIBERS]
-       l0 = Stage0Pipeline(output_dir=run_dir, save_result=False).apply(ramp)
+       l0 = Stage0Pipeline.call(ramp, output_dir=run_dir, save_result=False)
 
        del ramp
        del rate_map
 
-       l1 = Stage1Pipeline(
+       l1 = Stage1Pipeline.call(
+           l0,
            output_dir=run_dir,
            save_result=False,
-           prim_args={
+           primitives={
                "spec_extract": {"do_fibers": do_fibers},
                "set_wavesol": {"wavesol": cals["wavesol"]},
            },
-       ).apply(l0)
+       )
 
        del l0
 
-       l2 = Stage2Pipeline(
+       l2 = Stage2Pipeline.call(
+           l1,
            output_dir=run_dir,
            save_result=True,
-           prim_args={
+           primitives={
                "blaze_corr": {"do_fibers": do_fibers},
                # Multi-exposure loop reuses a shared cal set; skip sky_sub here.
                "sky_sub": {"run": False},
@@ -354,7 +357,7 @@ product.
                    "preview_write_png": False,
                },
            },
-       ).apply(l1)
+       )
 
        del l1
        gc.collect()
