@@ -36,6 +36,7 @@ E2E_STAGE2_PRIMITIVES: dict[str, type] = dict(_stage2_pipeline.Stage2Pipeline.PR
 
 # Keys copied from class PARAMETERS into default ``primitives`` dicts for E2E.
 _E2E_PARAM_SKIP = frozenset({"output_dir", "output_file", "output_path", "suffix"})
+_STELLAR_RV_E2E_PARAM_SKIP = frozenset({"ccf_zb"})
 
 
 def repository_root() -> Path:
@@ -324,7 +325,10 @@ def get_default_stage2_primitives(*, max_cores: int | None = None) -> dict:
     """
     out: dict[str, dict] = {}
     for name, cls in _stage2_pipeline.Stage2Pipeline.PRIMITIVES.items():
-        args = {k: v for k, v in cls.PARAMETERS.items() if k not in _E2E_PARAM_SKIP}
+        skip = _E2E_PARAM_SKIP
+        if name == "stellar_rv":
+            skip = _E2E_PARAM_SKIP | _STELLAR_RV_E2E_PARAM_SKIP
+        args = {k: v for k, v in cls.PARAMETERS.items() if k not in skip}
         if max_cores is not None and "max_cores" in args:
             args["max_cores"] = max_cores
         out[name] = args

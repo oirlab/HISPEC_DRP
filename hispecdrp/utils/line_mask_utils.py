@@ -39,11 +39,15 @@ __all__ = [
     "RELAXED_TEMPLATE_MASK_BUILD_KW",
     "CCFOPT_MASK_BUILD_KW",
     "CCFOPT_SINGLE_LINE_STELLAR_RV_KW",
+    "IDEAL_SPECTRUM_STELLAR_RV_KW",
+    "STELLAR_RV_WIDE_WINDOW_UM",
+    "apply_ccfopt_defaults_for_line_by_line",
     "E2ERV_MASK_BUILD_KW",
     "LineMaskEntry",
     "build_line_mask_from_template",
     "build_ccfopt_line_mask_from_template_and_seed",
     "build_ccfopt_line_mask_from_rvccf_table",
+    "build_ccfopt_line_mask_from_l2_line_by_line_rv",
     "build_ccfopt_line_mask_from_l2_single_line_ccf",
     "build_e2erv_line_mask_from_template",
     "compare_line_center_lists_um",
@@ -139,17 +143,23 @@ CCFOPT_MASK_BUILD_KW: dict[str, Any] = {
 # Line-by-line CCF (not order-window ensembles): each mask line is a rest-frame
 # λ calibrated once at injected RV=0 so that line's CCF → 0. The packaged
 # ``*.ccfopt.delta.mas`` is then static across bulk RV; only ``ccf_input_velocity``
-# moves at runtime.
+# moves at runtime. Velocity grid (``v_half_window_m_s``, ``v_step_m_s``) is shared
+# with the ideal-spectrum RV recovery and build-ccfopt-mask simulation examples.
+CCFOPT_MAX_ABS_RV_M_S = 500.0
+
+# Wide wavelength-chunk default on :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`
+# (``window_line_by_line=False``).  Line-by-line ccfopt uses :data:`CCFOPT_SINGLE_LINE_STELLAR_RV_KW`.
+STELLAR_RV_WIDE_WINDOW_UM = 0.25
+
 CCFOPT_SINGLE_LINE_STELLAR_RV_KW: dict[str, Any] = {
     "window_size_um": 5.65e-5,
     "window_line_by_line": True,
-    "v_half_window_m_s": 15000.0,
-    "v_step_m_s": 25.0,
+    "v_half_window_m_s": 20_000.0,
+    "v_step_m_s": 10.0,
     "ccf_input_velocity_m_s": 0.0,
-    "mask_auto_center_scout": False,
     "mask_ccf_pixel_interp_order": 3,
     "ccf_min_good_pixels": 9,
-    "max_abs_rv_m_s": 5000.0,
+    "max_abs_rv_m_s": CCFOPT_MAX_ABS_RV_M_S,
     "min_contrast": 0.0,
     # After λ' shift, re-run single-line CCF and drop lines with |RV − center|
     # at or above this (m/s). Default 0.001 m/s = 0.1 cm/s.
@@ -158,6 +168,33 @@ CCFOPT_SINGLE_LINE_STELLAR_RV_KW: dict[str, Any] = {
     # Removes aliases / shallow lines with tens-of-m/s (or worse) error bars.
     "max_rv_err_m_s": 10.0,
 }
+
+
+def apply_ccfopt_defaults_for_line_by_line(
+    *,
+    window_size_um: float,
+    v_half_window: float,
+    v_step_coarse: float,
+) -> tuple[float, float, float]:
+    """
+    Replace wide ``StellarRVPrimitive`` defaults with ccfopt mask-build settings.
+
+    When ``window_line_by_line=True``, line-mask CCF should use the same narrow
+    ``window_size_um`` and velocity grid as :data:`CCFOPT_SINGLE_LINE_STELLAR_RV_KW`
+    unless the caller explicitly set non-default values.
+    """
+    kw = CCFOPT_SINGLE_LINE_STELLAR_RV_KW
+    if float(window_size_um) == float(STELLAR_RV_WIDE_WINDOW_UM):
+        window_size_um = float(kw["window_size_um"])
+    if float(v_step_coarse) == 25.0:
+        v_step_coarse = float(kw["v_step_m_s"])
+    if float(v_half_window) == 15000.0:
+        v_half_window = float(kw["v_half_window_m_s"])
+    return float(window_size_um), float(v_half_window), float(v_step_coarse)
+
+
+#: Defaults for ideal-spectrum paint + line-mask RV (alias for notebooks/tests).
+IDEAL_SPECTRUM_STELLAR_RV_KW = CCFOPT_SINGLE_LINE_STELLAR_RV_KW
 
 #: Defaults for :func:`build_e2erv_line_mask_from_template` (RV-aligned e2e mask).
 E2ERV_MASK_BUILD_KW: dict[str, Any] = {
@@ -1979,14 +2016,17 @@ def build_ccfopt_line_mask_from_rvccf_table(
     output_path: str | None = None,
     masks_directory: str | None = None,
     match_half_m_s: float = 5000.0,
-    max_abs_rv_m_s: float = 5000.0,
+    max_abs_rv_m_s: float = CCFOPT_MAX_ABS_RV_M_S,
     min_contrast: float = 0.0,
 ) -> tuple[str, list[LineMaskEntry]]:
     """
     Build a CCF-opt delta mask from a line-by-line stellar-RV ``RVCCF`` table.
 
-    For each seed line, find the nearest finite ``RVCCF`` chunk (by wavelength),
-    shift the mask center so that chunk's measured RV becomes 0:
+    For each seed line, gather all ``RVCCF`` rows within ``match_half_m_s`` (any
+    echelle order). Drop the seed when **any** matching row has
+    ``|RV| > max_abs_rv_m_s`` (failed / aliased calibration in at least one order).
+    Otherwise pick the nearest unused matching row, shift the mask center so that
+    chunk's measured RV becomes 0:
 
     ``λ' = λ_seed × (1 + RV / c)``,
 
@@ -2008,7 +2048,8 @@ def build_ccfopt_line_mask_from_rvccf_table(
     match_half_m_s
         Maximum ``|Δv|`` between seed λ and chunk ``WAVELENGTH`` for a match.
     max_abs_rv_m_s
-        Drop chunks with ``|RV|`` above this gate (failed / aliased fits).
+        Drop a seed line when any matching ``RVCCF`` row (across orders) has
+        ``|RV|`` above this gate (failed / aliased per-line calibration).
     min_contrast
         Drop lines whose absolute Gaussian contrast is at or below this floor.
     """
@@ -2042,7 +2083,7 @@ def build_ccfopt_line_mask_from_rvccf_table(
     contrasts = np.full(n_chunk, np.nan, dtype=np.float64)
     for i in range(n_chunk):
         rv_i = float(chunk_rv[i])
-        if not np.isfinite(rv_i) or abs(rv_i) > float(max_abs_rv_m_s):
+        if not np.isfinite(rv_i):
             continue
         ccf = np.asarray(rvccf_table["CCF"][i], dtype=np.float64).ravel()
         if ccf.size < 5 or not np.any(np.isfinite(ccf)):
@@ -2079,15 +2120,20 @@ def build_ccfopt_line_mask_from_rvccf_table(
         lam0_f = float(lam0)
         # Match in velocity space relative to the seed center.
         dv = C_M_S * (chunk_wl - lam0_f) / lam0_f
-        ok = (
+        match = (
             np.isfinite(dv)
             & np.isfinite(chunk_rv)
             & np.isfinite(contrasts)
             & (np.abs(dv) <= match_half)
-            & (np.abs(chunk_rv) <= float(max_abs_rv_m_s))
             & (contrasts > float(min_contrast))
-            & (~used_chunk)
         )
+        if not np.any(match):
+            n_drop += 1
+            continue
+        if float(np.nanmax(np.abs(chunk_rv[match]))) > float(max_abs_rv_m_s):
+            n_drop += 1
+            continue
+        ok = match & (~used_chunk)
         if not np.any(ok):
             n_drop += 1
             continue
@@ -2180,6 +2226,110 @@ def build_ccfopt_line_mask_from_rvccf_table(
     return path_written, entries
 
 
+def build_ccfopt_line_mask_from_l2_line_by_line_rv(
+    seed_mask_path: str,
+    input_model,
+    *,
+    fiber: str | int = 1,
+    template_path: str | None = None,
+    output_path: str | None = None,
+    masks_directory: str | None = None,
+    ccf_input_velocity_m_s: float = 0.0,
+    outlier_sigma: float = 1.0e6,
+    use_single_line_builder: bool = False,
+    match_half_m_s: float = 5000.0,
+    max_abs_rv_m_s: float = CCFOPT_MAX_ABS_RV_M_S,
+    min_contrast: float = 0.0,
+    window_size_um: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["window_size_um"],
+    window_line_by_line: bool = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["window_line_by_line"],
+    v_half_window_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_half_window_m_s"],
+    v_step_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_step_m_s"],
+    mask_ccf_pixel_interp_order: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "mask_ccf_pixel_interp_order"
+    ],
+    zb: float = 0.0,
+    max_seed_lines: int | None = None,
+) -> tuple[str, list[LineMaskEntry]]:
+    """
+    Build a CCF-opt delta mask from an injected-RV=0 L2 via line-by-line stellar RV.
+
+    Two-step workflow (default ``use_single_line_builder=False``):
+
+    1. Run ``StellarRVPrimitive(algorithm="ccf_line_mask")`` on ``input_model`` with
+       the seed mask and **line-by-line** windowing at ``ccf_input_velocity_m_s``
+       (typically 0). Set ``outlier_sigma`` very large (default ``1e6``) so chunk
+       outlier rejection does not drop mask lines before aggregation.
+    2. Pass the per-line ``RVCCF`` table to
+       :func:`build_ccfopt_line_mask_from_rvccf_table`, which drops seed lines when
+       any matching per-order calibration RV exceeds ``max_abs_rv_m_s`` (default
+       :data:`CCFOPT_MAX_ABS_RV_M_S`), then shifts each kept line
+       ``λ' = λ × (1 + RV/c)`` and sets weights proportional to ``|Gaussian contrast|``.
+
+    When ``use_single_line_builder=True``, delegate to the slower per-line CCF path
+    :func:`build_ccfopt_line_mask_from_l2_single_line_ccf` (gold-standard).
+    """
+    if use_single_line_builder:
+        return build_ccfopt_line_mask_from_l2_single_line_ccf(
+            seed_mask_path,
+            input_model,
+            fiber=fiber,
+            template_path=template_path,
+            output_path=output_path,
+            masks_directory=masks_directory,
+            window_size_um=window_size_um,
+            window_line_by_line=window_line_by_line,
+            v_half_window_m_s=v_half_window_m_s,
+            v_step_m_s=v_step_m_s,
+            ccf_input_velocity_m_s=ccf_input_velocity_m_s,
+            mask_ccf_pixel_interp_order=mask_ccf_pixel_interp_order,
+            max_abs_rv_m_s=max_abs_rv_m_s,
+            min_contrast=min_contrast,
+            zb=zb,
+            max_seed_lines=max_seed_lines,
+        )
+
+    from hispecdrp.primitives import StellarRVPrimitive
+
+    fiber_s = str(fiber)
+    ost = int(getattr(input_model.meta, "order_start", 0))
+    oen = int(getattr(input_model.meta, "order_end", ost))
+    do_orders = list(range(ost, oen + 1))
+
+    out = StellarRVPrimitive.call(
+        input_model,
+        algorithm="ccf_line_mask",
+        mask_path=str(seed_mask_path),
+        ccf_input_velocity=float(ccf_input_velocity_m_s),
+        do_fibers=[fiber_s],
+        do_orders=do_orders,
+        window_line_by_line=bool(window_line_by_line),
+        window_size_um=float(window_size_um),
+        v_half_window=float(v_half_window_m_s),
+        v_step_coarse=float(v_step_m_s),
+        mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
+        ccf_zb=float(zb),
+        outlier_sigma=float(outlier_sigma),
+        save_result=False,
+        save_preview=False,
+        show_preview=False,
+    )
+    tbl = getattr(out, f"rvccf_fib{fiber_s}", None)
+    if tbl is None or len(tbl) == 0:
+        raise ValueError(
+            "line-by-line StellarRV produced empty RVCCF; check seed mask and L2"
+        )
+    return build_ccfopt_line_mask_from_rvccf_table(
+        seed_mask_path,
+        tbl,
+        template_path=template_path,
+        output_path=output_path,
+        masks_directory=masks_directory,
+        match_half_m_s=match_half_m_s,
+        max_abs_rv_m_s=max_abs_rv_m_s,
+        min_contrast=min_contrast,
+    )
+
+
 def build_ccfopt_line_mask_from_l2_single_line_ccf(
     seed_mask_path: str,
     input_model,
@@ -2194,9 +2344,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
     v_step_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_step_m_s"],
     ccf_input_velocity_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
         "ccf_input_velocity_m_s"
-    ],
-    mask_auto_center_scout: bool = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
-        "mask_auto_center_scout"
     ],
     mask_ccf_pixel_interp_order: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
         "mask_ccf_pixel_interp_order"
@@ -2311,7 +2458,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             ccf_half_window_m_s=half,
             zb=float(zb),
             want_preview=False,
-            mask_auto_center_scout=bool(mask_auto_center_scout),
             min_good_pixels=int(ccf_min_good_pixels),
             mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
             window_line_by_line=bool(window_line_by_line),
@@ -2397,7 +2543,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
                 ccf_half_window_m_s=half,
                 zb=float(zb),
                 want_preview=False,
-                mask_auto_center_scout=bool(mask_auto_center_scout),
                 min_good_pixels=int(ccf_min_good_pixels),
                 mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
                 window_line_by_line=bool(window_line_by_line),
@@ -2483,7 +2628,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             ccf_half_window_m_s=half,
             zb=float(zb),
             want_preview=False,
-            mask_auto_center_scout=bool(mask_auto_center_scout),
             min_good_pixels=int(ccf_min_good_pixels),
             mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
             window_line_by_line=True,
@@ -2569,7 +2713,6 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
         "v_half_window_m_s": float(v_half_window_m_s),
         "v_step_m_s": float(v_step_m_s),
         "ccf_input_velocity_m_s": float(ccf_input_velocity_m_s),
-        "mask_auto_center_scout": bool(mask_auto_center_scout),
         "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
         "ccf_min_good_pixels": int(ccf_min_good_pixels),
         "max_abs_rv_m_s": float(max_abs_rv_m_s),

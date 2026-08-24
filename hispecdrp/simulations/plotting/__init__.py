@@ -11,6 +11,7 @@ from .comb_wavesol_geometry import (
     write_comb_wavesol_per_fiber_summary_png,
     write_comb_wavesol_per_order_summary_png,
 )
+from .ideal_spectrum_rv_recovery import plot_ideal_spectrum_rv_recovery
 from .e2e_preview import (
     PREVIEWS_SUBDIR,
     REPORT_HTML_NAME,
@@ -42,6 +43,7 @@ __all__ = [
     "diagnose_stage0_rate_noise",
     "generate_e2e_preview_report",
     "infer_exposure_base_name",
+    "plot_ideal_spectrum_rv_recovery",
     "plot_injected_vs_recovered_rv",
     "plot_stage0_rate_pull_histogram",
     "robust_gaussian_params",

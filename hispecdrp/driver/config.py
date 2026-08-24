@@ -38,8 +38,6 @@ class ConfigFile:
 
     Attributes
     ----------
-    name : str
-        Unique name for a config file.
     class_name : str
         The name of the primitive or pipeline class (with or without the module path).
     filepath : str
@@ -105,6 +103,7 @@ class ConfigFile:
 
     @property
     def name(self):
+        """Unique name for a config file."""
         return self._name or os.path.splitext(self.filename)[0] or self.class_name
 
     @property

@@ -9,12 +9,37 @@ UTR and again with a realistic ``uint16`` UTR.
 
 .. raw:: html
 
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">GitHub</a>.</span></p>
+
+.. raw:: html
+
    <p class="download-notebook">
      <a class="download-notebook-btn"
         href="../../_static/notebooks/stage0_rate_noise_selfcheck.ipynb"
         data-notebook-download="stage0_rate_noise_selfcheck.ipynb"
         download="stage0_rate_noise_selfcheck.ipynb">Download as notebook</a>
    </p>
+
+.. warning::
+   **Setup.** Set these in your shell / notebook kernel before running (or let
+   the first cell create a local cache under ``OUT``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28, 28, 44
+
+   * - Variable
+     - Required when
+     - Purpose
+   * - ``KOA_CALIBRATION_CACHE``
+     - Always
+     - Local KOA calibration cache directory (and SQLite DB)
+   * - ``KECK_OBSERVER_EMAIL``
+     - Optional remote sync
+     - Keck Observer account email
+   * - ``KECK_OBSERVER_PASSWORD``
+     - Optional remote sync
+     - Keck Observer account password
 
 Imports and output directory
 ----------------------------
@@ -108,8 +133,8 @@ pipeline arguments. Products will be stored under ``OUT``.
        for label, ramp in ramps.items()
    }
 
-4. Pull histograms
-------------------
+4. Histograms of recovered versus injected rate levels
+------------------------------------------------------
 
 ``(rate − truth) / rate_err`` with a Gaussian fit demonstrating that the
 pipeline can recover a rate map resembling the injected value. After subtracting
@@ -135,8 +160,8 @@ normal distribution of pixels with a mean of 0 and unit variance.
    :alt: Stage 0 rate pull histogram for float32 UTR
    :width: 90%
 
-   Pull histogram for the ideal ``float32`` UTR
-   (``(rate − truth) / rate_err`` with Gaussian fit).
+   Histograms of recovered versus injected rate levels for the ideal
+   ``float32`` UTR (``(rate − truth) / rate_err`` with Gaussian fit).
 
 .. figure:: ../../_static/images/simulations/stage0_rate_pull_uint16.png
    :alt: Stage 0 rate pull histogram for uint16 UTR

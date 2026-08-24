@@ -1219,17 +1219,14 @@ def _run_lte049_k2all_line_mask_previews(
         if window_line_by_line
         else "lte049_line_mask"
     )
-    prim_line_kw: dict = {}
+    prim_line_kw: dict = {"window_line_by_line": bool(window_line_by_line)}
     if window_line_by_line:
         if ccf_input_velocity_m_s is None or not math.isfinite(float(ccf_input_velocity_m_s)):
             raise ValueError(
                 "_run_lte049_k2all_line_mask_previews: window_line_by_line requires "
                 "finite ccf_input_velocity_m_s"
             )
-        prim_line_kw = {
-            "window_line_by_line": True,
-            "ccf_input_velocity": float(ccf_input_velocity_m_s),
-        }
+        prim_line_kw["ccf_input_velocity"] = float(ccf_input_velocity_m_s)
 
     v_grid_kw: dict = {}
     if v_min_coarse is not None:
@@ -1328,7 +1325,6 @@ def _run_lte049_k2all_line_mask_previews(
                 do_orders=do_orders,
                 window_size_um=w_um,
                 v_step_coarse=v_step_c,
-                mask_auto_center_scout=False,
                 ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
                 mask_ccf_pixel_interp_order=_pio_preview,
                 show_preview=False,
@@ -1355,7 +1351,6 @@ def _run_lte049_k2all_line_mask_previews(
                     do_orders=do_orders,
                     window_size_um=w_um,
                     v_step_coarse=v_step_c,
-                    mask_auto_center_scout=False,
                     ccf_parabolic_vertex_n_samples=int(ccf_parabolic_vertex_n_samples),
                     mask_ccf_pixel_interp_order=_pio_preview,
                     show_preview=False,
@@ -1678,9 +1673,11 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
     ``StellarRVPrimitive.mask_ccf_pixel_interp_order`` (and the line-mask chunk benchmark).
 
     Mask-line CCF uses :data:`LTE049_BTSETTL_MASK_MAS` (template-derived **delta** mask paired with the
-    same lte049 spectrum), not a separate wide third-party catalog. Velocity sampling is the **coarse uniform** grid only (50 m/s via
-    ``v_step_coarse``); there is no centered window override (``ccf_input_velocity`` unset;
-    ``mask_auto_center_scout=False`` in this test).
+    same lte049 spectrum), not a separate wide third-party catalog. When
+    ``ccf_input_velocity`` is unset, the mask-line CCF runs an auto-center scout on the
+    broad uniform grid, then refines on a centered window (``v_half_window`` at
+    ``v_step_coarse``). This test uses the coarse uniform grid only when a center is
+    not provided; with scout enabled by default, recovery uses the centered refine grid.
 
     Chunk RVs use the Gaussian CCF centroid from :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
     / spline :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
@@ -1859,8 +1856,8 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
         do_fibers=["1"],
         do_orders=orders,
         window_size_um=window_um_eff,
+        window_line_by_line=False,
         v_step_coarse=50.0,
-        mask_auto_center_scout=False,
         mask_ccf_pixel_interp_order=_mask_ccf_pixel_interp_order_from_env(),
         outlier_sigma=4.0,
         max_cores=6,
@@ -2132,7 +2129,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
         do_fibers=["1"],
         do_orders=orders,
         window_size_um=window_um_eff,
-        mask_auto_center_scout=False,
+        window_line_by_line=False,
         mask_ccf_pixel_interp_order=_pio,
         outlier_sigma=4.0,
         max_cores=6,
@@ -2425,7 +2422,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_parallel(
         v_min_coarse=v_min_coarse_m_s,
         v_max_coarse=v_max_coarse_m_s,
         v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-        mask_auto_center_scout=False,
         mask_ccf_pixel_interp_order=int(_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER),
         outlier_sigma=4.0,
         max_cores=6,
@@ -2743,7 +2739,6 @@ def test_fit_ccf_tophat_style_btsettl_bspec_line_mask_line_window_n1_injected_rv
             v_min_coarse=v_min_c,
             v_max_coarse=v_max_c,
             v_step_coarse=float(_BTSETTL_LINE_WINDOW_N1_V_STEP_COARSE),
-            mask_auto_center_scout=False,
             mask_ccf_pixel_interp_order=int(_BTSETTL_LINE_WINDOW_N1_MASK_CCF_PIXEL_INTERP_ORDER),
             outlier_sigma=4.0,
             max_cores=6,
@@ -2892,14 +2887,14 @@ def test_fit_ccf_line_mask_btsettl_bspec_injected_rv_scan_pipeline_defaults(
         rvccf_l2.wave_fib1 = wave_2d
         rvccf_l2.spec_dq_fib1 = dq_2d
 
-        # Pipeline defaults for ccf_line_mask (omit window_line_by_line / n_samples /
-        # interp order / coarse grid overrides so PARAMETERS defaults apply).
+        # Wide-window chunking (legacy mode); line-by-line is the primitive default.
         out = StellarRVPrimitive.call(
             rvccf_l2,
             algorithm="ccf_line_mask",
             mask_path=mas_lte049,
             do_fibers=["1"],
             do_orders=orders,
+            window_line_by_line=False,
             outlier_sigma=4.0,
             max_cores=6,
             save_preview=False,

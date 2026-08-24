@@ -219,16 +219,14 @@ def resolve_ccf_zb(
     fiber: int | str,
     *,
     ccf_zb: float = 0.0,
-    from_barycorr: bool = True,
 ) -> float:
     """
-    Resolve the CCF barycentric factor for one fiber.
+    Resolve the CCF barycentric factor for one fiber from ``BARYCORR_FIB#``.
 
-    When ``from_barycorr`` is True and ``BARYCORR_FIB#`` is populated, ``BERV`` (m/s)
-    is converted to dimensionless :math:`z_b`. Otherwise returns ``ccf_zb``.
+    When ``BARYCORR_FIB#`` is populated, ``BERV`` (m/s) is converted to dimensionless
+    :math:`z_b`. Otherwise returns ``ccf_zb``.
     """
-    if from_barycorr:
-        berv_m_s = read_berv_m_s_from_model(input_model, fiber)
-        if berv_m_s is not None:
-            return berv_m_s_to_ccf_zb(berv_m_s)
+    berv_m_s = read_berv_m_s_from_model(input_model, fiber)
+    if berv_m_s is not None:
+        return berv_m_s_to_ccf_zb(berv_m_s)
     return float(ccf_zb)

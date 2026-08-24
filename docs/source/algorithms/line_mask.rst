@@ -71,7 +71,7 @@ and transmission-file notes.
 
 
 Unit tests (``tests/stage2/test_line_mask_utils.py``)
-----------------------------------------------
+-----------------------------------------------------
 
 The unit tests in ``tests/stage2/test_line_mask_utils.py`` validate both small mathematical helpers and
 end-to-end mask I/O behaviors. Highlights:

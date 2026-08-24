@@ -107,11 +107,11 @@ def test_resolve_ccf_zb_from_barycorr_table():
         {"MJDUTC": [61209.7], "MBJD": [61209.701], "BERV": [berv_m_s]}
     )
     assert resolve_ccf_zb(model, 1) == berv_m_s_to_ccf_zb(berv_m_s)
-    assert resolve_ccf_zb(model, 1, ccf_zb=0.5, from_barycorr=False) == 0.5
+    assert resolve_ccf_zb(model, 1, ccf_zb=0.5) == berv_m_s_to_ccf_zb(berv_m_s)
     assert resolve_ccf_zb(model, 2, ccf_zb=0.25) == 0.25
 
 
-def test_stellar_rv_uses_barycorr_ccf_zb_per_fiber():
+def test_stellar_rv_uses_ccf_zb_parameter_only():
     from hispecdrp.primitives import BarycenterCorrectionPrimitive, StellarRVPrimitive
 
     mjd_utc = 49254.5
@@ -139,12 +139,19 @@ def test_stellar_rv_uses_barycorr_ccf_zb_per_fiber():
     bary_model = BarycenterCorrectionPrimitive.call(input_model)
     berv_m_s = float(bary_model.barycorr_fib1["BERV"][0])
 
-    prim = StellarRVPrimitive(bary_model, do_fibers=['1'], do_orders=[139])
     from hispecdrp.primitives.barycenter_correction.barycenter_corr import berv_m_s_to_ccf_zb
     from hispecdrp.utils.physical_constants import C_M_S
 
+    zb_expected = berv_m_s_to_ccf_zb(berv_m_s)
+    prim = StellarRVPrimitive(
+        bary_model,
+        do_fibers=["1"],
+        do_orders=[139],
+        ccf_zb=zb_expected,
+    )
+
     zb = StellarRVPrimitive.resolve_ccf_zb_for_fiber(prim, bary_model, "1")
-    assert abs(zb - berv_m_s_to_ccf_zb(berv_m_s)) < 1e-15
+    assert abs(zb - zb_expected) < 1e-15
     assert abs(zb * C_M_S - berv_m_s) < 1e-9
 
 

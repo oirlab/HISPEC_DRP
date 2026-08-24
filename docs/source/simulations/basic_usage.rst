@@ -8,7 +8,7 @@ ccfopt settings).
 
 .. raw:: html
 
-   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">github</a>.</span></p>
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">GitHub</a>.</span></p>
 
 .. raw:: html
 
@@ -20,10 +20,25 @@ ccfopt settings).
    </p>
 
 .. warning::
-   **Setup.** This example uses a local KOA calibration cache. If
-   ``KOA_CALIBRATION_CACHE`` is unset, the first cell sets it under ``OUT``.
-   Optional remote sync uses ``KECK_OBSERVER_EMAIL`` and
-   ``KECK_OBSERVER_PASSWORD``.
+   **Setup.** Set these in your shell / notebook kernel before running (or let
+   the first cell create a local cache under ``OUT``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28, 28, 44
+
+   * - Variable
+     - Required when
+     - Purpose
+   * - ``KOA_CALIBRATION_CACHE``
+     - Always
+     - Local KOA calibration cache directory (and SQLite DB)
+   * - ``KECK_OBSERVER_EMAIL``
+     - Optional remote sync
+     - Keck Observer account email
+   * - ``KECK_OBSERVER_PASSWORD``
+     - Optional remote sync
+     - Keck Observer account password
 
 Imports and output directory
 ----------------------------
@@ -131,11 +146,9 @@ Same pipeline classes as real data. Stage-2 stellar RV uses line-by-line
                "window_size_um": float(kw["window_size_um"]),
                "v_half_window": float(kw["v_half_window_m_s"]),
                "v_step_coarse": float(kw["v_step_m_s"]),
-               "mask_auto_center_scout": bool(kw["mask_auto_center_scout"]),
                "mask_ccf_pixel_interp_order": int(kw["mask_ccf_pixel_interp_order"]),
                "ccf_min_good_pixels": int(kw["ccf_min_good_pixels"]),
                "ccf_zb": 0.0,
-               "ccf_zb_from_barycorr": False,
                "save_preview": True,
                "preview_write_png": False,
            },

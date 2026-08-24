@@ -123,16 +123,17 @@ class TelluricCorrectionPrimitive(BasePrimitive):
         """
         Build an interactive Plotly preview of the telluric correction.
 
-        Assumes the correction routine (e.g. airmass_scale_singlemodel) stores,
+        Assumes the correction routine (e.g. airmass_scale_singlemodel) stores
         for the science fiber:
-            SPEC_FIB{sci}         -> telluric-corrected science spectrum
-            SPEC_ERR_FIB{sci}     -> corrected error
-            WAVE_FIB{sci}         -> wavelength grid
-            TELLURIC_FIB{sci}     -> telluric transmission/correction curve applied
 
-        and that the *input* model (still reachable via output_model, or cached
-        separately) has the pre-correction spectrum under SPEC_FIB{sci} /
-        SPEC_UNCAL_FIB{sci}. Adjust the attribute names below if your
+        * ``SPEC_FIB{sci}`` — telluric-corrected science spectrum
+        * ``SPEC_ERR_FIB{sci}`` — corrected error
+        * ``WAVE_FIB{sci}`` — wavelength grid
+        * ``TELLURIC_FIB{sci}`` — telluric transmission/correction curve applied
+
+        and that the *input* model (still reachable via ``output_model``, or
+        cached separately) has the pre-correction spectrum under ``SPEC_FIB{sci}``
+        / ``SPEC_UNCAL_FIB{sci}``. Adjust the attribute names below if your
         airmass_scale_singlemodel implementation names things differently.
         """
         output_model = self._output['output']

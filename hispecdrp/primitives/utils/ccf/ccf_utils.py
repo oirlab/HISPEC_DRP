@@ -4256,6 +4256,104 @@ def _poly_interp_sorted_1d(
     return acc / wsum
 
 
+# Minimum R and per-pixel samples for Doppler paint (template densification).
+_DEFAULT_DOPPLER_PAINT_RESOLUTION_FLOOR = 3.0e5
+_DEFAULT_DOPPLER_PAINT_SAMPLES_PER_PIXEL = 8.0
+_DEFAULT_DOPPLER_PAINT_RESOLUTION_CEILING = 1.0e7
+
+
+def template_min_resolution_for_doppler_paint(
+    wave_obs_um: np.ndarray,
+    *,
+    samples_per_pixel: float = _DEFAULT_DOPPLER_PAINT_SAMPLES_PER_PIXEL,
+    resolution_floor: float = _DEFAULT_DOPPLER_PAINT_RESOLUTION_FLOOR,
+    resolution_ceiling: float = _DEFAULT_DOPPLER_PAINT_RESOLUTION_CEILING,
+) -> float:
+    """
+    Minimum template resolving power ``R = lambda / dlambda`` for Doppler paint.
+
+    Ensures at least ``samples_per_pixel`` rest-frame knots span one median
+    observed-pixel width on ``wave_obs_um``.  BT-Settl in the BSPEC band is often
+    already ``R > 3e5`` but can still be **undersampled for cm/s Doppler paint**
+    when only ~one native knot falls inside a BSPEC pixel (~500 m/s wide).
+
+    Parameters
+    ----------
+    wave_obs_um
+        Strictly ascending observed wavelength grid (um), typically one echelle
+        order from the instrument WAVE solution.
+    samples_per_pixel
+        Target number of template samples per observed pixel (default ``8``).
+    resolution_floor, resolution_ceiling
+        Clamp the returned ``R`` to ``[floor, ceiling]``.
+
+    Returns
+    -------
+    float
+        Resolving power to pass to :func:`prepare_template_for_doppler_paint`
+        / ``simulate_rate_map._upsample_spectrum``.
+    """
+    w = np.asarray(wave_obs_um, dtype=np.float64).ravel()
+    if w.size < 2:
+        return float(resolution_floor)
+    dlam_pix = float(np.median(np.diff(w)))
+    lam_mid = float(np.median(w))
+    if dlam_pix <= 0.0 or lam_mid <= 0.0 or not np.isfinite(dlam_pix):
+        return float(resolution_floor)
+    spp = float(samples_per_pixel)
+    if spp < 1.0:
+        spp = 1.0
+    dlam_target = dlam_pix / spp
+    r_req = lam_mid / dlam_target
+    return float(np.clip(r_req, float(resolution_floor), float(resolution_ceiling)))
+
+
+def prepare_template_for_doppler_paint(
+    wave_rest_um: np.ndarray,
+    flux_rest: np.ndarray,
+    wave_obs_um: np.ndarray,
+    *,
+    samples_per_pixel: float = _DEFAULT_DOPPLER_PAINT_SAMPLES_PER_PIXEL,
+    resolution_floor: float = _DEFAULT_DOPPLER_PAINT_RESOLUTION_FLOOR,
+    resolution_ceiling: float = _DEFAULT_DOPPLER_PAINT_RESOLUTION_CEILING,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Densify a rest-frame spectrum for :func:`doppler_paint_lanczos`.
+
+    Inserts PCHIP knots only where local ``R`` falls below the value returned by
+    :func:`template_min_resolution_for_doppler_paint` for ``wave_obs_um``.  Native
+    samples are preserved (see ``simulate_rate_map._upsample_spectrum``).
+
+    Returns
+    -------
+    wave_rest_um, flux_rest
+        Float64 arrays, strictly ascending wavelength.
+    """
+    from astropy import units as u
+
+    from hispecdrp.simulations.simulate_rate_map import _upsample_spectrum
+
+    w_rest = np.asarray(wave_rest_um, dtype=np.float64).ravel()
+    f_rest = np.asarray(flux_rest, dtype=np.float64).ravel()
+    if w_rest.size != f_rest.size:
+        raise ValueError("wave_rest_um and flux_rest must have the same length")
+    r_req = template_min_resolution_for_doppler_paint(
+        wave_obs_um,
+        samples_per_pixel=samples_per_pixel,
+        resolution_floor=resolution_floor,
+        resolution_ceiling=resolution_ceiling,
+    )
+    wd, fd = _upsample_spectrum(
+        w_rest * u.um,
+        f_rest * u.dimensionless_unscaled,
+        desired_sampling_resolution=float(r_req),
+    )
+    return (
+        np.asarray(wd.value, dtype=np.float64).ravel(),
+        np.asarray(fd.value, dtype=np.float64).ravel(),
+    )
+
+
 def doppler_paint_lanczos(
     wave_obs_um: np.ndarray,
     wave_rest_um: np.ndarray,
@@ -4264,6 +4362,8 @@ def doppler_paint_lanczos(
     *,
     zb: float = 0.0,
     order: int = 3,
+    prepare_for_obs_grid: np.ndarray | None = None,
+    prepare_samples_per_pixel: float = _DEFAULT_DOPPLER_PAINT_SAMPLES_PER_PIXEL,
 ) -> np.ndarray:
     """
     Resample a rest-frame spectrum onto an observed wavelength grid via Lanczos.
@@ -4284,17 +4384,26 @@ def doppler_paint_lanczos(
     Parameters
     ----------
     wave_obs_um
-        Observed wavelengths (µm).
+        Observed wavelengths (um).
     wave_rest_um, flux_rest
-        Rest-frame knots (µm) and fluxes; ``wave_rest_um`` must be strictly ascending.
+        Rest-frame knots (um) and fluxes; ``wave_rest_um`` must be strictly ascending.
     rv_m_s
-        Injected stellar RV (m s⁻¹).
+        Injected stellar RV (m/s).
     zb
         Barycentric redshift factor (same convention as the mask CCF).
     order
         Lanczos parameter *a* (default ``3`` = Lanczos-3), matching
         ``mask_ccf_pixel_interp_order``. ``1`` selects linear interpolation.
         Clamped to ``[1, MAX_MASK_CCF_PIXEL_INTERP_ORDER]``.
+    prepare_for_obs_grid
+        When set to the target observed wavelength grid (um), densify
+        ``wave_rest_um`` / ``flux_rest`` first via
+        :func:`prepare_template_for_doppler_paint` so the template has enough
+        knots per BSPEC pixel for cm/s Doppler shifts.  Omit for mask-CCF
+        sub-pixel sampling on an already-discretized L2 spectrum.
+    prepare_samples_per_pixel
+        Passed to :func:`prepare_template_for_doppler_paint` when
+        ``prepare_for_obs_grid`` is set (default ``8``).
 
     Returns
     -------
@@ -4303,12 +4412,21 @@ def doppler_paint_lanczos(
 
     See Also
     --------
+    :func:`prepare_template_for_doppler_paint`
+        Instrument-linked template densification before paint.
     :func:`~hispecdrp.primitives.utils.cubic_spline.doppler_paint_cubic_spline`
         Alternate not-a-knot cubic paint (not the science/CCF-matching path).
     """
     w_obs = np.asarray(wave_obs_um, dtype=np.float64).ravel()
     w_rest = np.asarray(wave_rest_um, dtype=np.float64).ravel()
     f_rest = np.asarray(flux_rest, dtype=np.float64).ravel()
+    if prepare_for_obs_grid is not None:
+        w_rest, f_rest = prepare_template_for_doppler_paint(
+            w_rest,
+            f_rest,
+            np.asarray(prepare_for_obs_grid, dtype=np.float64).ravel(),
+            samples_per_pixel=float(prepare_samples_per_pixel),
+        )
     if w_rest.size != f_rest.size:
         raise ValueError("wave_rest_um and flux_rest must have the same length")
     if w_rest.size < 1:
@@ -5688,7 +5806,6 @@ def run_ccf_line_mask_for_fiber(
     max_cores: int | None = None,
     want_preview: bool = False,
     debug_ccf: bool = False,
-    mask_auto_center_scout: bool = True,
     min_good_pixels: int = 10,
     mask_ccf_pixel_interp_order: int = 3,
     window_line_by_line: bool = False,
@@ -5738,7 +5855,8 @@ def run_ccf_line_mask_for_fiber(
         When ``ccf_center_m_s`` is finite, CCF is evaluated on a uniform window
         ``center ± ccf_half_window_m_s`` at ``v_step_m_s``
         (:func:`build_centered_uniform_velocity_grid`). When ``None`` / not finite,
-        only the broad grid is used.
+        an **auto-center scout** runs on the broad grid, then all chunks are evaluated
+        on a centered uniform window at the scout peak.
     zb : float, optional
         Barycentric factor for mask shift.
     max_cores : int or None, optional
@@ -5748,13 +5866,6 @@ def run_ccf_line_mask_for_fiber(
         If True, build order-averaged CCF data for Plotly preview.
     debug_ccf : bool, optional
         Extra logging per order.
-    mask_auto_center_scout : bool, optional
-        When ``ccf_center_m_s`` is unset and **exactly one** echelle order is processed,
-        run a **full-order** coarse mask CCF (one chunk spanning the echelle row), take the
-        sub-pixel peak on the order-mean CCF (same basis as the pipeline fit), build
-        :func:`build_centered_uniform_velocity_grid` at that center, and evaluate all wavelength
-        sub-bins on that centered uniform grid. Multi-order runs skip this so preview stacking keeps one
-        velocity axis.
     min_good_pixels : int, optional
         Minimum unmasked finite spectral pixels required per chunk (see ``rv_per_chunks_line_mask``).
     mask_ccf_pixel_interp_order : int, optional
@@ -5945,7 +6056,7 @@ def run_ccf_line_mask_for_fiber(
     # Fiber-level auto-center scout (multi-order): estimate CCF peak on the first valid
     # echelle row, then reuse the centered uniform velocity grid for every order on this fiber.
     fiber_scout_center_m_s: float | None = None
-    if bool(mask_auto_center_scout) and not centered and fiber_centered_v_grid is None:
+    if not centered and fiber_centered_v_grid is None:
         for _oi_sc, _ord_sc in order_tasks:
             _w_sc = np.asarray(wave[_oi_sc], dtype=np.float64)
             _s_sc = np.asarray(spec[_oi_sc], dtype=np.float64)
@@ -6067,12 +6178,7 @@ def run_ccf_line_mask_for_fiber(
         # Legacy single-order auto-center scout (when fiber-level scout did not run).
         span_um = float(w_max - w_min)
         window_um_scout = max(float(window_size_um), span_um * (1.0 + 1e-12))
-        if (
-            bool(mask_auto_center_scout)
-            and single_order_line_mask
-            and not centered
-            and v_auto_grid is None
-        ):
+        if single_order_line_mask and not centered and v_auto_grid is None:
             scout = rv_per_chunks_line_mask(
                 w,
                 s,

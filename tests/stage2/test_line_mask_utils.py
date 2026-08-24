@@ -392,7 +392,7 @@ def test_build_ccfopt_line_mask_from_l2_single_line_ccf_zeros_bias(tmp_path, mon
         assert mw.size == 1
         assert abs(float(kwargs["window_size_um"]) - 5.65e-5) < 1e-12
         assert kwargs["window_line_by_line"] is True
-        assert abs(float(kwargs["ccf_half_window_m_s"]) - 15000.0) < 1e-6
+        assert abs(float(kwargs["ccf_half_window_m_s"]) - lmu.CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_half_window_m_s"]) < 1e-6
         supp = Table(
             {
                 "CHUNK_ID": np.array([0], dtype=np.int32),
@@ -447,7 +447,7 @@ def test_build_ccfopt_line_mask_from_l2_single_line_ccf_zeros_bias(tmp_path, mon
         meta.get("generator", "")
     )
     assert meta.get("window_line_by_line") is True
-    assert abs(float(meta.get("v_half_window_m_s")) - 15000.0) < 1.0e-6
+    assert abs(float(meta.get("v_half_window_m_s")) - lmu.CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_half_window_m_s"]) < 1.0e-6
     assert abs(float(meta.get("window_size_um")) - 5.65e-5) < 1e-12
 
 
@@ -499,6 +499,57 @@ def test_build_ccfopt_line_mask_from_rvccf_table_shifts_and_weights(tmp_path):
     assert meta is not None
     assert meta.get("mask_weight_definition") == "abs_gaussian_ccf_contrast"
     assert "build_ccfopt_line_mask_from_rvccf_table" in str(meta.get("generator", ""))
+
+
+def test_build_ccfopt_line_mask_from_rvccf_table_rejects_cross_order_bad_rv(tmp_path):
+    """Drop a seed when any matching RVCCF row (multi-order) exceeds max_abs_rv_m_s."""
+    from astropy.table import Table
+
+    from hispecdrp.utils.line_mask_utils import build_ccfopt_line_mask_from_rvccf_table
+
+    seed_lam = 1.50
+    seed_path = tmp_path / "seed.delta.mas"
+    MaskLines.from_delta_centers_um(
+        np.array([seed_lam]),
+        np.array([1.0]),
+    ).save(output_path=str(seed_path))
+
+    def _tbl(rv_vals: list[float]) -> Table:
+        v_min, v_max, v_step = -500.0, 500.0, 25.0
+        v_grid = np.arange(v_min, v_max + 0.5 * v_step, v_step)
+        rows = []
+        for rv in rv_vals:
+            ccf = 0.4 * np.exp(-0.5 * ((v_grid - rv) / 80.0) ** 2)
+            rows.append(
+                {
+                    "RV": float(rv),
+                    "WAVELENGTH": float(seed_lam),
+                    "CCF": ccf,
+                    "V_MIN": v_min,
+                    "V_MAX": v_max,
+                    "V_STEP": v_step,
+                }
+            )
+        return Table(rows)
+
+    good_path = tmp_path / "good.ccfopt.delta.mas"
+    _, good_entries = build_ccfopt_line_mask_from_rvccf_table(
+        str(seed_path),
+        _tbl([100.0]),
+        output_path=str(good_path),
+        masks_directory=str(tmp_path),
+    )
+    assert len(good_entries) == 1
+
+    bad_path = tmp_path / "bad.ccfopt.delta.mas"
+    with pytest.raises(ValueError, match="kept no lines"):
+        build_ccfopt_line_mask_from_rvccf_table(
+            str(seed_path),
+            _tbl([100.0, 800.0]),
+            output_path=str(bad_path),
+            masks_directory=str(tmp_path),
+            max_abs_rv_m_s=500.0,
+        )
 
 
 def test_build_ccfopt_line_mask_recovers_offset_center(tmp_path):

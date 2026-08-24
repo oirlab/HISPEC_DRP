@@ -260,7 +260,6 @@ def _ccf_refine(
                 "mask_path": str(mask_path),
                 "ccf_input_velocity": float(known_rv_m_s),
                 "ccf_zb": 0.0,
-                "ccf_zb_from_barycorr": False,
                 "window_line_by_line": False,
                 "window_size_um": 0.25,
                 "v_half_window": 15000.0,
@@ -272,7 +271,6 @@ def _ccf_refine(
                 "save_preview": False,
                 "preview_write_png": False,
                 "save_overlay_debug": False,
-                "mask_auto_center_scout": False,
             },
         }
         e2e_support.run_stage2_simulation(

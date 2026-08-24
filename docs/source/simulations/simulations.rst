@@ -27,5 +27,4 @@ Reference
 .. toctree::
    :maxdepth: 1
 
-   calibrations
    limitations

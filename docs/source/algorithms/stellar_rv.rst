@@ -137,12 +137,11 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    The fiber driver constructs a **uniform** velocity grid:
 
-   - ``[v_min_coarse, v_max_coarse]`` at ``v_step_coarse`` when no center is set, or
    - ``ccf_input_velocity ± v_half_window`` at ``v_step_coarse`` when a center is set.
 
-   When enabled and applicable, an **auto-center scout** (``mask_auto_center_scout=True``,
-   no user-provided center) runs one pass on the broad uniform grid to estimate the peak,
-   then rebuilds a centered uniform window for the fiber.
+   When ``ccf_input_velocity`` is unset, an **auto-center scout** runs one pass on the
+   broad uniform grid to estimate the peak, then rebuilds a centered uniform window for
+   the fiber.
 
 #. **Per-order chunking and mask CCF**
 

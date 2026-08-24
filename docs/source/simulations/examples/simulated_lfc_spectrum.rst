@@ -7,7 +7,7 @@ injected wavelengths.
 
 .. raw:: html
 
-   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">github</a>.</span></p>
+   <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">GitHub</a>.</span></p>
 
 Modes follow ``nu_n = nu_0 + n * delta_nu`` via
 :func:`~hispecdrp.simulations.e2e_pipeline.build_lfc_line_list` (same ladder as
