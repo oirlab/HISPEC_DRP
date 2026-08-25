@@ -1,6 +1,6 @@
-==========================
-Run Pipelines & Primitives
-==========================
+============================
+Run Pipelines and Primitives
+============================
 
 **Examples require access to the calibration database hosted at Keck Observatory.** See :doc:`installation <../installation>` to configure access.
 
