@@ -424,10 +424,3 @@ class BasePipeline(ProcessingComponent):
         for prim_alias, prim_class in self.PRIMITIVES.items():
             s += f"    {prim_alias}: {prim_class.__name__}\n"
         return s
-
-    @property
-    def default_suffix(self):
-        """
-        Return the default suffix for this pipeline, which is the lowercase class name.
-        """
-        return None
