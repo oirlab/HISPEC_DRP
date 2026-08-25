@@ -7,8 +7,7 @@ Ensure you have followed the :doc:`installation instructions <../installation>` 
    :maxdepth: 1
    :glob:
     
-   run_primitive
-   run_pipeline
+   pipelines_and_primitives
    data_handling
    calibration_examples
    create_simulations
