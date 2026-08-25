@@ -59,69 +59,63 @@ class SetInitialWLSPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        outputs = {}
+        # Open the input model
+        input_model = datamodels.open(self.dataset)
+        
+        wavesol, _ = self.get_calibration(input_model, 'wavesol')
+        wavesol_model = datamodels.open(wavesol)
 
-        for key, input in self._iter_inputs():
+        output_model = self.get_output_model(input_model)
 
-            # Open the input model
-            input_model = datamodels.open(input)
+        # Get fibers and orders
+        do_fibers, do_orders = self.get_do_traces(
+            input_model, self.do_fibers, self.do_orders
+        )
+
+        for fiber in do_fibers:
+
+            n_orders = n_pix = None
+            if output_model.has_extension_value(f"spec_fib{fiber}"):
+                n_orders, n_pix = getattr(output_model, f'spec_fib{fiber}').shape
+            elif output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
+                n_orders, n_pix = getattr(output_model, f'spec_uncal_fib{fiber}').shape
+            if n_orders is None or n_pix is None:
+                # Fiber was not extracted (e.g. science injection on one fiber only).
+                continue
+
+            # Initialize arrays if not set yet
+            if getattr(output_model, f'wave_fib{fiber}', None) is None:
+                setattr(
+                    output_model,
+                    f'wave_fib{fiber}',
+                    np.full((n_orders, n_pix), np.nan, dtype=np.float64)
+                )
+            if getattr(output_model, f'spec_dq_fib{fiber}', None) is None:
+                setattr(
+                    output_model,
+                    f'spec_dq_fib{fiber}',
+                    np.zeros((n_orders, n_pix), dtype=np.uint32)
+                )
+
+            # Get the wavelength solution for the fiber
+            wavesol_cal_arr = getattr(wavesol_model, f'wave_fib{fiber}')
+            dq_cal_arr = getattr(wavesol_model, f'spec_dq_fib{fiber}')
+
+            wavesol_output_arr = getattr(output_model, f'wave_fib{fiber}')
+            dq_output_arr = getattr(output_model, f'spec_dq_fib{fiber}')
+
+            orders = list(output_model.make_order_vec())
             
-            wavesol, _ = self.get_calibration(input_model, 'wavesol')
-            wavesol_model = datamodels.open(wavesol)
+            for i, order in enumerate(orders):
+                if order in do_orders:
+                    wavesol_output_arr[i, :] = wavesol_cal_arr[i, :]
 
-            output_model = self.get_output_model(input_model)
-
-            # Get fibers and orders
-            do_fibers, do_orders = self.get_do_traces(
-                input_model, self.do_fibers, self.do_orders
-            )
-
-            for fiber in do_fibers:
-
-                n_orders = n_pix = None
-                if output_model.has_extension_value(f"spec_fib{fiber}"):
-                    n_orders, n_pix = getattr(output_model, f'spec_fib{fiber}').shape
-                elif output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
-                    n_orders, n_pix = getattr(output_model, f'spec_uncal_fib{fiber}').shape
-                if n_orders is None or n_pix is None:
-                    # Fiber was not extracted (e.g. science injection on one fiber only).
-                    continue
-
-                # Initialize arrays if not set yet
-                if getattr(output_model, f'wave_fib{fiber}', None) is None:
-                    setattr(
-                        output_model,
-                        f'wave_fib{fiber}',
-                        np.full((n_orders, n_pix), np.nan, dtype=np.float64)
-                    )
-                if getattr(output_model, f'spec_dq_fib{fiber}', None) is None:
-                    setattr(
-                        output_model,
-                        f'spec_dq_fib{fiber}',
-                        np.zeros((n_orders, n_pix), dtype=np.uint32)
-                    )
-
-                # Get the wavelength solution for the fiber
-                wavesol_cal_arr = getattr(wavesol_model, f'wave_fib{fiber}')
-                dq_cal_arr = getattr(wavesol_model, f'spec_dq_fib{fiber}')
-
-                wavesol_output_arr = getattr(output_model, f'wave_fib{fiber}')
-                dq_output_arr = getattr(output_model, f'spec_dq_fib{fiber}')
-
-                orders = list(output_model.make_order_vec())
-                
-                for i, order in enumerate(orders):
-                    if order in do_orders:
-                        wavesol_output_arr[i, :] = wavesol_cal_arr[i, :]
-
-                    if dq_cal_arr is not None:
-                        flag_value = DQ_FLAGS['UNRELIABLE_WS']
-                        mask = (dq_cal_arr & flag_value) != 0
-                        dq_output_arr[mask] |= flag_value
-
-            outputs[key] = output_model
+                if dq_cal_arr is not None:
+                    flag_value = DQ_FLAGS['UNRELIABLE_WS']
+                    mask = (dq_cal_arr & flag_value) != 0
+                    dq_output_arr[mask] |= flag_value
 
         return dict(
-            output=self._wrap_outputs(outputs),
+            output=output_model,
             wavesol=wavesol
         )
