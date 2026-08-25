@@ -287,7 +287,7 @@ class ProcessingComponent(_BasePrimitive):
         if self.output_file is not None:
             filename = self.output_file
         else:
-            suffix = self.suffix if self.suffix is not None else self.default_suffix
+            suffix = self.suffix if self.suffix is not None else None
             filename = model.generate_filename(suffix=suffix)
 
         # Construct the full output path
@@ -414,31 +414,87 @@ class ProcessingComponent(_BasePrimitive):
 
         return do_fibers, do_orders
 
-    def _iter_inputs(self, dataset=None):
-        """
-        Yields (key, item) pairs from self.dataset, normalized
-        to a single item, list, or dict depending on the input.
-        """
-        if dataset is None:
-            dataset = self.dataset
-        if isinstance(dataset, (DataModel, str)):
-            yield None, dataset
-        elif isinstance(dataset, dict):
-            yield from dataset.items()
-        elif isinstance(dataset, Sequence):
-            yield from enumerate(dataset)
-        else:
-            raise ValueError(f"Unsupported input type: {type(dataset)}")
+    # def _iter_inputs(self, dataset=None):
+    #     """
+    #     Yields (key, item) pairs from self.dataset, normalized
+    #     to a single item, list, or dict depending on the input.
+    #     """
+    #     if dataset is None:
+    #         dataset = self.dataset
+    #     if isinstance(dataset, (DataModel, str)):
+    #         yield None, dataset
+    #     elif isinstance(dataset, dict):
+    #         yield from dataset.items()
+    #     elif isinstance(dataset, Sequence):
+    #         yield from enumerate(dataset)
+    #     else:
+    #         raise ValueError(f"Unsupported input type: {type(dataset)}")
 
-    def _wrap_outputs(self, keyed_outputs: dict, dataset=None):
+    # def _wrap_outputs(self, keyed_outputs: dict, dataset=None):
+    #     """
+    #     Reconstruct a keyed_outputs dict (built via _iter_inputs) into the original container shape.
+    #     """
+    #     if dataset is None:
+    #         dataset = self.dataset
+    #     if isinstance(dataset, (DataModel, str)):
+    #         return keyed_outputs[None]
+    #     elif isinstance(dataset, dict):
+    #         return keyed_outputs
+    #     else:  # Sequence
+    #         return [keyed_outputs[i] for i in range(len(keyed_outputs))]
+
+    def _get_first_model(
+        self,
+        dataset : Any,
+        open : bool = True,
+        return_type : bool = False,
+        **kwargs
+    ) -> DataModel | tuple[DataModel, type | None, int]:
         """
-        Reconstruct a keyed_outputs dict (built via _iter_inputs) into the original container shape.
+        Get the first input model and its container type from the dataset.
+
+        Parameters
+        ----------
+        dataset : Any
+            The dataset to extract the first model from.
+        open : bool, optional
+            If True, open the model if it's a file path. Default is True.
+        return_type : bool, optional
+            If True, also return the container type and length. Default is False.
+        **kwargs
+            Additional keyword arguments to pass to the datamodels.open() function.
+
+        Returns
+        -------
+        DataModel | tuple[DataModel, type | None, int]
+            If return_type is False, returns the first DataModel.
+            If return_type is True, returns a tuple of (first DataModel, container type, length). Supported container types are Sequence and dict. For a single model, the type is None.
         """
-        if dataset is None:
-            dataset = self.dataset
-        if isinstance(dataset, (DataModel, str)):
-            return keyed_outputs[None]
-        elif isinstance(dataset, dict):
-            return keyed_outputs
-        else:  # Sequence
-            return [keyed_outputs[i] for i in range(len(keyed_outputs))]
+
+        def _resolve(item):
+            if isinstance(item, datamodels.DataModel):
+                return item
+            return datamodels.open(item, **kwargs) if open else item
+
+        def _finish(model, container_type, length):
+            if return_type:
+                return model, container_type, length
+            return model
+
+        if isinstance(dataset, datamodels.DataModel):
+            return _finish(dataset, None, 1)
+        if isinstance(dataset, str):
+            return _finish(_resolve(dataset), None, 1)
+        if isinstance(dataset, Sequence):
+            for item in dataset:
+                if isinstance(item, datamodels.DataModel):
+                    return _finish(item, Sequence, len(dataset))
+                if isinstance(item, str) and os.path.isfile(item):
+                    return _finish(_resolve(item), Sequence, len(dataset))
+        if isinstance(dataset, dict):
+            for val in dataset.values():
+                if isinstance(val, datamodels.DataModel):
+                    return _finish(val, dict, len(dataset))
+                if isinstance(val, str) and os.path.isfile(val):
+                    return _finish(_resolve(val), dict, len(dataset))
+        raise ValueError("Input must be a datamodel, filepath, sequence, or dict.")
