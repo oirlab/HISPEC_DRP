@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 from hispecdrp import datamodels
 from hispecdrp.simulations.utr import create_ramp
+from hispecdrp.simulations.simulate_rate_map import SimulateRateMap
 
 
 def repo_root() -> Path:
@@ -151,6 +152,7 @@ def make_stage0_cals(
 
     return cals
 
+
 def fast_ccf_orders(spectrograph: str) -> list[int]:
     """Three mid-band echelle orders for fast RV-recovery unit tests."""
     from hispecdrp.datamodels import hispec_config
@@ -160,3 +162,38 @@ def fast_ccf_orders(spectrograph: str) -> list[int]:
         return orders
     mid = len(orders) // 2
     return [orders[mid - 1], orders[mid], orders[mid + 1]]
+
+
+def make_sim_wavecal(spectrograph: str, meta: dict | None = None):
+    """Build a SimulatedWavesolModel from the pyechelle HDF wavelength solution."""
+    sim = SimulateRateMap()
+    ws = sim.get_wavelength_solution(spectrograph)
+    # ws[fiber][order]["pixel"]      -> np.arange(4096)
+    # ws[fiber][order]["wavelength"] -> wavelength in microns per pixel
+
+    fibers = list(ws.keys())
+    orders = list(ws[1].keys())
+    n_orders = len(orders)
+    npix = 4096
+
+    meta = meta or {}
+    meta.update({
+        "origin": "KECK",
+        "spectrograph": spectrograph,
+        "object_fiber1": "NONE",
+        "object_fiber2": "NONE",
+        "object_fiber3": "NONE",
+    })
+
+    waves = {}
+
+    for fiber in fibers:
+        waves[fiber] = np.zeros((n_orders, npix))
+        for j, order in enumerate(orders):
+            waves[fiber][j, :] = ws[fiber][order]["wavelength"]
+
+    model = datamodels.SimulatedWavesolModel(meta=meta)
+    for fiber in fibers:
+        setattr(model, f"wave_fib{fiber}", waves[fiber])
+
+    return model

@@ -68,10 +68,11 @@ class DarkSubtractionPrimitive(BasePrimitive):
         logger.info(f"Applying dark correction with {dark_model} to {input_model}")
 
         # Perform dark subtraction
+        max_cores = self.max_cores or 1
         dark_subtraction_rate(
             result.rate, result.rate_err, result.dq,
             dark_model.rate, dark_model.rate_err, dark_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

@@ -13,18 +13,8 @@ __all__ = ['ProcessFiberflatsPipeline']
 
 class ProcessFiberflatsPipeline(CalibrationPipeline):
 
-    """
-    Build TracePos, TraceProf, and Fiberflat calibrations from fiberflat frames.
-
-    Optional ``lfc`` (L0 rate map or path) is forwarded to
-    :class:`~hispecdrp.primitives.trace_fitting.traceprof_primitive.TraceProfilePrimitive`
-    so the TraceProf product also stores spectroperfection moments (iso-λ shear
-    and LSF/spatial 2nd moments) measured from LFC spots + the fiberflat.
-    """
-
     PARAMETERS = {
-        'use_pipeline_trace_cals' : True, # True for boostrapping until we have good trace cals
-        'lfc': None,
+        'use_pipeline_trace_cals' : True # True for boostrapping until we have good trace cals
     }
 
     PRIMITIVES = {
@@ -66,12 +56,6 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         # Create trace pos and prof cals
         # All fibers merged into one model
         trace_position_model = self.trace_pos.apply(ff_coadded_models_L0)
-        # TraceProf needs the just-built TracePos to window LFC spots / fiberflat
-        # spatial moments when an LFC rate map is supplied.
-        self.trace_prof.tracepos = trace_position_model
-        lfc = getattr(self, "lfc", None)
-        if lfc is not None:
-            self.trace_prof.lfc = lfc
         trace_profile_model = self.trace_prof.apply(ff_coadded_models_L0)
 
         # Register the trace pos and prof cals
@@ -79,20 +63,23 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         trace_prof_reg = self.register_traceprof_cal.apply(trace_profile_model)
         
         # Set the trace pos and prof cals in the spectral extraction primitive
-        # NOTE: Final behavior TBD - sometimes we want to use these trace cals, sometimes we want older trace cals.
+        # NOTE: Final behavior TBD - sometimes we want to use the these trace cals, sometimes we want older trace cals.
         if self.use_pipeline_trace_cals:
-            if getattr(self.spec_extract, 'tracepos', None) is not None:
+            if self.spec_extract.tracepos is not None:
                 logger.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
             self.spec_extract.tracepos = trace_pos_reg
-            if getattr(self.spec_extract, 'traceprof', None) is not None:
+            if self.spec_extract.traceprof is not None:
                 logger.warning(f"Overriding spec_extract.traceprof with {trace_prof_reg}.")
             self.spec_extract.traceprof = trace_prof_reg
 
         # Extract the coadded fiberflats (models split by fiber)
-        ff_coadded_models_L1 = self.spec_extract.apply(ff_coadded_models_L0)
+        ff_coadded_models_L1 = {}
+        for fiber, model in ff_coadded_models_L0.items():
+            ff_coadded_models_L1[fiber] = self.spec_extract.apply(model)
 
         # Set wavelength solution for each model
-        ff_coadded_models_L1 = self.set_wavesol.apply(ff_coadded_models_L1)
+        for fiber, model in ff_coadded_models_L1.items():
+            ff_coadded_models_L1[fiber] = self.set_wavesol.apply(model)
 
         # Create the fiberflat cal
         fiberflat_model = self.make_fiberflat.apply(ff_coadded_models_L1)

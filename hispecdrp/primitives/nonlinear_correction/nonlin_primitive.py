@@ -87,6 +87,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
             result.data = result.data.astype(np.float32)
         logger.info(f"Polynomial coeffs dtype: {nonlin_model.coeffs.dtype}.")
 
+        max_cores = self.max_cores or 1
         correct_nonlinearity(
             result.data,
             result.dq_raw,
@@ -94,7 +95,7 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
             nonlin_model.coeffs,
             nonlin_model.nonlin_max,
             nonlin_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         return dict(output=result, nonlin=nonlin)

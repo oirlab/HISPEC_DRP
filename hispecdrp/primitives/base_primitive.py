@@ -266,6 +266,11 @@ class BasePrimitive(ProcessingComponent):
             if self.parent is not None:
                 self.max_cores = self.parent.max_cores or 1
 
+        # Ensure all calibrations are set as attributes, even if None
+        for cal in self.CALIBRATIONS:
+            if getattr(self, cal, None) is None:
+                setattr(self, cal, None)
+
     ##################
     #### MAIN API ####
     ##################
@@ -383,6 +388,7 @@ class BasePrimitive(ProcessingComponent):
         config : dict | str | ConfigFile | None = None,
         context : dict | None = None,
         parent : BasePipeline | None = None,
+        log_config : dict | str | None = None,
         return_instance : bool = False,
         **kwargs
     ):
@@ -399,6 +405,8 @@ class BasePrimitive(ProcessingComponent):
             The configuration to use for the primitive. Can be a dict, a config file path, or a ConfigFile object.
         parent : BasePipeline, optional
             The parent pipeline of this primitive.
+        log_config : dict, str, or None, optional
+            The logging configuration to use for the primitive.
         return_instance : bool, optional
             If True, return a tuple of (result, primitive_instance).
             If False, return only the result.
@@ -415,6 +423,7 @@ class BasePrimitive(ProcessingComponent):
             config=config,
             parent=parent,
             context=context,
+            log_config=log_config,
             **kwargs
         )
         result = prim.apply()
@@ -425,7 +434,7 @@ class BasePrimitive(ProcessingComponent):
 
     def get_calibration(
         self,
-        input : str | DataModel,
+        input_model : str | DataModel,
         cal_role : str,
         selector : CalibrationSelector | None = None,
         use_cached : bool | None = None,
@@ -457,7 +466,7 @@ class BasePrimitive(ProcessingComponent):
         cal_value = getattr(self, cal_role, None)
 
         # Input model
-        input_model = datamodels.open(input, meta_only=True)
+        input_model = datamodels.open(input_model, meta_only=True)
 
         ####################
         #### Case 1: ID ####
@@ -821,27 +830,8 @@ class BasePrimitive(ProcessingComponent):
         if output_model is None:
             output_model = getattr(self, 'output_model', None)
 
-        def _get_first_input(dataset):
-            if isinstance(dataset, datamodels.DataModel):
-                return dataset, None, 1
-            if isinstance(dataset, str):
-                return datamodels.open(dataset), None, 1
-            if isinstance(dataset, Sequence):
-                for item in dataset:
-                    if isinstance(item, datamodels.DataModel):
-                        return item, list, len(dataset)
-                    if isinstance(item, str) and os.path.isfile(item):
-                        return datamodels.open(item), list, len(dataset)
-            if isinstance(dataset, dict):
-                for val in dataset.values():
-                    if isinstance(val, datamodels.DataModel):
-                        return val, dict, len(dataset)
-                    if isinstance(val, str) and os.path.isfile(val):
-                        return datamodels.open(val), dict, len(dataset)
-            raise ValueError("Input must be a datamodel, filepath, sequence, or dict.")
-
         # Get the first input model and its container type
-        input_model, input_type, input_len = _get_first_input(dataset)
+        input_model, input_type, input_len = self._get_first_model(dataset, return_type=True)
 
         ###################################
         #### Return output model as is ####
@@ -866,7 +856,6 @@ class BasePrimitive(ProcessingComponent):
             if output_model.lower() == 'input_copy':
                 if not isinstance(dataset, (datamodels.DataModel, str)):
                     raise ValueError("Input DataModel or filepath must be provided if output_model is 'input_copy'.")
-                input_model = datamodels.open(dataset)
                 kwargs.setdefault('primitive', self)
                 return input_model.from_datamodels(input_model, **kwargs)
 
@@ -920,10 +909,6 @@ class BasePrimitive(ProcessingComponent):
         config_file = deepcopy(self.config)
         config_file.parameters |= self.get_pars()
         return config_file
-
-    @property
-    def default_suffix(self):
-        return f'proc-{self.class_alias}'
 
     def get_pars_str_for_receipt(self):
         pars = self.get_pars()

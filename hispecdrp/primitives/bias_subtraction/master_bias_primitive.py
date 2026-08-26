@@ -82,7 +82,8 @@ class MakeMasterBiasPrimitive(BasePrimitive):
             output_bias.ktc = np.sqrt(_kTC2 / len(input_models))
             output_bias.dq = _dq
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _find_bad_pixels_bias(
                 output_bias.bias, output_bias.ktc , output_bias.dq,
                 self.kTC_threshold, self.bias_threshold

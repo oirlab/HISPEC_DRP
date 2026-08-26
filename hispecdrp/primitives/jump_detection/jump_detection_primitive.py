@@ -97,6 +97,7 @@ class JumpDetectionPrimitive(BasePrimitive):
             return dict(output=result, method=self.method.lower())
 
         # Perform jump detection - this only modifies the DQ mask
+        max_cores = self.max_cores or 1
         if self.method.lower() == 'jwst':
             logger.info(
                 "JWST jump detection is not optimized with shared memory here.",
@@ -110,7 +111,7 @@ class JumpDetectionPrimitive(BasePrimitive):
                 result.dq,
                 rdnoise=rn_model.rn,
                 gain=gain_model.gain,
-                max_cores=self.max_cores,
+                max_cores=max_cores,
                 rejection_threshold=self.rejection_threshold
             )
         elif self.method.lower() == 'tpd':
@@ -120,7 +121,7 @@ class JumpDetectionPrimitive(BasePrimitive):
                 result.dq,
                 rdnoise=rn_model.rn,
                 gain=gain_model.gain,
-                max_cores=self.max_cores,
+                max_cores=max_cores,
                 rejection_threshold=self.rejection_threshold
             )
         else:

@@ -79,10 +79,11 @@ class GainCorrectionPrimitive(BasePrimitive):
         logger.info(f"Applying detector gain correction with {gain} to {input_model}")
 
         # Perform detector flat correction
+        max_cores = self.max_cores or 1
         gain_correction(
             result.rate, result.rate_err, result.dq,
             gain_model.gain, np.sqrt(gain_model.cov[0,0]), gain_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

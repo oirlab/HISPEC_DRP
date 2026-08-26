@@ -209,11 +209,20 @@ class MakeNonLinPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_nonlin_coefs(ramp_arr, dq_raw_arr, gain_model.gain, rn_model.RN,
-                                order = self.order, satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias),
-                                mode = self.mode, use_legendre = self.use_legendre, readstart = self.readstart,
-                                criterion_for_nonlin_thresh = self.criterion_for_nonlin_thresh, criterion_for_nonlin_max = self.criterion_for_nonlin_max,
-                                max_cores =self.max_cores)
+        satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias)
+
+        max_cores = self.max_cores or 1
+        _out = fit_nonlin_coefs(
+            ramp_arr, dq_raw_arr, gain_model.gain, rn_model.RN,
+            order=self.order,
+            satval=satval,
+            mode=self.mode,
+            use_legendre=self.use_legendre,
+            readstart=self.readstart,
+            criterion_for_nonlin_thresh=self.criterion_for_nonlin_thresh,
+            criterion_for_nonlin_max=self.criterion_for_nonlin_max,
+            max_cores=max_cores
+        )
         nonlin_coeffs, nonlin_thresh,nonlin_max = _out
 
         # Output

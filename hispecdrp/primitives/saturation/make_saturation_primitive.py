@@ -62,7 +62,8 @@ class MakeSaturationPrimitive(BasePrimitive):
             last_read_arr.append(_input.data[-1,:,:])
         last_read_arr = np.array(last_read_arr)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             output_saturation.SAT_THRESH = median_axis0_3d(last_read_arr)-self.offset
 
         # Output

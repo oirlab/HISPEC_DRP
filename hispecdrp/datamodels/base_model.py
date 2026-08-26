@@ -763,7 +763,7 @@ class DataModel:
             elif hdu_type is fits.BinTableHDU:
                 data = getattr(self, extl, None)
                 if data is not None:
-                    print(f"Extension: {extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
+                    print(f"{extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
 
     @property
     def data_dict(self):
@@ -783,7 +783,7 @@ class DataModel:
     @classmethod
     def from_datamodels(
         cls,
-        input : Any,
+        dataset : Any,
         append_receipts: bool = True,
         ancestor_rule : str = 'these', # 'these', 'append', 'none'
         append_calibrations: bool = True,
@@ -796,7 +796,7 @@ class DataModel:
 
         Parameters
         ----------
-        input : DataModel | str | list[DataModel | str] | dict[str, DataModel | str]
+        dataset : DataModel | str | list[DataModel | str] | dict[str, DataModel | str]
             Input DataModel(s) or file path(s) to merge.
         append_receipts : bool, optional
             Whether to append receipts from input models. Defaults to True.
@@ -818,29 +818,29 @@ class DataModel:
             A new DataModel with merged metadata and optional data.
         """
 
-        if input is None:
+        if dataset is None:
             raise ValueError("No models provided")
         
         # Normalize to iterable
-        if isinstance(input, (str, DataModel)):
-            input = [input]
-        elif isinstance(input, dict):
-            input = [
+        if isinstance(dataset, (str, DataModel)):
+            dataset = [dataset]
+        elif isinstance(dataset, dict):
+            dataset = [
                 item
-                for v in input.values()
+                for v in dataset.values()
                 for item in (v if isinstance(v, list) else [v])
             ]
-        elif not isinstance(input, Sequence):
+        elif not isinstance(dataset, Sequence):
             raise ValueError("Input must be a DataModel, filepath, list of DataModels/filepaths, or dict of DataModels/filepaths.")
         
         # Sort inputs by datetime_obs
-        input = sorted(input, key=lambda x: datamodel_open(x, meta_only=True).meta.datetime_obs)
+        dataset = sorted(dataset, key=lambda x: datamodel_open(x, meta_only=True).meta.datetime_obs)
 
         # Merge metadata
-        meta_out = merge_meta(input)
+        meta_out = merge_meta(dataset)
 
         # Get first model
-        first_model = datamodel_open(input[0])
+        first_model = datamodel_open(dataset[0])
 
         # Create new model
         model_out = cls(
@@ -861,7 +861,7 @@ class DataModel:
                     setattr(model_out, extl, getattr(first_model, extl, None))
 
         ancestor_rule = ancestor_rule.lower()
-        for _input in input:
+        for _input in dataset:
 
             input_model = datamodel_open(_input)
 
@@ -1108,6 +1108,16 @@ class DataModel:
     def has_extension_value(self, extname: str) -> bool:
         """NOTE: Utility of this method TBD"""
         return getattr(self, extname.upper(), None) is not None
+
+    @property
+    def primary_extension_name(self):
+        """
+        Return the name of the primary extension for this datamodel. By default, this is the first extension declared within the EXTENSIONS dictionary that is not one of the special extensions: 'PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', or 'CALIBRATIONS'.
+        """
+        for extname in self.EXTENSIONS:
+            if extname not in ('PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS'):
+                return extname
+        return None
 
     @property
     def shape(self):

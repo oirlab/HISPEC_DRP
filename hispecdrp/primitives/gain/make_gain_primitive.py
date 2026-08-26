@@ -225,9 +225,14 @@ class MakeGainPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, _init_center_gain, _init_center_RN,_init_delta_gains,_init_delta_RNs,
-                                      countratesidentical=self.countratesidentical,
-                                      mode = self.mode, method= self.method, max_cores =self.max_cores)
+        max_cores = self.max_cores or 1
+        _out = fit_gain_and_readnoise(
+            delta_readtimes, ramp_arr, dq_raw_arr, _init_center_gain, _init_center_RN,_init_delta_gains,_init_delta_RNs,
+            countratesidentical=self.countratesidentical,
+            mode=self.mode,
+            method=self.method,
+            max_cores=max_cores
+        )
         bestfit_gain, bestfit_rn, cov = _out
 
         # Output

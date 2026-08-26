@@ -116,14 +116,12 @@ class TelluricCorrectionPrimitive(BasePrimitive):
                 output = output_model
 
         return dict(output=output)
-    
-    
 
     def _create_preview(self):
         """
         Build an interactive Plotly preview of the telluric correction.
 
-        Assumes the correction routine (e.g. airmass_scale_singlemodel) stores
+        Assumes the correction routine (e.g. airmass_scale_singlemodel) stores,
         for the science fiber:
 
         * ``SPEC_FIB{sci}`` — telluric-corrected science spectrum

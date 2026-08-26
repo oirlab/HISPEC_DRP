@@ -62,7 +62,8 @@ class MakeDarkPrimitive(BasePrimitive):
         output_dark.rate_var_poisson = input_model.rate_var_poisson
         output_dark.dq = copy(input_model.dq)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _detect_hot_pixels(output_dark.rate, output_dark.dq,self.hot_pixel_threshold)
 
         return dict(output=output_dark)

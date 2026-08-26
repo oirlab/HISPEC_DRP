@@ -32,6 +32,8 @@ def open(
     copy : bool
         If True, return a copy of the DataModel instance.
         If ``init`` is a filepath, this is ignored.
+    config : type, optional
+        The instrument configuration class to use for the DataModel.
     kwargs:
         Additional keyword arguments for the DataModel constructor.
     

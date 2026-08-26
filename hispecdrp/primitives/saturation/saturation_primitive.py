@@ -83,10 +83,11 @@ class CheckSaturationPrimitive(BasePrimitive):
             input_model.dq = np.zeros(input_model.data.shape[1:], dtype=np.uint32)
 
         # Perform saturation check
+        max_cores = self.max_cores or 1
         check_saturation(
             result.data, result.dq_raw, result.dq,
             saturation_model.sat_thresh, saturation_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output
