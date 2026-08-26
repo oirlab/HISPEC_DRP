@@ -1,0 +1,4 @@
+class: GainCorrectionPrimitive
+description: Standard gain correction configuration.
+context: {}
+parameters: {}

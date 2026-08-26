@@ -204,6 +204,22 @@ def read_berv_m_s_from_model(
     return berv_m_s
 
 
+def read_berv_m_s_uniform_from_model(
+    input_model: datamodels.DataModel,
+) -> float | None:
+    """
+    Return exposure ``BERV`` (m/s) from the first populated ``BARYCORR_FIB#`` table.
+
+    HISPEC barycentric corrections are not resolved per fiber at the precision
+    relevant for CCF; one value applies to all fibers on the exposure.
+    """
+    for fiber in (1, 2, 3):
+        berv_m_s = read_berv_m_s_from_model(input_model, fiber)
+        if berv_m_s is not None:
+            return berv_m_s
+    return None
+
+
 def berv_m_s_to_ccf_zb(berv_m_s: float) -> float:
     """
     Convert ``BARYCORR`` ``BERV`` (m/s) to the CCF barycentric factor :math:`z_b`.
@@ -216,19 +232,17 @@ def berv_m_s_to_ccf_zb(berv_m_s: float) -> float:
 
 def resolve_ccf_zb(
     input_model: datamodels.DataModel,
-    fiber: int | str,
     *,
     ccf_zb: float = 0.0,
-    from_barycorr: bool = True,
 ) -> float:
     """
-    Resolve the CCF barycentric factor for one fiber.
+    Resolve the exposure CCF barycentric factor from ``BARYCORR``.
 
-    When ``from_barycorr`` is True and ``BARYCORR_FIB#`` is populated, ``BERV`` (m/s)
-    is converted to dimensionless :math:`z_b`. Otherwise returns ``ccf_zb``.
+    When any ``BARYCORR_FIB#`` table is populated, ``BERV`` (m/s) is converted to
+    dimensionless :math:`z_b` and applied uniformly to all fibers. Otherwise returns
+    ``ccf_zb``.
     """
-    if from_barycorr:
-        berv_m_s = read_berv_m_s_from_model(input_model, fiber)
-        if berv_m_s is not None:
-            return berv_m_s_to_ccf_zb(berv_m_s)
+    berv_m_s = read_berv_m_s_uniform_from_model(input_model)
+    if berv_m_s is not None:
+        return berv_m_s_to_ccf_zb(berv_m_s)
     return float(ccf_zb)

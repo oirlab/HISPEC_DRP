@@ -1,0 +1,5 @@
+class: RegisterCalibrationPrimitive
+description: Standard register calibration configuration.
+context: {}
+parameters: {}
+steps: {}

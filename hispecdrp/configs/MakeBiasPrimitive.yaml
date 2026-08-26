@@ -1,0 +1,5 @@
+class: MakeBiasPrimitive
+description: Standard make bias configuration.
+context: {}
+parameters: {}
+steps: {}

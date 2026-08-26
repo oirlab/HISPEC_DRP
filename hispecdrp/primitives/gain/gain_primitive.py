@@ -22,7 +22,7 @@ class GainCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. This is expected to be a
         level 0 (rate map) data product.
     suffix : str or None, optional
@@ -40,7 +40,7 @@ class GainCorrectionPrimitive(BasePrimitive):
         electrons.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'gaincorr',
         'max_cores' : 1,
     }
@@ -55,7 +55,7 @@ class GainCorrectionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the gain model
         gain, _ = self.get_calibration(input_model, 'gain')
@@ -79,10 +79,11 @@ class GainCorrectionPrimitive(BasePrimitive):
         logger.info(f"Applying detector gain correction with {gain} to {input_model}")
 
         # Perform detector flat correction
+        max_cores = self.max_cores or 1
         gain_correction(
             result.rate, result.rate_err, result.dq,
             gain_model.gain, np.sqrt(gain_model.cov[0,0]), gain_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

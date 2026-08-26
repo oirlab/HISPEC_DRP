@@ -7,6 +7,8 @@ from typing import Sequence
 from ..utils.array_utils import median_filter_2d, nanmedian_axis0_ignore_empty_columns
 import matplotlib.pyplot as plt
 
+from ..spectral_extraction.extraction_utils import get_extraction_window
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import logging
@@ -53,7 +55,7 @@ class TracePositionPrimitive(BasePrimitive):
         Output model containing fitted trace positions and widths for each fiber.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'deg_pos' : None,
         'deg_width' : None,
         'window_size' : 8,
@@ -67,14 +69,14 @@ class TracePositionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Associate inputs by fiber number
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            self._input_by_fiber = datamodels.group_by_fiber_combination([self.input])
-        if isinstance(self.input, Sequence):
-            self._input_by_fiber = datamodels.group_by_fiber_combination(self.input)
-        elif isinstance(self.input, dict):
-            self._input_by_fiber = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            self._input_by_fiber = datamodels.group_by_fiber_combination([self.dataset])
+        if isinstance(self.dataset, Sequence):
+            self._input_by_fiber = datamodels.group_by_fiber_combination(self.dataset)
+        elif isinstance(self.dataset, dict):
+            self._input_by_fiber = self.dataset
         else:
-            raise ValueError(f"Unsupported input type: {type(self.input)}")
+            raise ValueError(f"Unsupported input type: {type(self.dataset)}")
         
         first_key = next(iter(self._input_by_fiber))
 
@@ -190,7 +192,7 @@ class TracePositionPrimitive(BasePrimitive):
             im_data = input_model.rate
             ny, nx = im_data.shape
             zmin = 0
-            zmax = np.nanquantile(im_data, 0.999)
+            zmax = np.nanquantile(im_data, 0.98)
 
             # Downsample image for preview to save space
             # Use slice factor of 4 (16x smaller size)
@@ -397,6 +399,11 @@ def find_trace_positions(
         good = np.where(np.isfinite(trace_centroids[i, :]))[0]
         if len(good) >= deg_pos + 1:
             coeffs_pos[i, :] = np.polyfit(good, trace_centroids[i, good], deg_pos)
+            #breakpoint()
+            #plt.plot(good, trace_centroids[i, good], 'o')
+            #plt.plot(np.arange(ny), np.polyval(coeffs_pos[i, :], np.arange(ny)))
+            # plt.plot(good, trace_centroids[i, good] - np.polyval(coeffs_pos[i, :], good), 'o'); plt.show()
+            plt.show()
         good = np.where(np.isfinite(trace_widths[i, :]))[0]
         if len(good) >= deg_width + 1:
             coeffs_width[i, :] = np.polyfit(good, trace_widths[i, good], deg_width)
@@ -456,7 +463,7 @@ def _walk_trace_up_down(
 ):
 
     # Central slice
-    c, w, f = _compute_centroid_and_width(
+    c, w, f = _compute_centroid_and_width_2pass(
         pixels,
         data[y0, :],
         dq[y0, :],
@@ -471,7 +478,7 @@ def _walk_trace_up_down(
     # centroid that jumps by more than ``max_step`` is rejected (order hop / noise spike).
     anchor = anchor0
     for y in range(y0 - 1, disp_range[0] - 1, -1):
-        c, w, f = _compute_centroid_and_width(
+        c, w, f = _compute_centroid_and_width_2pass(
             pixels,
             data[y, :],
             dq[y, :],
@@ -488,7 +495,7 @@ def _walk_trace_up_down(
     # Walk up
     anchor = anchor0
     for y in range(y0 + 1, disp_range[1] + 1):
-        c, w, f = _compute_centroid_and_width(
+        c, w, f = _compute_centroid_and_width_2pass(
             pixels,
             data[y, :],
             dq[y, :],
@@ -503,6 +510,56 @@ def _walk_trace_up_down(
             trace_centroids[y], trace_widths[y] = np.nan, np.nan
 
 
+# @njit(nogil=True, cache=True)
+# def _compute_centroid_and_width(
+#     pixels : np.ndarray,
+#     trace_slice : np.ndarray,
+#     trace_dq : np.ndarray,
+#     center_loc : float,
+#     window_size_half : float,
+# ):
+#     """
+#     Compute the centroid, width, and integrated flux of a trace slice.
+
+#     Returns
+#     -------
+#     centroid : float
+#         Flux-weighted centroid, or NaN when the window has no usable signal.
+#     fwhm : float
+#         Gaussian-equivalent FWHM, or NaN when the window has no usable signal.
+#     total_flux : float
+#         Summed flux inside the window (0.0 when the window is out of bounds / empty).
+#     """
+
+#     if not np.isfinite(center_loc):
+#         return np.nan, np.nan, 0.0
+
+#     xi = int(np.round(center_loc - window_size_half))
+#     xf = int(np.round(center_loc + window_size_half + 1))
+#     if xi < 0 or xf > trace_slice.size - 1:
+#         return np.nan, np.nan, 0.0
+
+#     slice_x = pixels[xi : xf + 1]
+#     slice_y = trace_slice[xi : xf + 1]
+#     slice_dq = trace_dq[xi : xf + 1]
+
+#     n_good = np.sum(slice_dq == 0)
+#     if n_good < slice_dq.size:
+#         return np.nan, np.nan, 0.0
+
+#     total_flux = np.sum(slice_y)
+
+#     if total_flux > 0:
+#         centroid = np.sum(slice_x * slice_y) / total_flux
+#         variance = np.sum(((slice_x - centroid) ** 2) * slice_y) / total_flux
+#         if variance < 0:
+#             return np.nan, np.nan, total_flux
+#         fwhm = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(variance)
+#         return centroid, fwhm, total_flux
+#     else:
+#         return np.nan, np.nan, 0.0
+
+
 @njit(nogil=True, cache=True)
 def _compute_centroid_and_width(
     pixels : np.ndarray,
@@ -514,6 +571,12 @@ def _compute_centroid_and_width(
     """
     Compute the centroid, width, and integrated flux of a trace slice.
 
+    The window is the continuous interval ``[center_loc - window_size_half,
+    center_loc + window_size_half]``; ``get_extraction_window`` supplies the fractional
+    overlap of each pixel with that interval, so the pixels straddling the window edges
+    contribute partially. No interpolation is performed — pixel values are used as-is and
+    only their weights vary.
+
     Returns
     -------
     centroid : float
@@ -521,33 +584,81 @@ def _compute_centroid_and_width(
     fwhm : float
         Gaussian-equivalent FWHM, or NaN when the window has no usable signal.
     total_flux : float
-        Summed flux inside the window (0.0 when the window is out of bounds / empty).
+        Weighted flux inside the window (0.0 when the window is out of bounds / empty).
     """
 
     if not np.isfinite(center_loc):
         return np.nan, np.nan, 0.0
 
-    xi = int(np.round(center_loc - window_size_half))
-    xf = int(np.round(center_loc + window_size_half + 1))
-    if xi < 0 or xf > trace_slice.size - 1:
+    n = trace_slice.size
+
+    # Reject windows that are not fully on the detector. get_extraction_window would
+    # silently clip them to the edge, which biases the centroid inward; the walker wants
+    # these rows dropped instead.
+    if center_loc - window_size_half < -0.5 or center_loc + window_size_half > n - 0.5:
         return np.nan, np.nan, 0.0
 
-    slice_x = pixels[xi : xf + 1]
-    slice_y = trace_slice[xi : xf + 1]
-    slice_dq = trace_dq[xi : xf + 1]
-
-    n_good = np.sum(slice_dq == 0)
-    if n_good < slice_dq.size:
+    idx, W = get_extraction_window(center_loc, 2.0 * window_size_half, n)
+    if idx.size == 0:
         return np.nan, np.nan, 0.0
 
-    total_flux = np.sum(slice_y)
+    # Any flagged pixel touching the window invalidates the measurement.
+    for j in range(idx.size):
+        if W[j] > 0.0 and trace_dq[idx[j]] != 0:
+            return np.nan, np.nan, 0.0
 
-    if total_flux > 0:
-        centroid = np.sum(slice_x * slice_y) / total_flux
-        variance = np.sum(((slice_x - centroid) ** 2) * slice_y) / total_flux
-        if variance < 0:
-            return np.nan, np.nan, total_flux
-        fwhm = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(variance)
-        return centroid, fwhm, total_flux
-    else:
+    total_flux = 0.0
+    moment1 = 0.0
+    for j in range(idx.size):
+        i = idx[j]
+        fi = W[j] * trace_slice[i]
+        total_flux += fi
+        moment1 += pixels[i] * fi
+
+    if total_flux <= 0:
         return np.nan, np.nan, 0.0
+
+    centroid = moment1 / total_flux
+
+    variance = 0.0
+    for j in range(idx.size):
+        i = idx[j]
+        d = pixels[i] - centroid
+        variance += d * d * W[j] * trace_slice[i]
+    variance /= total_flux
+
+    if variance < 0:
+        return np.nan, np.nan, total_flux
+
+    fwhm = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(variance)
+    return centroid, fwhm, total_flux
+
+
+@njit(nogil=True, cache=True)
+def _compute_centroid_and_width_2pass(
+    pixels : np.ndarray,
+    trace_slice : np.ndarray,
+    trace_dq : np.ndarray,
+    center_loc : float,
+    window_size_half : float,
+):
+    """
+    Two-pass centroid: the first pass centers the window on ``center_loc`` (the anchor
+    carried from the previous row), the second re-centers it on the first pass's centroid
+    so the fractional edge weights are symmetric about the measured trace rather than about
+    the anchor. Falls back to the first-pass result if the refinement fails (e.g. the
+    re-centered window runs off the edge or picks up a flagged pixel).
+    """
+
+    c, w, f = _compute_centroid_and_width(
+        pixels, trace_slice, trace_dq, center_loc, window_size_half,
+    )
+    if not np.isfinite(c):
+        return c, w, f
+
+    c2, w2, f2 = _compute_centroid_and_width(
+        pixels, trace_slice, trace_dq, c, window_size_half,
+    )
+    if not np.isfinite(c2):
+        return c, w, f
+    return c2, w2, f2

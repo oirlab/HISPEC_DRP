@@ -59,3 +59,27 @@ pre {
         font-size: 12px;
     }
 }
+
+/* "Download as notebook" button on Simulations → Basic Usage */
+.download-notebook {
+    margin: 1rem 0 1.25rem;
+}
+
+a.download-notebook-btn {
+    display: inline-block;
+    padding: 0.55rem 1rem;
+    border-radius: 6px;
+    border: 1px solid #2f5d8c;
+    background: #3a6ea5;
+    color: #fff !important;
+    text-decoration: none !important;
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.2;
+}
+
+a.download-notebook-btn:hover,
+a.download-notebook-btn:focus {
+    background: #2f5d8c;
+    color: #fff !important;
+}

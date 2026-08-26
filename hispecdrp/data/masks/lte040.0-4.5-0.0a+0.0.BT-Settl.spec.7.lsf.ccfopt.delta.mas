@@ -1,0 +1,22 @@
+# HISPEC DRP CCF line mask (columns: wavelength_vac_nm, weight).
+# mask_style: delta
+# Metadata JSON on the next line (parse with read_mask_generation_meta).
+# HISPEC_DRP_MASK_META {"disk_wavelength_columns":{"column0_line_center":"vacuum_nanometer","column1_weight":"dimensionless"},"generator":"hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_rvccf_table","hispecdrp_wavelength_columns":{"line_center":{"astropy_unit_string":"nm","fits_unit_string":"nm"},"line_left_edge":{"astropy_unit_string":"nm","fits_unit_string":"nm"},"line_right_edge":{"astropy_unit_string":"nm","fits_unit_string":"nm"},"line_width":{"astropy_unit_string":"nm","fits_unit_string":"nm"}},"injected_rv_m_s":0.0,"mask_line_geometry":"delta_two_column","mask_style":"delta","mask_weight_definition":"abs_gaussian_ccf_contrast","match_half_m_s":5000.0,"max_abs_rv_m_s":500.0,"min_contrast":0.0,"n_dropped_lines":6839,"n_lines":18,"n_rvccf_rows":21,"n_seed_lines":6857,"schema_version":2,"seed_mask_path":"/Users/ckilpatrick/Library/CloudStorage/Dropbox/scripts/python/cursor/HISPEC_DRP/hispecdrp/data/masks/lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.delta.mas","template_path":"/Users/ckilpatrick/Library/CloudStorage/Dropbox/scripts/python/cursor/HISPEC_DRP/hispecdrp/data/templates/lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5","wavelength_offset_definition":"lambda_prime = lambda_seed * (1 + RV/c)","weights_sum_normalized_to":1.0}
+   1.3102434802375258e+03        2.4437634220550057e-02
+   1.3108089048157312e+03        3.6744036024661073e-02
+   1.3126985378752279e+03        5.6837895148353190e-02
+   1.3138521943184489e+03        8.2693900291803762e-02
+   1.3154338195705973e+03        6.3774127687150184e-02
+   1.3180483624195958e+03        2.7264985809062760e-02
+   1.3216020254917373e+03        5.4082938035771896e-02
+   1.3227816783021306e+03        2.5153626177708624e-02
+   1.3259426617326699e+03        3.4748715143191410e-02
+   1.3276389402799380e+03        4.1564582593073704e-02
+   1.3285132876863504e+03        1.1298431060850009e-01
+   1.3290433382484250e+03        3.3262199552391257e-02
+   1.3291192519158926e+03        4.7020013493448740e-02
+   1.3294900688838529e+03        2.6814667981796672e-02
+   1.3297434470025883e+03        1.2595919253645674e-01
+   1.3309321338180623e+03        4.8145484087310439e-02
+   1.3311589797180832e+03        4.7092143504180818e-02
+   1.3322636607988554e+03        1.1141954710458846e-01

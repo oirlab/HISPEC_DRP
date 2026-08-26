@@ -22,14 +22,14 @@ class DQInitPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. Currently, this is expected
         to be a raw (ramp) data product.
     suffix : str or None, optional
         Suffix to append to the output filename. Default is ``'dqinit'``.
     max_cores : int, optional
         Maximum number of CPU cores to use for parallel processing. Default is 1 (no parallelization).
-
+    
     Calibrations
     ------------
     dq : DQModel
@@ -41,7 +41,7 @@ class DQInitPrimitive(BasePrimitive):
         Data model with the DQ array initialized from the DQ reference file.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'dqinit',
         'max_cores' : 1
     }
@@ -56,7 +56,7 @@ class DQInitPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the dark model
         dq, _ = self.get_calibration(input_model, 'dq')

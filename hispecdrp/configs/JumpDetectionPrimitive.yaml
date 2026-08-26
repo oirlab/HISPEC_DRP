@@ -1,0 +1,4 @@
+class: JumpDetectionPrimitive
+description: Standard jump detection configuration.
+context: {}
+parameters: {}

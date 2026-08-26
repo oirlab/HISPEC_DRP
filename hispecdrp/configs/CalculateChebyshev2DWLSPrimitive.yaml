@@ -1,0 +1,4 @@
+class: CalculateChebyshev2DWLSPrimitive
+description: Standard 2D Chebyshev WLS configuration.
+context: {}
+parameters: {}

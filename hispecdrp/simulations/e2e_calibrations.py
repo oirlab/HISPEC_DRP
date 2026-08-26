@@ -34,7 +34,7 @@ from ..calibrations import (
     TraceProfSelector,
     WavelengthSolutionSelector,
 )
-from ..utils.config import read_config_file
+from ..driver.config import load_config_file
 from . import e2e_support
 from .simulate_up_the_ramp import create_simulated_calibration_models
 
@@ -129,7 +129,7 @@ def load_calibration_config(path_or_dict: str | Mapping[str, Any]) -> dict[str, 
     if isinstance(path_or_dict, Mapping):
         cfg = dict(path_or_dict)
     else:
-        cfg = read_config_file(str(path_or_dict))
+        cfg = load_config_file(str(path_or_dict))
     if cfg is None:
         return {}
     if not isinstance(cfg, dict):

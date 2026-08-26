@@ -3,7 +3,7 @@ import glob
 from koa_middleware import CalibrationStore, CalibrationSelector
 import os
 from .. import datamodels
-from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid
+from koa_middleware.utils import generate_koa_filehandle, is_valid_uuid, get_env_var_bool
 
 from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
@@ -19,11 +19,42 @@ from .download_verify import (
 
 __all__ = ['HISPECCalibrationStore']
 
+
+def _default_connect_remote() -> bool:
+    """Remote KOA unless ``HISPEC_KOA_CONNECT_REMOTE`` / ``KOA_CONNECT_REMOTE`` is false."""
+    if "HISPEC_KOA_CONNECT_REMOTE" in os.environ:
+        return get_env_var_bool("HISPEC_KOA_CONNECT_REMOTE", default=True)
+    if "KOA_CONNECT_REMOTE" in os.environ:
+        return get_env_var_bool("KOA_CONNECT_REMOTE", default=True)
+    return True
+
+
+def _is_recoverable_remote_init_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    markers = (
+        "failed login",
+        "incorrect password",
+        "incorrect password or email",
+        "must be set as environment variables",
+        "keck_observer",
+        "failed to query metadata",
+        "404",
+        "connection",
+        "timeout",
+        "timed out",
+        "name or service not known",
+        "nodename nor servname",
+        "temporary failure",
+    )
+    return any(m in msg for m in markers)
+
+
 class HISPECCalibrationStore(CalibrationStore):
 
     def __init__(
         self, *args,
         instrument_name : str | None = None,
+        connect_remote : bool | None = None,
         **kwargs
     ):
         if instrument_name is None:
@@ -31,9 +62,31 @@ class HISPECCalibrationStore(CalibrationStore):
                 'HISPECDRP_INSTRUMENT_NAME',
                 datamodels.DataModel._DEFAULT_INSTRUMENT
             )
+        if connect_remote is None:
+            connect_remote = _default_connect_remote()
+
+        if connect_remote:
+            try:
+                super().__init__(
+                    *args,
+                    instrument_name=instrument_name,
+                    connect_remote=True,
+                    **kwargs
+                )
+                return
+            except (ValueError, RuntimeError, OSError) as exc:
+                if not _is_recoverable_remote_init_error(exc):
+                    raise
+                logger.warning(
+                    "Remote KOA unavailable (%s: %s); using local caldb only.",
+                    type(exc).__name__,
+                    str(exc).splitlines()[0] if str(exc) else exc,
+                )
+
         super().__init__(
             *args,
             instrument_name=instrument_name,
+            connect_remote=False,
             **kwargs
         )
 
@@ -71,56 +124,9 @@ class HISPECCalibrationStore(CalibrationStore):
         assigns those fields on the model and record before insert, and returns any
         existing version-family match instead of ``(None, None)``.
         """
-        from koa_middleware.utils import generate_md5_file
-
+        #from koa_middleware.utils import generate_md5_file
         cal = datamodels.open(cal)
-
-        if origin is not None:
-            cal.meta.origin = origin
-        elif getattr(cal.meta, "origin", None) is None:
-            cal.meta.origin = os.getenv("KOA_CALIBRATION_ORIGIN", "LOCAL")
-
-        if self.calibration_record_in_cache(cal, mode="id"):
-            existing = self.calibration_record_in_cache(cal, mode="id")
-            logger.warning("Calibration already exists in cache: %s! Skipping registration.", cal)
-            return self._existing_calibration_path_and_record(existing)
-
-        if not new_version and self.calibration_record_in_cache(cal, mode="version-family"):
-            existing = self.calibration_record_in_cache(cal, mode="version-family")
-            logger.warning("Calibration already exists in cache: %s! Skipping registration.", cal)
-            return self._existing_calibration_path_and_record(existing)
-
-        cal_record = cal.to_record()
-
-        if new_version:
-            # Middleware's generate_calibration_version sets origin on the dict and
-            # *returns* the version string but does not assign cal_version itself.
-            version = self.generate_calibration_version(cal_record, origin=cal.meta.origin)
-            cal_record["cal_version"] = version
-            cal.meta.cal_version = version
-            cal.meta.origin = cal_record.get("origin") or cal.meta.origin
-
-        if not getattr(cal.meta, "filename", None):
-            cal.generate_filename(origin=cal.meta.origin, auto_version=False)
-
-        cal_record["filename"] = cal.meta.filename
-        cal_record["koa_id"] = cal_record.get("koa_id") or cal.meta.filename
-        cal_record["origin"] = cal_record.get("origin") or cal.meta.origin
-        if getattr(cal.meta, "koa_filepath", None):
-            cal_record["koa_filepath"] = cal.meta.koa_filepath
-        if getattr(cal.meta, "cal_version", None) and not cal_record.get("cal_version"):
-            cal_record["cal_version"] = cal.meta.cal_version
-
-        local_filepath = cal.save(output_dir=self.data_dir)
-        fname = os.path.basename(local_filepath)
-        cal_record["filename"] = getattr(cal.meta, "filename", None) or fname
-        cal_record["koa_id"] = cal_record.get("koa_id") or cal_record["filename"]
-        if getattr(cal.meta, "koa_filepath", None):
-            cal_record["koa_filepath"] = cal.meta.koa_filepath
-
-        cal_record["file_md5"] = generate_md5_file(local_filepath)
-        cal_record_added = self.local_db.add(cal_record)
-        return local_filepath, cal_record_added
+        return super().register_calibration(cal, origin=origin, new_version=new_version)
 
     def _existing_calibration_path_and_record(
         self, existing: dict | list | None
@@ -133,6 +139,12 @@ class HISPECCalibrationStore(CalibrationStore):
         """
         if not existing:
             return None, None
+        # rows_where / some cache lookups can yield a generator or other iterable.
+        if not isinstance(existing, (dict, list)):
+            try:
+                existing = list(existing)
+            except TypeError:
+                return None, None
         if isinstance(existing, list):
             chosen = None
             for row in existing:
@@ -142,43 +154,19 @@ class HISPECCalibrationStore(CalibrationStore):
             existing = chosen or (existing[0] if existing else None)
             if not isinstance(existing, dict):
                 return None, None
+        if not isinstance(existing, dict):
+            return None, None
         try:
             path = self.calibration_file_in_cache(existing)
         except Exception:  # noqa: BLE001 - missing/null filename should not crash callers
             logger.warning(
                 "Existing calibration record is not usable (filename=%r).",
-                existing.get("filename"),
+                existing.get("filename") if isinstance(existing, dict) else None,
             )
-            return None, existing
+            return None, existing if isinstance(existing, dict) else None
         if path and existing.get("filename"):
             return path, existing
         return None, existing
-
-    def _prepare_cal_record(
-        self,
-        cal_model: CalibrationModel,
-        origin: str = "LOCAL",
-    ) -> dict:
-        """Build a DB record from an on-disk / in-memory calibration model."""
-        from koa_middleware.utils import generate_md5_file
-
-        if origin and not getattr(cal_model.meta, "origin", None):
-            cal_model.meta.origin = origin
-
-        filepath = getattr(cal_model, "_filepath", None)
-        if not getattr(cal_model.meta, "filename", None) and filepath:
-            cal_model.meta.filename = os.path.basename(filepath)
-
-        record = cal_model.to_record()
-        if not record.get("filename") and filepath:
-            record["filename"] = os.path.basename(filepath)
-        if not record.get("origin"):
-            record["origin"] = origin
-        if not record.get("koa_id"):
-            record["koa_id"] = record.get("filename")
-        if filepath and os.path.isfile(filepath) and not record.get("file_md5"):
-            record["file_md5"] = generate_md5_file(filepath)
-        return record
 
     # Select and get calibration
     def select_and_get_calibration(
@@ -390,6 +378,11 @@ class HISPECCalibrationStore(CalibrationStore):
         ``cals`` is accepted for compatibility with callers that pass an explicit
         remote query result; when omitted, records are discovered via
         ``get_missing_records`` (same as ``koa_middleware``).
+
+        Remote metadata failures (e.g. KOA API 404) are logged and treated as a
+        no-op so pipelines can continue with the local caldb/cache. Callers that
+        need a hard failure should inspect logs or sync explicitly with their own
+        error handling.
         """
         if cals is not None:
             mode = str(mode).lower()
@@ -420,7 +413,20 @@ class HISPECCalibrationStore(CalibrationStore):
                 mode,
             )
             return []
-        return super().sync_records_from_remote(mode=mode)
+        if self.remote_db is None:
+            logger.info("Skipping remote sync (remote_db is None).")
+            return []
+        try:
+            return super().sync_records_from_remote(mode=mode)
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "Failed to query metadata" in msg or "404" in msg:
+                logger.warning(
+                    "Remote KOA metadata sync failed (%s); continuing with local caldb only.",
+                    msg.splitlines()[0] if msg else exc,
+                )
+                return []
+            raise
 
     def calibration_record_in_cache(
         self,

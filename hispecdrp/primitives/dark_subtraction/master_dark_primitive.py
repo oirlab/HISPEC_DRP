@@ -44,7 +44,7 @@ class MakeMasterDarkPrimitive(BasePrimitive):
         combined error map, and updated DQ array.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'DarkModel',
         'mean_calc' : 'wmean',
         'err_calc' : 'wse',
@@ -55,8 +55,8 @@ class MakeMasterDarkPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if self.input is not None: # How do you call a primitive without input?
-            _inputs = self.input
+        if self.dataset is not None: # How do you call a primitive without input?
+            _inputs = self.dataset
         else:
             # todo implement automatic query of caldb to get all the darks between some dates with xyz filters
             raise NotImplementedError("Automatic calibration retrieval not yet implemented. List of darks must be provided as input.")
@@ -76,7 +76,8 @@ class MakeMasterDarkPrimitive(BasePrimitive):
                 primitive=self
             )
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _detect_hot_pixels(output_dark.rate, output_dark.dq, self.hot_pixel_threshold)
 
         mask = output_dark.dq == 0

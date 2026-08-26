@@ -46,7 +46,6 @@ from ..utils.ccf.ccf_utils import (
     process_orders_rvs_numba_parallel,
 )
 from ..utils.spectral_utils import resolve_stellar_template_to_log_micron
-from ..barycenter_correction.barycenter_corr import resolve_ccf_zb
 
 __all__ = [
     "StellarRVPrimitive",
@@ -102,19 +101,20 @@ class StellarRVPrimitive(BasePrimitive):
     **Algorithms**
 
     * ``ccf_line_mask`` (default) — mask-shifted CCF using a **line mask** (SPIROU ``.mas`` or
-      two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils` and
-      :mod:`~hispecdrp.primitives.utils.ccf.ccf_line_mask_spline`). Per-chunk CCFs use
-      :func:`~hispecdrp.primitives.utils.ccf.ccf_spline.compute_ccf_spline`; RVs and preview
-      metadata use :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`.
+      two-column center+weight tables; see :mod:`~hispecdrp.utils.line_mask_utils`). Per-chunk
+      CCFs use Numba Lanczos / linear spectrum sampling
+      (:func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask` /
+      ``mask_ccf_pixel_interp_order``; default Lanczos-3); final RVs are Gaussian centroids from
+      :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`.
     * ``ccf_stellar_template`` — weighted CCF in :math:`\\ln\\lambda` against a stellar
       template; per-chunk RVs; median/MAD rejection; inverse-variance mean
       (:mod:`~hispecdrp.primitives.utils.ccf.ccf_utils`).
 
+    All constructor arguments list their **default** from :attr:`PARAMETERS`; override per run as
+    needed. Order matches the grouped layout in :attr:`PARAMETERS`.
+
     Parameters
     ----------
-    All entries list **default** from :attr:`ARGUMENTS`; override per run as needed. Order matches
-    the grouped layout in :attr:`ARGUMENTS`.
-
     suffix : str
         **Default:** ``"stellar_rv"``. Short label used by the framework for this primitive’s
         derived products, logging, and file naming together with ``output_dir``.
@@ -143,7 +143,7 @@ class StellarRVPrimitive(BasePrimitive):
     mask_path : str or None
         **Default:** ``None``. Path to a SPIROU ``.mas`` or KPF-style two-column mask file for
         ``ccf_line_mask`` (delta-line model). ``None`` resolves to the packaged lte049
-        **e2erval** delta mask (see
+        **ccfopt** delta mask (see
         :func:`~hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path`) via
         :func:`~hispecdrp.utils.line_mask_utils.resolve_mask_path` when you are **not**
         passing ``mask_wavelength`` / ``mask_weight``.
@@ -153,19 +153,12 @@ class StellarRVPrimitive(BasePrimitive):
     mask_weight : array-like or None
         **Default:** ``None``. Weights matching ``mask_wavelength`` (same length).
     mask_ccf_pixel_interp_order : int
-        **Default:** ``3``. **Mask algorithm only:** Lagrange interpolation **order** (``1`` = linear)
-        for sampling flux and the per-pixel gate onto Doppler-shifted mask-line wavelengths in
+        **Default:** ``3``. **Mask algorithm only:** Lanczos parameter *a* (``1`` = linear;
+        ``3`` = Lanczos-3 windowed-sinc in pixel-index space) for sampling flux and the
+        per-pixel gate onto Doppler-shifted mask-line wavelengths in
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
-        to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Orders **greater than 1** are not
-        equivalent to the historical linear scheme: polynomial overshoot between pixels can bias
-        mask CCF shapes and aggregate RVs compared to ``order=1``; use for experiments only unless
-        you revalidate tolerances on your science cases.
-    mask_auto_center_scout : bool
-        **Default:** ``False``. **Mask algorithm only.** When ``True`` and ``ccf_input_velocity``
-        is unset, a scout CCF on the broad uniform grid finds a coarse peak, then the fiber
-        is reprocessed on a **centered uniform** window (``v_half_window`` at ``v_step_coarse``).
-        ``False`` uses only ``v_min_coarse`` / ``v_max_coarse`` / ``v_step_coarse`` (or a
-        centered window when ``ccf_input_velocity`` is set).
+        to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Values **greater than 1** use
+        Lanczos-*a* (not historical Lagrange polynomials).
     window_size_um : float
         **Default:** ``0.25``. Approximate wavelength span (µm) of each **chunk** along an order:
         spectra are split into contiguous bins of roughly this width for per-chunk RVs (template
@@ -184,8 +177,10 @@ class StellarRVPrimitive(BasePrimitive):
         ``|RV − ccf_input_velocity| <= half_width`` before aggregation. ``None`` uses
         ``max(2000, 0.5 × v_half_window)`` m/s.
     window_line_by_line : bool
-        **Default:** ``False``. **Line-mask algorithm only** (``ccf_line_mask``). When ``False``, chunk
-        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
+        **Default:** ``True``. **Line-mask algorithm only** (``ccf_line_mask``). Ignored for
+        ``ccf_stellar_template`` (that path always chunks on ``window_size_um``). When ``False``,
+        chunk boundaries follow ``window_size_um`` via
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
         When ``True``, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
         at ``ccf_input_velocity``, which must be finite — grid center). Spectral pixels
         per chunk use the intersection of that Voronoi interval with a symmetric ``window_size_um``
@@ -201,28 +196,21 @@ class StellarRVPrimitive(BasePrimitive):
     ccf_input_velocity : float or None
         **Default:** ``None``. If set (m/s), the CCF uses a **uniform** window centered here:
         ``[ccf_input_velocity − v_half_window, ccf_input_velocity + v_half_window]`` at
-        ``v_step_coarse``. If ``None`` and ``mask_auto_center_scout`` is True, a scout pass
-        sets this center automatically.
+        ``v_step_coarse``. If ``None``, a scout pass on the broad uniform grid estimates the
+        peak, then the fiber is evaluated on a centered window (``v_half_window`` at
+        ``v_step_coarse``).
     v_half_window : float
         **Default:** ``15000.0``. Half-width (m/s) of the centered uniform velocity window
         (±this value around ``ccf_input_velocity`` or the auto-scout center).
-    ccf_parabolic_vertex_n_samples : int or None
-        **Deprecated (ignored for final RV).** Final chunk RVs use the Gaussian fit from
-        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv` /
-        :class:`~hispecdrp.primitives.utils.ccf.ccf_fitting.CCFMetrics`. Retained for
-        backward-compatible constructor kwargs only.
     ccf_zb : float
         **Default:** ``0.0``. **Both algorithms:** barycentric factor :math:`z_b`. For ``ccf_line_mask``
         it enters :math:`\\lambda_{\\rm obs} = \\lambda_{\\rm rest}(1+v/c)/(1+z_b)` (``zb`` in
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber` /
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`). For ``ccf_stellar_template``
         it applies the same multiplicative shift in :math:`\\ln\\lambda` template evaluation as in
-        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba`. Used as a fallback when
-        ``ccf_zb_from_barycorr`` is False or ``BARYCORR_FIB#`` is absent.
-    ccf_zb_from_barycorr : bool
-        **Default:** ``True``. When True and ``BARYCORR_FIB#`` is present on the input L2 model,
-        ``BERV`` (m/s) is converted to :math:`z_b = \\mathrm{BERV}/c` and passed to the CCF for
-        each fiber. Set False to force the fixed ``ccf_zb`` value.
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba`.
+        Set by the caller or pipeline (e.g. :class:`~hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline`
+        populates this from ``BARYCORR`` ``BERV`` when not overridden).
     ccf_min_good_pixels : int
         **Default:** ``9``. **Both algorithms:** minimum unmasked finite spectral pixels per
         **wavelength chunk** (chunking from ``window_size_um`` via
@@ -262,7 +250,7 @@ class StellarRVPrimitive(BasePrimitive):
 
     # Default primitive arguments (merged with ProcessingComponent at class init).
     # Keys and semantics: see class docstring **Parameters** (same order as below).
-    ARGUMENTS = {
+    PARAMETERS = {
         # --- Dispatch ---
         "suffix": "stellar_rv",
         "algorithm": "ccf_line_mask",
@@ -273,27 +261,25 @@ class StellarRVPrimitive(BasePrimitive):
         "template_wavelength": None,
         "template_flux": None,
         # --- Mask line list & mask-only analysis (ccf_line_mask): mask_* ---
-        # None → hispecdrp/data/masks packaged default (e2erval) via resolve_mask_path.
+        # None → hispecdrp/data/masks packaged default (ccfopt) via resolve_mask_path.
         "mask_path": None,
         "mask_wavelength": None,
         "mask_weight": None,
         "mask_ccf_pixel_interp_order": 3,
-        "mask_auto_center_scout": False,  # set True to scout when ccf_input_velocity is unset
         # --- Shared chunking & chunk RV aggregation (both algorithms) ---
         "window_size_um": 0.25,
         "outlier_sigma": 3.0,
         "chunk_rv_max_abs_m_s": DEFAULT_CHUNK_RV_MAX_ABS_M_S,
         "chunk_rv_prior_half_width_m_s": None,
-        "window_line_by_line": False,  # ccf_line_mask only; False -> wavelength window_size_um chunks
+        "window_line_by_line": True,  # ccf_line_mask only; False -> wavelength window_size_um chunks
+        "ccfopt_line_by_line_defaults": True,  # when line-by-line: use CCFOPT_SINGLE_LINE_STELLAR_RV_KW if wide defaults
         # --- CCF velocity grid & shared CCF analysis (both algorithms) ---
         "v_min_coarse": None,  # m/s; None -> ccf_common.V_MIN_DEFAULT_M_S
         "v_max_coarse": None,  # m/s; None -> V_MAX_DEFAULT_M_S
         "v_step_coarse": 25.0,  # m/s; None -> ccf_common.V_STEP_DEFAULT_M_S
-        "ccf_input_velocity": None,  # m/s; center of uniform velocity window when set
+        "ccf_input_velocity": None,  # m/s; centered window when set; else auto-center scout
         "v_half_window": 15000.0,  # m/s; ± half-width of centered uniform grid
-        "ccf_parabolic_vertex_n_samples": 31,
         "ccf_zb": 0.0,
-        "ccf_zb_from_barycorr": True,
         "ccf_min_good_pixels": 9,
         # --- Output & compute ---
         "output_model": "L2Model",
@@ -319,12 +305,12 @@ class StellarRVPrimitive(BasePrimitive):
         dict
             With key "output" containing the output L2 model (or list of models).
         """
-        if isinstance(self.input, (datamodels.DataModel, str)):
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
             output = None
-            inp_list = [self.input]
-        elif isinstance(self.input, Sequence):
+            inp_list = [self.dataset]
+        elif isinstance(self.dataset, Sequence):
             output = []
-            inp_list = self.input
+            inp_list = self.dataset
         else:
             raise TypeError("Input must be a DataModel, path, or sequence of these.")
 
@@ -335,11 +321,37 @@ class StellarRVPrimitive(BasePrimitive):
             len(inp_list),
             getattr(self, "suffix", ""),
         )
+        # Default window_line_by_line=True is for ccf_line_mask. Template CCF still
+        # chunks on window_size_um; ignore the line-mask flag so callers can switch
+        # algorithm without also flipping chunking.
+        if (
+            algo_key not in STELLAR_RV_LINE_MASK_ALGORITHMS
+            and bool(getattr(self, "window_line_by_line", False))
+        ):
+            logger.info(
+                "Stellar RV: ignoring window_line_by_line for algorithm=%s "
+                "(line-mask only)",
+                algo_key,
+            )
+            self.window_line_by_line = False
         validate_line_mask_line_window_chunking_config(
             algorithm=algo_key,
             window_line_by_line=bool(getattr(self, "window_line_by_line", False)),
             ccf_input_velocity_m_s=getattr(self, "ccf_input_velocity", None),
         )
+        if bool(getattr(self, "window_line_by_line", False)) and bool(
+            getattr(self, "ccfopt_line_by_line_defaults", True)
+        ):
+            from ...utils.line_mask_utils import apply_ccfopt_defaults_for_line_by_line
+
+            ws, vh, vs = apply_ccfopt_defaults_for_line_by_line(
+                window_size_um=float(getattr(self, "window_size_um", 0.25)),
+                v_half_window=float(getattr(self, "v_half_window", 15000.0)),
+                v_step_coarse=float(getattr(self, "v_step_coarse", 25.0)),
+            )
+            self.window_size_um = ws
+            self.v_half_window = vh
+            self.v_step_coarse = vs
         template_ln, template_flux = None, None
         if (algo_key or "").strip().lower() not in STELLAR_RV_LINE_MASK_ALGORITHMS:
             logger.info("Stellar RV: resolving stellar template (path or inline arrays)")
@@ -379,8 +391,6 @@ class StellarRVPrimitive(BasePrimitive):
 
         # Per-fiber CCF preview slots (mean + per-order); filled when save/show preview.
         self._ccf_preview_by_fiber: dict = {}
-        # Per-fiber resolved CCF barycentric factor z_b (from BARYCORR or ccf_zb fallback).
-        self._ccf_zb_by_fiber: dict[str, float] = {}
         # Per-fiber payload for mask overlay debug HTML (ccf_line_mask only).
         self._mask_overlay_by_fiber: dict = {}
         # Per-fiber payload for template overlay debug HTML (ccf_stellar_template only).
@@ -466,13 +476,6 @@ class StellarRVPrimitive(BasePrimitive):
         if sg in ("BSPEC", "RSPEC"):
             return sg
         return "BSPEC"
-
-    def _fiber_ccf_zb(self, fiber: str | int) -> float:
-        """Resolved :math:`z_b` for one fiber (set in :meth:`_process_fiber`)."""
-        return self._ccf_zb_by_fiber.get(
-            str(fiber),
-            float(getattr(self, "ccf_zb", 0.0)),
-        )
 
     def _resolve_chunk_rv_prior_half_width_m_s(self) -> float | None:
         """Half-width (m/s) for prior-gated chunk aggregation when a CCF center is set."""
@@ -565,20 +568,13 @@ class StellarRVPrimitive(BasePrimitive):
         fiber: str | int,
     ) -> float:
         """
-        Resolve CCF :math:`z_b` for previews and overlays.
+        Return the uniform CCF :math:`z_b` for previews and overlays.
 
-        Uses per-fiber values cached on ``primitive._ccf_zb_by_fiber`` when present;
-        otherwise applies the same BARYCORR logic as :meth:`_process_fiber`.
+        ``fiber`` is accepted for API compatibility; all fibers share
+        ``primitive.ccf_zb``.
         """
-        by_fiber = getattr(primitive, "_ccf_zb_by_fiber", None)
-        if by_fiber and str(fiber) in by_fiber:
-            return float(by_fiber[str(fiber)])
-        return resolve_ccf_zb(
-            input_model,
-            fiber,
-            ccf_zb=float(getattr(primitive, "ccf_zb", 0.0)),
-            from_barycorr=bool(getattr(primitive, "ccf_zb_from_barycorr", True)),
-        )
+        del input_model, fiber
+        return float(getattr(primitive, "ccf_zb", 0.0))
 
     def _run_algorithm_ccf_stellar_template(
         self,
@@ -827,16 +823,10 @@ class StellarRVPrimitive(BasePrimitive):
             v_step_m_s=vs,
             ccf_center_m_s=(float(h_center) if h_center is not None else None),
             ccf_half_window_m_s=float(getattr(self, "v_half_window", 20000.0)),
-            zb=self._fiber_ccf_zb(fiber),
+            zb=float(self.ccf_zb),
             max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
             debug_ccf=bool(getattr(self, "debug_ccf", False)),
-            mask_auto_center_scout=bool(
-                getattr(self, "mask_auto_center_scout", True)
-            ),
-            ccf_parabolic_vertex_n_samples=int(
-                getattr(self, "ccf_parabolic_vertex_n_samples", 31)
-            ),
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             mask_ccf_pixel_interp_order=int(
                 getattr(self, "mask_ccf_pixel_interp_order", 3)
@@ -937,24 +927,11 @@ class StellarRVPrimitive(BasePrimitive):
         if _fiber_l2_bundle(input_model, fiber) is None:
             return
 
-        ccf_zb = resolve_ccf_zb(
-            input_model,
-            fiber,
-            ccf_zb=float(getattr(self, "ccf_zb", 0.0)),
-            from_barycorr=bool(getattr(self, "ccf_zb_from_barycorr", True)),
-        )
-        self._ccf_zb_by_fiber[str(fiber)] = ccf_zb
-        berv_m_s = getattr(input_model, f"barycorr_fib{fiber}", None)
-        if berv_m_s is not None and len(berv_m_s) > 0:
+        fiber_s = str(fiber)
+        ccf_zb = float(getattr(self, "ccf_zb", 0.0))
+        if ccf_zb != 0.0:
             logger.info(
-                "Stellar RV: fiber=%s ccf_zb=%.9e from BARYCORR BERV=%.3f m/s",
-                fiber,
-                ccf_zb,
-                float(berv_m_s["BERV"][0]),
-            )
-        elif ccf_zb != 0.0:
-            logger.info(
-                "Stellar RV: fiber=%s ccf_zb=%.9e from primitive ccf_zb (no BARYCORR)",
+                "Stellar RV: fiber=%s ccf_zb=%.9e",
                 fiber,
                 ccf_zb,
             )
@@ -1145,12 +1122,9 @@ class StellarRVPrimitive(BasePrimitive):
                             t_ln,
                             t_flux,
                             v_grid=v_merged,
-                            zb=self._fiber_ccf_zb(fiber),
+                            zb=float(self.ccf_zb),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
-                            ),
-                            ccf_parabolic_vertex_n_samples=getattr(
-                                self, "ccf_parabolic_vertex_n_samples", 31
                             ),
                             return_ccf=True,
                         )
@@ -1165,12 +1139,9 @@ class StellarRVPrimitive(BasePrimitive):
                             v_min=v_min_m_s,
                             v_max=v_max_m_s,
                             v_step=v_step_m_s,
-                            zb=self._fiber_ccf_zb(fiber),
+                            zb=float(self.ccf_zb),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
-                            ),
-                            ccf_parabolic_vertex_n_samples=getattr(
-                                self, "ccf_parabolic_vertex_n_samples", 31
                             ),
                             return_ccf=True,
                         )
@@ -1303,10 +1274,7 @@ class StellarRVPrimitive(BasePrimitive):
             max_cores=max_cores,
             return_ccf=True,
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
-            zb=self._fiber_ccf_zb(fiber),
-            ccf_parabolic_vertex_n_samples=getattr(
-                self, "ccf_parabolic_vertex_n_samples", 31
-            ),
+            zb=float(self.ccf_zb),
             **(
                 dict(
                     ccf_center_m_s=ccf_center_m_s,

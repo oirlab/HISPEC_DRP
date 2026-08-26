@@ -26,12 +26,12 @@ class RegisterCalibrationPrimitive(BasePrimitive):
         The same calibration model that was registered.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'origin' : 'LOCAL',
     }
 
     def _perform(self):
-        cal_model = datamodels.open(self.input)
+        cal_model = datamodels.open(self.dataset)
 
         assert isinstance(
             cal_model, datamodels.CalibrationModel

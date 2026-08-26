@@ -22,14 +22,6 @@ Calibration alignment
 * **KOA download failures** — empty zip archives have been observed in development; E2E
   falls back to simulated stage-0 cals when fetch fails.
 
-Extraction edge cases
----------------------
-
-After trace-calibration fixes, **115 of 117** fiber-orders typically show median extracted
-flux above 5 e⁻ s⁻¹. The remaining low-flux cases are often the last echelle order
-(order 148 on BSPEC) at the detector edge — investigate blaze coverage rather than trace
-mis-centroiding.
-
 Network dependencies
 --------------------
 

@@ -4,7 +4,7 @@ Data Handling
 Open Model
 ++++++++++
 
-The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and constructs the appropriate data model class for that data product as specified by the header key `DATAMODL`.
+The method :py:meth:`datamodels.open <hispecdrp.datamodels.utils.open>` reads in a file and constructs the appropriate data model class for that data product as specified by the header key `DATAMODL`.
 
 **Data arrays** are accessed with ``model.<attribute>`` where the attribute name is the extension name (case insensitive).
 
@@ -14,32 +14,31 @@ The method :py:meth:`~hispecdrp.datamodels.utils.open` reads in a file and const
 
     from hispecdrp import datamodels
     from hispecdrp.utils import download_gdrive_file
-    sci_path = download_gdrive_file('HB.20231006.00000.00_rate-TELLURICS-FIB1.fits')
+    
+    # Download and open raw science data
+    sci_path = download_gdrive_file('HB.20240924.00000.00_raw.fits')
     model = datamodels.open(sci_path)
-    print(model.meta.datetime_obs) # -> '2023-10-06T00:00:00.000'
-    print(model.meta.model_type) # -> 'L0Model'
+
+    print(model.meta.datetime_obs) # -> '2024-09-24T00:00:00.000'
+    print(model.meta.model_type) # -> 'RampModel'
     print(model.meta.exposure_type) # -> 'SPEC'
     print(model.meta.spectrograph) # -> 'BSPEC'
     print(model.meta.instrument_mode) # -> 'YJHK'
-    print(model.data.shape) # -> (4096, 4160)
-
-.. autofunction:: hispecdrp.datamodels.open
+    print(model.data.shape) # -> (10, 4096, 4160) = (n_reads, ny, nx)
 
 
-A file can alose be passed to the constructor for the appropriate datamodel class:
+
+A file can also be passed to the :py:meth:`constructor <hispecdrp.datamodels.DataModel.__init__>` for the appropriate datamodel class:
 
 .. code-block:: python
 
     from hispecdrp import datamodels
-    model = datamodels.HISPECL0Model(sci_path)
-    ...
-
-.. autofunction:: hispecdrp.datamodels.DataModel.__init__
+    model = datamodels.L0Model(sci_path)
 
 Save Model
 ++++++++++
 
-Saving a datamodel is done with `DataModel.save`:
+Saving a datamodel is done with :py:meth:`DataModel.save <hispecdrp.datamodels.DataModel.save>`:
 
 
 .. code-block:: python
@@ -47,8 +46,6 @@ Saving a datamodel is done with `DataModel.save`:
     from hispecdrp import datamodels
     model = datamodels.open(sci_path)
     model.save(sci_path.replace('.fits', '_copy.fits'))
-
-.. autofunction:: hispecdrp.datamodels.DataModel.save
 
 
 Instantiate DataModel from Scratch
@@ -68,7 +65,7 @@ Instead of reading in a datamodel from a file, one can instantiate a datamodel f
     )
 
 
-**NOTE**: When instantiating new datamodels without a file, one should at minimum pass the ``datetime_obs`` keyword to the metadata.
+**NOTE**: When instantiating new datamodels without a file, one should at minimum pass the ``datetime_obs`` keyword to the metadata, or it will adopt the current time as the observation time.
 
 Processing History
 ++++++++++++++++++
@@ -79,10 +76,11 @@ Each datamodel has a **receipt** attribute which is a Table that contains a hist
 * **PROC_START_TIME** — Processing start time YYYY-MM-DDTHH:MM:SS.sss
 * **PROC_END_TIME** — Processing end time YYYY-MM-DDTHH:MM:SS.sss
 * **FILENAME** — Base filename
-* **ARGUMENTS** — JSON representation of arguments
+* **PARAMETERS** — JSON representation of parameters used for processing.
 * **DRP_VERSION** — DRP semver
 * **DRP_GIT_COMMIT_ID** — Full SHA1 commit ID
 * **STATUS** — COMPLETED, FAILED, SKIPPED
+* **CONFIG_FILE** — Name of the configuration file used for processing.
 
 
 Calibration History

@@ -182,8 +182,19 @@ def _extract_box_numba(
             D_var_rnoise = input_var_rnoise[window_inds, x].copy()
             D_dq = input_dq[window_inds, x]
 
-        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate / variance (NaN err → NaN var)
-        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D) & np.isfinite(D_var)
+        # Finite rate with non-finite err: treat variance as 0 and keep the pixel.
+        # Dropping empty aperture-edge pixels (NaN rate_err) and renormalizing
+        # caused large spectral spikes for undersampled PSFs.
+        for i in range(D.size):
+            if np.isfinite(D[i]) and not np.isfinite(D_var[i]):
+                D_var[i] = 0.0
+            if np.isfinite(D[i]) and not np.isfinite(D_var_poisson[i]):
+                D_var_poisson[i] = 0.0
+            if np.isfinite(D[i]) and not np.isfinite(D_var_rnoise[i]):
+                D_var_rnoise[i] = 0.0
+
+        # Mask bad pixels: DQ DO_NOT_USE and non-finite rate only
+        M = ((D_dq & DO_NOT_USE) == 0) & np.isfinite(D)
         bad = np.where(~M)[0]
         n_good = len(M) - len(bad)
         if n_good == 0:
@@ -194,6 +205,23 @@ def _extract_box_numba(
             dq_output[x] = DO_NOT_USE
             continue
 
+        # Flux that would have been contributed by masked pixels (before zeroing).
+        # If that flux is negligible, skip aperture renormalization so empty /
+        # DQ-only edge pixels do not inflate the spectrum.
+        flux_keep = 0.0
+        flux_lost = 0.0
+        w_good = 0.0
+        w_tot = 0.0
+        for i in range(D.size):
+            wi = W[i]
+            w_tot += wi
+            di = D[i] if np.isfinite(D[i]) else 0.0
+            if M[i]:
+                w_good += wi
+                flux_keep += di * wi
+            else:
+                flux_lost += di * wi
+
         # Zero bad pixels (M already excludes them). Use 0 not inf for variances:
         # ``M * inf`` is NaN and would poison the error sum.
         D[bad] = 0
@@ -201,12 +229,20 @@ def _extract_box_numba(
         D_var_poisson[bad] = 0
         D_var_rnoise[bad] = 0
 
-        # Debugging
-        # if x == 1024:
-        #     breakpoint()
+        if w_good <= 0.0:
+            spec_output[x] = np.nan
+            err_output[x] = np.nan
+            var_rnoise_output[x] = np.nan
+            var_poisson_output[x] = np.nan
+            dq_output[x] = DO_NOT_USE
+            continue
 
-        # Normalization factor
-        N = np.sum(M * W) / np.sum(W)
+        # Renormalize only when masked pixels carried real flux.
+        scale = max(abs(flux_keep), 1e-30)
+        if abs(flux_lost) > 1e-6 * scale and w_tot > 0.0:
+            N = w_good / w_tot
+        else:
+            N = 1.0
 
         if N == 0:
             spec_output[x] = np.nan

@@ -1,0 +1,4 @@
+class: DarkSubtractionPrimitive
+description: Standard dark subtraction configuration.
+context: {}
+parameters: {}

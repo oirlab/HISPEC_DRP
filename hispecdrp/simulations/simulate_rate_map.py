@@ -1088,7 +1088,7 @@ def _check_wavelength_sampling(
 
     delta_wl = np.diff(wl)
     resolution = wl[:-1] / delta_wl
-    # Allow a small float margin: densify inserts at exact log-λ steps that can
+    # Allow a small float margin: densify inserts at exact log-lambda steps that can
     # land ~0.5 below ``min_resolution`` from rounding (~2e-6 relative at R=3e5).
     return bool(np.all(resolution >= float(min_resolution) * (1.0 - 1e-5)))
 
@@ -1105,7 +1105,7 @@ def _upsample_spectrum(
     local resolving power falls below ``desired_sampling_resolution``.  A global
     linear resample to fixed ``R`` is avoided: for BT-Settl in the BSPEC band the
     native grid is already denser than ``R~3e5``, and a global rebuild would
-    *downsample* those lines (a cm/s–m/s systematic for small Doppler tests).
+    *downsample* those lines (a cm/s-m/s systematic for small Doppler tests).
 
     Inserted fluxes use PCHIP on the native samples (shape-preserving).
     """

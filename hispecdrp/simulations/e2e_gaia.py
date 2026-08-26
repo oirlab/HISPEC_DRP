@@ -20,23 +20,20 @@ from ..primitives.utils import (
     get_stellar_data_gaia_from_source_id,
 )
 from ..primitives.utils.gaia_query import GAIA_DR3_VIZIER_ID, query_vizier
+from ..primitives.utils.spectral_utils import twomass_vega_to_ab
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TELESCOPE = "Keck-II"
 
-# Fixed first-read MJD for reproducible E2E runs (UTC mid-2026). Exposure mid-time and
-# BERV are derived deterministically from this value plus ``n_reads`` / ``readtime``.
-DEFAULT_E2E_MJD_START = 61210.0
+# Fixed first-read MJD for reproducible E2E runs (UTC 2024-09-24). Kept inside the
+# IERS leap-second table so Astropy/ERFA does not emit "dubious year" warnings.
+# Exposure mid-time and BERV are derived from this value plus ``n_reads`` / ``readtime``.
+DEFAULT_E2E_MJD_START = 60577.0
 
 # Approximate mean epoch of 2MASS observations (J2000); Gaia positions are propagated
 # back to this epoch before the 2MASS cone search to handle high-proper-motion stars.
 _TWOMASS_EPOCH_JYEAR = 2000.0
-
-# 2MASS magnitudes are reported in the Vega system; the template normalizer
-# (``load_btsettl_spectrum``) works in AB. These are the per-band Vega->AB offsets
-# (m_AB = m_Vega + offset) for the 2MASS JHKs bands (Blanton & Roweis 2007).
-_TWOMASS_VEGA_TO_AB = {"J": 0.910, "H": 1.390, "K": 1.850, "KS": 1.850}
 
 # Map a 2MASS band label to the catalog magnitude key returned by
 # :func:`~hispecdrp.primitives.utils.get_2mass_data_vizier`.
@@ -83,13 +80,15 @@ def twomass_mag_ab(twomass_data: dict | None, band: str) -> float | None:
         return None
     b = str(band).upper()
     key = _TWOMASS_BAND_TO_KEY.get(b)
-    offset = _TWOMASS_VEGA_TO_AB.get(b)
-    if key is None or offset is None:
+    if key is None:
         return None
     mag_vega = _finite_float(twomass_data.get(key), float("nan"))
     if not np.isfinite(mag_vega):
         return None
-    return float(mag_vega) + float(offset)
+    try:
+        return twomass_vega_to_ab(float(mag_vega), b)
+    except ValueError:
+        return None
 
 
 def query_random_bright_gaia_source_id(
@@ -196,7 +195,7 @@ def build_target_meta_from_gaia(
     target_name: str | None = None,
     telescope: str = DEFAULT_TELESCOPE,
 ) -> dict:
-    """Build target metadata dict (same fields as ``tests/test_barycorr.py``)."""
+    """Build target metadata dict (same fields as ``tests/stage2/test_barycenter_correction.py``)."""
     sid = str(star_data["source_id"])
     name = target_name or f"Gaia_{sid}"
     return {
@@ -238,7 +237,7 @@ def resolve_e2e_gaia_target(
 
     Stellar properties are loaded with
     :func:`~hispecdrp.primitives.utils.get_stellar_data_gaia_from_source_id`
-    (same as ``tests/test_barycorr.py``).
+    (same as ``tests/stage2/test_barycenter_correction.py``).
     """
     if source_id is None:
         source_id = query_random_bright_gaia_source_id(

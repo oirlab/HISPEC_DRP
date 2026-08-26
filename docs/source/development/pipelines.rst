@@ -27,16 +27,16 @@ Every pipeline must define the class attribute ``PRIMITIVES`` which is a diction
             ... # Additional primitives as needed.
         }
 
-3. Arguments
-~~~~~~~~~~~~
+3. Parameters
+~~~~~~~~~~~~~
 
-By default, ``NewPipeline`` will inherit the same arguments as :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline`, which shares the same arguments as :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. It can specify any additional arguments in the class attribute ``ARGUMENTS``. These arguments are only relevant for the pipeline itself and are not passed to the primitives it uses.
+By default, ``NewPipeline`` will inherit the same parameters as :py:class:`~hispecdrp.pipelines.base_pipeline.BasePipeline`, which shares the same parameters as :py:class:`~hispecdrp.primitives.base_primitive.BasePrimitive`. It can specify any additional parameters in the class attribute ``PARAMETERS``. These parameters are only relevant for the pipeline itself and are not passed to the primitives it uses.
 
 .. code-block:: python
 
     class NewPipeline(BasePipeline):
 
-        ARGUMENTS = {
+        PARAMETERS = {
             'arg_name': ... # <default_value>
         }
 
@@ -44,7 +44,7 @@ By default, ``NewPipeline`` will inherit the same arguments as :py:class:`~hispe
 4. Perform Method
 ~~~~~~~~~~~~~~~~~
 
-The pipeline must implement the required method :py:meth:`~hispecdrp.pipelines.base_pipeline.BasePipeline._perform`. This method contains the main processing code for the pipeline. It takes in no arguments and returns a dictionary, which must contain at least one key - ``output``. If additional / ancillary outputs are needed, they can be found with either ``pipeline._output[<key>]`` or simply ``pipeline.<key>`` if there is no collision with the explicit attributes.
+The pipeline must implement the required method :py:meth:`~hispecdrp.pipelines.base_pipeline.BasePipeline._perform`. This method contains the main processing code for the pipeline. It takes in no parameters and returns a dictionary, which must contain at least one key - ``output``. If additional / ancillary outputs are needed, they can be found with either ``pipeline._output[<key>]`` or simply ``pipeline.<key>`` if there is no collision with the explicit attributes.
 
 .. code-block:: python
 
@@ -52,8 +52,8 @@ The pipeline must implement the required method :py:meth:`~hispecdrp.pipelines.b
 
         def _perform(self):
             # Main processing code here
-            # Primary input is accessed with ``self.input``
-            # Access arguments with ``self.<arg_name>``
+            # Primary input is accessed with ``self.dataset``
+            # Access parameters with ``self.<param_name>``
             # Call primitives with ``result = self.prim_alias.apply(<input>, **kwargs)``
             ...
             return dict(output=result, extra1=<extra_output1>, extra2=<extra_output2>)

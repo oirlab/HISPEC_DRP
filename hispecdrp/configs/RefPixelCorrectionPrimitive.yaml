@@ -1,0 +1,4 @@
+class: RefPixelCorrectionPrimitive
+description: Standard reference pixel correction configuration.
+context: {}
+parameters: {}

@@ -6,6 +6,7 @@ import astropy.time
 from datetime import datetime
 if TYPE_CHECKING:
     from ..datamodels import DataModel
+    from typing import Any
 
 from koa_middleware.utils import generate_koa_filehandle
 
@@ -31,6 +32,8 @@ def open(
     copy : bool
         If True, return a copy of the DataModel instance.
         If ``init`` is a filepath, this is ignored.
+    config : type, optional
+        The instrument configuration class to use for the DataModel.
     kwargs:
         Additional keyword arguments for the DataModel constructor.
     
@@ -392,8 +395,12 @@ def _as_model_list(other: DataModel | list[DataModel] | dict[DataModel]) -> list
     raise ValueError(f"Expected DataModel, list, or dict — got {type(other).__name__}")
 
 def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
+    from .extensions import migrate_receipt_table
+
+    target.receipt = migrate_receipt_table(target.receipt)
     for model in _as_model_list(other):
-        for row in model.receipt:
+        src = migrate_receipt_table(model.receipt)
+        for row in src:
             target.receipt.add_row(row)
 
 def append_calibrations(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
@@ -410,3 +417,14 @@ def append_ancestors(target: DataModel, other: DataModel | list[DataModel] | dic
         for row in model.data_ancestors:
             row_dict = {c: row[c] for c in model.data_ancestors.colnames}
             target.data_ancestors.add_row(row_dict)
+
+def get_first_model(dataset : Any, **kwargs) -> DataModel:
+    from .base_model import DataModel
+    if isinstance(dataset, (str, DataModel)):
+        return open(dataset, **kwargs)
+    elif isinstance(dataset, list):
+        return open(dataset[0], **kwargs)
+    elif isinstance(dataset, dict):
+        return open(list(dataset.values())[0], **kwargs)
+    else:
+        raise TypeError(f"Unsupported dataset type: {type(dataset)}")

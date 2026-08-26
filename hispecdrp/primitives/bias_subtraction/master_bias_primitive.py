@@ -43,7 +43,7 @@ class MakeMasterBiasPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'BiasModel',
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad
         'bias_threshold' : 1000,  # DN,  Threshold bias above which pixels are bad
@@ -52,8 +52,8 @@ class MakeMasterBiasPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if self.input is not None: # How do you call a primitive without input?
-            _inputs = self.input
+        if self.dataset is not None: # How do you call a primitive without input?
+            _inputs = self.dataset
         else:
             # todo implement automatic query of caldb to get all the darks between some dates with xyz filters
             raise NotImplementedError("Automatic calibration retrieval not yet implemented. List of darks must be provided as input.")
@@ -82,7 +82,8 @@ class MakeMasterBiasPrimitive(BasePrimitive):
             output_bias.ktc = np.sqrt(_kTC2 / len(input_models))
             output_bias.dq = _dq
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             _find_bad_pixels_bias(
                 output_bias.bias, output_bias.ktc , output_bias.dq,
                 self.kTC_threshold, self.bias_threshold

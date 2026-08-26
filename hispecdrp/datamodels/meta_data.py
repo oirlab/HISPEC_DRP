@@ -301,7 +301,7 @@ class MetaModel(MutableMapping):
             if sub_schema.get("cal_db") and sub_schema.get("type") == "boolean"
         ]
 
-    def pprint(self, show_none : bool = False):
+    def pprint(self, show_none : bool = False, header_style : bool = True):
         """
         Pretty-print the metadata.
 
@@ -313,15 +313,24 @@ class MetaModel(MutableMapping):
         for attr, sub_schema in self._schema['properties'].items():
             val = self[attr]
             if not val is None or show_none:
+
                 unit = sub_schema['unit']
-                if unit is not None:
-                    print(f"{attr}: {val} {unit}")
+
+                if header_style:
+                    s = f"{attr} = {val}"
+                    if unit is not None:
+                        s += f" ({unit})"
+                    s += f"  # {sub_schema['title']}"
+                    print(s)
                 else:
-                    print(f"{attr}: {val}")
-                print(f"  title: {sub_schema['title']}")
-                print(f"  type: {sub_schema['type']}")
-                print(f"  fits_keyword: {sub_schema['fits_keyword']}")
-                print(f"  fits_hdu: {sub_schema['fits_hdu']}")
+                    if unit is not None:
+                        print(f"{attr}: {val} {unit}")
+                    else:
+                        print(f"{attr}: {val}")
+                    print(f"  title: {sub_schema['title']}")
+                    print(f"  type: {sub_schema['type']}")
+                    print(f"  fits_keyword: {sub_schema['fits_keyword']}")
+                    print(f"  fits_hdu: {sub_schema['fits_hdu']}")
 
     def __delitem__(self, key):
         del self._data[key]

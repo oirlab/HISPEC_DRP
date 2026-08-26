@@ -15,7 +15,7 @@ from .ccf_common import (
 )
 from .ccf_fitting import CCFMetrics, calc_ccf_metrics
 from .ccf_spline import compute_ccf_spline
-from .ccf_parabolic import _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s
+from .ccf_peak import _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s
 from .ccf_utils import (
     LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
     _ccf_preview_finalize_n_workers,
@@ -40,23 +40,17 @@ logger = logging.getLogger(__name__)
 
 # Half-width (m/s) of the local velocity window for :func:`calc_ccf_metrics` after the
 # mask-line prominence peak seed (coarse uniform grids alias without this step).
-# Alias troughs inside this window are handled by prior-aware recentering /
-# ``_pipeline_rv_from_metrics`` peak anchoring rather than by shrinking this cut.
+# Alias troughs inside this window are handled by prior-aware recentering of the
+# Gaussian fit window (not by replacing the fitted RV with a discrete peak).
 _SPLINE_MASK_METRICS_FIT_HALF_WIDTH_M_S = 20_000.0
 
-# When the Gaussian disagrees with the discrete/parabolic CCF peak by more than
-# max(n_vstep × Δv, abs floor), fall back to the peak vertex (asymmetric-core guard).
-# Keep this near ~1–2 grid steps so ~100 m/s wing-biased fits on a 50 m/s grid are caught.
-_FIT_VS_PEAK_DISAGREE_N_VSTEP = 1.5
-_FIT_VS_PEAK_DISAGREE_MIN_M_S = 50.0
-
-# If the prominence seed / Gaussian is farther than this from ``gaussian_seed_mean_m_s``
+# If the prominence seed is farther than this from ``gaussian_seed_mean_m_s``
 # (typically ``ccf_input_velocity``), prefer a competitive local peak near the prior
-# as the metrics window center / peak-anchor (multimodal / alias guard).
+# as the metrics *window center* so the Gaussian fit does not lock onto a deeper
+# alias trough. Reported chunk RV always remains the Gaussian vertex.
 # Must sit below dense-mask alias offsets (~280–480 m/s on BSPEC 117/145).
 _ALIAS_PRIOR_RECENTER_GATE_M_S = 200.0
-# Half-width for prior-local peak search / peak-anchor recovery. Keep this tighter
-# than those same aliases; a FWHM-scale window re-admits the trough that stole the fit.
+# Half-width for prior-local peak search when recentering the metrics window.
 _ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S = 250.0
 # Prior-local peak must reach at least this fraction of the prominence-peak amplitude
 # (stored peak-up convention) before we recenter away from prominence.
@@ -86,11 +80,11 @@ def line_mask_scout_center_m_s(
     ccf_stored_mean: np.ndarray,
 ) -> float:
     """
-    Velocity center from a coarse scout pass on spline mask CCFs.
+    Velocity center from a coarse scout pass on mask CCFs.
 
-    Prefer the RV already measured by :func:`rv_per_chunks_line_mask_spline` on the
-    scout pass (prominence seed + :func:`~hispecdrp.primitives.utils.ccf.ccf_fitting.calc_ccf_metrics`).
-    That estimate is typically within a coarse-grid step of the true peak.
+    Prefer the RV already measured by the scout chunk worker (Gaussian centroid
+    after the Numba seed). That estimate is typically within a coarse-grid step
+    of the true peak.
 
     Do **not** use a global argmax on the mean stored CCF: with
     :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`
@@ -361,57 +355,6 @@ def _ccf_metrics_to_preview_fits(metrics: CCFMetrics) -> tuple[dict, dict | None
     return gaussian_fit, bisector_fit
 
 
-def _line_mask_ccf_peak_rv_m_s(
-    vel_grid: np.ndarray,
-    ccf_raw: np.ndarray,
-    *,
-    anchor_m_s: float | None = None,
-    half_width_m_s: float | None = None,
-) -> float:
-    """
-    Sub-pixel CCF peak RV (m/s) on the mask-line stored (peak-up) convention.
-
-    When ``anchor_m_s`` / ``half_width_m_s`` are set, the peak is taken only inside
-    that local window so a broad scout grid cannot latch onto a distant alias.
-    """
-    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
-    raw = np.asarray(ccf_raw, dtype=np.float64).ravel()
-    if vg.size < 3 or raw.size != vg.size:
-        return float("nan")
-    stored = -raw if LINE_MASK_CCF_STORED_NEGATED_FROM_RAW else raw
-    if (
-        anchor_m_s is not None
-        and math.isfinite(float(anchor_m_s))
-        and half_width_m_s is not None
-        and math.isfinite(float(half_width_m_s))
-        and float(half_width_m_s) > 0.0
-    ):
-        hw = float(half_width_m_s)
-        anc = float(anchor_m_s)
-        m = (vg >= anc - hw) & (vg <= anc + hw) & np.isfinite(vg) & np.isfinite(stored)
-        if int(np.count_nonzero(m)) >= 3:
-            vg = vg[m]
-            stored = stored[m]
-        else:
-            return float("nan")
-    return float(_ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s(vg, stored))
-
-
-def _velocity_grid_step_m_s(vel_grid: np.ndarray) -> float:
-    """Median positive spacing of a velocity grid (m/s), or NaN if unavailable."""
-    vg = np.asarray(vel_grid, dtype=np.float64).ravel()
-    if vg.size < 2:
-        return float("nan")
-    ok = np.isfinite(vg)
-    if int(np.count_nonzero(ok)) < 2:
-        return float("nan")
-    d = np.diff(np.sort(vg[ok]))
-    d = d[np.isfinite(d) & (d > 0.0)]
-    if d.size == 0:
-        return float("nan")
-    return float(np.median(d))
-
-
 def _pipeline_rv_from_metrics(
     metrics: CCFMetrics,
     *,
@@ -420,92 +363,16 @@ def _pipeline_rv_from_metrics(
     peak_anchor_m_s: float | None = None,
 ) -> tuple[float, float]:
     """
-    Chunk RV from :class:`CCFMetrics` (Gaussian), with asymmetric-core guards.
+    Chunk RV from :class:`CCFMetrics` Gaussian fit only.
 
-    Uses the Gaussian ``rv`` / ``rv_err``. Absolute bisector refine (``bis_rv``) is
-    retained on the metrics object for diagnostics only. If a CCF velocity grid is
-    provided and the Gaussian disagrees with the **local** discrete/parabolic peak
-    (anchored on the Gaussian, half-width ``max(FWHM, 5×Δv, 1 km/s)``) by more than
-    ``max(1.5×Δv, 50 m/s)``, fall back to that peak RV. The local window avoids
-    broad-grid alias peaks.
-
-    When ``peak_anchor_m_s`` (typically ``ccf_input_velocity``) is set and the
-    Gaussian has wandered farther than :data:`_ALIAS_PRIOR_RECENTER_GATE_M_S` from
-    it, the discrete-peak guard is anchored on the prior instead so an alias-locked
-    Gaussian cannot self-confirm via a peak search around the wrong trough.
-
-    Peak fallback is also refused when a finite prior is available and the candidate
-    peak lands farther than that gate from the prior (unless this was a prior-anchored
-    recovery that pulled the peak *closer* to the prior than the Gaussian). This
-    stops FWHM-wide peak searches from swapping a near-prior shoulder fit for a
-    deeper alias (e.g. BSPEC order 117).
+    Always returns the Gaussian ``rv`` / ``rv_err``. Absolute bisector refine
+    (``bis_rv``) stays on the metrics object for diagnostics. Keyword arguments
+    ``vel_grid``, ``ccf_raw``, and ``peak_anchor_m_s`` are accepted for call-site
+    compatibility and are not used to replace the fitted RV with a discrete peak
+    (no snap-back onto the coarse velocity grid).
     """
-    rv = float(metrics.rv)
-    err = float(metrics.rv_err)
-    gauss_rv = rv
-
-    if (
-        vel_grid is not None
-        and ccf_raw is not None
-        and math.isfinite(gauss_rv)
-    ):
-        v_step = _velocity_grid_step_m_s(vel_grid)
-        fwhm = float(metrics.fwhm) if metrics.fwhm is not None else float("nan")
-        peak_hw = 1000.0
-        if np.isfinite(fwhm) and fwhm > 0.0:
-            peak_hw = max(peak_hw, float(fwhm))
-        if math.isfinite(v_step) and v_step > 0.0:
-            peak_hw = max(peak_hw, 5.0 * float(v_step))
-        anchor = gauss_rv
-        prior_anchored = False
-        prior = (
-            float(peak_anchor_m_s)
-            if peak_anchor_m_s is not None and math.isfinite(float(peak_anchor_m_s))
-            else None
-        )
-        if (
-            prior is not None
-            and abs(gauss_rv - prior) > float(_ALIAS_PRIOR_RECENTER_GATE_M_S)
-        ):
-            # Keep this window tight: FWHM-inflated half-widths re-admit the alias
-            # trough that stole the Gaussian (e.g. BSPEC order 145 at ~+480 m/s).
-            anchor = prior
-            peak_hw = float(_ALIAS_PRIOR_SEARCH_HALF_WIDTH_M_S)
-            prior_anchored = True
-        peak_rv = _line_mask_ccf_peak_rv_m_s(
-            vel_grid,
-            ccf_raw,
-            anchor_m_s=anchor,
-            half_width_m_s=peak_hw,
-        )
-        if math.isfinite(peak_rv):
-            disagree_thresh = _FIT_VS_PEAK_DISAGREE_MIN_M_S
-            if math.isfinite(v_step) and v_step > 0.0:
-                disagree_thresh = max(
-                    disagree_thresh,
-                    _FIT_VS_PEAK_DISAGREE_N_VSTEP * float(v_step),
-                )
-            if abs(gauss_rv - peak_rv) > disagree_thresh:
-                take_peak = True
-                if prior is not None:
-                    d_peak = abs(float(peak_rv) - prior)
-                    d_gauss = abs(gauss_rv - prior)
-                    gate = float(_ALIAS_PRIOR_RECENTER_GATE_M_S)
-                    if prior_anchored:
-                        # Recovery must move toward the prior, not along an alias wing.
-                        take_peak = d_peak < d_gauss
-                    elif d_peak > gate:
-                        take_peak = False
-                if take_peak:
-                    rv = float(peak_rv)
-                    # Alias recovery (or missing Gaussian σ): use a grid-scale floor.
-                    if prior_anchored or not (math.isfinite(err) and err > 0.0):
-                        err = (
-                            0.15 * float(v_step)
-                            if math.isfinite(v_step) and v_step > 0.0
-                            else 1.0
-                        )
-    return rv, err
+    del vel_grid, ccf_raw, peak_anchor_m_s
+    return float(metrics.rv), float(metrics.rv_err)
 
 
 def _fit_ccf_metrics_on_stored_ccf(

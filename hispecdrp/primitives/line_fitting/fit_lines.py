@@ -261,10 +261,18 @@ def fit_line_gauss(
 
     try:
         cov = np.linalg.inv(result.jac.T @ result.jac)
-        errors = np.sqrt(np.diag(cov))
     except np.linalg.LinAlgError:
-       logger.exception("Covariance matrix could not be computed. Fit may be degenerate.")
-       return _output_badfit()
+        logger.exception("Covariance matrix could not be computed. Fit may be degenerate.")
+        return _output_badfit()
+
+    # ``(J^T J)^{-1}`` is only approximately a covariance. On a poorly constrained
+    # line the inverse can put negative values on the diagonal; ``sqrt`` of those
+    # would warn and is not a real 1-sigma error. Keep the centroid and report nan.
+    var = np.diag(np.asarray(cov, dtype=np.float64))
+    errors = np.full(var.shape, np.nan, dtype=np.float64)
+    ok = np.isfinite(var) & (var >= 0.0)
+    if np.any(ok):
+        errors[ok] = np.sqrt(var[ok])
 
     # Scale amplitude and background back to original units. Emission subtracted
     # a floor then divided by norm; absorption only divided by norm. Restore the

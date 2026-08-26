@@ -9,6 +9,7 @@ the Stage 0 and fiberflat pipelines. Master calibrations come from
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
@@ -23,6 +24,8 @@ from .. import datamodels
 from ..primitives.utils.spectral_utils import (
     get_spectrum_path,
     load_btsettl_spectrum,
+    normalize_2mass_band,
+    resolve_twomass_mag_ab,
 )
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
@@ -34,6 +37,7 @@ from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simul
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 # Default output filenames for simulated products
 DEFAULT_SIMULATED_RAMP_FILENAME = "simulated_ramp.fits"
+DEFAULT_SIMULATED_RAMP_FLOAT32_FILENAME = "simulated_ramp_float32.fits"
 
 def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -> str:
     """Default filename for a single-fiber fiberflat rate FITS (matches KOA-style naming)."""
@@ -44,9 +48,14 @@ def _fiberflat_rate_filename(spectrograph: str, fiber: int, exposure: int = 1) -
     return f"{base}.{exposure:03d}.fits"
 
 
-def get_expected_ramp_path(output_dir: str) -> str:
-    """Return the path where the simulated ramp is saved (``simulated_ramp.fits`` under ``output_dir``)."""
-    return os.path.join(os.path.abspath(output_dir), DEFAULT_SIMULATED_RAMP_FILENAME)
+def get_expected_ramp_path(
+    output_dir: str,
+    *,
+    ramp_filename: str | None = None,
+) -> str:
+    """Return the path where the simulated ramp is saved under ``output_dir``."""
+    name = ramp_filename or DEFAULT_SIMULATED_RAMP_FILENAME
+    return os.path.join(os.path.abspath(output_dir), name)
 
 
 def get_expected_fiberflat_rate_paths(
@@ -209,13 +218,16 @@ __all__ = [
     "sim_stage1_masters_exist",
     "load_cached_sim_stage1_masters",
     "save_sim_stage1_masters",
+    "get_default_stage0_primitives",
     "get_default_stage0_prim_args",
     "run_stage0_simulation",
     "run_fiberflat_pipeline",
     "create_wavelength_solution_model_from_sim",
     "register_sim_lfc_wavesol",
+    "register_sim_matched_nonlin",
     "register_sim_stage1_calibrations",
     "prepare_fiberflat_models",
+    "get_fiberflat_primitives",
     "get_fiberflat_prim_args",
 ]
 
@@ -292,7 +304,7 @@ def register_sim_lfc_wavesol(
     Prefers the packaged sim-HDF **line-ZP** WAVE under ``hispecdrp/data/wavesol/``
     when present (``prefer_packaged_line_zp=True``); otherwise falls back to the
     geometric HDF deposit-inverse WAVE. The model uses ``cal_type='lfc_wavesol'``,
-    so Stage 1 ``set_wavesol`` can select it without ``prim_args`` overrides.
+    so Stage 1 ``set_wavesol`` can select it without ``primitives`` overrides.
 
     Packaged line-ZP registration defaults to ``new_version=True`` and tags
     ``meta.note`` so :class:`~hispecdrp.calibrations.selectors.WavelengthSolutionSelector`
@@ -369,6 +381,97 @@ def register_sim_lfc_wavesol(
         local_path,
     )
     return local_path, cal_record
+
+
+def register_sim_matched_nonlin(
+    nonlin_model: datamodels.NonlinearCorrectionModel,
+    *,
+    connect_remote: bool = False,
+    origin: str = "LOCAL",
+    new_version: bool = True,
+) -> tuple[str, dict]:
+    """
+    Register a UTR-matched ``NonlinearCorrectionModel`` in the local caldb.
+
+    Tags ``meta.note`` with :data:`~hispecdrp.simulations.e2e_support.SIM_MATCHED_NONLIN_NOTE`
+    so :class:`~hispecdrp.calibrations.selectors.NonlinearCorrectionSelector`
+    prefers it over KOA masters. Call this when the ramp was simulated with an
+    explicit ``nonlin_coeffs`` so ``Stage0Pipeline.call(ramp)`` applies the
+    matching inverse without ``primitives`` overrides.
+    """
+    from ..calibrations import HISPECCalibrationStore
+
+    meta = getattr(nonlin_model, "meta", None)
+    if meta is not None:
+        meta.note = e2e_support.SIM_MATCHED_NONLIN_NOTE
+
+    with HISPECCalibrationStore(connect_remote=connect_remote, sync_on_init=False) as store:
+        existing = _existing_sim_matched_nonlin(store, nonlin_model)
+        if existing is not None:
+            local_path, cal_record = existing
+            logger.info(
+                "Reusing sim-matched nonlin in caldb (spectrograph=%s): %s",
+                getattr(meta, "spectrograph", None),
+                local_path,
+            )
+            return local_path, cal_record
+        local_path, cal_record = store.register_calibration(
+            nonlin_model, origin=origin, new_version=bool(new_version)
+        )
+    if local_path is None or not (cal_record or {}).get("filename"):
+        raise RuntimeError(
+            "Failed to register sim-matched nonlin: "
+            f"local_path={local_path!r}, filename={(cal_record or {}).get('filename')!r}."
+        )
+    logger.info(
+        "Registered sim-matched nonlin in caldb (spectrograph=%s): %s",
+        getattr(meta, "spectrograph", None),
+        local_path,
+    )
+    return local_path, cal_record
+
+
+def _existing_sim_matched_nonlin(
+    store, nonlin_model: datamodels.NonlinearCorrectionModel
+) -> tuple[str, dict] | None:
+    """Return an already-registered sim-matched nonlin for the same science meta."""
+    meta = getattr(nonlin_model, "meta", None)
+    if meta is None:
+        return None
+    spec = str(getattr(meta, "spectrograph", "") or "").upper()
+    era = getattr(meta, "instrument_era", None)
+    mjd = getattr(meta, "mjd_start", None)
+    if not spec or era is None or mjd is None:
+        return None
+    tag = e2e_support.SIM_MATCHED_NONLIN_NOTE
+    try:
+        rows = list(
+            store.local_db.rows_where(
+                """
+                cal_type = :cal_type AND
+                spectrograph = :spec AND
+                instrument_era = :era AND
+                ABS(mjd_start - :mjd) < 1e-6 AND
+                note LIKE :note
+                """,
+                {
+                    "cal_type": "nonlin",
+                    "spec": spec,
+                    "era": era,
+                    "mjd": float(mjd),
+                    "note": f"%{tag}%",
+                },
+            )
+            or ()
+        )
+    except Exception:
+        return None
+    if not rows:
+        return None
+    path, rec = store._existing_calibration_path_and_record(rows[0])
+    if path and rec and rec.get("filename"):
+        return path, rec
+    return None
 
 
 def _ensure_packaged_line_zp_note(store, rec: dict) -> dict:
@@ -476,9 +579,14 @@ def _merge_ramp_meta_into_cal(model: datamodels.DataModel, ramp_meta, spectrogra
     # Stage-1 selector prefers a same-night geometric lfc_wavesol instead.
     mjd = getattr(meta, "mjd_start", None)
     if mjd is not None and getattr(meta, "datetime_obs", None) in (None, "", "1858-11-17T00:00:00.000"):
-        import astropy.time
+        import warnings
 
-        meta.datetime_obs = astropy.time.Time(float(mjd), format="mjd", scale="utc").isot
+        import astropy.time
+        from erfa import ErfaWarning
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ErfaWarning, message=r".*dubious year.*")
+            meta.datetime_obs = astropy.time.Time(float(mjd), format="mjd", scale="utc").isot
 
 
 def register_sim_stage1_calibrations(
@@ -693,6 +801,70 @@ def create_simulated_calibration_models(
     }
 
 
+def _kTC_noise_median_e(kTC_noise: float | np.ndarray | None) -> float:
+    """Return a scalar median kTC amplitude in e- (0 if disabled)."""
+    if kTC_noise is None:
+        return 0.0
+    arr = np.asarray(kTC_noise, dtype=np.float64)
+    if arr.size == 0:
+        return 0.0
+    return float(np.nanmedian(arr))
+
+
+def _ensure_bias_headroom_for_clipping(
+    bias_e: np.ndarray,
+    *,
+    gain_arr: np.ndarray,
+    read_noise_e: np.ndarray,
+    kTC_noise: float | np.ndarray | None,
+    clip_ramps: bool,
+    bias_model: datamodels.CalibrationModel,
+) -> np.ndarray:
+    """
+    Raise injected bias when it is too low for kTC/read-noise + uint16 clipping.
+
+    Placeholder KOA bias masters are often identically 0 DN while UTR still adds
+    default kTC (~50 e-). With ``clip_ramps=True``, negative kTC draws peg early
+    reads at 0 and systematically flatten fitted slopes (rate pedestal / asymmetric
+    background pulls). Lift bias (and the in-memory bias cal) so Stage 0 bias_sub
+    stays matched if enabled.
+    """
+    if not clip_ramps:
+        return bias_e
+
+    ktc_med = _kTC_noise_median_e(kTC_noise)
+    rn_med = float(np.nanmedian(np.asarray(read_noise_e, dtype=np.float64)))
+    noise_floor = ktc_med + rn_med
+    if noise_floor <= 0.0:
+        return bias_e
+
+    # ~5σ headroom keeps essentially all pixels above the clip for Gaussian noise.
+    min_bias_e = 5.0 * noise_floor
+    bias_med = float(np.nanmedian(np.asarray(bias_e, dtype=np.float64)))
+    if np.isfinite(bias_med) and bias_med >= min_bias_e:
+        return bias_e
+
+    # Prefer the historical simulated-cal default (~1000 e-) when raising placeholders.
+    target_bias_e = max(min_bias_e, 1000.0)
+    logger.warning(
+        "Bias calibration median %.3g e- is too low for kTC=%.3g e- and "
+        "read_noise=%.3g e- with clip_ramps; raising bias to %.3g e- to avoid "
+        "zero-clip slope bias.",
+        bias_med,
+        ktc_med,
+        rn_med,
+        target_bias_e,
+    )
+    bias_e_out = np.full(np.asarray(bias_e).shape, target_bias_e, dtype=np.float64)
+    gain_safe = np.where(np.asarray(gain_arr, dtype=np.float64) > 0.0, gain_arr, 1.0)
+    bias_dn = (bias_e_out / gain_safe).astype(np.float32)
+    if hasattr(bias_model, "bias"):
+        bias_model.bias[:] = bias_dn
+    else:
+        bias_model["BIAS"][:] = bias_dn
+    return bias_e_out
+
+
 def simulate_ramp_from_rate_map(
     rate_map: np.ndarray,
     calibration_models: dict[str, datamodels.CalibrationModel],
@@ -709,6 +881,7 @@ def simulate_ramp_from_rate_map(
     mjd_start: float | None = None,
     target_meta: dict | None = None,
     seed: int | None = None,
+    ramp_filename: str | None = None,
 ) -> datamodels.RampModel:
     """
     Simulate a ramp from a rate map (e-/s/pixel) using create_ramp and calibration models.
@@ -739,6 +912,14 @@ def simulate_ramp_from_rate_map(
         Whether to add Poisson noise in create_ramp. Default is True.
     kTC_noise : float, optional
         kTC noise in e- for first read. Default is 50.0.
+        When ``clip_ramps`` is True and the bias calibration median is below
+        ``5 * (kTC + read_noise)`` e-, the injected bias (and in-memory bias
+        cal) is raised to avoid zero-clip slope bias from placeholder bias=0
+        masters.
+    ramp_filename : str or None, optional
+        Basename written to ``meta.filename``. Defaults to
+        ``simulated_ramp.fits`` (uint16) or ``simulated_ramp_float32.fits``
+        when ``convert_to_uint16`` is False.
 
     Returns
     -------
@@ -783,6 +964,14 @@ def simulate_ramp_from_rate_map(
     dark_e_per_s = np.asarray(dark_map, dtype=np.float64) * gain_arr
     rn_dn = np.asarray(rn_map, dtype=np.float64)
     read_noise_e = rn_dn * gain_arr
+    bias_e = _ensure_bias_headroom_for_clipping(
+        bias_e,
+        gain_arr=gain_arr,
+        read_noise_e=read_noise_e,
+        kTC_noise=kTC_noise,
+        clip_ramps=clip_ramps,
+        bias_model=bias_model,
+    )
 
     eff_mjd_start = 60577.0 if mjd_start is None else float(mjd_start)
     ramp_dict = create_ramp(
@@ -822,11 +1011,20 @@ def simulate_ramp_from_rate_map(
         dq_raw=ramp_dict["dq_raw"],
         meta=ramp_dict["meta"],
     )
-    ramp_model.meta.filename = DEFAULT_SIMULATED_RAMP_FILENAME
+    if convert_to_uint16:
+        fname = ramp_filename or DEFAULT_SIMULATED_RAMP_FILENAME
+    else:
+        # Keep continuous DN on disk/in-memory (RampModel default HDU is uint16).
+        from ..datamodels.extensions import IMAGE_FLOAT32_HDU
+
+        fname = ramp_filename or DEFAULT_SIMULATED_RAMP_FLOAT32_FILENAME
+        ramp_model.EXTENSIONS = {**type(ramp_model).EXTENSIONS, "DATA": IMAGE_FLOAT32_HDU}
+        ramp_model.data = np.asarray(ramp_model.data, dtype=np.float32)
+    ramp_model.meta.filename = fname
     return ramp_model
 
 
-def get_default_stage0_prim_args(
+def get_default_stage0_primitives(
     *,
     max_cores: int | None = 1,
     ramp_fit_method: str = "jwst_likely",
@@ -835,7 +1033,7 @@ def get_default_stage0_prim_args(
     run_jump_detec: bool = False,
 ) -> dict:
     """
-    Return default primitive arguments for the Stage 0 pipeline.
+    Return default ``primitives`` for the Stage 0 pipeline.
 
     Parameters
     ----------
@@ -849,13 +1047,15 @@ def get_default_stage0_prim_args(
     run_nonlin_corr : bool, optional
         Whether to run nonlinearity correction. Default is False.
     run_jump_detec : bool, optional
-        Whether to run jump detection. Default is False.
+        Whether to run the standalone jump-detection primitive. Default False.
+        Independent of ``ramp_fit``'s in-ramp ``jwst_jump_detection``, which is
+        also False by default in these primitives (enable explicitly for CR work).
 
     Returns
     -------
     dict
-        Nested dict of primitive names to keyword arguments for
-        Stage0Pipeline.apply(..., prim_args=...).
+        Nested dict of primitive names to parameters for
+        ``Stage0Pipeline.call(..., primitives=...)``.
     """
     mc = max_cores if max_cores is not None else 1
     return {
@@ -872,13 +1072,19 @@ def get_default_stage0_prim_args(
         "ramp_fit": {
             "method": ramp_fit_method,
             "max_cores": mc,
-            "jwst_jump_detection": True,
+            # In-ramp JWST jump flagging is off by default: it is a science
+            # CR/jump path, not part of the baseline noise model, and it biases
+            # Stage-0 rate self-checks. Enable explicitly when needed.
+            "jwst_jump_detection": False,
             "jwst_jump_rejection_threshold": 4.0,
         },
         "dark_sub": {"max_cores": mc},
         "gain_corr": {"max_cores": mc},
         "detflat_corr": {"max_cores": mc},
     }
+
+
+get_default_stage0_prim_args = get_default_stage0_primitives
 
 
 def _build_fiberflat_rate_map(
@@ -925,7 +1131,7 @@ def create_dummy_fiberflat_rate_files(
     readtime: float = 1.7,
     n_reads: int = 10,
     max_cores: int = 1,
-    stage0_prim_args: dict | None = None,
+    stage0_primitives: dict | None = None,
     fiberflat_filename: callable | None = None,
     fiberflat_coadd_exposures: int = 1,
     fiberflat_duplicate_single_reduction: bool = False,
@@ -951,8 +1157,8 @@ def create_dummy_fiberflat_rate_files(
     import astropy.units as u
     from astropy.modeling.models import BlackBody
 
-    if stage0_prim_args is None:
-        stage0_prim_args = get_default_stage0_prim_args(max_cores=max_cores)
+    if stage0_primitives is None:
+        stage0_primitives = get_default_stage0_primitives(max_cores=max_cores)
     if fiberflat_filename is None:
         fiberflat_filename = _fiberflat_rate_filename
     if fiberflat_coadd_exposures < 1:
@@ -1055,7 +1261,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             paths.append(_finalize_and_save(rate_model, 1))
@@ -1076,7 +1282,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             primary_path = _finalize_and_save(rate_model, 1)
@@ -1104,7 +1310,7 @@ def create_dummy_fiberflat_rate_files(
                 ramp_model,
                 calibration_models,
                 output_dir=out_dir_abs,
-                prim_args=stage0_prim_args,
+                primitives=stage0_primitives,
                 max_cores=max_cores,
             )
             paths.append(_finalize_and_save(rate_model, exposure))
@@ -1122,8 +1328,9 @@ def run_stage0_simulation(
     ramp_model: datamodels.RampModel,
     calibration_models: dict[str, datamodels.CalibrationModel],
     output_dir: str = ".",
-    prim_args: dict | None = None,
+    primitives: dict | None = None,
     *,
+    prim_args: dict | None = None,
     max_cores: int | None = None,
 ) -> datamodels.DataModel:
     """
@@ -1138,21 +1345,25 @@ def run_stage0_simulation(
         ``dq``, ``saturation``, ``bias``, ``gain``, ``rn``, ``dark``, ``detflat``.
     output_dir : str, optional
         Directory for pipeline outputs. Default is ".".
-    prim_args : dict or None, optional
-        Primitive arguments for the pipeline. If None, use
-        :func:`get_default_stage0_prim_args`(). Default is None.
+    primitives : dict or None, optional
+        Per-primitive parameters for ``Stage0Pipeline.call``. If None, use
+        :func:`get_default_stage0_primitives`(). Default is None.
 
     Returns
     -------
     DataModel
-        Result of Stage0Pipeline.apply (e.g. rate or slope model).
+        Result of ``Stage0Pipeline.call`` (e.g. rate or slope model).
     """
-    if prim_args is None:
-        prim_args = get_default_stage0_prim_args()
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
+    if primitives is None:
+        primitives = get_default_stage0_primitives()
+    else:
+        primitives = copy.deepcopy(primitives)
     if max_cores is not None:
-        prim_args = e2e_support.apply_max_cores_to_stage0_prim_args(prim_args, max_cores)
-    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
-        prim_args, Stage0Pipeline.PRIMITIVES
+        primitives = e2e_support.apply_max_cores_to_stage0_primitives(primitives, max_cores)
+    primitives = e2e_support.apply_e2e_save_and_preview_flags(
+        primitives, Stage0Pipeline.PRIMITIVES
     )
 
     output_dir = e2e_support.ensure_output_directory(output_dir)
@@ -1162,20 +1373,24 @@ def run_stage0_simulation(
         ny, nx
     )
 
-    pipe = Stage0Pipeline()
-    pipe.dq_init.dq = calibration_models["dq"]
-    pipe.saturation_check.saturation = calibration_models["saturation"]
-    pipe.bias_sub.bias = calibration_models["bias"]
-    pipe.nonlin_corr.nonlin = nonlin_model
-    pipe.jump_detec.gain = calibration_models["gain"]
-    pipe.jump_detec.rn = calibration_models["rn"]
-    pipe.ramp_fit.gain = calibration_models["gain"]
-    pipe.ramp_fit.rn = calibration_models["rn"]
-    pipe.dark_sub.dark = calibration_models["dark"]
-    pipe.gain_corr.gain = calibration_models["gain"]
-    pipe.detflat_corr.detflat = calibration_models["detflat"]
+    primitives = copy.deepcopy(primitives)
+    primitives.setdefault("dq_init", {})["dq"] = calibration_models["dq"]
+    primitives.setdefault("saturation_check", {})["saturation"] = calibration_models[
+        "saturation"
+    ]
+    primitives.setdefault("bias_sub", {})["bias"] = calibration_models["bias"]
+    primitives.setdefault("nonlin_corr", {})["nonlin"] = nonlin_model
+    primitives.setdefault("jump_detec", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("jump_detec", {})["rn"] = calibration_models["rn"]
+    primitives.setdefault("ramp_fit", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("ramp_fit", {})["rn"] = calibration_models["rn"]
+    primitives.setdefault("dark_sub", {})["dark"] = calibration_models["dark"]
+    primitives.setdefault("gain_corr", {})["gain"] = calibration_models["gain"]
+    primitives.setdefault("detflat_corr", {})["detflat"] = calibration_models["detflat"]
 
-    return pipe.apply(ramp_model, prim_args=prim_args, output_dir=output_dir)
+    return Stage0Pipeline.call(
+        ramp_model, primitives=primitives, output_dir=output_dir
+    )
 
 
 def create_ramp_and_calibrations(
@@ -1274,13 +1489,23 @@ def create_ramp_and_calibrations(
         When using master calibrations, sync store first.
     template_mag_ab, template_2mass_band : optional
         When building the default rate map from the bundled BT-Settl template, normalize
-        to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, or ``'K'``).
+        to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, ``'K'``, or
+        ``'Ks'``).
     sky_filename : string, optional
         MK sky background filename to be used as sky background on sky fiber.
     sky_fiber : int, optional
-        Fiber number to which only the sky background is applied. 
+        Fiber number to which only the sky background is applied.
     **cal_kw
-        Passed to :func:`create_simulated_calibration_models` when creating dummy calibrations.
+        Passed to :func:`create_simulated_calibration_models` when creating dummy
+        calibrations. Also accepts ``nonlin_coeffs`` (UTR forward ``np.polyval``
+        poly, high→low). Default is the identity poly
+        (:data:`~hispecdrp.simulations.e2e_support.IDENTITY_UTR_FORWARD_NONLIN_POLY`).
+        Whatever poly is used is applied to the UTR and a matching Stage-0
+        ``nonlin`` cal is registered in the local caldb (tagged
+        ``sim_matched_nonlin``) so ``Stage0Pipeline.call(ramp)`` applies the
+        inverse by default. Pass
+        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_UTR_FORWARD_NONLIN_POLY`
+        for a small quadratic forward nonlin with a matched inverse.
 
     Returns
     -------
@@ -1293,15 +1518,26 @@ def create_ramp_and_calibrations(
         raise ValueError(
             "template_mag_ab and template_2mass_band must both be set or both be None."
         )
+    # UTR forward nonlinearity (np.polyval high→low). Default is identity so
+    # Stage 0 nonlin_corr is a matched no-op unless the caller opts into a
+    # realistic forward poly (e.g. DEFAULT_UTR_FORWARD_NONLIN_POLY).
+    nonlin_coeffs = cal_kw.pop(
+        "nonlin_coeffs", e2e_support.IDENTITY_UTR_FORWARD_NONLIN_POLY
+    )
+    kTC_noise = cal_kw.pop("kTC_noise", None)
+    clip_ramps = cal_kw.pop("clip_ramps", None)
+    ramp_filename = cal_kw.pop("ramp_filename", None)
     _band: str | None = None
     if template_2mass_band is not None:
-        _band = str(template_2mass_band).strip().upper()
-        if _band not in ("J", "H", "K"):
-            raise ValueError("template_2mass_band must be one of 'J', 'H', 'K'")
+        try:
+            _band = normalize_2mass_band(template_2mass_band)
+        except ValueError as exc:
+            raise ValueError(
+                "template_2mass_band must be one of 'J', 'H', 'K', or 'Ks'"
+            ) from exc
 
     output_dir = e2e_support.ensure_output_directory(output_dir)
     e2e_support.ensure_koa_calibration_cache_env(output_dir)
-    ramp_path = get_expected_ramp_path(output_dir)
 
     if rate_map is None:
         if fibers is None:
@@ -1450,9 +1686,7 @@ def create_ramp_and_calibrations(
             calibration_models = cal_models
 
     logger.info("Simulating ramp (n_reads=%s, readtime=%s s).", n_reads, readtime)
-    ramp_model = simulate_ramp_from_rate_map(
-        rate_map,
-        calibration_models,
+    ramp_kw: dict = dict(
         readtime=readtime,
         n_reads=n_reads,
         max_cores=max_cores,
@@ -1463,8 +1697,40 @@ def create_ramp_and_calibrations(
         target_meta=target_meta,
         seed=seed,
     )
+    if kTC_noise is not None:
+        ramp_kw["kTC_noise"] = kTC_noise
+    if clip_ramps is not None:
+        ramp_kw["clip_ramps"] = clip_ramps
+    if ramp_filename is not None:
+        ramp_kw["ramp_filename"] = ramp_filename
+    # Always pass an explicit forward poly (identity by default) and register
+    # the matching Stage-0 inverse so pipeline defaults stay consistent.
+    fwd = np.asarray(nonlin_coeffs, dtype=np.float64)
+    ramp_kw["nonlin_coeffs"] = fwd
+    ramp_model = simulate_ramp_from_rate_map(
+        rate_map,
+        calibration_models,
+        **ramp_kw,
+    )
+    ramp_path = os.path.join(
+        os.path.abspath(output_dir),
+        ramp_model.meta.filename or DEFAULT_SIMULATED_RAMP_FILENAME,
+    )
     if overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
+
+    rm = np.asarray(rate_map, dtype=np.float64)
+    ny, nx = int(rm.shape[0]), int(rm.shape[1])
+    nonlin_model = e2e_support.matching_poly_nonlin_calibration_model(
+        ny,
+        nx,
+        forward_poly_high_first=fwd,
+    )
+    _merge_ramp_meta_into_cal(nonlin_model, ramp_model.meta, spectrograph)
+    register_sim_matched_nonlin(nonlin_model, connect_remote=False)
+    calibration_models = dict(calibration_models)
+    calibration_models["nonlin"] = nonlin_model
+
     return ramp_model, calibration_models, np.asarray(rate_map, dtype=np.float64)
 
 
@@ -1475,6 +1741,7 @@ def create_ramp_from_spectrum(
     fibers: list[int] | None = None,
     template_filename: str | None = None,
     mag_ab: float | None = 10.0,
+    mag_vega: float | None = None,
     filter_band: str | None = "J",
     spectrum_wavelengths=None,
     spectrum_flux=None,
@@ -1489,6 +1756,7 @@ def create_ramp_from_spectrum(
     register_wavesol: bool = True,
     register_stage1_sims: bool = True,
     reuse_stage1_sims: bool = True,
+    extraction_aperture: float = 10.0,
     seed: int | None = 0,
     sky_filename: str | None = None,
     sky_fiber: int | None = None,
@@ -1538,9 +1806,13 @@ def create_ramp_from_spectrum(
         BT-Settl HDF5 filename under the package templates directory. Ignored when
         ``spectrum_wavelengths`` and ``spectrum_flux`` are provided. Default is the
         E2E default template when neither a custom spectrum nor this name is given.
-    mag_ab, filter_band : optional
-        Normalize the BT-Settl template to this AB magnitude in a 2MASS band
-        (``'J'``, ``'H'``, or ``'K'``). Both must be set or both ``None``.
+    mag_ab, mag_vega, filter_band : optional
+        Normalize the BT-Settl template to a 2MASS magnitude
+        (``'J'``, ``'H'``, ``'K'``, or ``'Ks'``). Provide either AB or Vega;
+        ``mag_vega`` overrides ``mag_ab`` when both are set. Vega→AB uses fixed
+        Blanton & Roweis (2007) offsets (J: +0.91, H: +1.39, Ks: +1.85).
+        A magnitude requires ``filter_band``; set both magnitude args and
+        ``filter_band`` to ``None`` to skip template normalization.
     spectrum_wavelengths, spectrum_flux : optional
         Custom 1D spectrum (with units). When both are set, the template is not loaded.
     radial_velocity_km_s : float, optional
@@ -1573,6 +1845,10 @@ def create_ramp_from_spectrum(
     reuse_stage1_sims : bool, optional
         When True (default), reuse Stage-1 masters / fiberflat rate frames already
         present under ``<output_dir>/cals``. Set False to force re-simulation.
+    extraction_aperture : float, optional
+        Box-extraction aperture (pixels) used when building / caching sim-HDF
+        Stage-1 fiberflat masters. Default ``10``. Science Stage-1 extraction
+        still needs the same value in ``spec_extract`` prim args.
     seed : int or None, optional
         UTR noise seed (default ``0``). Keep fixed so the packaged WAVE CCF bake
         transfers across notebook re-runs; change only when intentionally drawing
@@ -1596,6 +1872,20 @@ def create_ramp_from_spectrum(
     target_meta = dict(kwargs.pop("target_meta", None) or {})
     if barycentric_velocity_km_s is not None:
         target_meta["force_berv_m_s"] = float(barycentric_velocity_km_s) * 1000.0
+
+    if spectrum_wavelengths is None or spectrum_flux is None:
+        mag_ab, filter_band = resolve_twomass_mag_ab(
+            mag_ab=mag_ab,
+            mag_vega=mag_vega,
+            filter_band=filter_band,
+        )
+        if mag_vega is not None:
+            logger.info(
+                "Using mag_vega=%.4f (%s) → mag_ab=%.4f",
+                float(mag_vega),
+                filter_band,
+                float(mag_ab),
+            )
 
     inject_mode = str(inject_rv_via or "spectrum").strip().lower()
     if inject_mode not in ("spectrum", "wavesol"):
@@ -1650,6 +1940,7 @@ def create_ramp_from_spectrum(
             fibers=fibers,
             ramp_meta=ramp_meta,
             connect_remote=False,
+            extraction_aperture=float(extraction_aperture),
             reuse_existing=bool(reuse_stage1_sims),
         )
         for key in ("trace_pos", "trace_prof", "fiberflat", "wavesol"):
@@ -1809,7 +2100,7 @@ _DEFAULT_FIBERFLAT_XDISP_RANGE = {"BSPEC": (100, 4050), "RSPEC": (100, 4050)}
 _DEFAULT_FIBERFLAT_PROMINENCE = 0.02
 
 
-def get_fiberflat_prim_args(
+def get_fiberflat_primitives(
     ff_models: list[datamodels.DataModel],
     *,
     disp_range: tuple[int, int] | None = None,
@@ -1819,9 +2110,9 @@ def get_fiberflat_prim_args(
     extraction_aperture: int = 10,
     prominence_factor: float | dict[str, float] | None = None,
 ) -> dict:
-    """Build default primitive arguments for ProcessFiberflatsPipeline from opened fiberflat models."""
+    """Build default ``primitives`` for ProcessFiberflatsPipeline from opened fiberflat models."""
     do_orders = ff_models[0].make_order_vec() if hasattr(ff_models[0], "make_order_vec") else None
-    # Multiple rate files per fiber (for coadd) share the same illumination pattern; prim_args
+    # Multiple rate files per fiber (for coadd) share the same illumination pattern; primitives
     # only need the distinct fiber ids, not one model per fiber.
     do_fibers: list[str] = []
     seen: set[str] = set()
@@ -1862,10 +2153,14 @@ def get_fiberflat_prim_args(
     }
 
 
+get_fiberflat_prim_args = get_fiberflat_primitives
+
+
 def run_fiberflat_pipeline(
     fiberflat_filepaths: list[str],
-    prim_args: dict | None = None,
+    primitives: dict | None = None,
     *,
+    prim_args: dict | None = None,
     output_dir: str | None = None,
     disp_range: tuple[int, int] | None = None,
     xdisp_range: tuple[int, int] | None = None,
@@ -1882,8 +2177,8 @@ def run_fiberflat_pipeline(
     fiberflat_filepaths : list of str
         Paths to fiberflat rate FITS files. Multiple paths with the same fiber
         illumination pattern are coadded before trace finding.
-    prim_args : dict or None, optional
-        Primitive arguments. If None, built from the other keyword arguments.
+    primitives : dict or None, optional
+        Per-primitive parameters. If None, built from the other keyword arguments.
         Default is None.
     output_dir : str or None, optional
         If set, pipeline products are written under this directory. Default is None.
@@ -1903,12 +2198,14 @@ def run_fiberflat_pipeline(
     dict
         Pipeline results with keys such as ``trace_pos``, ``trace_prof``.
     """
+    if primitives is None and prim_args is not None:
+        primitives = prim_args
     if output_dir is not None:
         e2e_support.ensure_koa_calibration_cache_env(output_dir)
     logger.info("Running fiberflat pipeline on %d file(s).", len(fiberflat_filepaths))
     ff_models = prepare_fiberflat_models(fiberflat_filepaths)
-    if prim_args is None:
-        prim_args = get_fiberflat_prim_args(
+    if primitives is None:
+        primitives = get_fiberflat_primitives(
             ff_models,
             disp_range=disp_range,
             xdisp_range=xdisp_range,
@@ -1917,11 +2214,10 @@ def run_fiberflat_pipeline(
             extraction_aperture=extraction_aperture,
             prominence_factor=prominence_factor,
         )
-    prim_args = e2e_support.apply_e2e_save_and_preview_flags(
-        prim_args, ProcessFiberflatsPipeline.PRIMITIVES
+    primitives = e2e_support.apply_e2e_save_and_preview_flags(
+        primitives, ProcessFiberflatsPipeline.PRIMITIVES
     )
-    pipe = ProcessFiberflatsPipeline(prim_args=prim_args)
-    apply_kw: dict = {}
+    call_kw: dict = {"primitives": primitives}
     if output_dir is not None:
-        apply_kw["output_dir"] = e2e_support.ensure_output_directory(output_dir)
-    return pipe.apply(ff_models, **apply_kw)
+        call_kw["output_dir"] = e2e_support.ensure_output_directory(output_dir)
+    return ProcessFiberflatsPipeline.call(ff_models, **call_kw)

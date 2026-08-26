@@ -142,13 +142,41 @@ def _fit_ramps_cython_row(indata: tuple) -> tuple:
         covar.alpha_phnoise, covar.beta_phnoise,
         covar.alpha_readnoise, covar.beta_readnoise,
         readnoise_2d[0,:].astype(np.float64),gain_2d[0,:].astype(np.float64), cguess_phnoise, n1, n0)
-    logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np = cython_out
 
-    var_poisson = np.full((1, nx),np.nan)
-    var_rnoise = np.full((1, nx),np.nan)
+    if len(cython_out) >= 9:
+        (
+            logdetC_np,
+            A_np,
+            B_np,
+            C_np,
+            countrate_np,
+            chisq_np,
+            uncert_np,
+            var_poisson_np,
+            var_rnoise_np,
+        ) = cython_out[:9]
+        var_poisson = np.asarray(var_poisson_np, dtype=np.float64)
+        var_rnoise = np.asarray(var_rnoise_np, dtype=np.float64)
+        uncert = np.asarray(uncert_np, dtype=np.float64)
+        # Prefer the GLS total when the split is incomplete / non-finite.
+        total = np.square(uncert)
+        split = var_poisson + var_rnoise
+        bad = ~(np.isfinite(split) & (split >= 0.0)) | (split <= 0.0)
+        # If split is usable, rebuild err from the split (stcal-like); else keep uncert.
+        err = np.where(bad, uncert, np.sqrt(np.maximum(split, 0.0)))
+        var_poisson = np.where(bad, 0.0, var_poisson)
+        var_rnoise = np.where(bad, total, var_rnoise)
+    else:
+        logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np = cython_out[:7]
+        # Legacy cython: total uncertainty only — park it in var_rnoise.
+        uncert = np.asarray(uncert_np, dtype=np.float64)
+        var_rnoise = np.square(uncert)
+        var_poisson = np.zeros_like(var_rnoise, dtype=np.float64)
+        err = uncert
+
     dq = np.zeros((1, nx), dtype=np.uint32)
 
-    return (i, countrate_np, dq, var_poisson, var_rnoise, uncert_np)
+    return (i, countrate_np, dq, var_poisson, var_rnoise, err)
 
 
 def _fit_ramps_jwst_row(indata : tuple) -> tuple:
@@ -241,10 +269,16 @@ def _fit_ramps_jwst_row(indata : tuple) -> tuple:
     if algorithm == 'LIKELY':
         if nframes < ramp_fit.likely_fit.LIKELY_MIN_NGROUPS:
             raise Exception(f'Input ramps have {nframes} frames which is less than LIKELY algorithm requirement of {ramp_fit.likely_fit.LIKELY_MIN_NGROUPS} frames')
+        # stcal.likely_fit divides readnoise by √2 because JWST READNOISE
+        # reference files store CDS (pairwise-difference) noise
+        # (σ_CDS = √2 σ_single). HISPEC RN calibrations and create_ramp use
+        # single-read σ, so convert to CDS units before calling stcal; otherwise
+        # rate_var_rnoise is under-reported by exactly 2×.
+        readnoise_for_stcal = np.asarray(readnoise_2d, dtype=np.float64) * np.sqrt(2.0)
         # Call directly to likely ramp fit code (allow signed / low-SNR rates)
         with _stcal_likely_fit_allow_negative_rates():
             image_info, integ_info, opt_info = ramp_fit.likely_fit.likely_ramp_fit(
-                ramp_data, readnoise_2d, gain_2d
+                ramp_data, readnoise_for_stcal, gain_2d
             )
     elif algorithm == 'FIXSEN_C':
         # Call to C extension for FIXSEN slope fitting

@@ -38,17 +38,17 @@ class MakeSaturationPrimitive(BasePrimitive):
 
     """
     
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'SaturationModel',
         'offset' : 100, # subtract from last read to define saturation threshold in case read noise or other systematics are an issue.
         'max_cores' : 1,
     }
 
     def _perform(self):
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector saturation threshold by taking the median of the last reads of a list of {nfiles} inputs.")
 
@@ -62,7 +62,8 @@ class MakeSaturationPrimitive(BasePrimitive):
             last_read_arr.append(_input.data[-1,:,:])
         last_read_arr = np.array(last_read_arr)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             output_saturation.SAT_THRESH = median_axis0_3d(last_read_arr)-self.offset
 
         # Output

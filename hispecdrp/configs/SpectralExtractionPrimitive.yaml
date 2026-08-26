@@ -1,0 +1,4 @@
+class: SpectralExtractionPrimitive
+description: Standard spectral extraction primitive configuration.
+context: {}
+parameters: {}

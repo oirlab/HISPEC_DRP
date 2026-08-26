@@ -36,11 +36,9 @@ function states otherwise.
     Optional ``*.tophat.mas`` segment masks are produced by ``regenerate_template_masks.py`` only;
     they are not part of the default RV API.
 
-``run_ccf_line_mask_for_fiber``, ``build_ccf_preview_dict``
-    Line-mask CCF driver for one fiber (``StellarRVPrimitive(algorithm="ccf_line_mask")``) and Plotly preview payload builder.
-
-``line_mask_parabolic_vertex_rv_err_levmar_m_s``, ``line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s``
-    Parabolic-vertex σ: LevMar ``Polynomial1D`` (+ optional ``ccf_err`` weights) and homoscedastic LSTSQ fallback.
+``run_ccf_line_mask_for_fiber``, ``build_ccf_preview_dict``, ``doppler_paint_lanczos``
+    Line-mask CCF driver for one fiber (``StellarRVPrimitive(algorithm="ccf_line_mask")``),
+    Plotly preview payload builder, and science-matching Lanczos Doppler paint.
 
 See :mod:`hispecdrp.primitives.utils.ccf` for full docstrings and references.
 """
@@ -61,13 +59,15 @@ from .ccf import (
     CCFFitConfig,
     build_ccf_preview_dict,
     continuum_normalize,
+    doppler_paint_lanczos,
+    doppler_paint_lagrange,
+    prepare_template_for_doppler_paint,
+    template_min_resolution_for_doppler_paint,
     dv_per_pixel_m_s,
     fit_ccf_rv,
     fit_ccf_rv_bisector,
     flat_chunk_echelle_orders,
     masked_ccf_rv,
-    line_mask_parabolic_vertex_rv_err_levmar_m_s,
-    line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s,
     process_one_order_rvs,
     process_orders_rvs_numba_parallel,
     run_ccf_line_mask_for_fiber,
@@ -86,6 +86,10 @@ __all__ = [
     "MaskLines",
     "combine_rvs_median_mad",
     "continuum_normalize",
+    "doppler_paint_lanczos",
+    "doppler_paint_lagrange",
+    "prepare_template_for_doppler_paint",
+    "template_min_resolution_for_doppler_paint",
     "dv_per_pixel_m_s",
     "fit_ccf_rv",
     "fit_ccf_rv_bisector",
@@ -94,8 +98,6 @@ __all__ = [
     "masked_ccf_rv",
     "packaged_default_line_mask_path",
     "pixel_edges_from_wavelength",
-    "line_mask_parabolic_vertex_rv_err_levmar_m_s",
-    "line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s",
     "process_one_order_rvs",
     "process_orders_rvs_numba_parallel",
     "resolve_mask_path",

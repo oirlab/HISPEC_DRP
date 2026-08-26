@@ -1,0 +1,5 @@
+class: ProcessFiberflatsPipeline
+description: Standard process fiber flats pipeline configuration.
+context: {}
+parameters: {}
+primitives: {}

@@ -1,0 +1,5 @@
+class: ProcessDetFlatsPipeline
+description: Standard process detector flats pipeline configuration.
+context: {}
+parameters: {}
+primitives: {}

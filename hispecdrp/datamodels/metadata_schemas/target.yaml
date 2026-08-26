@@ -128,7 +128,6 @@ properties:
   distance_fiber1:
       title: "Distance of fiber 1 from tracking axis"
       fits_keyword: DISTFIB1
-      cal_db: true
       include_ancestors: true
       type: number
       unit: arcseconds
@@ -136,7 +135,6 @@ properties:
   distance_fiber2:
       title: "Distance of fiber 2 from tracking axis"
       fits_keyword: DISTFIB2
-      cal_db: true
       include_ancestors: true
       type: number
       unit: arcseconds
@@ -144,11 +142,9 @@ properties:
   distance_fiber3:
       title: "Distance of fiber 3 from tracking axis"
       fits_keyword: DISTFIB3
-      cal_db: true
       include_ancestors: true
       type: number
       unit: arcseconds
-      merge_rule: fiber_state
 
   # Target OB contents
   # NOTE: Final home TBD

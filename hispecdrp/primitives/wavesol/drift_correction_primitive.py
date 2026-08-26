@@ -41,7 +41,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
         - selector: :class:`~hispecdrp.calibrations.selectors.ReferenceEtalonSelector`
     """
 # 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'driftcalc',
         'do_fibers' : None,
         'do_orders' : None,
@@ -56,7 +56,7 @@ class CalculateEtalonDriftCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         ref_model, _ = self.get_calibration(input_model, 'ref_etalon')
         ref_model = datamodels.open(ref_model)
         output_model = self.get_output_model(input_model)
@@ -179,14 +179,14 @@ class ApplyDriftCorrectionPrimitive(BasePrimitive):
         List of orders to perform drift correction for. If None, all orders will be used.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'driftcorr',
         'fiber_reference_map' : None,
         'do_orders' : None,
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         # Get fibers and orders
         _, do_orders = self.get_do_traces(input_model, None, self.do_orders)
         for fiber, ref_fiber in self.fiber_reference_map.items():

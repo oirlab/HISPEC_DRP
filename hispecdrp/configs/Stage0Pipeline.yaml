@@ -1,0 +1,6 @@
+class: Stage0Pipeline
+description: Standard Stage 0 pipeline configuration.
+context:
+  quicklook: false
+parameters: {}
+steps: {}
