@@ -13,8 +13,18 @@ __all__ = ['ProcessFiberflatsPipeline']
 
 class ProcessFiberflatsPipeline(CalibrationPipeline):
 
+    """
+    Build TracePos, TraceProf, and Fiberflat calibrations from fiberflat frames.
+
+    Optional ``lfc`` (L0 rate map or path) is forwarded to
+    :class:`~hispecdrp.primitives.trace_fitting.traceprof_primitive.TraceProfilePrimitive`
+    so the TraceProf product also stores spectroperfection moments (iso-λ shear
+    and LSF/spatial 2nd moments) measured from LFC spots + the fiberflat.
+    """
+
     PARAMETERS = {
-        'use_pipeline_trace_cals' : True # True for boostrapping until we have good trace cals
+        'use_pipeline_trace_cals' : True, # True for boostrapping until we have good trace cals
+        'lfc': None,
     }
 
     PRIMITIVES = {
@@ -56,6 +66,12 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         # Create trace pos and prof cals
         # All fibers merged into one model
         trace_position_model = self.trace_pos.apply(ff_coadded_models_L0)
+        # TraceProf needs the just-built TracePos to window LFC spots / fiberflat
+        # spatial moments when an LFC rate map is supplied.
+        self.trace_prof.tracepos = trace_position_model
+        lfc = getattr(self, "lfc", None)
+        if lfc is not None:
+            self.trace_prof.lfc = lfc
         trace_profile_model = self.trace_prof.apply(ff_coadded_models_L0)
 
         # Register the trace pos and prof cals
