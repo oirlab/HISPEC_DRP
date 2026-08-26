@@ -21,8 +21,8 @@ Simulated Science Observations
 
 Examples that simulate science targets and reduce them through Stage 0–2
 (for example a Barnard's star PRV analog), ideal-spectrum line-mask RV
-validation on native BSPEC WAVE, building CCF-opt delta masks from simulated
-spectra, plus Stage-0 rate/noise self-checks on realistic UTRs.
+validation on LSF-matched BSPEC WAVE, building CCF-opt delta masks from
+LSF-convolved ideal L2, plus Stage-0 rate/noise self-checks on realistic UTRs.
 
 .. toctree::
    :maxdepth: 1

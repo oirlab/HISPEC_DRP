@@ -5,17 +5,21 @@ Build a CCF-Opt Delta Mask from an Ideal-Spectrum Template
 
    <p><span style="color:red">The HISPEC DRP is in active development. Please submit issues and suggestions on the <a href="https://github.com/oirlab/HISPEC_DRP">GitHub</a>.</span></p>
 
-For an arbitrary stellar template:
+For an arbitrary stellar template (here **BT-Settl lte040**, 4000 K):
 
 1. **Seed mask** — gradient-based line detection on the 1D template
    (``build_line_mask_from_template`` / ``RELAXED_TEMPLATE_MASK_BUILD_KW``).
 2. **Ideal L2** — :func:`~hispecdrp.simulations.spectra.build_l2` paints the template
-   onto a native BSPEC L2 data model.
-3. **Re-zero + reweight** — line-by-line ``StellarRVPrimitive`` on the seed mask,
-   then shift each line ``λ' = λ × (1 + RV/c)`` and set weights ∝ ``|Gaussian contrast|``
+   onto a native BSPEC L2, then convolves each order with the HDF PSF→1-D LSF
+   (``apply_lsf=True``) so line shapes match the instrument.
+3. **Re-zero + reweight** — line-by-line ``StellarRVPrimitive`` on that
+   LSF-matched L2 and the seed mask, then shift each line
+   ``λ' = λ × (1 + RV/c)`` and set weights ∝ ``|Gaussian contrast|``
    (``build_ccfopt_line_mask_from_l2_line_by_line_rv``).
 
-Output: ``<template_stem>.ccfopt.delta.mas``.
+Output: ``<template_stem>.lsf.ccfopt.delta.mas``. The packaged
+``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke product; this example
+rebuilds a **full-band** LSF mask (needs the pyechelle HDF model).
 
 .. raw:: html
 
@@ -54,8 +58,9 @@ Imports and output directory
 2. Build seed mask, ideal L2, and CCF-opt mask
 ----------------------------------------------
 
-:func:`~hispecdrp.simulations.spectra.build_ccfopt_mask` runs the three-step pipeline
-with ccfopt line-by-line defaults on the full BSPEC echelle order range.
+:func:`~hispecdrp.simulations.spectra.build_ccfopt_mask` with ``apply_lsf=True``
+runs the three-step pipeline on an LSF-matched ideal L2 (full BSPEC echelle
+range). Equivalent helper: :func:`~hispecdrp.simulations.spectra.build_ccfopt_mask_lsf_matched`.
 
 .. code-block:: python
 
@@ -68,6 +73,7 @@ with ccfopt line-by-line defaults on the full BSPEC echelle order range.
            TEMPLATE,
            OUT,
            fiber=FIBER,
+           apply_lsf=True,
        )
 
    meta = read_mask_generation_meta(ccfopt_path) or {}
@@ -81,10 +87,11 @@ with ccfopt line-by-line defaults on the full BSPEC echelle order range.
 3. Closed-loop check at injected RV = 0
 ---------------------------------------
 
-Run :class:`~hispecdrp.primitives.StellarRVPrimitive` on the ccfopt mask. The
-``RVCCF`` table has more rows than mask lines because echelle orders can measure the
-same line more than once; aggregate RV should still be near zero. Use the mask from
-this example in :doc:`ideal_spectrum_rv_recovery` for bulk-RV recovery validation.
+Run :class:`~hispecdrp.primitives.StellarRVPrimitive` on the LSF-matched L2 and
+ccfopt mask. The ``RVCCF`` table has more rows than mask lines because echelle
+orders can measure the same line more than once; aggregate RV should still be
+near zero. Use this mask in :doc:`ideal_spectrum_rv_recovery` with
+``build_l2(..., apply_lsf=True)`` for like-to-like bulk-RV recovery.
 
 .. code-block:: python
 

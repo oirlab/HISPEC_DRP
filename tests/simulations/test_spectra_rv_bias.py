@@ -1,9 +1,11 @@
 """
 Ideal-spectrum RV bias regression: compare recovery configs vs injected bulk RV.
 
-Exercises the same path as the ideal-spectrum RV recovery simulation example with packaged
-lte040 + ``*.ccfopt.delta.mas``.  Configurations isolate parameter alignment
-(``window_size_um``) and linear vs Lanczos paint/recovery interpolation.
+Exercises the same path as the **native-paint** ideal-spectrum RV recovery
+simulation (packaged lte040 + ``*.ccfopt.delta.mas``, no HDF LSF).  The worked
+example in ``docs/source/simulations/examples/ideal_spectrum_rv_recovery`` now
+uses ``apply_lsf=True`` and ``*.lsf.ccfopt.delta.mas``; this test keeps the
+native grid so interpolation / window-alignment regressions stay isolated.
 
 All recovery comparisons use the full BSPEC echelle order range (39 orders).
 Tests are marked ``slow`` because each bulk-RV point runs ``build_l2`` + line-mask

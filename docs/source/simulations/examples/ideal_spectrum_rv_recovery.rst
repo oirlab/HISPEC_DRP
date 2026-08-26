@@ -1,11 +1,16 @@
 Ideal-Spectrum RV Recovery
 ==========================
 
-From the rest-frame **BT-Settl lte040** (4000 K) template, we simulate a BSPEC L2
-data model then recover its injected RV with the matched delta line mask and
+From the rest-frame **BT-Settl lte040** (4000 K) template, we simulate an
+**LSF-matched** BSPEC L2 (HDF PSF→1-D LSF after paint) then recover its injected
+RV with the matched ``*.lsf.ccfopt.delta.mas`` line mask and
 ``StellarRVPrimitive``.  In this example, this is done for injected RVs from
 0–50 km/s in steps of 10 km/s and the injected versus recovered RVs are plotted
 at the end, including the recovered RV uncertainty and residual.
+
+Build the full-band LSF mask first with :doc:`build_ccfopt_mask_ideal_spectrum`
+(or point ``MASK_PATH`` at that product). The packaged
+``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke file only.
 
 .. raw:: html
 
@@ -38,17 +43,29 @@ Imports and output directory
 1. Configure template and mask
 ------------------------------
 
-Packaged lte040 template and the paired ``*.ccfopt.delta.mas`` line mask. Recovery
-uses the ccfopt line-by-line defaults on the full BSPEC echelle order range.
+Packaged lte040 template and an **LSF-matched** ``*.lsf.ccfopt.delta.mas`` line
+mask. Recovery uses ccfopt line-by-line defaults on the full BSPEC echelle
+range. Prefer the mask written by :doc:`build_ccfopt_mask_ideal_spectrum`; the
+``paired_line_mask_path_for_template`` fallback is the packaged smoke product.
 
 .. code-block:: python
+
+   from pathlib import Path
 
    from hispecdrp.utils.line_mask_utils import paired_line_mask_path_for_template
 
    FIBER = 1
    BULK_RV_KM_S = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
    TEMPLATE = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5"
-   MASK_PATH = paired_line_mask_path_for_template(TEMPLATE, mask_style="ccfopt.delta")
+   APPLY_LSF = True
+   MASK_STEM = Path(TEMPLATE).stem + ".lsf.ccfopt.delta.mas"
+   MASK_LOCAL = OUT / MASK_STEM
+   if MASK_LOCAL.is_file():
+       MASK_PATH = str(MASK_LOCAL)
+   else:
+       MASK_PATH = paired_line_mask_path_for_template(
+           TEMPLATE, mask_style="lsf.ccfopt.delta"
+       )
 
    print(f"mask: {MASK_PATH}")
 
@@ -56,9 +73,9 @@ uses the ccfopt line-by-line defaults on the full BSPEC echelle order range.
 -------------------------------
 
 For each bulk shift, :func:`~hispecdrp.simulations.spectra.build_l2`
-injects the template into a BSPEC L2 data model, then
-:class:`~hispecdrp.primitives.StellarRVPrimitive` recovers RV with the matched
-delta mask and line-by-line ``ccf_line_mask``.
+injects the template into a BSPEC L2 and convolves with the HDF LSF
+(``apply_lsf=True``), then :class:`~hispecdrp.primitives.StellarRVPrimitive`
+recovers RV with the matched LSF ccfopt mask and line-by-line ``ccf_line_mask``.
 
 .. code-block:: python
 
@@ -81,7 +98,12 @@ delta mask and line-by-line ``ccf_line_mask``.
    # This suppresses logging from the pipeline so the output is cleaner
    with quiet_pipeline_logging():
        for bulk in BULK_RV_KM_S:
-           l2 = build_l2(bulk, template=TEMPLATE, fiber=FIBER)
+           l2 = build_l2(
+               bulk,
+               template=TEMPLATE,
+               fiber=FIBER,
+               apply_lsf=APPLY_LSF,
+           )
            inj = float(bulk) * 1000.0
            out = StellarRVPrimitive.call(
                l2,
@@ -127,7 +149,8 @@ a zoomed scale so bias can be compared with the reported ``RV_ERR`` bars.
        inj_m_s,
        rec_m_s,
        err_m_s,
-       out_path=OUT / "lte040_simulated_vs_recovered_rv.png",
+       title="BT-Settl lte040 (LSF-matched): injected vs recovered RV",
+       out_path=OUT / "lte040_lsf_simulated_vs_recovered_rv.png",
    )
    if summary.get("out_path"):
        print("wrote", summary["out_path"])
