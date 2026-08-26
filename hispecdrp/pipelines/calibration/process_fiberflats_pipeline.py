@@ -73,7 +73,9 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
             self.spec_extract.traceprof = trace_prof_reg
 
         # Extract the coadded fiberflats (models split by fiber)
-        ff_coadded_models_L1 = self.spec_extract.apply(ff_coadded_models_L0)
+        ff_coadded_models_L1 = {}
+        for fiber, model in ff_coadded_models_L0.items():
+            ff_coadded_models_L1[fiber] = self.spec_extract.apply(model)
 
         # Set wavelength solution for each model
         for fiber, model in ff_coadded_models_L1.items():
