@@ -851,8 +851,8 @@ class DataModel:
 
         # Forward data?
         if include_data:
-            assert len(input) == 1, "Cannot include data when merging multiple models. Set include_data=False or provide a single model."
-            first_model = datamodel_open(input[0])
+            assert len(dataset) == 1, "Cannot include data when merging multiple models. Set include_data=False or provide a single model."
+            first_model = datamodel_open(dataset[0])
             for extname in model_out.EXTENSIONS:
                 if extname in ('PRIMARY', 'DATA_ANCESTORS', 'CALIBRATIONS', 'RECEIPT'):
                     continue
