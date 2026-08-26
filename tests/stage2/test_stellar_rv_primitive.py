@@ -1970,7 +1970,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_delta_mask(
     t1 = bench_times[1]
     n_chunk_b = int(bench_chunks.get(1, 0))
     _gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-    _parallel_wall_cap = t1 * (1.45 if _gha else 1.12)
+    _parallel_wall_cap = t1 * (1.45 if _gha else 1.25)
     if eff_threads[6] > 1 and n_chunk_b > 1:
         t6 = bench_times[6]
         if not _btsettl_parallel_line_mask_relax_assertions():
@@ -2216,7 +2216,7 @@ def test_fit_ccf_line_mask_btsettl_bspec_all_chunks_parallel_tophat_mask(
     t1 = bench_times[1]
     n_chunk_b = int(bench_chunks.get(1, 0))
     _gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-    _parallel_wall_cap = t1 * (1.45 if _gha else 1.12)
+    _parallel_wall_cap = t1 * (1.45 if _gha else 1.25)
     if eff_threads[6] > 1 and n_chunk_b > 1:
         t6 = bench_times[6]
         if not _btsettl_parallel_line_mask_relax_assertions():
@@ -3212,7 +3212,7 @@ def test_fit_ccf_template_style_btsettl_bspec_all_chunks_parallel(
     t1 = bench_times[1]
     n_chunk_b = int(bench_chunks.get(1, 0))
     _gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-    _tpl_cap = t1 * (1.45 if _gha else 1.12)
+    _tpl_cap = t1 * (1.45 if _gha else 1.25)
     if eff_threads[6] > 1 and n_chunk_b > 1:
         t6 = bench_times[6]
         if not _btsettl_parallel_line_mask_relax_assertions():

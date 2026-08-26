@@ -12,7 +12,9 @@ from hispecdrp.primitives.utils.ccf.ccf_utils import (
     effective_ccf_v_step_for_fit,
     fit_ccf_rv,
     fit_ccf_rv_rows_numba,
+    rv_per_chunks_line_mask,
 )
+from hispecdrp.utils.line_mask_utils import MaskLines
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "test_data" / "ccf_line_mask_chunk0.npz"
 
@@ -98,3 +100,35 @@ def test_fit_ccf_rv_matches_numba_on_clean_gaussian_bump():
     assert bool(diag.get("fit_via_numba_line_mask"))
     np.testing.assert_allclose(rv_a, rv_n[0], rtol=0, atol=2.0)
     np.testing.assert_allclose(rv_a, true_rv, rtol=0, atol=15.0)
+
+
+def test_rv_per_chunks_line_mask_accepts_decreasing_wavelength():
+    """HDF WAVE often decreases along detector rows; pixel-edge CCF needs increasing λ."""
+    n = 128
+    w_inc = np.linspace(1.200, 1.220, n, dtype=np.float64)
+    lam0 = 1.210
+    spec = 1.0 - 0.5 * np.exp(-0.5 * ((w_inc - lam0) / 1.5e-4) ** 2)
+    err = np.full(n, 0.01, dtype=np.float64)
+    dq = np.zeros(n, dtype=bool)
+    mask = MaskLines.from_delta_centers_um(np.array([lam0]), np.array([1.0]))
+    kw = dict(
+        window_size_um=0.02,
+        v_min_m_s=-20_000.0,
+        v_max_m_s=20_000.0,
+        v_step_m_s=100.0,
+        window_line_by_line=True,
+        line_mask_line_chunk_v_center_m_s=0.0,
+        min_good_pixels=9,
+        max_cores=1,
+        return_ccf=False,
+    )
+    rvs_inc, _, _, _, _, _, _, _, _, _, _, _ = rv_per_chunks_line_mask(
+        w_inc, spec, err, dq, mask, **kw
+    )
+    rvs_dec, _, _, _, _, _, _, _, _, _, _, _ = rv_per_chunks_line_mask(
+        w_inc[::-1].copy(), spec[::-1].copy(), err[::-1].copy(), dq[::-1].copy(), mask, **kw
+    )
+    assert rvs_inc.size >= 1
+    assert rvs_dec.size >= 1
+    assert np.any(np.isfinite(rvs_inc))
+    assert np.any(np.isfinite(rvs_dec))

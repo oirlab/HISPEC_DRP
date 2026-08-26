@@ -177,8 +177,10 @@ class StellarRVPrimitive(BasePrimitive):
         ``|RV − ccf_input_velocity| <= half_width`` before aggregation. ``None`` uses
         ``max(2000, 0.5 × v_half_window)`` m/s.
     window_line_by_line : bool
-        **Default:** ``True``. **Line-mask algorithm only** (``ccf_line_mask``). When ``False``, chunk
-        boundaries follow ``window_size_um`` via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
+        **Default:** ``True``. **Line-mask algorithm only** (``ccf_line_mask``). Ignored for
+        ``ccf_stellar_template`` (that path always chunks on ``window_size_um``). When ``False``,
+        chunk boundaries follow ``window_size_um`` via
+        :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span`.
         When ``True``, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
         at ``ccf_input_velocity``, which must be finite — grid center). Spectral pixels
         per chunk use the intersection of that Voronoi interval with a symmetric ``window_size_um``
@@ -319,6 +321,19 @@ class StellarRVPrimitive(BasePrimitive):
             len(inp_list),
             getattr(self, "suffix", ""),
         )
+        # Default window_line_by_line=True is for ccf_line_mask. Template CCF still
+        # chunks on window_size_um; ignore the line-mask flag so callers can switch
+        # algorithm without also flipping chunking.
+        if (
+            algo_key not in STELLAR_RV_LINE_MASK_ALGORITHMS
+            and bool(getattr(self, "window_line_by_line", False))
+        ):
+            logger.info(
+                "Stellar RV: ignoring window_line_by_line for algorithm=%s "
+                "(line-mask only)",
+                algo_key,
+            )
+            self.window_line_by_line = False
         validate_line_mask_line_window_chunking_config(
             algorithm=algo_key,
             window_line_by_line=bool(getattr(self, "window_line_by_line", False)),

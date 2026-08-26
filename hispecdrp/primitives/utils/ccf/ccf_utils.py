@@ -5494,7 +5494,9 @@ def rv_per_chunks_line_mask(
     Parameters
     ----------
     wave_um, spec, spec_err : np.ndarray
-        Wavelength (µm), flux, and error; same length.
+        Wavelength (µm), flux, and error; same length. Detector order may decrease
+        in λ (HDF WAVE); each chunk is sorted to increasing λ before pixel edges
+        and interpolation.
     dq_bad_mask : np.ndarray
         True where pixel should be excluded (e.g. DO_NOT_USE).
     mask_lines : MaskLines
@@ -5715,6 +5717,12 @@ def rv_per_chunks_line_mask(
         w_c = w[in_chunk]
         s_c = s[in_chunk]
         e_c = e[in_chunk]
+        # Pixel-edge CCF and ``_poly_interp_sorted_1d`` require increasing λ.
+        # Native HDF WAVE often decreases along detector rows.
+        order_w = np.argsort(w_c, kind="mergesort")
+        w_c = w_c[order_w]
+        s_c = s_c[order_w]
+        e_c = e_c[order_w]
 
         # Restrict mask lines so we don't waste time on lines that cannot land in this
         # chunk for any trial velocity in the search range.
