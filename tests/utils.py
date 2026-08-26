@@ -2,6 +2,7 @@ import numpy as np
 import yaml
 from hispecdrp import datamodels
 from hispecdrp.simulations.utr import create_ramp
+from hispecdrp.simulations.simulate_rate_map import SimulateRateMap
 
 
 def save_config_yaml(config_dict : dict, config_path : str):
@@ -137,3 +138,39 @@ def make_stage0_cals(
         cals['detflat'] = flat_model
 
     return cals
+
+
+def make_sim_wavecal(spectrograph : str, meta : dict | None = None):
+
+    sim = SimulateRateMap()
+    ws = sim.get_wavelength_solution(spectrograph)
+    # ws[fiber][order]["pixel"]      -> np.arange(4096)
+    # ws[fiber][order]["wavelength"] -> wavelength in microns per pixel
+
+    fibers = list(ws.keys())
+    orders = list(ws[1].keys())
+    n_orders = len(orders)
+    npix = 4096
+
+    meta = meta or {}
+    meta.update({
+        'origin' : 'KECK',
+        'spectrograph' : spectrograph,
+        'object_fiber1' : 'NONE',
+        'object_fiber2' : 'NONE',
+        'object_fiber3' : 'NONE',
+    })  
+
+    waves = {}
+
+    for i, fiber in enumerate(fibers):
+        waves[fiber] = np.zeros((n_orders, npix))
+        for j, order in enumerate(orders):
+            waves[fiber][j, :] = ws[fiber][order]["wavelength"]
+
+    # Wavelength solution model
+    model = datamodels.SimulatedWavesolModel(meta=meta)
+    for fiber in fibers:
+        setattr(model, f'wave_fib{fiber}', waves[fiber])
+
+    return model
