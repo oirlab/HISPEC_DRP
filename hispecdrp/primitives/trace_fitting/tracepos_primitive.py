@@ -192,7 +192,7 @@ class TracePositionPrimitive(BasePrimitive):
             im_data = input_model.rate
             ny, nx = im_data.shape
             zmin = 0
-            zmax = np.nanquantile(im_data, 0.999)
+            zmax = np.nanquantile(im_data, 0.98)
 
             # Downsample image for preview to save space
             # Use slice factor of 4 (16x smaller size)
