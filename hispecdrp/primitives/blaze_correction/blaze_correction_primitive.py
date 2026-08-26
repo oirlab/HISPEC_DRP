@@ -12,7 +12,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['BlazeCorrectionPrimitive']
+__all__ = [
+    'BlazeCorrectionPrimitive',
+    'lamp_spectrum_shape',
+    'divide_out_lamp_spectrum',
+]
 
 
 class BlazeCorrectionPrimitive(BasePrimitive):
@@ -22,6 +26,11 @@ class BlazeCorrectionPrimitive(BasePrimitive):
         'max_cores' : 1,
         'do_fibers' : None,
         'do_orders' : None,
+        # Divide fiberflat by analytic lamp SED before blaze-correcting science.
+        # Default shape matches simulated flats (1000 K blackbody); see lamp_temperature_k.
+        'remove_lamp_spectrum' : False,
+        'lamp_temperature_k' : 1000.0,
+        # Deprecated alias for remove_lamp_spectrum (kept for older configs).
         'remove_lamp_blackbody' : False,
         'normalize_for_stitching' : False,
         'smooth_blaze' : False,
@@ -91,21 +100,43 @@ class BlazeCorrectionPrimitive(BasePrimitive):
                     setattr(output_model, f'SPEC_DQ_FIB{fiber}', 
                             np.zeros((n_orders, npx), dtype=np.uint32))
 
-                # get aray of smoothed blaze values for this fiber and all orders in do_orders
+                blaze_array = np.array(ff_trace['spec'], dtype=np.float64, copy=True)
+                blaze_std_array = np.array(ff_trace['spec_err'], dtype=np.float64, copy=True)
+
+                remove_lamp = bool(self.remove_lamp_spectrum) or bool(
+                    self.remove_lamp_blackbody
+                )
+                if self.remove_lamp_blackbody and not self.remove_lamp_spectrum:
+                    logger.warning(
+                        "remove_lamp_blackbody is deprecated; use remove_lamp_spectrum=True"
+                    )
+                if remove_lamp:
+                    wave_ff = ff_trace.get("wave")
+                    if wave_ff is None:
+                        raise ValueError(
+                            "remove_lamp_spectrum=True requires fiberflat WAVE "
+                            f"(missing wave for fiber {fiber})"
+                        )
+                    blaze_array, blaze_std_array = divide_out_lamp_spectrum(
+                        blaze_array,
+                        blaze_std_array,
+                        wave_ff,
+                        order_vec,
+                        do_orders,
+                        temperature_k=float(self.lamp_temperature_k),
+                    )
+
+                # Smooth instrument blaze after optional lamp detrend (not before).
                 if self.smooth_blaze:
-                    blaze_array = get_smooth_blaze(ff_trace['spec'],
-                                                ff_trace['spec_err'],
-                                                ff_trace['spec_dq'],
-                                                order_vec, do_orders, pixels_per_spline_knot=self.pixels_per_spline_knot)
-                else:
-                    blaze_array = ff_trace['spec']
-                blaze_std_array = ff_trace['spec_err']
-                
-                # remove lamp blackbody from blaze array
-                if self.remove_lamp_blackbody:
-                    #TODO
-                    raise NotImplementedError('remove_lamp_blackbody=True is not yet') 
-                
+                    blaze_array = get_smooth_blaze(
+                        blaze_array,
+                        blaze_std_array,
+                        ff_trace['spec_dq'],
+                        order_vec,
+                        do_orders,
+                        pixels_per_spline_knot=self.pixels_per_spline_knot,
+                    )
+
                 # normalize blaze array, either with simple median, or fitting spline to wavelength/blaze peaks
                 if self.normalize_for_stitching:
                     # only necessary if stitching
@@ -147,6 +178,80 @@ class BlazeCorrectionPrimitive(BasePrimitive):
             raise TypeError(f"Unsupported input model type: {type(input_model)}. Expected L1Model or L2Model.")
         return output_model
     
+
+def lamp_spectrum_shape(
+    wave_um: np.ndarray,
+    *,
+    temperature_k: float = 1000.0,
+) -> np.ndarray:
+    """
+    Analytic lamp SED matching simulated fiberflats (energy density).
+
+    Uses the same blackbody construction as
+    :func:`~hispecdrp.simulations.simulate_up_the_ramp.create_dummy_fiberflat_rate_files`:
+    ``BlackBody`` radiance per Å, then ×1e4 to per-µm energy density. Only the
+    relative shape is used when dividing the fiberflat.
+    """
+    import astropy.units as u
+    from astropy.modeling.models import BlackBody
+
+    wave_um = np.asarray(wave_um, dtype=np.float64)
+    out = np.full(wave_um.shape, np.nan, dtype=np.float64)
+    good = np.isfinite(wave_um) & (wave_um > 0.0)
+    if not np.any(good):
+        return out
+
+    wl_aa = (wave_um[good] * u.micron).to(u.AA)
+    bb = BlackBody(
+        temperature=float(temperature_k) * u.K,
+        scale=1.0 * u.erg / (u.cm**2 * u.s * u.AA * u.sr),
+    )
+    # Match dummy-fiberflat: B_λ [per Å] → per µm energy density (×1e4).
+    out[good] = np.asarray(bb(wl_aa).value, dtype=np.float64) * 1.0e4
+    return out
+
+
+def divide_out_lamp_spectrum(
+    blaze_array: np.ndarray,
+    blaze_std_array: np.ndarray,
+    wavelengths: np.ndarray,
+    order_vec,
+    do_orders,
+    *,
+    temperature_k: float = 1000.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Divide fiberflat blaze (and its uncertainty) by an analytic lamp spectrum.
+
+    Per-order lamp shapes are applied directly (no median renormalization) so
+    the subsequent per-order max-normalization step preserves the correct
+    instrument-blaze shape after dividing out BB×blaze fiberflats.
+    """
+    blaze = np.array(blaze_array, dtype=np.float64, copy=True)
+    blaze_std = np.array(blaze_std_array, dtype=np.float64, copy=True)
+    wave = np.asarray(wavelengths, dtype=np.float64)
+    if wave.shape != blaze.shape:
+        raise ValueError(
+            f"fiberflat WAVE shape {wave.shape} != blaze shape {blaze.shape}"
+        )
+
+    for o, order in enumerate(order_vec):
+        if order not in do_orders:
+            continue
+        sed = lamp_spectrum_shape(wave[o], temperature_k=temperature_k)
+        valid = np.isfinite(sed) & (sed > 0.0) & np.isfinite(blaze[o])
+        if not np.any(valid):
+            logger.warning(
+                "remove_lamp_spectrum: no valid lamp SED samples for order %s; skipping",
+                order,
+            )
+            continue
+        sed_norm = sed
+        with np.errstate(divide="ignore", invalid="ignore"):
+            blaze[o] = blaze[o] / sed_norm
+            blaze_std[o] = blaze_std[o] / sed_norm
+    return blaze, blaze_std
+
 
 def _longest_contiguous_true_segment(mask: np.ndarray) -> slice:
     """Return a slice covering the longest run of True values in ``mask``."""

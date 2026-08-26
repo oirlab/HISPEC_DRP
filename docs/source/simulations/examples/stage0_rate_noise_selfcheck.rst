@@ -121,7 +121,7 @@ KOA.
 ----------
 
 This cell will call the Stage0Pipeline for the ``uint16`` and ``float32`` UTR
-frames with: ``Stage0Pipeline(output_dir=OUT).apply(ramp)`` using all default
+frames with: ``Stage0Pipeline.call(ramp, output_dir=OUT)`` using all default
 pipeline arguments. Products will be stored under ``OUT``.
 
 .. code-block:: python
@@ -129,7 +129,7 @@ pipeline arguments. Products will be stored under ``OUT``.
    from hispecdrp.pipelines import Stage0Pipeline
 
    l0s = {
-       label: Stage0Pipeline(output_dir=OUT).apply(ramp)
+       label: Stage0Pipeline.call(ramp, output_dir=OUT)
        for label, ramp in ramps.items()
    }
 

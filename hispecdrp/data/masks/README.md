@@ -60,6 +60,27 @@ python hispecdrp/data/masks/regenerate_ccfopt_masks.py
 |--------------|------|
 | `<template_stem>.ccfopt.delta.mas` | Two columns: vacuum line-center (nm), weight (`mask_weight_definition`: contrast after bias cull). |
 
+### LSF-matched ccfopt masks (instrument-apparent)
+
+For like-to-like RV vs extracted spectra, build the mask on an **LSF-convolved**
+ideal L2 (`build_l2(..., apply_lsf=True)` / `build_l2_lsf_matched`):
+
+```bash
+python hispecdrp/data/masks/regenerate_lsf_ccfopt_masks.py \
+  --template lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5 --fiber 2
+```
+
+| File pattern | Role |
+|--------------|------|
+| `<template_stem>.lsf.ccfopt.delta.mas` | CCF-opt delta mask from LSF-matched L2 (HDF PSF→1-D LSF). |
+
+The packaged ``lte040...lsf.ccfopt.delta.mas`` currently covers a **smoke** order
+range (110–111) for CI / fidelity wiring; regenerate without ``--order-start`` /
+``--order-end`` for a full-band science product (slow; needs HDF model).
+
+Use LSF masks for ideal-spectrum / fidelity diagnostics; keep E2E
+``*.ccfopt.delta.mas`` (from blaze L2) as the on-sky-like science mask.
+
 Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
 :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
 

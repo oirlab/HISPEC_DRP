@@ -106,9 +106,29 @@ def test_resolve_ccf_zb_from_barycorr_table():
     model.barycorr_fib1 = Table(
         {"MJDUTC": [61209.7], "MBJD": [61209.701], "BERV": [berv_m_s]}
     )
-    assert resolve_ccf_zb(model, 1) == berv_m_s_to_ccf_zb(berv_m_s)
-    assert resolve_ccf_zb(model, 1, ccf_zb=0.5) == berv_m_s_to_ccf_zb(berv_m_s)
-    assert resolve_ccf_zb(model, 2, ccf_zb=0.25) == 0.25
+    assert resolve_ccf_zb(model) == berv_m_s_to_ccf_zb(berv_m_s)
+    assert resolve_ccf_zb(model, ccf_zb=0.5) == berv_m_s_to_ccf_zb(berv_m_s)
+    assert resolve_ccf_zb(datamodels.L2Model(), ccf_zb=0.25) == 0.25
+
+
+def test_stage2_prefills_stellar_rv_ccf_zb_from_barycorr():
+    from astropy.table import Table
+
+    from hispecdrp.pipelines.stage2.stage2_pipeline import Stage2Pipeline
+    from hispecdrp.primitives import StellarRVPrimitive
+    from hispecdrp.primitives.barycenter_correction.barycenter_corr import berv_m_s_to_ccf_zb
+
+    berv_m_s = 1244.0
+    model = datamodels.L2Model()
+    model.barycorr_fib2 = Table({"BERV": [berv_m_s]})
+
+    pipe = Stage2Pipeline(
+        dataset=model,
+        primitives={"stellar_rv": {"do_fibers": ["2"]}},
+    )
+    assert isinstance(pipe.stellar_rv, StellarRVPrimitive)
+    pipe._populate_stellar_rv_ccf_zb_from_barycorr(model)
+    assert pipe.stellar_rv.ccf_zb == berv_m_s_to_ccf_zb(berv_m_s)
 
 
 def test_stellar_rv_uses_ccf_zb_parameter_only():

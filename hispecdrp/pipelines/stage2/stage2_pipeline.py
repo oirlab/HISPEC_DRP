@@ -10,7 +10,7 @@ from ...primitives import (
 )
 from ...primitives.barycenter_correction.barycenter_corr import (
     berv_m_s_to_ccf_zb,
-    read_berv_m_s_from_model,
+    read_berv_m_s_uniform_from_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,25 +65,19 @@ class Stage2Pipeline(BasePipeline):
         super().init_primitives(context, primitives)
 
     def _populate_stellar_rv_ccf_zb_from_barycorr(self, model: datamodels.DataModel) -> None:
-        """Set per-fiber ``ccf_zb`` on the stellar-RV primitive from ``BARYCORR`` tables."""
+        """Set uniform ``ccf_zb`` on the stellar-RV primitive from ``BARYCORR``."""
         if self._stellar_rv_ccf_zb_explicit:
             return
-        rv_prim = self.stellar_rv
-        do_fibers = getattr(rv_prim, "do_fibers", None)
-        if not do_fibers:
+        berv_m_s = read_berv_m_s_uniform_from_model(model)
+        if berv_m_s is None:
             return
-        for fiber in do_fibers:
-            berv_m_s = read_berv_m_s_from_model(model, fiber)
-            if berv_m_s is None:
-                continue
-            zb = berv_m_s_to_ccf_zb(berv_m_s)
-            rv_prim._ccf_zb_by_fiber[str(fiber)] = zb
-            logger.info(
-                "Stage2: stellar RV fiber=%s ccf_zb=%.9e from BARYCORR BERV=%.3f m/s",
-                fiber,
-                zb,
-                float(berv_m_s),
-            )
+        zb = berv_m_s_to_ccf_zb(berv_m_s)
+        self.stellar_rv.ccf_zb = zb
+        logger.info(
+            "Stage2: stellar RV ccf_zb=%.9e from BARYCORR BERV=%.3f m/s",
+            zb,
+            float(berv_m_s),
+        )
 
     def _perform(self):
         model_to_process = datamodels.open(self.dataset)

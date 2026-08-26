@@ -334,6 +334,10 @@ def get_default_stage2_primitives(*, max_cores: int | None = None) -> dict:
         out[name] = args
     if "sky_sub" in out:
         out["sky_sub"]["run"] = False
+    if "blaze_corr" in out:
+        # Smooth instrument blaze only: analytic BB lamp removal skews extracted
+        # science continuum (stellar×blaze, not BB×blaze) and harms line shapes.
+        out["blaze_corr"]["remove_lamp_spectrum"] = False
     if "barycorr" not in out:
         out["barycorr"] = {}
     bary_cls = E2E_STAGE2_PRIMITIVES.get("barycorr")

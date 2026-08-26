@@ -7,6 +7,9 @@ import logging
 from .extract_box import extract_spectrum_box
 from .extract_optimal import extract_spectrum_optimal
 from .extract_cross_talk import extract_spectra_cross_talk
+from .extract_sheared_sp import extract_sheared_banded_ls
+from .extract_spectroperfectionism import extract_order_spectroperfectionism_from_hdf
+from .extract_spectroperfection import extract_spectroperfection
 from ...calibrations import TracePosSelector, TraceProfSelector
 
 import matplotlib.pyplot as plt
@@ -32,6 +35,11 @@ class SpectralExtractionPrimitive(BasePrimitive):
             - **box**: Sum all pixels within a fixed aperture around the trace position.
             - **optimal**: Fit a 1D profile to the data.
             - **cross_talk**: Simultaneously fit 1D profiles for all fibers to account for cross-talk between fibers. Only applicable when multiple fibers are present.
+            - **sheared_sp**: Banded LS inverse of the separable sheared scatter operator.
+            - **spectroperfection**: Banded LS with fiberflat spatial profile + LFC
+              iso-λ shear. Default bilinear kernel (pixel-grid 1-D basis); set
+              ``spectral_kernel='gaussian'`` to invert the measured LSF.
+            - **spectroperfectionism**: Banded LS with HDF PSF deposit operator (sim).
     extraction_aperture : float
         Size of the extraction aperture in pixels, centered on the trace position.
     do_fibers : list[int] or None
@@ -40,6 +48,15 @@ class SpectralExtractionPrimitive(BasePrimitive):
         List of order numbers to extract. If None, all orders will be extracted.
     pix_range : tuple[int, int] or None
         Range of x pixels to extract. If None, the full range will be extracted.
+    shear : array-like or None
+        Optional iso-λ shear ``(n_orders, n_pix)`` for ``optimal`` / ``sheared_sp``.
+        When None and ``method`` is ``sheared_sp``, shear is loaded from the sim HDF
+        for the input spectrograph (if available).
+    continuum_smooth_pix : int
+        Spectral smooth length for building continuum ``P`` in ``sheared_sp``.
+    spectral_kernel : str
+        For ``spectroperfection``: ``bilinear`` (default, pixel-grid iso-λ) or
+        ``gaussian`` (invert LFC-measured LSF).
 
     Returns
     -------
@@ -55,6 +72,9 @@ class SpectralExtractionPrimitive(BasePrimitive):
         'do_orders' : None,
         'pix_range' : None,
         'output_model' : 'L1Model',
+        'shear' : None,
+        'continuum_smooth_pix' : 81,
+        'spectral_kernel': 'bilinear',
     }
 
     CALIBRATIONS = {
@@ -143,7 +163,8 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     )
 
             # Dispatch to extraction method
-            if self.method.lower() == 'box':
+            method = str(self.method).lower()
+            if method == 'box':
                 self.extract_box(
                     input_model=input_model,
                     output_model=output_model,
@@ -151,7 +172,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     do_fibers=do_fibers,
                     do_orders=do_orders
                 )
-            elif self.method.lower() == 'optimal':
+            elif method == 'optimal':
                 self.extract_optimal(
                     input_model=input_model,
                     output_model=output_model,
@@ -160,7 +181,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     do_fibers=do_fibers,
                     do_orders=do_orders
                 )
-            elif self.method.lower() == 'cross_talk':
+            elif method == 'cross_talk':
                 self.extract_cross_talk(
                     input_model=input_model,
                     output_model=output_model,
@@ -168,6 +189,30 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     traceprof_model=traceprof_model,
                     do_fibers=do_fibers,
                     do_orders=do_orders
+                )
+            elif method == 'sheared_sp':
+                self.extract_sheared_sp(
+                    input_model=input_model,
+                    output_model=output_model,
+                    tracepos_model=tracepos_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders,
+                )
+            elif method in ('spectroperfection', 'spectroperfectionist'):
+                self.extract_spectroperfection(
+                    input_model=input_model,
+                    output_model=output_model,
+                    tracepos_model=tracepos_model,
+                    traceprof_model=traceprof_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders,
+                )
+            elif method in ('spectroperfectionism', 'sp'):
+                self.extract_spectroperfectionism(
+                    input_model=input_model,
+                    output_model=output_model,
+                    do_fibers=do_fibers,
+                    do_orders=do_orders,
                 )
             else:
                 raise ValueError(f"Unknown extraction method: {self.method}")
@@ -308,6 +353,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 #     plt.imshow(input_data, vmin=0, vmax=np.nanquantile(input_data, 0.995)); plt.plot(trace_positions[j+1], pixarr, c='red'); plt.plot(trace_positions[j], pixarr, c='red'); plt.show()
 
                 # Perform optimal extraction
+                shear_row = self._shear_for_order(input_model, fiber, j, order_vec.size)
                 result = extract_spectrum_optimal(
                     input_data=input_data,
                     input_err=input_err,
@@ -320,6 +366,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                     extraction_aperture=self.extraction_aperture,
                     pix_range=self.pix_range,
                     orders_are_vertical=input_model.meta.orders_are_vertical,
+                    shear=shear_row,
                 )
 
                 spec_out[j, :] = result['spec']
@@ -422,3 +469,315 @@ class SpectralExtractionPrimitive(BasePrimitive):
             # breakpoint()
             # import matplotlib.pyplot as plt; plt.imshow(input_model.rate, vmin=0, vmax=np.nanquantile(input_model.rate, 0.995)); plt.plot(trace_positions,color='r'); plt.show()
             # plt.plot(spec_uncal[j, :]); plt.show()
+
+    def _resolve_shear_array(self, input_model, n_orders: int, n_pix: int) -> np.ndarray | None:
+        """Return ``(n_orders, n_pix)`` shear or ``None``."""
+        shear = getattr(self, "shear", None)
+        if shear is None:
+            return None
+        arr = np.asarray(shear, dtype=np.float64)
+        if arr.ndim == 1:
+            if arr.size != n_pix:
+                raise ValueError(
+                    f"1-D shear length {arr.size} does not match n_pix={n_pix}"
+                )
+            return np.broadcast_to(arr, (n_orders, n_pix)).copy()
+        if arr.shape != (n_orders, n_pix):
+            raise ValueError(
+                f"shear shape {arr.shape} does not match {(n_orders, n_pix)}"
+            )
+        return arr
+
+    def _shear_for_order(
+        self,
+        input_model,
+        fiber: int,
+        order_index: int,
+        n_orders: int,
+    ) -> np.ndarray | None:
+        pext_name = input_model.primary_extension_name
+        input_data = getattr(input_model, pext_name)
+        n_pix = (
+            input_data.shape[0]
+            if input_model.meta.orders_are_vertical
+            else input_data.shape[1]
+        )
+        shear_2d = self._resolve_shear_array(input_model, n_orders, n_pix)
+        if shear_2d is None:
+            return None
+        return shear_2d[int(order_index)]
+
+    def _hdf_shear_or_none(self, input_model, fiber: int) -> np.ndarray | None:
+        shear = getattr(self, "shear", None)
+        if shear is not None:
+            return np.asarray(shear, dtype=np.float64)
+        spectrograph = getattr(input_model.meta, "spectrograph", None)
+        if spectrograph is None:
+            return None
+        try:
+            from ...simulations.e2e_pipeline import create_trace_shear_from_sim_hdf
+
+            return create_trace_shear_from_sim_hdf(
+                str(spectrograph), fiber=int(fiber)
+            )
+        except Exception as exc:
+            logger.warning("Could not load HDF shear for sheared_sp: %s", exc)
+            return None
+
+    def extract_sheared_sp(
+        self,
+        input_model: datamodels.L0Model,
+        output_model: datamodels.L1Model,
+        tracepos_model: datamodels.TracePosModel,
+        do_fibers: np.ndarray,
+        do_orders: np.ndarray,
+    ):
+        from ...simulations.plotting.stage1_extraction_noise import (
+            build_profile_image,
+            continuum_rate_from_spectral_smooth,
+        )
+
+        order_vec = input_model.make_order_vec()
+        pext_name = input_model.primary_extension_name
+        input_data = getattr(input_model, pext_name)
+        input_err = getattr(input_model, pext_name + "_err", None)
+        input_dq = getattr(input_model, "dq", None)
+        input_mid_time = getattr(input_model, "mid_time", None)
+
+        for fiber in do_fibers:
+            trace_positions = getattr(tracepos_model, f"pos_fib{fiber}")
+            shear_2d = self._hdf_shear_or_none(input_model, int(fiber))
+            spec_out = getattr(output_model, f"SPEC_UNCAL_FIB{fiber}")
+            err_out = getattr(output_model, f"SPEC_UNCAL_ERR_FIB{fiber}")
+            var_rnoise_out = getattr(output_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fiber}")
+            var_poisson_out = getattr(output_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fiber}")
+            dq_out = getattr(output_model, f"SPEC_DQ_FIB{fiber}")
+            mid_time_out = getattr(output_model, f"MID_TIME_FIB{fiber}")
+
+            for j, order in enumerate(order_vec):
+                if order not in do_orders:
+                    continue
+                logger.info(
+                    "Extracting %s with method sheared_sp [Fiber %s][Order %s]",
+                    input_model,
+                    fiber,
+                    order,
+                )
+                ty = np.asarray(trace_positions[j, :], dtype=np.float64)
+                cont = continuum_rate_from_spectral_smooth(
+                    np.asarray(input_data, dtype=np.float64),
+                    ty,
+                    extraction_aperture=float(self.extraction_aperture),
+                    smooth_pix=int(self.continuum_smooth_pix),
+                )
+                profile = build_profile_image(
+                    cont, ty, extraction_aperture=float(self.extraction_aperture)
+                )
+                if input_err is not None:
+                    rate_var = np.maximum(
+                        np.asarray(input_err, dtype=np.float64), 1.0e-30
+                    ) ** 2
+                else:
+                    rate_var = np.ones_like(input_data, dtype=np.float64)
+                shear_row = None if shear_2d is None else shear_2d[j]
+                result = extract_sheared_banded_ls(
+                    np.asarray(input_data, dtype=np.float64),
+                    rate_var,
+                    profile,
+                    ty,
+                    extraction_aperture=float(self.extraction_aperture),
+                    shear=shear_row,
+                    rate_dq=None if input_dq is None else np.asarray(input_dq),
+                )
+                spec_out[j, :] = result["spec"]
+                err_out[j, :] = result["err"]
+                var_rnoise_out[j, :] = np.nan
+                var_poisson_out[j, :] = np.nan
+                dq_out[j, :] = 0
+                if input_mid_time is not None:
+                    mid_time_out[j, :] = np.nanmean(
+                        np.asarray(input_mid_time, dtype=np.float64), axis=1
+                    )
+                else:
+                    mid_time_out[j, :] = np.nan
+
+    def _traceprof_moment_row(
+        self,
+        traceprof_model,
+        fiber: int,
+        order_index: int,
+        n_pix: int,
+        name: str,
+    ) -> np.ndarray | None:
+        attr = f"{name}_fib{fiber}"
+        try:
+            arr = getattr(traceprof_model, attr)
+        except Exception:
+            return None
+        if arr is None:
+            return None
+        arr = np.asarray(arr, dtype=np.float64)
+        if arr.ndim == 1:
+            if arr.size != n_pix:
+                return None
+            return arr
+        if arr.ndim == 2 and order_index < arr.shape[0] and arr.shape[1] == n_pix:
+            return arr[int(order_index)]
+        return None
+
+    def extract_spectroperfection(
+        self,
+        input_model: datamodels.L0Model,
+        output_model: datamodels.L1Model,
+        tracepos_model: datamodels.TracePosModel,
+        traceprof_model: datamodels.TraceProfModel,
+        do_fibers: np.ndarray,
+        do_orders: np.ndarray,
+    ):
+        from ...simulations.plotting.stage1_extraction_noise import (
+            build_profile_image,
+            continuum_rate_from_spectral_smooth,
+        )
+
+        order_vec = input_model.make_order_vec()
+        pext_name = input_model.primary_extension_name
+        input_data = getattr(input_model, pext_name)
+        input_err = getattr(input_model, pext_name + "_err", None)
+        input_dq = getattr(input_model, "dq", None)
+        input_mid_time = getattr(input_model, "mid_time", None)
+        n_pix = (
+            input_data.shape[0]
+            if input_model.meta.orders_are_vertical
+            else input_data.shape[1]
+        )
+
+        for fiber in do_fibers:
+            trace_positions = getattr(tracepos_model, f"pos_fib{fiber}")
+            trace_profile = getattr(traceprof_model, f"prof_fib{fiber}")
+            spec_out = getattr(output_model, f"SPEC_UNCAL_FIB{fiber}")
+            err_out = getattr(output_model, f"SPEC_UNCAL_ERR_FIB{fiber}")
+            var_rnoise_out = getattr(output_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fiber}")
+            var_poisson_out = getattr(output_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fiber}")
+            dq_out = getattr(output_model, f"SPEC_DQ_FIB{fiber}")
+            mid_time_out = getattr(output_model, f"MID_TIME_FIB{fiber}")
+
+            for j, order in enumerate(order_vec):
+                if order not in do_orders:
+                    continue
+                logger.info(
+                    "Extracting %s with method spectroperfection [Fiber %s][Order %s]",
+                    input_model,
+                    fiber,
+                    order,
+                )
+                ty = np.asarray(trace_positions[j, :], dtype=np.float64)
+                prof = np.asarray(trace_profile, dtype=np.float64)
+                # Prefer the fiberflat image as P; fall back to spectrally
+                # smoothed science if the profile is a placeholder (unity).
+                if np.allclose(prof, 1.0) or not np.any(np.isfinite(prof) & (prof > 0)):
+                    cont = continuum_rate_from_spectral_smooth(
+                        np.asarray(input_data, dtype=np.float64),
+                        ty,
+                        extraction_aperture=float(self.extraction_aperture),
+                        smooth_pix=int(self.continuum_smooth_pix),
+                    )
+                    prof = build_profile_image(
+                        cont, ty, extraction_aperture=float(self.extraction_aperture)
+                    )
+                shear_row = self._traceprof_moment_row(
+                    traceprof_model, int(fiber), j, n_pix, "shear"
+                )
+                if shear_row is None or not np.any(np.isfinite(shear_row)):
+                    hdf_shear = self._hdf_shear_or_none(input_model, int(fiber))
+                    shear_row = None if hdf_shear is None else hdf_shear[j]
+                sig_row = self._traceprof_moment_row(
+                    traceprof_model, int(fiber), j, n_pix, "sigma_spec"
+                )
+                if input_err is not None:
+                    rate_var = np.maximum(
+                        np.asarray(input_err, dtype=np.float64), 1.0e-30
+                    ) ** 2
+                else:
+                    rate_var = np.ones_like(input_data, dtype=np.float64)
+                result = extract_spectroperfection(
+                    np.asarray(input_data, dtype=np.float64),
+                    rate_var,
+                    prof,
+                    ty,
+                    extraction_aperture=float(self.extraction_aperture),
+                    shear=shear_row,
+                    sigma_spec=sig_row,
+                    rate_dq=None if input_dq is None else np.asarray(input_dq),
+                    pix_range=self.pix_range,
+                    spectral_kernel=getattr(self, "spectral_kernel", "bilinear"),
+                )
+                spec_out[j, :] = result["spec"]
+                err_out[j, :] = result["err"]
+                var_rnoise_out[j, :] = np.nan
+                var_poisson_out[j, :] = np.nan
+                dq_out[j, :] = 0
+                if input_mid_time is not None:
+                    mid_time_out[j, :] = np.nanmean(
+                        np.asarray(input_mid_time, dtype=np.float64), axis=1
+                    )
+                else:
+                    mid_time_out[j, :] = np.nan
+
+    def extract_spectroperfectionism(
+        self,
+        input_model: datamodels.L0Model,
+        output_model: datamodels.L1Model,
+        do_fibers: np.ndarray,
+        do_orders: np.ndarray,
+    ):
+        order_vec = input_model.make_order_vec()
+        spectrograph = getattr(input_model.meta, "spectrograph", None)
+        if spectrograph is None:
+            raise ValueError(
+                "spectroperfectionism extract requires input_model.meta.spectrograph"
+            )
+        pext_name = input_model.primary_extension_name
+        input_data = getattr(input_model, pext_name)
+        input_err = getattr(input_model, pext_name + "_err", None)
+        input_dq = getattr(input_model, "dq", None)
+        input_mid_time = getattr(input_model, "mid_time", None)
+        rate = np.asarray(input_data, dtype=np.float64)
+        if input_err is not None:
+            rate_var = np.maximum(np.asarray(input_err, dtype=np.float64), 1.0e-30) ** 2
+        else:
+            rate_var = np.ones_like(rate, dtype=np.float64)
+
+        for fiber in do_fibers:
+            spec_out = getattr(output_model, f"SPEC_UNCAL_FIB{fiber}")
+            err_out = getattr(output_model, f"SPEC_UNCAL_ERR_FIB{fiber}")
+            var_rnoise_out = getattr(output_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fiber}")
+            var_poisson_out = getattr(output_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fiber}")
+            dq_out = getattr(output_model, f"SPEC_DQ_FIB{fiber}")
+            mid_time_out = getattr(output_model, f"MID_TIME_FIB{fiber}")
+
+            for j, order in enumerate(order_vec):
+                if order not in do_orders:
+                    continue
+                logger.info(
+                    "Extracting %s with method spectroperfectionism [Fiber %s][Order %s]",
+                    input_model,
+                    fiber,
+                    order,
+                )
+                result = extract_order_spectroperfectionism_from_hdf(
+                    rate,
+                    rate_var,
+                    spectrograph=str(spectrograph),
+                    fiber=int(fiber),
+                    order=int(order),
+                    rate_dq=None if input_dq is None else np.asarray(input_dq),
+                )
+                n = min(spec_out.shape[1], result["spec"].size)
+                spec_out[j, :n] = result["spec"][:n]
+                err_out[j, :n] = result["err"][:n]
+                var_rnoise_out[j, :] = np.nan
+                var_poisson_out[j, :] = np.nan
+                dq_out[j, :] = 0
+                mid_time_out[j, :] = np.nan
+                if input_mid_time is not None:
+                    mid_time_out[j, :] = np.nanmean(input_mid_time, axis=1)

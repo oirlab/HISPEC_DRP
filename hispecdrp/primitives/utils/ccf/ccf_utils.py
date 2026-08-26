@@ -1239,8 +1239,138 @@ def _ccf_gaussian_amp_floor_free_baseline_scaled(
     return max(span_floor, peak_floor, float(abs_scaled_floor))
 
 
+def _gaussian_preview_params_from_peak_up_ccf(
+    v_grid_m_s: np.ndarray,
+    ccf_peak_up: np.ndarray,
+    rv_m_s: float,
+    rv_err_m_s: float,
+    *,
+    fit_ok: bool,
+    config: CCFFitConfig | None = None,
+    gaussian_seed_mean_m_s: float | None = None,
+) -> tuple[dict, dict]:
+    """
+    Build ``params`` / ``diagnostics`` for mask-line preview overlays when RV comes from
+    :func:`~hispecdrp.primitives.utils.ccf.ccf_gauss_fit_numba.fit_ccf_rv_rows_numba`.
+    """
+    cfg = config or CCFFitConfig()
+    vg = np.asarray(v_grid_m_s, dtype=np.float64).ravel()
+    y = np.asarray(ccf_peak_up, dtype=np.float64).ravel()
+    v0 = float(rv_m_s)
+    sig = float(cfg.initial_stddev_km_s) * 1000.0
+    amp = float("nan")
+    base = float("nan")
+    if fit_ok and np.isfinite(v0):
+        half = max(2500.0, 2.5 * sig)
+        loc = np.isfinite(vg) & np.isfinite(y) & (vg >= v0 - half) & (vg <= v0 + half)
+        if int(np.count_nonzero(loc)) < 5:
+            loc = np.isfinite(vg) & np.isfinite(y)
+        if int(np.count_nonzero(loc)) >= 3:
+            vl = vg[loc]
+            yl = y[loc]
+            peak = float(np.nanmax(yl))
+            mn = float(np.nanmin(yl))
+            if peak > mn:
+                mid = mn + 0.5 * (peak - mn)
+                above = vl[yl >= mid]
+                if above.size >= 2:
+                    fwhm = float(np.nanmax(above) - np.nanmin(above))
+                    if fwhm > 0.0:
+                        sig = max(sig, fwhm / 2.355)
+            sig = max(float(sig), 1.0)
+            g = np.exp(-0.5 * ((vl - v0) / sig) ** 2)
+            mat = np.column_stack((g, np.ones(vl.size, dtype=np.float64)))
+            coeff, _res, rank, _s = np.linalg.lstsq(mat, yl, rcond=None)
+            if int(rank) >= 2 and np.all(np.isfinite(coeff)):
+                amp = float(coeff[0])
+                base = float(coeff[1])
+            else:
+                base = float(np.nanmedian(yl))
+                amp = max(peak - base, 0.0)
+    if not np.isfinite(amp):
+        amp = 0.0
+    if not np.isfinite(base):
+        base = float(np.nanmedian(y[np.isfinite(y)])) if np.any(np.isfinite(y)) else 0.0
+    params = {
+        "amplitude": float(amp),
+        "v0": v0,
+        "sigma": float(sig),
+        "baseline": float(base),
+    }
+    diag: dict = {
+        "fit_ok": bool(fit_ok and np.isfinite(v0) and np.isfinite(rv_err_m_s)),
+        "ccf_line_mask_forced_peak_up_profile": True,
+        "ccf_line_mask_stored_negated": True,
+        "fit_via_numba_line_mask": True,
+        "lm_gaussian_width_plausible": bool(fit_ok and sig > 0.0),
+        "used_covariance_for_error": False,
+        "used_sigma_fallback": False,
+        "used_gradient_ccf_error": False,
+        "used_ccf_pointwise_error": False,
+        "profile": "absorption",
+        "ccf_dir_style": "up",
+        "message": "mask-line stored CCF via fit_ccf_rv_rows_numba",
+    }
+    if gaussian_seed_mean_m_s is not None and math.isfinite(float(gaussian_seed_mean_m_s)):
+        diag["gaussian_seed_mean_m_s"] = float(gaussian_seed_mean_m_s)
+    return params, diag
 
 
+def _fit_ccf_rv_line_mask_stored_negated_via_numba(
+    v_grid_m_s: np.ndarray,
+    ccf: np.ndarray,
+    v_step_m_s: float,
+    n_good: int | None,
+    *,
+    return_params: bool,
+    ccf_err: np.ndarray | None,
+    config: CCFFitConfig | None,
+    gaussian_seed_mean_m_s: float | None,
+) -> tuple:
+    """Mask-line stored CCF rows: use the same Numba centroid as the RVCCF pipeline."""
+    cfg = config or CCFFitConfig()
+    vg = np.asarray(v_grid_m_s, dtype=np.float64).ravel()
+    y0 = np.asarray(ccf, dtype=np.float64).ravel()
+    ok_mask = np.isfinite(vg) & np.isfinite(y0)
+    if int(np.sum(ok_mask)) < int(cfg.min_points):
+        nan_pair = (np.nan, np.nan)
+        if return_params:
+            return nan_pair + ({}, {"fit_ok": False, "message": "insufficient valid points"})
+        return nan_pair
+
+    err_row: np.ndarray | None = None
+    if ccf_err is not None:
+        er0 = np.asarray(ccf_err, dtype=np.float64).ravel()
+        if er0.size == vg.size and np.any(np.isfinite(er0) & (er0 > 0)):
+            err_row = er0.reshape(1, -1)
+
+    rv_arr, err_arr, ok_arr = fit_ccf_rv_rows_numba(
+        vg,
+        y0.reshape(1, -1),
+        ccf_err_rows=err_row,
+        gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
+        pass1_half_width_m_s=float(cfg.pass1_half_width_km_s) * 1000.0,
+        pass2_half_width_m_s=float(cfg.pass2_half_width_km_s) * 1000.0,
+        initial_stddev_m_s=float(cfg.initial_stddev_km_s) * 1000.0,
+        levmar_maxiter=int(cfg.levmar_maxiter),
+        min_points=int(cfg.min_points),
+        max_cores=1,
+    )
+    fit_ok = int(ok_arr[0]) == 1
+    rv_ms = float(rv_arr[0]) if fit_ok else float("nan")
+    rv_err_ms = float(err_arr[0]) if fit_ok else float("nan")
+    if not return_params:
+        return rv_ms, rv_err_ms
+    params, diag = _gaussian_preview_params_from_peak_up_ccf(
+        vg,
+        y0,
+        rv_ms,
+        rv_err_ms,
+        fit_ok=fit_ok,
+        config=cfg,
+        gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
+    )
+    return rv_ms, rv_err_ms, params, diag
 
 
 def fit_ccf_rv(
@@ -1391,6 +1521,17 @@ def fit_ccf_rv(
       minimum on ``rv_err`` (no 200 km/s-style floor from ``max(rv_err, σ_slope)``).
     """
     cfg = config or CCFFitConfig()
+    if bool(ccf_line_mask_stored_negated):
+        return _fit_ccf_rv_line_mask_stored_negated_via_numba(
+            v_grid_m_s,
+            ccf,
+            v_step_m_s,
+            n_good,
+            return_params=return_params,
+            ccf_err=ccf_err,
+            config=cfg,
+            gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
+        )
     free_bl = _line_mask_ccf_fit_free_baseline_requested(
         fit_ccf_baseline_free=fit_ccf_baseline_free,
         line_mask_line_window_by_line=line_mask_line_window_by_line,
@@ -3181,6 +3322,97 @@ def _fit_ccf_preview_slot_worker(
     return gaussian_fit, bisector_fit
 
 
+def _fit_ccf_preview_slots_line_mask_numba(
+    slots: list[dict],
+    v_step: float,
+    *,
+    line_mask_gaussian_seed_mean_m_s: float | None = None,
+    config: CCFFitConfig | None = None,
+) -> list[tuple[dict, dict | None]]:
+    """
+    Batch Gaussian fits for mask-line preview slots (same Numba path as RVCCF).
+
+    Avoids calling :func:`fit_ccf_rv_rows_numba` from multiple threads inside
+    :func:`finalize_ccf_preview_dict` (Numba workqueue is not thread-safe).
+    """
+    if not slots:
+        return []
+    cfg = config or CCF_PREVIEW_SLOT_FIT_CONFIG
+    v_slot = np.asarray(slots[0]["v"], dtype=np.float64).ravel()
+    rows = np.vstack([np.asarray(sl["ccf"], dtype=np.float64).ravel() for sl in slots])
+    if rows.shape[1] != v_slot.size:
+        raise ValueError("preview slots must share the same velocity grid")
+
+    err_rows: np.ndarray | None = None
+    err_list: list[np.ndarray] = []
+    for sl in slots:
+        ce = sl.get("ccf_err")
+        if ce is None:
+            err_list = []
+            break
+        err_list.append(np.asarray(ce, dtype=np.float64).ravel())
+    if err_list and len(err_list) == len(slots):
+        err_rows = np.vstack(err_list)
+
+    rv_arr, err_arr, ok_arr = fit_ccf_rv_rows_numba(
+        v_slot,
+        rows,
+        ccf_err_rows=err_rows,
+        gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
+        pass1_half_width_m_s=float(cfg.pass1_half_width_km_s) * 1000.0,
+        pass2_half_width_m_s=float(cfg.pass2_half_width_km_s) * 1000.0,
+        initial_stddev_m_s=float(cfg.initial_stddev_km_s) * 1000.0,
+        levmar_maxiter=int(cfg.levmar_maxiter),
+        min_points=int(cfg.min_points),
+        max_cores=None,
+    )
+
+    results: list[tuple[dict, dict | None]] = []
+    for i, sl in enumerate(slots):
+        fit_ok = int(ok_arr[i]) == 1
+        rv_ms = float(rv_arr[i]) if fit_ok else float("nan")
+        rv_err_ms = float(err_arr[i]) if fit_ok else float("nan")
+        y_slot = rows[i]
+        params, diag = _gaussian_preview_params_from_peak_up_ccf(
+            v_slot,
+            y_slot,
+            rv_ms,
+            rv_err_ms,
+            fit_ok=fit_ok,
+            config=cfg,
+            gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
+        )
+        gaussian_fit = {
+            "rv": rv_ms,
+            "rv_err": rv_err_ms,
+            "params": params,
+            "diagnostics": diag,
+        }
+        bisector_fit: dict | None = None
+        if fit_ok and np.isfinite(rv_ms):
+            ce = sl.get("ccf_err")
+            ccf_err_arg = np.asarray(ce, np.float64) if ce is not None else None
+            rv_bi, err_bi, bmeta = _refine_ccf_rv_bisector_after_gaussian_fit(
+                v_slot,
+                y_slot,
+                float(v_step),
+                ccf_err=ccf_err_arg,
+                gaussian_seed_mean_m_s=float(rv_ms),
+            )
+            if rv_bi is not None and math.isfinite(float(rv_bi)):
+                bisector_fit = {
+                    "rv": float(rv_bi),
+                    "rv_err": (
+                        float(err_bi)
+                        if err_bi is not None and math.isfinite(float(err_bi)) and float(err_bi) > 0
+                        else float("nan")
+                    ),
+                    "diagnostics": bmeta if isinstance(bmeta, dict) else {},
+                }
+        results.append((gaussian_fit, bisector_fit))
+    return results
+
+
 def finalize_ccf_preview_dict(
     order_slots: list[dict],
     all_ccf_rows: list[np.ndarray],
@@ -3256,28 +3488,41 @@ def finalize_ccf_preview_dict(
         mean_slot["ccf_err"] = np.asarray(combined_err, dtype=np.float64)
     slots = [mean_slot] + order_slots
     vs = float(v_step)
-    n_workers = _ccf_preview_finalize_n_workers(len(slots))
-    logger.info(
-        "CCF preview: finalize_ccf_preview_dict fitting Gaussians n_slots=%d n_workers=%d "
-        "(mean + orders)",
-        len(slots),
-        n_workers,
-    )
-
-    def _run_slot(s: dict) -> tuple[dict, dict | None]:
-        return _fit_ccf_preview_slot_worker(
-            s,
+    if bool(ccf_line_mask_stored_negated):
+        logger.info(
+            "CCF preview: finalize_ccf_preview_dict fitting Gaussians n_slots=%d "
+            "(mask-line batch Numba)",
+            len(slots),
+        )
+        results = _fit_ccf_preview_slots_line_mask_numba(
+            slots,
             vs,
-            ccf_line_mask_stored_negated=ccf_line_mask_stored_negated,
-            line_mask_line_window_by_line=line_mask_line_window_by_line,
             line_mask_gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
+            config=CCF_PREVIEW_SLOT_FIT_CONFIG,
+        )
+    else:
+        n_workers = _ccf_preview_finalize_n_workers(len(slots))
+        logger.info(
+            "CCF preview: finalize_ccf_preview_dict fitting Gaussians n_slots=%d n_workers=%d "
+            "(mean + orders)",
+            len(slots),
+            n_workers,
         )
 
-    if n_workers <= 1:
-        results = [_run_slot(sl) for sl in slots]
-    else:
-        with ThreadPoolExecutor(max_workers=n_workers) as ex:
-            results = list(ex.map(_run_slot, slots))
+        def _run_slot(s: dict) -> tuple[dict, dict | None]:
+            return _fit_ccf_preview_slot_worker(
+                s,
+                vs,
+                ccf_line_mask_stored_negated=ccf_line_mask_stored_negated,
+                line_mask_line_window_by_line=line_mask_line_window_by_line,
+                line_mask_gaussian_seed_mean_m_s=line_mask_gaussian_seed_mean_m_s,
+            )
+
+        if n_workers <= 1:
+            results = [_run_slot(sl) for sl in slots]
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                results = list(ex.map(_run_slot, slots))
     for sl, (gaussian_fit, bisector_fit) in zip(slots, results):
         sl["gaussian_fit"] = gaussian_fit
         if bisector_fit is not None:
@@ -4279,9 +4524,9 @@ def template_min_resolution_for_doppler_paint(
 
     Parameters
     ----------
-    wave_obs_um
-        Strictly ascending observed wavelength grid (um), typically one echelle
-        order from the instrument WAVE solution.
+        wave_obs_um
+        Observed wavelength grid (um), typically one echelle order from the
+        instrument WAVE solution. May increase or decrease with pixel index.
     samples_per_pixel
         Target number of template samples per observed pixel (default ``8``).
     resolution_floor, resolution_ceiling
@@ -4296,7 +4541,7 @@ def template_min_resolution_for_doppler_paint(
     w = np.asarray(wave_obs_um, dtype=np.float64).ravel()
     if w.size < 2:
         return float(resolution_floor)
-    dlam_pix = float(np.median(np.diff(w)))
+    dlam_pix = float(np.median(np.abs(np.diff(w))))
     lam_mid = float(np.median(w))
     if dlam_pix <= 0.0 or lam_mid <= 0.0 or not np.isfinite(dlam_pix):
         return float(resolution_floor)

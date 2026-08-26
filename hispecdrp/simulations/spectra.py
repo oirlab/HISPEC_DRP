@@ -35,7 +35,9 @@ from .simulate_rate_map import SimulateRateMap
 
 __all__ = [
     "build_ccfopt_mask",
+    "build_ccfopt_mask_lsf_matched",
     "build_l2",
+    "build_l2_lsf_matched",
     "build_l2_and_recover_rv",
     "paint_order_list",
     "recover_stellar_rv",
@@ -129,13 +131,18 @@ def _paint_context(
 
     n_pix = int(np.asarray(ws_all[orders[0]]["wavelength"]).size)
     wave_2d = np.zeros((len(orders), n_pix), dtype=np.float64)
+    w_obs_inc_rows: list[np.ndarray] = []
     for i, od in enumerate(orders):
         w = np.asarray(ws_all[od]["wavelength"], dtype=np.float64)
         if w.size != n_pix:
             raise ValueError(f"order {od}: expected {n_pix} pixels, got {w.size}")
-        if not np.all(np.diff(w) > 0.0):
-            raise ValueError(f"order {od}: wavelength grid is not strictly increasing")
+        if not np.all(np.isfinite(w)):
+            raise ValueError(f"order {od}: wavelength grid contains non-finite values")
+        w_obs_inc = np.unique(w)
+        if w_obs_inc.size < 2:
+            raise ValueError(f"order {od}: wavelength grid has no span")
         wave_2d[i] = w
+        w_obs_inc_rows.append(w_obs_inc)
 
     w_native, f_native = load_template_from_path(template_path)
     order = np.argsort(w_native)
@@ -145,7 +152,9 @@ def _paint_context(
     w_dense: list[np.ndarray] = []
     f_dense: list[np.ndarray] = []
     for i in range(wave_2d.shape[0]):
-        wd, fd = prepare_template_for_doppler_paint(w_native, f_native, wave_2d[i])
+        wd, fd = prepare_template_for_doppler_paint(
+            w_native, f_native, w_obs_inc_rows[i]
+        )
         w_dense.append(wd)
         f_dense.append(fd)
 
@@ -169,6 +178,7 @@ def build_l2(
     templates_base_dir: str | None = None,
     spec_err_floor: float = 1.0e-6,
     spec_err_relative: float = 1.0e-6,
+    apply_lsf: bool = False,
 ) -> datamodels.L2Model:
     """
     Build a noiseless L2 with a Doppler-shifted template on the instrument grid.
@@ -202,6 +212,10 @@ def build_l2(
     spec_err_floor, spec_err_relative
         Near-noiseless error bars:
         ``max(spec_err_relative * |flux|, spec_err_floor)``.
+    apply_lsf
+        If True, convolve each order with the HDF PSF→1-D LSF after paint so
+        the L2 matches instrument-apparent line shapes (for ccfopt masks and
+        fidelity vs extracted spectra).
 
     Returns
     -------
@@ -230,6 +244,17 @@ def build_l2(
             order=int(mask_ccf_pixel_interp_order),
         )
 
+    if apply_lsf:
+        from ..primitives.lsf.lsf_convolve import convolve_l2_with_hdf_lsf
+
+        spec = convolve_l2_with_hdf_lsf(
+            ctx.wave_2d,
+            spec,
+            spectrograph=spectrograph,
+            fiber=int(fiber),
+            order_start=ost,
+        )
+
     model = datamodels.L2Model(
         meta={
             "order_start": ost,
@@ -255,6 +280,25 @@ def build_l2(
     return model
 
 
+def build_l2_lsf_matched(
+    rv_km_s: float,
+    *,
+    spectrograph: str = "BSPEC",
+    template: str,
+    fiber: int = 1,
+    **kwargs,
+) -> datamodels.L2Model:
+    """Paint an ideal L2 then apply the HDF detector LSF (see ``apply_lsf=True``)."""
+    return build_l2(
+        rv_km_s,
+        spectrograph=spectrograph,
+        template=template,
+        fiber=fiber,
+        apply_lsf=True,
+        **kwargs,
+    )
+
+
 def build_ccfopt_mask(
     template: str,
     output_dir: str | Path,
@@ -265,6 +309,8 @@ def build_ccfopt_mask(
     order_end: int | None = None,
     rebuild_seed: bool = True,
     templates_base_dir: str | None = None,
+    apply_lsf: bool = False,
+    mask_suffix: str | None = None,
     **ccfopt_overrides,
 ) -> tuple[str, str, datamodels.L2Model]:
     """
@@ -275,6 +321,9 @@ def build_ccfopt_mask(
     :func:`~hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_l2_line_by_line_rv`
     with ccfopt line-by-line defaults.
 
+    When ``apply_lsf=True``, the L2 is LSF-matched and the default product name is
+    ``<stem>.lsf.ccfopt.delta.mas`` (override with ``mask_suffix``).
+
     Returns ``(seed_mask_path, ccfopt_mask_path, l2_at_zero_rv)``.
     """
     out_dir = Path(output_dir)
@@ -284,7 +333,11 @@ def build_ccfopt_mask(
     stem = Path(template).stem
 
     seed_mask = out_dir / f"{stem}.delta.mas"
-    ccfopt_mask = out_dir / f"{stem}.ccfopt.delta.mas"
+    if mask_suffix is None:
+        mask_suffix = ".lsf.ccfopt.delta.mas" if apply_lsf else ".ccfopt.delta.mas"
+    if not str(mask_suffix).startswith("."):
+        mask_suffix = "." + str(mask_suffix)
+    ccfopt_mask = out_dir / f"{stem}{mask_suffix}"
     wl_min, wl_max = _spectrograph_wavelength_clip_um(
         spectrograph,
         fiber,
@@ -310,6 +363,7 @@ def build_ccfopt_mask(
         order_start=order_start,
         order_end=order_end,
         templates_base_dir=templates_base_dir,
+        apply_lsf=bool(apply_lsf),
     )
     ccfopt_path, _ = build_ccfopt_line_mask_from_l2_line_by_line_rv(
         str(seed_mask),
@@ -321,6 +375,25 @@ def build_ccfopt_mask(
         **ccfopt_overrides,
     )
     return str(seed_mask), ccfopt_path, l2
+
+
+def build_ccfopt_mask_lsf_matched(
+    template: str,
+    output_dir: str | Path,
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    **kwargs,
+) -> tuple[str, str, datamodels.L2Model]:
+    """Build ``*.lsf.ccfopt.delta.mas`` from an LSF-matched ideal L2."""
+    return build_ccfopt_mask(
+        template,
+        output_dir,
+        spectrograph=spectrograph,
+        fiber=fiber,
+        apply_lsf=True,
+        **kwargs,
+    )
 
 
 def paint_order_list(

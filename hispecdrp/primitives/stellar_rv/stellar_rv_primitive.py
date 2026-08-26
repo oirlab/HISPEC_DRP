@@ -46,7 +46,6 @@ from ..utils.ccf.ccf_utils import (
     process_orders_rvs_numba_parallel,
 )
 from ..utils.spectral_utils import resolve_stellar_template_to_log_micron
-from ..barycenter_correction.barycenter_corr import berv_m_s_to_ccf_zb
 
 __all__ = [
     "StellarRVPrimitive",
@@ -377,8 +376,6 @@ class StellarRVPrimitive(BasePrimitive):
 
         # Per-fiber CCF preview slots (mean + per-order); filled when save/show preview.
         self._ccf_preview_by_fiber: dict = {}
-        # Per-fiber resolved CCF barycentric factor z_b (set in :meth:`_process_fiber` or by pipeline).
-        self._ccf_zb_by_fiber: dict[str, float] = {}
         # Per-fiber payload for mask overlay debug HTML (ccf_line_mask only).
         self._mask_overlay_by_fiber: dict = {}
         # Per-fiber payload for template overlay debug HTML (ccf_stellar_template only).
@@ -464,13 +461,6 @@ class StellarRVPrimitive(BasePrimitive):
         if sg in ("BSPEC", "RSPEC"):
             return sg
         return "BSPEC"
-
-    def _fiber_ccf_zb(self, fiber: str | int) -> float:
-        """Resolved :math:`z_b` for one fiber (set in :meth:`_process_fiber`)."""
-        return self._ccf_zb_by_fiber.get(
-            str(fiber),
-            float(getattr(self, "ccf_zb", 0.0)),
-        )
 
     def _resolve_chunk_rv_prior_half_width_m_s(self) -> float | None:
         """Half-width (m/s) for prior-gated chunk aggregation when a CCF center is set."""
@@ -563,15 +553,12 @@ class StellarRVPrimitive(BasePrimitive):
         fiber: str | int,
     ) -> float:
         """
-        Resolve CCF :math:`z_b` for previews and overlays.
+        Return the uniform CCF :math:`z_b` for previews and overlays.
 
-        Uses per-fiber values cached on ``primitive._ccf_zb_by_fiber`` when present;
-        otherwise returns the primitive ``ccf_zb`` parameter.
+        ``fiber`` is accepted for API compatibility; all fibers share
+        ``primitive.ccf_zb``.
         """
-        del input_model
-        by_fiber = getattr(primitive, "_ccf_zb_by_fiber", None)
-        if by_fiber and str(fiber) in by_fiber:
-            return float(by_fiber[str(fiber)])
+        del input_model, fiber
         return float(getattr(primitive, "ccf_zb", 0.0))
 
     def _run_algorithm_ccf_stellar_template(
@@ -821,7 +808,7 @@ class StellarRVPrimitive(BasePrimitive):
             v_step_m_s=vs,
             ccf_center_m_s=(float(h_center) if h_center is not None else None),
             ccf_half_window_m_s=float(getattr(self, "v_half_window", 20000.0)),
-            zb=self._fiber_ccf_zb(fiber),
+            zb=float(self.ccf_zb),
             max_cores=(None if getattr(self, "max_cores", None) is None else int(getattr(self, "max_cores"))),
             want_preview=want_preview,
             debug_ccf=bool(getattr(self, "debug_ccf", False)),
@@ -926,9 +913,7 @@ class StellarRVPrimitive(BasePrimitive):
             return
 
         fiber_s = str(fiber)
-        if fiber_s not in self._ccf_zb_by_fiber:
-            self._ccf_zb_by_fiber[fiber_s] = float(getattr(self, "ccf_zb", 0.0))
-        ccf_zb = self._ccf_zb_by_fiber[fiber_s]
+        ccf_zb = float(getattr(self, "ccf_zb", 0.0))
         if ccf_zb != 0.0:
             logger.info(
                 "Stellar RV: fiber=%s ccf_zb=%.9e",
@@ -1122,7 +1107,7 @@ class StellarRVPrimitive(BasePrimitive):
                             t_ln,
                             t_flux,
                             v_grid=v_merged,
-                            zb=self._fiber_ccf_zb(fiber),
+                            zb=float(self.ccf_zb),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
@@ -1139,7 +1124,7 @@ class StellarRVPrimitive(BasePrimitive):
                             v_min=v_min_m_s,
                             v_max=v_max_m_s,
                             v_step=v_step_m_s,
-                            zb=self._fiber_ccf_zb(fiber),
+                            zb=float(self.ccf_zb),
                             min_good_pixels=int(
                                 getattr(self, "ccf_min_good_pixels", 9)
                             ),
@@ -1274,7 +1259,7 @@ class StellarRVPrimitive(BasePrimitive):
             max_cores=max_cores,
             return_ccf=True,
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
-            zb=self._fiber_ccf_zb(fiber),
+            zb=float(self.ccf_zb),
             **(
                 dict(
                     ccf_center_m_s=ccf_center_m_s,

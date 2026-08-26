@@ -101,9 +101,11 @@ class E2EConfig:
     template_filename: str | None = None
     stellar_rv_mask_path: str | None = None
     # Optional Stage-2 ``primitives`` overrides merged on top of defaults (e.g. stellar_rv
-    # ``v_step_coarse``, ``ccf_zb_from_barycorr``). Nested dicts are shallow-merged per
+    # ``v_step_coarse``). Nested dicts are shallow-merged per
     # primitive name.
     stage2_primitives: dict[str, Any] | None = None
+    # Optional Stage-1 ``primitives`` overrides (e.g. ``spec_extract.method``).
+    stage1_primitives: dict[str, Any] | None = None
     overwrite_ramp: bool = True
     make_preview_html: bool = True
     # Dummy fiberflat simulation (ProcessFiberflatsPipeline input)
@@ -737,8 +739,8 @@ def run_e2e_simulation(config: E2EConfig) -> E2EResult:
     stage2_primitives = None
     if config.infinite_snr_rv_validation:
 
-        stage1_primitives = merge_infinite_snr_stage1_primitives(None)
-        stage2_primitives = merge_infinite_snr_stage2_primitives(None)
+        stage1_primitives = merge_infinite_snr_stage1_primitives(config.stage1_primitives)
+        stage2_primitives = merge_infinite_snr_stage2_primitives(config.stage2_primitives)
     elif config.stage2_primitives:
         import copy
 
@@ -1053,6 +1055,7 @@ def prepare_pipeline_example_stage1(
 
 _DEFAULT_FWHM_PIX = 3.5
 _TRACE_POLY_DEG = 2
+_HDF_MODEL_CACHE: dict[str, dict] = {}
 
 
 def _order_list(spectrograph: str) -> list[int]:
@@ -1060,11 +1063,25 @@ def _order_list(spectrograph: str) -> list[int]:
 
 
 def _load_hdf_model_data(spectrograph: str) -> tuple[str, dict]:
-    srm = SimulateRateMap()
+    """Load pyechelle HDF once per spectrograph (PSF stamps are ~1 GB)."""
+    global _HDF_MODEL_CACHE
     spectrograph = spectrograph.upper()
+    cached = _HDF_MODEL_CACHE.get(spectrograph)
+    if cached is not None:
+        return spectrograph, cached
+    srm = SimulateRateMap()
     model = srm.bspec_hdf_model if spectrograph == "BSPEC" else srm.rspec_hdf_model
     model_path = srm.hdf_file_directory + model
-    return spectrograph, read_pyechelle_hdf(model_path)
+    model_data = read_pyechelle_hdf(model_path)
+    _HDF_MODEL_CACHE[spectrograph] = model_data
+    return spectrograph, model_data
+
+
+def clear_hdf_model_cache() -> None:
+    """Drop cached HDF models (free ~1 GB) when finished with sim extracts."""
+    global _HDF_MODEL_CACHE
+    _HDF_MODEL_CACHE = {}
+
 
 
 def _orient_hdf_pixel_xy(
@@ -1300,13 +1317,88 @@ def create_tracepos_model_from_fiberflat_rates(
     return trace_pos
 
 
+def create_traceprof_model_from_rate_maps(
+    rate_maps_by_fiber: dict[int, np.ndarray | str | os.PathLike[str]],
+    *,
+    spectrograph: str = "BSPEC",
+    meta: dict | None = None,
+    lfc_rate: np.ndarray | None = None,
+    tracepos: TracePosModel | None = None,
+    orders: list[int] | None = None,
+    extraction_aperture: float = 8.0,
+    expected_xy_by_order: dict[int, list[tuple[float, float]]] | None = None,
+) -> TraceProfModel:
+    """
+    Build a :class:`~hispecdrp.datamodels.traceprof.TraceProfModel` from 2-D rate maps.
+
+    Matches the production :class:`~hispecdrp.primitives.trace_fitting.traceprof_primitive.TraceProfilePrimitive`
+    pattern (``prof_fib*`` = fiberflat rate image). Used for optimal extraction
+    where spatial profile ``P`` must come from the flat, not the science spectrum.
+
+    When ``lfc_rate`` and ``tracepos`` are given, also fills spectroperfection
+    moment HDUs (shear, ``sigma_spec``, ``sigma_spat``, ``mom2_cross``).
+    """
+    from astropy.io import fits
+
+    spectrograph = str(spectrograph).upper()
+    model_meta = {"spectrograph": spectrograph}
+    if meta:
+        model_meta.update(meta)
+    model = TraceProfModel(config=hispec_config.HISPECConfig, meta=model_meta)
+    for fiber, src in rate_maps_by_fiber.items():
+        fib = int(fiber)
+        if isinstance(src, (str, os.PathLike)):
+            prof = np.asarray(fits.getdata(os.fspath(src)), dtype=np.float64)
+        else:
+            prof = np.asarray(src, dtype=np.float64)
+        if prof.ndim != 2:
+            raise ValueError(f"fiber {fib} profile rate must be 2-D; got {prof.shape}")
+        err = np.zeros_like(prof, dtype=np.float64)
+        setattr(model, f"prof_fib{fib}", prof)
+        setattr(model, f"prof_err_fib{fib}", err)
+    if lfc_rate is not None and tracepos is not None:
+        from ..primitives.trace_fitting.traceprof_moments import (
+            fill_traceprof_spectroperfection_moments,
+        )
+
+        lfc = np.asarray(lfc_rate, dtype=np.float64)
+        for fiber in rate_maps_by_fiber:
+            fib = int(fiber)
+            prof = np.asarray(getattr(model, f"prof_fib{fib}"), dtype=np.float64)
+            fill_traceprof_spectroperfection_moments(
+                model,
+                fiberflat_rate=prof,
+                lfc_rate=lfc,
+                tracepos=tracepos,
+                spectrograph=spectrograph,
+                fiber=fib,
+                orders=orders,
+                extraction_aperture=float(extraction_aperture),
+                expected_xy_by_order=expected_xy_by_order,
+            )
+    return model
+
+
 def create_traceprof_model_from_sim_hdf(
     spectrograph: str,
     *,
     meta: dict | None = None,
+    fiberflat_rate_paths: dict[int, str | os.PathLike[str]] | None = None,
     detector_shape: tuple[int, int] = (4096, 4160),
 ) -> TraceProfModel:
-    """Placeholder trace profiles (box extraction does not use them)."""
+    """
+    Trace profiles for optimal extraction.
+
+    When ``fiberflat_rate_paths`` is provided (``{fiber: rate_fits_path}``),
+    profiles are taken from those 2-D rate maps (production-like). Otherwise
+    returns unity placeholders (box extract only; not suitable for optimal).
+    """
+    if fiberflat_rate_paths:
+        return create_traceprof_model_from_rate_maps(
+            fiberflat_rate_paths,
+            spectrograph=spectrograph,
+            meta=meta,
+        )
     spectrograph = spectrograph.upper()
     model_meta = {"spectrograph": spectrograph}
     if meta:
@@ -1319,6 +1411,25 @@ def create_traceprof_model_from_sim_hdf(
         setattr(model, f"prof_fib{fiber}", prof)
         setattr(model, f"prof_err_fib{fiber}", err)
     return model
+
+
+def create_trace_shear_from_sim_hdf(
+    spectrograph: str,
+    *,
+    fiber: int = 2,
+    n_pix: int = 4096,
+) -> np.ndarray:
+    """
+    Iso-λ shear ``∂row/∂col`` from HDF PSF stamps (oriented spectral-row grid).
+
+    Thin wrapper around
+    :func:`hispecdrp.primitives.spectral_extraction.iso_lambda_shear.create_trace_shear_from_sim_hdf`.
+    """
+    from ..primitives.spectral_extraction.iso_lambda_shear import (
+        create_trace_shear_from_sim_hdf as _create,
+    )
+
+    return _create(spectrograph, fiber=fiber, n_pix=n_pix)
 
 
 def create_wavelength_solution_model_from_sim_hdf(
@@ -2306,6 +2417,135 @@ def ensure_shared_stage1_cals_for_rv_sim(
     }
 
 
+# Default box aperture for RV-recovery E2E sims (matches rv_recovery_sim_line_by_line.ipynb).
+DEFAULT_E2E_RV_SIM_EXTRACTION_APERTURE: float = 8.0
+
+
+def stellar_rv_kwargs_for_e2e_sim(
+    bulk_rv_km_s: float,
+    mask_path: str,
+    *,
+    fibers: list[int] | tuple[int, ...] = (2,),
+    **overrides,
+) -> dict[str, Any]:
+    """
+    Keyword arguments for :class:`~hispecdrp.primitives.StellarRVPrimitive` on E2E blaze L2.
+
+    Uses :data:`~hispecdrp.utils.line_mask_utils.CCFOPT_SINGLE_LINE_STELLAR_RV_KW`
+    (line-by-line ccfopt defaults).  Set ``ccf_zb=0`` when ``barycentric_velocity_km_s=0``
+    and ``barycorr`` is skipped.
+    """
+    from ..utils.line_mask_utils import CCFOPT_SINGLE_LINE_STELLAR_RV_KW
+
+    kw = CCFOPT_SINGLE_LINE_STELLAR_RV_KW
+    inj_m_s = float(bulk_rv_km_s) * 1000.0
+    pars: dict[str, Any] = {
+        "algorithm": "ccf_line_mask",
+        "mask_path": str(mask_path),
+        "ccf_input_velocity": inj_m_s,
+        "do_fibers": [str(int(f)) for f in fibers],
+        "window_line_by_line": True,
+        "window_size_um": float(kw["window_size_um"]),
+        "v_half_window": float(kw["v_half_window_m_s"]),
+        "v_step_coarse": float(kw["v_step_m_s"]),
+        "mask_ccf_pixel_interp_order": int(kw["mask_ccf_pixel_interp_order"]),
+        "ccf_min_good_pixels": int(kw["ccf_min_good_pixels"]),
+        "ccf_zb": 0.0,
+        "save_preview": False,
+        "show_preview": False,
+    }
+    pars.update(overrides)
+    return pars
+
+
+def run_sim_through_blaze(
+    ramp,
+    shared_cals: dict[str, Any],
+    *,
+    output_dir: str,
+    fibers: list[int] | tuple[int, ...] = (2,),
+    extraction_aperture: float = DEFAULT_E2E_RV_SIM_EXTRACTION_APERTURE,
+) -> Any:
+    """
+    Reduce a simulated UTR through Stage 0–2 blaze correction (no stellar RV).
+
+    ``shared_cals`` must be the bundle from
+    :func:`ensure_shared_stage1_cals_for_rv_sim` (tracepos / traceprof / fiberflat /
+    Aidan+deg-0 WAVE).
+    """
+    from ..pipelines import Stage0Pipeline, Stage1Pipeline, Stage2Pipeline
+
+    do_fibers = [str(int(f)) for f in fibers]
+    l0 = Stage0Pipeline.call(ramp, output_dir=output_dir)
+    l1 = Stage1Pipeline.call(
+        l0,
+        output_dir=output_dir,
+        primitives={
+            "spec_extract": {
+                "do_fibers": do_fibers,
+                "method": "box",
+                "extraction_aperture": int(extraction_aperture),
+                "tracepos": shared_cals["trace_pos"],
+                "traceprof": shared_cals["trace_prof"],
+            },
+            "set_wavesol": {"wavesol": shared_cals["wavesol"]},
+        },
+    )
+    return Stage2Pipeline.call(
+        l1,
+        output_dir=output_dir,
+        primitives={
+            "blaze_corr": {
+                "do_fibers": do_fibers,
+                "fiberflat": shared_cals["fiberflat"],
+                "smooth_blaze": True,
+            },
+            "sky_sub": {"run": False},
+            "barycorr": {"run": False},
+            "stellar_rv": {"run": False},
+        },
+    )
+
+
+def build_e2e_ccfopt_mask_from_blaze_l2(
+    blaze_l2,
+    template_filename: str,
+    output_path: str,
+    *,
+    fiber: int = 2,
+    masks_directory: str | None = None,
+) -> str:
+    """
+    Build a static ``*.ccfopt.delta.mas`` mask on an E2E blaze L2 at inject RV = 0.
+
+    Re-zeros seed line centers from a line-by-line ``RVCCF`` table on the blaze
+    spectrum (same path as :func:`hispecdrp.simulations.spectra.build_ccfopt_mask`
+    but for ZEMAX+extraction L2 rather than ideal native-WAVE L2).
+    """
+    from pathlib import Path
+
+    from ..utils.line_mask_utils import (
+        build_ccfopt_line_mask_from_l2_line_by_line_rv,
+        paired_line_mask_path_for_template,
+    )
+
+    seed_mask = paired_line_mask_path_for_template(template_filename, mask_style="delta")
+    templates_dir = Path(e2e_support.templates_data_dir())
+    template_path = templates_dir / Path(template_filename).name
+    if not template_path.is_file():
+        alt = Path(template_filename).expanduser()
+        template_path = alt.resolve() if alt.is_file() else (templates_dir / template_filename)
+    mask_path, _ = build_ccfopt_line_mask_from_l2_line_by_line_rv(
+        seed_mask,
+        blaze_l2,
+        fiber=int(fiber),
+        template_path=str(template_path),
+        output_path=str(output_path),
+        masks_directory=masks_directory,
+    )
+    return mask_path
+
+
 def materialize_stage1_bundle_from_sim_hdf(
     *,
     spectrograph: str,
@@ -2498,6 +2738,7 @@ def build_lfc_line_list(
     mode_stride: int = 1,
     nu0: float | None = None,
     delta_nu: float | None = None,
+    orders: list[int] | None = None,
 ) -> tuple[dict[int, np.ndarray], dict[str, float]]:
     """
     Physical LFC mode wavelengths matching :func:`gen_lfc_modes` / ``FitLFCLinesPrimitive``.
@@ -2511,6 +2752,9 @@ def build_lfc_line_list(
     mode_stride
         Keep every ``mode_stride``-th mode (1 = full comb). Useful for faster
         diagnostic paints without changing the underlying ladder physics.
+    orders
+        Restrict to these echelle orders. ``None`` uses the full spectrograph
+        order list.
 
     Returns
     -------
@@ -2537,7 +2781,12 @@ def build_lfc_line_list(
     grids = get_sim_hdf_trace_grids(spectrograph)
     pix = np.arange(4096, dtype=np.float64)
     out: dict[int, np.ndarray] = {}
-    for od in _order_list(spectrograph):
+    order_iter = (
+        [int(od) for od in orders]
+        if orders is not None
+        else list(_order_list(spectrograph))
+    )
+    for od in order_iter:
         if od not in grids.get(fiber, {}):
             continue
         w = np.asarray(grids[fiber][od]["wavelength"], dtype=np.float64)
@@ -3902,7 +4151,6 @@ def calibrate_wavesol_from_injected_comb(
 HIGH_PRECISION_STELLAR_RV_ARGS: dict[str, Any] = {
     "algorithm": "ccf_line_mask",
     "mask_ccf_pixel_interp_order": 1,
-    "mask_auto_center_scout": False,
     "window_line_by_line": True,
     "v_half_window": 500.0,
     "v_step_coarse": 0.01,
@@ -3995,14 +4243,31 @@ def merge_infinite_snr_stage1_primitives(
     primitives: dict | None,
     *,
     extraction_aperture: int = 10,
+    method: str = "box",
+    shear: object | None = None,
 ) -> dict:
     import copy
 
     out = copy.deepcopy(primitives or {})
     out.setdefault("spec_extract", {})
-    out["spec_extract"]["method"] = "box"
+    out["spec_extract"]["method"] = str(method)
     out["spec_extract"]["extraction_aperture"] = int(extraction_aperture)
+    if shear is not None:
+        out["spec_extract"]["shear"] = shear
     return out
+
+
+def merge_sp_lsf_e2e_stage1_primitives(
+    primitives: dict | None,
+    *,
+    extraction_aperture: int = 10,
+) -> dict:
+    """Stage-1 kwargs for spectroperfectionism extract (sim / infinite-S/N RV)."""
+    return merge_infinite_snr_stage1_primitives(
+        primitives,
+        extraction_aperture=extraction_aperture,
+        method="spectroperfectionism",
+    )
 
 
 def merge_infinite_snr_stage2_primitives(primitives: dict | None) -> dict:
@@ -4083,6 +4348,96 @@ def evaluate_infinite_snr_rv_recovery(
         fibers=rows,
         max_abs_bias_km_s=max_abs,
         fiber_bias_spread_km_s=spread,
+    )
+
+
+def summarize_per_line_rv_mad(
+    stage2_model: datamodels.DataModel | None,
+    *,
+    injected_rv_m_s: float,
+    fiber: int = 2,
+) -> dict[str, float | int]:
+    """
+    Aggregate bias and per-line MAD from a Stage-2 ``RVCCF`` table.
+
+    Used for E2E closure with SP extract + LSF/E2E ccfopt masks: track
+    aggregate bias, per-line MAD, and formal ``RV_ERR`` vs ideal recovery.
+    """
+    out: dict[str, float | int] = {
+        "fiber": int(fiber),
+        "injected_rv_m_s": float(injected_rv_m_s),
+        "n_lines": 0,
+        "aggregate_bias_m_s": float("nan"),
+        "per_line_mad_m_s": float("nan"),
+        "formal_rv_err_m_s": float("nan"),
+    }
+    if stage2_model is None:
+        return out
+    avg = getattr(stage2_model, f"rvccfavg_fib{fiber}", None)
+    chunks = getattr(stage2_model, f"rvccf_fib{fiber}", None)
+    if avg is not None and len(avg) > 0:
+        meas = float(avg["RV"][0])
+        err = float(avg["RV_ERR"][0])
+        if np.isfinite(meas):
+            out["aggregate_bias_m_s"] = meas - float(injected_rv_m_s)
+        if np.isfinite(err):
+            out["formal_rv_err_m_s"] = err
+    if chunks is None or len(chunks) == 0:
+        return out
+    rv = np.asarray(chunks["RV"], dtype=np.float64)
+    names = getattr(chunks, "colnames", None)
+    if names is None and hasattr(chunks, "dtype"):
+        names = chunks.dtype.names
+    if names and "INLIER" in names:
+        ok = np.asarray(chunks["INLIER"], dtype=bool) & np.isfinite(rv)
+    else:
+        ok = np.isfinite(rv)
+    resid = rv[ok] - float(injected_rv_m_s)
+    out["n_lines"] = int(resid.size)
+    if resid.size:
+        out["per_line_mad_m_s"] = float(np.median(np.abs(resid)))
+    return out
+
+
+def e2e_rv_closure_config(
+    config: "E2EConfig",
+    *,
+    extract_method: str = "spectroperfectionism",
+    use_lsf_mask: bool = True,
+    extraction_aperture: int = 10,
+) -> "E2EConfig":
+    """
+    Configure infinite-S/N E2E RV with SP (or sheared_sp) extract and optional LSF mask.
+
+    When ``use_lsf_mask`` is True and a packaged ``*.lsf.ccfopt.delta.mas`` exists for
+    the template, prefer it; otherwise keep the E2E / packaged ccfopt mask.
+
+    Track closure with :func:`summarize_per_line_rv_mad` on the Stage-2 product.
+    """
+    from dataclasses import replace
+    from pathlib import Path
+    from ..utils.line_mask_utils import paired_line_mask_path_for_template
+
+    cfg = apply_infinite_snr_rv_e2e_config(config)
+    mask_path = cfg.stellar_rv_mask_path
+    if use_lsf_mask and cfg.template_filename:
+        stem = Path(cfg.template_filename).stem
+        try:
+            base = Path(paired_line_mask_path_for_template(cfg.template_filename))
+            lsf_cand = base.with_name(f"{stem}.lsf.ccfopt.delta.mas")
+            if lsf_cand.is_file():
+                mask_path = str(lsf_cand)
+        except FileNotFoundError:
+            pass
+    stage1 = merge_infinite_snr_stage1_primitives(
+        cfg.stage1_primitives,
+        extraction_aperture=extraction_aperture,
+        method=extract_method,
+    )
+    return replace(
+        cfg,
+        stellar_rv_mask_path=mask_path,
+        stage1_primitives=stage1,
     )
 
 

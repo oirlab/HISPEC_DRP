@@ -40,3 +40,9 @@ def test_get_config_filepath_and_load_yaml(tmp_path):
     bad.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported"):
         load_config_file(str(bad))
+
+
+def test_stage2_pipeline_config_packaged():
+    path = get_config_filepath("Stage2Pipeline.yaml")
+    cfg = load_config_file(path)
+    assert cfg["class"] == "Stage2Pipeline"
