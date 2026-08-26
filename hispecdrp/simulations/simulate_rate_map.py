@@ -138,6 +138,19 @@ class SimulateRateMap:
         if fiber_number not in (1, 2, 3):
             raise ValueError('Fiber must be 1, 2, or 3!')
 
+        if continuous and spectrum_flux.unit.is_equivalent(u.ph/u.s):
+            logger.warning(
+                "Spectrum is specified as continuous, but units match those expected from a line list. "
+                "Continuing assuming spectrum is a non-continuous line list."
+            )
+            continuous=False
+        elif not continuous and spectrum_flux.unit.is_equivalent(u.erg/u.s/u.cm**2/u.AA):
+            logger.warning(
+                "Spectrum is specified as NOT continuous, but units are a spectral density. "
+                "Continuing assuming spectrum is a continuous spectrum."
+            )
+            continuous=True
+
         if continuous and not _check_wavelength_sampling(
             spectrum_wavelengths, min_resolution=3e5
         ):
@@ -243,13 +256,22 @@ class SimulateRateMap:
 
         sky_template_path = get_skybackground_path(sky_filename, base_dir=e2e_support.atmosphere_data_dir())
         sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
-        sky_flux = sky_flux.to(self.fibers[fiber_number]["flux"].unit)
 
-        # Interpolate sky flux onto fiber wavelengths
-        fiber_wavelengths = self.fibers[fiber_number]["wavelength"]
-        sky_flux_interp = np.interp(fiber_wavelengths.value, sky_wl.value, sky_flux.value)  *sky_flux.unit
-
-        self.fibers[fiber_number]["flux"] += sky_flux_interp
+        # check if fiber exists already or not
+        try:
+            sky_flux = sky_flux.to(self.fibers[fiber_number]["flux"].unit)
+            fiber_wavelengths = self.fibers[fiber_number]["wavelength"]
+            # Interpolate sky flux onto fiber wavelengths
+            sky_flux_interp = np.interp(fiber_wavelengths.value, sky_wl.value, sky_flux.value)  *sky_flux.unit
+            self.fibers[fiber_number]["flux"] += sky_flux_interp
+        except KeyError: 
+            sky_flux = sky_flux
+            fiber_wavelengths = sky_wl
+            self.fibers[fiber_number] = {
+                "wavelength": sky_wl,
+                "flux": sky_flux,
+                "continuous": True
+            }
 
         return fiber_wavelengths, self.fibers[fiber_number]["flux"]
 
