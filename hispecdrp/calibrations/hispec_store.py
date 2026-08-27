@@ -242,6 +242,11 @@ class HISPECCalibrationStore(CalibrationStore):
         moved to the expected cache path, then verifies the file exists and is
         non-trivial before returning.
         """
+
+        # Initialize the remote DB if file is 
+        if self.remote_db is None:
+            self._init_remote_db()
+
         if isinstance(calibration, dict):
             cal_record = calibration
         elif isinstance(calibration, str):
@@ -324,6 +329,14 @@ class HISPECCalibrationStore(CalibrationStore):
         
         # Generate filename
         cal.generate_filename()
+
+        # Set the KOA metadtata fields in the model
+        cal.meta.koa_id = cal_record.get('koa_id', None)
+        cal.meta.koa_filepath = generate_koa_filehandle(
+            cal.meta.instrument_name,
+            cal.meta.datetime_obs,
+            cal.meta.koa_id,
+        )
 
         # Call super to save file and return filename
         return super().save_calibration_file(cal, cal_record)
@@ -550,6 +563,28 @@ class HISPECCalibrationStore(CalibrationStore):
 
         return new_local_filepath, new_record
 
+    # def _prepare_cal_record(
+    #     self,
+    #     cal : dict | CalibrationModel,
+    #     origin: str | None = None,
+    #     version : bool = True,
+    #     last_updated : bool = True
+    # ) -> dict:
+    #     """
+    #     Extract and version a calibration's metadata record before saving to disk.
+    #     """
+    #     cal_record = self.record_from(cal)
+    #     if version:
+    #         if origin is None:
+    #             origin = self.origin or cal_record.get('origin')
+    #         if origin is None:
+    #             raise ValueError(f"Origin must be provided or already set in record for {cal}.")
+    #         cal_record['cal_version'] = self.generate_calibration_version(cal_record, origin=origin)
+    #         cal_record['origin'] = origin
+    #     if last_updated:
+    #         cal_record['last_updated'] = datetime_to_isot_ms(datetime.now(timezone.utc))
+    #     return cal_record
+
     def _finalize_cal_record(
         self,
         cal,
@@ -568,20 +603,12 @@ class HISPECCalibrationStore(CalibrationStore):
         * ``_finalize_cal_record(cal, cal_record, local_filepath)`` (current git)
         * ``_finalize_cal_record(cal_record, local_filepath)`` (older releases)
         """
-        if isinstance(cal_record, str):
-            # Older koa_middleware: (cal_record, local_filepath)
-            record = cal
-            path = cal_record
-            cal_record = super()._finalize_cal_record(record, path)
-        else:
-            cal_record = super()._finalize_cal_record(cal, cal_record, local_filepath)
+        cal_record = super()._finalize_cal_record(cal, cal_record, local_filepath)
 
-        if cal_record.get("koa_id") is None:
-            cal_record["koa_id"] = cal_record.get("filename")
-        if cal_record.get("koa_filepath") is None and cal_record.get("koa_id") is not None:
-            cal_record["koa_filepath"] = generate_koa_filehandle(
-                cal_record.get("instrument_name"),
-                cal_record.get("datetime_obs"),
-                cal_record["koa_id"],
-            )
+        cal_record["koa_id"] = cal.meta.filename
+        cal_record["koa_filepath"] = generate_koa_filehandle(
+            cal.meta.instrument_name,
+            cal.meta.datetime_obs,
+            cal_record["koa_id"],
+        )
         return cal_record
