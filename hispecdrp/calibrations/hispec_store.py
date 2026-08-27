@@ -242,6 +242,11 @@ class HISPECCalibrationStore(CalibrationStore):
         moved to the expected cache path, then verifies the file exists and is
         non-trivial before returning.
         """
+
+        # Initialize the remote DB if file is 
+        if self.remote_db is None:
+            self._init_remote_db()
+
         if isinstance(calibration, dict):
             cal_record = calibration
         elif isinstance(calibration, str):
