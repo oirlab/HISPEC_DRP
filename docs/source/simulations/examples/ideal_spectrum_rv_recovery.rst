@@ -66,6 +66,10 @@ range. Prefer the mask written by :doc:`build_ccfopt_mask_ideal_spectrum`; the
        MASK_PATH = paired_line_mask_path_for_template(
            TEMPLATE, mask_style="lsf.ccfopt.delta"
        )
+       print(
+           "WARNING: no full-band mask in OUT; using the packaged two-order smoke "
+           "file. Run build_ccfopt_mask_ideal_spectrum first."
+       )
 
    print(f"mask: {MASK_PATH}")
 
@@ -74,15 +78,16 @@ range. Prefer the mask written by :doc:`build_ccfopt_mask_ideal_spectrum`; the
 
 For each bulk shift, :func:`~hispecdrp.simulations.spectra.build_l2`
 injects the template into a BSPEC L2 and convolves with the HDF LSF
-(``apply_lsf=True``), then :class:`~hispecdrp.primitives.StellarRVPrimitive`
-recovers RV with the matched LSF ccfopt mask and line-by-line ``ccf_line_mask``.
+(``apply_lsf=True``), then :func:`~hispecdrp.simulations.spectra.recover_stellar_rv`
+runs the same line-by-line ``ccf_line_mask`` path as
+:func:`~hispecdrp.simulations.spectra.build_ccfopt_mask`
+(:data:`~hispecdrp.utils.line_mask_utils.IDEAL_SPECTRUM_STELLAR_RV_KW`).
 
 .. code-block:: python
 
    import numpy as np
 
-   from hispecdrp.primitives import StellarRVPrimitive
-   from hispecdrp.simulations.spectra import build_l2, quiet_pipeline_logging
+   from hispecdrp.simulations.spectra import build_l2, quiet_pipeline_logging, recover_stellar_rv
 
    hdr = (
        f"{'bulk_km/s':>10}  {'injected_m/s':>14}  {'recovered_m/s':>16}  "
@@ -104,15 +109,15 @@ recovers RV with the matched LSF ccfopt mask and line-by-line ``ccf_line_mask``.
                fiber=FIBER,
                apply_lsf=APPLY_LSF,
            )
-           inj = float(bulk) * 1000.0
-           out = StellarRVPrimitive.call(
+           inj, rec, err = recover_stellar_rv(
                l2,
+               bulk,
+               template=TEMPLATE,
                mask_path=str(MASK_PATH),
-               ccf_input_velocity=inj,
+               spectrograph="BSPEC",
+               fiber=FIBER,
+               quiet=False,
            )
-           avg = getattr(out, f"rvccfavg_fib{FIBER}")
-           rec = float(avg["RV"][0])
-           err = float(avg["RV_ERR"][0])
            bias = rec - inj
            inj_m_s.append(inj)
            rec_m_s.append(rec)

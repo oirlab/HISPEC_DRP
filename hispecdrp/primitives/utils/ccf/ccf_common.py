@@ -14,8 +14,10 @@ __all__ = [
     "_ccf_rv_err_numeric_floor",
     "_make_velocity_grid",
     "_velocity_grid_from_window",
+    "ccf_oversample_nsp",
     "effective_ccf_v_step_for_fit",
     "resolve_ccf_broad_grid_m_s",
+    "science_centroid_spec_err",
 ]
 
 # Default coarse CCF velocity grid (m/s) for broad scans and StellarRV fallbacks.
@@ -52,6 +54,60 @@ def effective_ccf_v_step_for_fit(v_grid: np.ndarray) -> float:
     if d.size == 0:
         return 1.0
     return float(np.min(d))
+
+
+def ccf_oversample_nsp(pix_size_m_s: float | None, v_step_m_s: float) -> float:
+    """
+    Number of CCF velocity samples per independent detector pixel.
+
+    Interpolated ``CCF(v)`` on a grid finer than ``Δv_pix`` reuses the same
+    pixels, so Fisher / LM covariances that treat bins as i.i.d. must inflate
+    ``σ_μ`` by ``√nsp`` with ``nsp = max(Δv_pix / Δv_grid, 1)``.
+    """
+    if pix_size_m_s is None or not math.isfinite(float(pix_size_m_s)) or float(pix_size_m_s) <= 0.0:
+        return 1.0
+    vs = float(v_step_m_s) if math.isfinite(float(v_step_m_s)) and float(v_step_m_s) > 0.0 else 1.0
+    return max(float(pix_size_m_s) / vs, 1.0)
+
+
+def science_centroid_spec_err(
+    spec: np.ndarray,
+    spec_err: np.ndarray,
+    spec_uncal: np.ndarray | None = None,
+    spec_uncal_err: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Per-pixel σ for centroiding blaze-corrected (or native) flux.
+
+    A multiplicative fiberflat / blaze error is almost entirely amplitude, not
+    line centroid. When L1 ``spec_uncal`` / ``spec_uncal_err`` are present,
+    map the **science-extract** relative error onto ``spec``:
+
+    ``σ = |spec| · |spec_uncal_err / spec_uncal|``
+
+    (equivalent to ``σ_uncal / blaze``). Fall back to ``spec_err`` where those
+    arrays are missing or invalid.
+    """
+    flux = np.asarray(spec, dtype=np.float64)
+    out = np.array(spec_err, dtype=np.float64, copy=True)
+    if out.shape != flux.shape:
+        out = np.broadcast_to(out, flux.shape).astype(np.float64, copy=True)
+    if spec_uncal is None or spec_uncal_err is None:
+        return out
+    uncal = np.asarray(spec_uncal, dtype=np.float64)
+    uncal_err = np.asarray(spec_uncal_err, dtype=np.float64)
+    if uncal.shape != flux.shape or uncal_err.shape != flux.shape:
+        return out
+    good = (
+        np.isfinite(flux)
+        & np.isfinite(uncal)
+        & np.isfinite(uncal_err)
+        & (np.abs(uncal) > 0.0)
+        & (uncal_err >= 0.0)
+    )
+    mapped = np.abs(flux) * np.abs(uncal_err / uncal)
+    use = good & np.isfinite(mapped) & (mapped > 0.0)
+    return np.where(use, mapped, out)
 
 
 def _ccf_rv_err_numeric_floor(v_step_m_s: float) -> float:

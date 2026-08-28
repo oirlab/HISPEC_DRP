@@ -130,6 +130,15 @@ def test_get_spectrum_path():
     assert get_spectrum_path(abs_path) == abs_path
 
 
+def test_get_spectrum_path_dropbox_conflicted_copy(tmp_path):
+    """If the canonical .h5 is missing, use a same-stem Dropbox conflicted copy."""
+    stem = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7"
+    conflicted = tmp_path / f"{stem} (MacBook Pro's conflicted copy 2026-08-28).h5"
+    conflicted.write_bytes(b"ok")
+    resolved = get_spectrum_path(f"{stem}.h5", base_dir=str(tmp_path))
+    assert resolved == str(conflicted)
+
+
 @pytest.mark.skipif(
     not os.path.isfile(get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
     reason="BT-Settl spectrum file not present",

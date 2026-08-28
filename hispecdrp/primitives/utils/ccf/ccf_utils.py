@@ -63,6 +63,7 @@ from .ccf_common import (
     _make_velocity_grid,
     effective_ccf_v_step_for_fit,
     resolve_ccf_broad_grid_m_s,
+    science_centroid_spec_err,
 )
 
 
@@ -1130,6 +1131,20 @@ def dv_per_pixel_m_s(wl_um: float) -> float:
     if not np.isfinite(wl_um) or wl_um <= 0:
         return float("nan")
     return float(C_M_S / (max(147.0 / wl_um, 1.0) * 4096.0))
+
+
+def median_pixel_dv_m_s(wave_um: np.ndarray) -> float:
+    """Median detector-pixel velocity width (m/s) from a 1-D wavelength row."""
+    w = np.asarray(wave_um, dtype=np.float64).ravel()
+    m = np.isfinite(w) & (w > 0.0)
+    if int(np.count_nonzero(m)) < 2:
+        return float("nan")
+    ww = w[m]
+    dw = float(np.median(np.abs(np.diff(ww))))
+    w0 = float(np.median(ww))
+    if not (dw > 0.0 and w0 > 0.0 and math.isfinite(dw) and math.isfinite(w0)):
+        return float("nan")
+    return float(C_M_S * dw / w0)
 
 
 def _subsample_velocity_ccf_for_gaussian_fit(
@@ -4924,13 +4939,16 @@ def _calc_mask_ccf_chunks_numba(
         \\sigma_{\\mathrm{line}}^2 = \\max\\left(0,\\;
           \\frac{\\sum_j w_j x_j^2}{\\sum_j w_j} - C^2\\right)\\,.
 
-    When ``compute_line_std`` is True, the second output combines both in quadrature:
+    When ``compute_line_std`` is True, the second output is the **flux-propagated**
+    measurement uncertainty :math:`\\sigma_{\\mathrm{meas}}` (independent pixel
+    noise through the interpolator stencil). A line-to-line flux scatter
+    :math:`\\sigma_{\\mathrm{line}}` is still accumulated internally but is **not**
+    added in quadrature: that term is a depth-dispersion floor, not jitter on the
+    CCF centroid, and would freeze :math:`\\sigma_\\mu` at the LSF width even at
+    infinite S/N.
 
-    .. math::
-
-        \\sigma_{\\mathrm{CCF}} = \\sqrt{\\sigma_{\\mathrm{meas}}^2 + \\sigma_{\\mathrm{line}}^2}\\,.
-
-    The third output stores :math:`\\sigma_{\\mathrm{meas}}` (``nan`` when unavailable).
+    The third output stores the same :math:`\\sigma_{\\mathrm{meas}}` (``nan`` when
+    unavailable).
 
     Input arrays are padded to fixed widths; ``n_pix_arr`` and ``n_line_arr`` give
     valid lengths for each chunk row.
@@ -5124,7 +5142,8 @@ def _calc_mask_ccf_chunks_numba(
                                 sig_meas_sq += cm * cm * em * em
                     sig_meas = math.sqrt(sig_meas_sq)
                     out_sigma_flux[ic, i_v] = sig_meas
-                    out_std[ic, i_v] = math.sqrt(sig_meas * sig_meas + sig_line * sig_line)
+                    # Centroid weights use pixel-propagated σ only (not σ_line).
+                    out_std[ic, i_v] = sig_meas
             else:
                 out_ccf[ic, i_v] = np.nan
                 if compute_line_std:
@@ -5561,12 +5580,11 @@ def rv_per_chunks_line_mask(
     n_good : np.ndarray
         Per-chunk count of good pixels used in the mask CCF.
     ccf_line_std_2d : np.ndarray or None
-        If ``return_ccf``, shape ``(n_chunks, n_v)``: per-velocity uncertainty combining
-        (in quadrature) the **flux-error–propagated** standard error of the mask-weighted
-        mean and the weighted line-to-line dispersion of :math:`x_j = F_j\\,\\mathrm{SN}_j`
-        about that mean (see :func:`_calc_mask_ccf_chunks_numba`). Not flipped with the CCF
-        row; use as a symmetric band around ``ccf_preview_2d``. If ``return_ccf`` is False,
-        ``None``.
+        If ``return_ccf``, shape ``(n_chunks, n_v)``: per-velocity **flux-error–propagated**
+        interpolator uncertainty :math:`\\sigma_{\\mathrm{meas}}` (see
+        :func:`_calc_mask_ccf_chunks_numba`). Line-to-line flux scatter is not included.
+        Not flipped with the CCF row; use as a symmetric band around ``ccf_preview_2d``.
+        If ``return_ccf`` is False, ``None``.
     ccf_preview_2d : np.ndarray or None
         If ``return_ccf``, same shape as ``ccf_2d``: **weight-normalized** mask CCF
         (matching :func:`_calc_mask_ccf_chunks_numba`) **before** the per-chunk sign flip
@@ -5833,13 +5851,13 @@ def rv_per_chunks_line_mask(
             line_right_rest_2d,
             line_w_2d,
             n_line_arr,
-            bool(return_ccf),
+            True,
             int(pio),
             int(TOPHAT_MASK_CCF_SEGMENT_SAMPLES),
         )
-        # σ_CCF: quadrature of flux-propagated SE of the mask mean and weighted line
-        # dispersion of x_j = F_j·SN_j about that mean (Numba).
-        if bool(return_ccf) and ccf_std_rows.size > 0:
+        # σ_CCF for the centroid: flux-propagated interpolator SE (σ_meas), not
+        # line-to-line depth scatter.
+        if ccf_std_rows.size > 0:
             sf = np.asarray(ccf_std_rows, dtype=np.float64)
             ccf_std_rows = np.where(np.isfinite(sf), np.maximum(0.0, sf), np.nan)
         ccf_preview_unflipped: np.ndarray | None = (
@@ -5887,6 +5905,7 @@ def rv_per_chunks_line_mask(
         err_fit = np.ascontiguousarray(ccf_std_rows, dtype=np.float64)
 
     cfg_fit = CCF_PREVIEW_SLOT_FIT_CONFIG
+    pix_dv = median_pixel_dv_m_s(wave_um)
     rv_g_arr, err_g_arr, ok_g_arr = fit_ccf_rv_rows_numba(
         vg_cc,
         y_fit,
@@ -5898,6 +5917,7 @@ def rv_per_chunks_line_mask(
         levmar_maxiter=int(cfg_fit.levmar_maxiter),
         min_points=int(cfg_fit.min_points),
         max_cores=max_cores,
+        pix_size_m_s=pix_dv if math.isfinite(pix_dv) and pix_dv > 0.0 else None,
     )
     v_step_floor = float(effective_ccf_v_step_for_fit(vg_cc))
     for i in range(n_chunk_valid):
@@ -6200,6 +6220,14 @@ def run_ccf_line_mask_for_fiber(
         err = np.ones_like(spec, dtype=np.float64)
     if dq is None:
         dq = np.zeros_like(spec, dtype=np.uint32)
+
+    uncal_attr = f"SPEC_UNCAL_FIB{fiber}"
+    uncal_err_attr = f"SPEC_UNCAL_ERR_FIB{fiber}"
+    spec_uncal = getattr(input_model, uncal_attr, None) if hasattr(input_model, uncal_attr) else None
+    spec_uncal_err = (
+        getattr(input_model, uncal_err_attr, None) if hasattr(input_model, uncal_err_attr) else None
+    )
+    err = science_centroid_spec_err(spec, err, spec_uncal, spec_uncal_err)
 
     # Load mask before building the velocity grid so line-window mode can tighten broad ``v``.
     mask_lines, mask_src_label = stellar_rv_ccf_mask_lines(

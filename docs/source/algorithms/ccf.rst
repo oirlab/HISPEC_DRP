@@ -42,11 +42,14 @@ Gaussian parameters (center, width, amplitude, baseline) are always computed and
 and debug output. The **reported** chunk RV is not taken from the Gaussian center alone; see
 bisector refinement below.
 
-The Gaussian fit also derives an ``RV_ERR`` using a combination of fit covariance, local CCF sampling
-information, and configuration-driven heuristics (see
-:class:`~hispecdrp.primitives.utils.ccf.ccf_utils.CCFFitConfig`). Attribution to published Keck KPF PRV
-ideas appears in module docstrings and references; this repository does **not** include Keck KPF
-pipeline source.
+The Gaussian fit also derives an ``RV_ERR`` from the Levenberg–Marquardt
+covariance of the Gaussian mean, using **interpolated science-pixel** CCF errors
+(:math:`\\sigma_{\\mathrm{meas}}`) and an oversampling factor so velocity bins that
+share a detector pixel are not treated as independent. Fiberflat / blaze terms in
+``SPEC_ERR`` are omitted from those weights (they are common-mode in wavelength).
+Inverse-variance weights are renormalized before the Hessian so ``σ_μ`` decreases
+with S/N and converges to a numerical floor as ``σ_meas → 0`` (it does not
+explode at infinite S/N).
 
 Gaussian CCF centroid (final estimate)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
