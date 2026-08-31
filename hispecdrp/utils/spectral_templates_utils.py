@@ -78,6 +78,7 @@ __all__ = [
     "resolve_stellar_template_to_log_micron",
     "get_skybackground_path",
     "load_sky_spectrum",
+    "etalon_line_list",
 ]
 
 
@@ -651,3 +652,58 @@ def load_sky_spectrum(filepath: str, wl_min_um: float = 0.8, wl_max_um: float = 
     sky_flux = sky_flux[mask]
 
     return sky_wl.to(u.micron), sky_flux.to(u.erg / (u.s * u.cm**2 * u.AA)) 
+
+
+def etalon_line_list(
+    fsr: u.Quantity,
+    wavelength_range: tuple[u.Quantity, u.Quantity],
+    n_cavity: float,
+    wavelength_meas: u.Quantity,
+    finesse_meas: np.ndarray,
+    peak_trans_meas: np.ndarray,
+):
+    """Return resonance order, wavelength, finesse, and peak transmission."""
+    from astropy import units as u
+    from astropy.constants import c
+
+    fsr = fsr.to(u.Hz)
+    wl_min, wl_max = [x.to(u.nm) for x in wavelength_range]
+    wavelength_meas = wavelength_meas.to(u.nm)
+
+    finesse_meas = np.asarray(finesse_meas, dtype=float)
+    peak_trans_meas = np.asarray(peak_trans_meas, dtype=float)
+
+    # FSR = c / (2 n d)
+    d = c / (2 * n_cavity * fsr)
+
+    # Resonance condition: lambda_m = 2 n d / m
+    m_max = int(np.floor(
+        (2 * n_cavity * d / wl_min).decompose().value
+    ))
+    m_min = int(np.ceil(
+        (2 * n_cavity * d / wl_max).decompose().value
+    ))
+
+    order = np.arange(m_min, m_max + 1)
+
+    wavelength = (2 * n_cavity * d / order).to(u.nm)
+
+    # Keep only requested wavelength range
+    mask = (wavelength >= wl_min) & (wavelength <= wl_max)
+
+    order = order[mask]
+    wavelength = wavelength[mask]
+
+    finesse = np.interp(
+        wavelength.value,
+        wavelength_meas.value,
+        finesse_meas,
+    )
+
+    transmission = np.interp(
+        wavelength.value,
+        wavelength_meas.value,
+        peak_trans_meas,
+    )
+
+    return order, wavelength.to(u.micron), finesse, transmission
