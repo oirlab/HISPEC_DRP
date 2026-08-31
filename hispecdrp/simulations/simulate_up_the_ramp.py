@@ -1628,6 +1628,17 @@ def create_ramp_and_calibrations(
             "template_mag_ab and template_2mass_band must both be set "
             "or both be None."
         )
+
+    # UTR forward nonlinearity (np.polyval high→low). Default is identity so
+    # Stage 0 nonlin_corr is a matched no-op unless the caller opts into a
+    # realistic forward poly (e.g. DEFAULT_UTR_FORWARD_NONLIN_POLY).
+    nonlin_coeffs = cal_kw.pop(
+        "nonlin_coeffs", e2e_support.IDENTITY_UTR_FORWARD_NONLIN_POLY
+    )
+    kTC_noise = cal_kw.pop("kTC_noise", None)
+    clip_ramps = cal_kw.pop("clip_ramps", None)
+    ramp_filename = cal_kw.pop("ramp_filename", None)
+    
     _band: str | None = None
 
     if template_2mass_band is not None:
