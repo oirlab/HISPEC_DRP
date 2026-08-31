@@ -36,7 +36,7 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. Currently, this is expected
         to be a raw (ramp) data product.
     suffix : str or None, optional
@@ -68,7 +68,7 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
     https://ui.adsabs.harvard.edu/abs/2025arXiv250915489U/abstract
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'run' : False,
         'suffix' : 'refpix',
         'method' : 'scales_drp',
@@ -81,7 +81,7 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         if self.n_channels is None:
             _n_channels =  input_model.meta.n_channels

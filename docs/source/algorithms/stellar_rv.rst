@@ -38,14 +38,14 @@ in the community; HISPEC DRP does not ship Keck KPF pipeline source.
 References
 ^^^^^^^^^^
 
-.. [1] KPF mask-line algorithm reference (``alg_rv_mask_line.py``):
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
-.. [2] KPF radial_velocity module source tree:
-       https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
-.. [3] spirou-ccf helper library (``spiroulib.py``):
-       https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
-.. [4] spirou-ccf example masks:
-       https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
+* KPF mask-line algorithm reference (``alg_rv_mask_line.py``):
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src/alg_rv_mask_line.py
+* KPF radial_velocity module source tree:
+  https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/tree/81609b0ac0ab6d12536fb771bfdd0112001340c3/modules/radial_velocity/src
+* spirou-ccf helper library (``spiroulib.py``):
+  https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
+* spirou-ccf example masks:
+  https://github.com/edermartioli/spirou-ccf/tree/main/ccf_masks
 
 
 Units and conventions
@@ -63,7 +63,7 @@ Units and conventions
 
 
 RV tables and data storage (RVCCF)
----------------------------------
+----------------------------------
 
 L2 datamodel formatting (code references)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -119,7 +119,7 @@ The overlay debug page is written by
 
 
 Workflow outline (``ccf_line_mask``)
------------------------------------
+------------------------------------
 
 This is a high-level outline of what :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`
 does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorithm follows a different path).
@@ -137,12 +137,11 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
    The fiber driver constructs a **uniform** velocity grid:
 
-   - ``[v_min_coarse, v_max_coarse]`` at ``v_step_coarse`` when no center is set, or
    - ``ccf_input_velocity ± v_half_window`` at ``v_step_coarse`` when a center is set.
 
-   When enabled and applicable, an **auto-center scout** (``mask_auto_center_scout=True``,
-   no user-provided center) runs one pass on the broad uniform grid to estimate the peak,
-   then rebuilds a centered uniform window for the fiber.
+   When ``ccf_input_velocity`` is unset, an **auto-center scout** runs one pass on the
+   broad uniform grid to estimate the peak, then rebuilds a centered uniform window for
+   the fiber.
 
 #. **Per-order chunking and mask CCF**
 
@@ -164,31 +163,19 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
 
 #. **Per-chunk RV and uncertainty**
 
-   Per-chunk RVs are initialized from a parabolic-vertex fit on the (stored-convention) CCF rows:
+   Per-chunk RVs come from a Gaussian fit to the (stored-convention) CCF:
 
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._rv_from_ccf_line_mask_rows_numba`
+   - Line-mask path: :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
+     via :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask`
+     (Numba Lagrange sampler; ``mask_ccf_pixel_interp_order`` / ``max_cores``)
+   - Legacy / template helpers: :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
 
-   Per-chunk ``RV_ERR`` may be replaced by the LevMar-based parabolic vertex uncertainty estimator when
-   ``ccf_err(v)`` is available; otherwise it falls back to a homoscedastic LSTSQ estimate:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_levmar_m_s`
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.line_mask_parabolic_vertex_rv_err_lstsq_homoscedastic_m_s`
+   The reported chunk ``RV`` / ``RV_ERR`` are the Gaussian centroid and its Gaussian uncertainty.
+   A discrete-peak Numba seed may be used only when the Gaussian fit does not succeed.
 
    **CCF sign convention:** stored CCF rows (RVCCF / preview slots) follow the negated convention
    so the absorption-like feature appears as a **peak** near the true RV (see
    :data:`~hispecdrp.primitives.utils.ccf.ccf_utils.LINE_MASK_CCF_STORED_NEGATED_FROM_RAW`).
-
-#. **Optional order-mean Gaussian override**
-
-   When enabled by the driver (centered window or post-scout centered grid), an order-mean CCF is fit with a Gaussian:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
-
-   and then refined with the same mask-line parabolic machinery:
-
-   - :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._refine_ccf_rv_after_gaussian_fit_ccf_line_mask`
-
-   On success, all chunks on that order can receive the same RV/σ (one fiber-aggregate estimate).
 
 #. **Fiber-level aggregation**
 
@@ -240,15 +227,15 @@ Additional notes (primitive behavior and details)
 Unit tests and command-line overrides
 -------------------------------------
 
-The main integration tests for stellar RV live in ``tests/test_stellar_rv.py``.
+The main integration tests for stellar RV live in ``tests/stage2/test_stellar_rv_primitive.py``.
 
 Useful command-line / environment overrides used by these tests include:
 
 ``HISPEC_DRP_SHOW_BSPEC_BTSETTL_PREVIEWS=1``
-   Single switch for optional stellar-RV previews in ``tests/test_stellar_rv.py``: after BT-Settl BSPEC
+   Single switch for optional stellar-RV previews in ``tests/stage2/test_stellar_rv_primitive.py``: after BT-Settl BSPEC
    integration tests, write and open preview HTML (mask-overlay + unified Plotly for ``ccf_line_mask``,
    and unified Plotly + template-overlay HTML for ``ccf_stellar_template`` when that optional leg runs).
-   Also enables the unified Plotly preview in ``test_stellar_rv_recovers_rv_per_chunk``. Forces
+   Also enables the unified Plotly preview in ``test_stellar_rv_primitive_recovers_rv_per_chunk``. Forces
    HTML-only behavior for the unified Plotly preview (skips Kaleido PNG export when this env is set;
    see :mod:`hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview`). When unset, those optional
    preview legs are skipped.
@@ -257,11 +244,6 @@ Useful command-line / environment overrides used by these tests include:
    Override the mask CCF interpolation order used by the tests (and reflected in the overlay
    debug spectrum interpolation trace label).
 
-``HISPEC_DRP_CCF_PARABOLIC_VERTEX_N_SAMPLES``
-   Test-only hook (implemented in ``tests/test_stellar_rv.py``) to override the primitive parameter
-   ``ccf_parabolic_vertex_n_samples``. Set to an **odd** integer :math:`\ge 3` to enable post-Gaussian
-   parabolic-vertex refinement. Set to ``none`` (or ``null``) to disable refinement and keep
-   **Gaussian-only** per-chunk RV/RV_ERR for the template-CCF workflow.
 
 ``HISPEC_DRP_BSPEC_BTSETTL_ORDER``
    Which BSPEC echelle orders the BT-Settl BSPEC tests use. **Default** when unset is ``139``

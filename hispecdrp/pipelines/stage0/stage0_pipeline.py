@@ -41,7 +41,7 @@ class Stage0Pipeline(BasePipeline):
     }
 
     def _perform(self):
-        model_to_process = datamodels.open(self.input)
+        model_to_process = datamodels.open(self.dataset)
         result = self.dq_init.apply(model_to_process)
         result = self.saturation_check.apply(result)
         result = self.bias_sub.apply(result)

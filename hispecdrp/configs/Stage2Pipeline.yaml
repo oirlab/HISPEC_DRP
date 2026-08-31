@@ -1,0 +1,5 @@
+class: Stage2Pipeline
+description: Standard Stage 2 pipeline configuration.
+context: {}
+parameters: {}
+steps: {}

@@ -61,10 +61,10 @@ class ProcessDarksPipeline(CalibrationPipeline):
     def _perform(self):
 
         # Making sure that the input is a list of models for processing
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list = self.dataset
 
         # First, loop over all inputs to apply DQ init
         results = []

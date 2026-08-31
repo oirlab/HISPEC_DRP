@@ -93,7 +93,7 @@ class MakeReadnoisePrimitive(BasePrimitive):
     https://github.com/spacetelescope/romancal
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'max_cores' : 1,
         'init_RN' : None,  # None | in,  Define the initial readnoise value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(1, 20, 101)).
@@ -127,10 +127,10 @@ class MakeReadnoisePrimitive(BasePrimitive):
             raise NotImplementedError(
                 f"Only 'full_detector' and 'per_pixel' modes are implemented currently. Not {self.mode}")
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector readnoise from a list of {nfiles} inputs.")
 
@@ -182,9 +182,14 @@ class MakeReadnoisePrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, gain_arr, _init_center_RN,None,_init_delta_RNs,
-                                      countratesidentical=self.countratesidentical,
-                                      mode = self.mode, method= self.method, max_cores =self.max_cores)
+        max_cores = self.max_cores or 1
+        _out = fit_gain_and_readnoise(
+            delta_readtimes, ramp_arr, dq_raw_arr, gain_arr, _init_center_RN, None, _init_delta_RNs,
+            countratesidentical=self.countratesidentical,
+            mode=self.mode,
+            method=self.method,
+            max_cores=max_cores
+        )
         _, bestfit_rn, cov = _out
 
         # Output

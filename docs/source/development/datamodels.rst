@@ -133,8 +133,6 @@ Each entry can contain the following schema fields:
     - 'max' - Use the max of the values
     - 'min' - Use the min of the values
     - 'mean' - Use the mean of the values
+    - 'fiber_state' - Special rule for merging fiber state data such as ``meta.object_fiber#``.
 
 - **include_ancestors** (boolean) - Whether to include this metadata field in the ancestors table when merging data models (e.g. when coadding). Default is False.
-
-
-    

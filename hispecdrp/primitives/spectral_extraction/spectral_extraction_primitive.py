@@ -47,7 +47,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
         Extracted spectra for each fiber and order.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'specextract',
         'method' : 'box',
         'extraction_aperture' : 10,
@@ -69,119 +69,102 @@ class SpectralExtractionPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            output = None
-            input = [self.input]
-        elif isinstance(self.input, Sequence):
-            output = []
-            input = self.input
-        elif isinstance(self.input, dict):
-            output = {}
-            input_keys = list(self.input.keys())
-            input_vals = list(self.input.values())
-            input = input_vals
-        else:
-            raise ValueError(f"Unsupported input type: {type(self.input)}")
-
-        # Loop over inputs
-        for _input_i, _input in enumerate(input):
         
-            # Open the input model
-            input_model = datamodels.open(_input)
-            npix = input_model.shape[0] if input_model.meta.orders_are_vertical else input_model.shape[1]
+        # Open the input model
+        input_model = datamodels.open(self.dataset)
+        npix = input_model.shape[0] if input_model.meta.orders_are_vertical else input_model.shape[1]
 
-            # Get calibrations (get_calibration returns a filepath or model)
-            tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
-            tracepos_model = datamodels.open(tracepos_model)
-            traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
-            traceprof_model = datamodels.open(traceprof_model)
+        # Get calibrations (get_calibration returns a filepath or model)
+        tracepos_model, _ = self.get_calibration(input_model, 'tracepos')
+        tracepos_model = datamodels.open(tracepos_model)
+        traceprof_model, _ = self.get_calibration(input_model, 'traceprof')
+        traceprof_model = datamodels.open(traceprof_model)
 
-            # Init output model
-            output_model = self.get_output_model(input_model)
+        # Init output model
+        output_model = self.get_output_model(input_model)
 
-            # Which fibers and orders to process
-            do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
-            order_vec = input_model.make_order_vec()
-            n_orders = len(order_vec)
+        # Which fibers and orders to process
+        do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
+        order_vec = input_model.make_order_vec()
+        n_orders = len(order_vec)
 
-            # Initialize output arrays for all fibers if not already set.
-            # Mock / sim L0s may omit mid_time (or dq); fall back to safe dtypes.
-            dq_dtype = (
-                input_model.dq.dtype
-                if getattr(input_model, "dq", None) is not None
-                else np.uint32
+        # Initialize output arrays for all fibers if not already set.
+        # Mock / sim L0s may omit mid_time (or dq); fall back to safe dtypes.
+        dq_dtype = (
+            input_model.dq.dtype
+            if getattr(input_model, "dq", None) is not None
+            else np.uint32
+        )
+        mid_time = getattr(input_model, "mid_time", None)
+        mid_time_dtype = (
+            mid_time.dtype if mid_time is not None else np.float64
+        )
+        for fiber in do_fibers:
+            if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
+                setattr(
+                    output_model, f'SPEC_UNCAL_FIB{fiber}',
+                    np.full((n_orders, npix), np.nan, dtype=np.float32)
+                )
+                setattr(
+                    output_model, f'SPEC_UNCAL_ERR_FIB{fiber}',
+                    np.full((n_orders, npix), np.nan, dtype=np.float32)
+                )
+                setattr(
+                    output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, npix), np.nan, dtype=np.float32)
+                )
+                setattr(
+                    output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}',
+                    np.full((n_orders, npix), np.nan, dtype=np.float32)
+                )
+                setattr(
+                    output_model, f'SPEC_DQ_FIB{fiber}',
+                    np.zeros((n_orders, npix), dtype=dq_dtype)
+                )
+                setattr(
+                    output_model, f'MID_TIME_FIB{fiber}',
+                    np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
+                )
+
+        # Dispatch to extraction method
+        if self.method.lower() == 'box':
+            self.extract_box(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
             )
-            mid_time = getattr(input_model, "mid_time", None)
-            mid_time_dtype = (
-                mid_time.dtype if mid_time is not None else np.float64
+        elif self.method.lower() == 'optimal':
+            self.extract_optimal(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                traceprof_model=traceprof_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
             )
-            for fiber in do_fibers:
-                if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
-                    setattr(
-                        output_model, f'SPEC_UNCAL_FIB{fiber}',
-                        np.full((n_orders, npix), np.nan, dtype=np.float32)
-                    )
-                    setattr(
-                        output_model, f'SPEC_UNCAL_ERR_FIB{fiber}',
-                        np.full((n_orders, npix), np.nan, dtype=np.float32)
-                    )
-                    setattr(
-                        output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, npix), np.nan, dtype=np.float32)
-                    )
-                    setattr(
-                        output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}',
-                        np.full((n_orders, npix), np.nan, dtype=np.float32)
-                    )
-                    setattr(
-                        output_model, f'SPEC_DQ_FIB{fiber}',
-                        np.zeros((n_orders, npix), dtype=dq_dtype)
-                    )
-                    setattr(
-                        output_model, f'MID_TIME_FIB{fiber}',
-                        np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
-                    )
-
-            # Dispatch to extraction method
-            if self.method.lower() == 'box':
-                self.extract_box(
-                    input_model=input_model,
-                    output_model=output_model,
-                    tracepos_model=tracepos_model,
-                    do_fibers=do_fibers,
-                    do_orders=do_orders
-                )
-            elif self.method.lower() == 'optimal':
-                self.extract_optimal(
-                    input_model=input_model,
-                    output_model=output_model,
-                    tracepos_model=tracepos_model,
-                    traceprof_model=traceprof_model,
-                    do_fibers=do_fibers,
-                    do_orders=do_orders
-                )
-            elif self.method.lower() == 'cross_talk':
-                self.extract_cross_talk(
-                    input_model=input_model,
-                    output_model=output_model,
-                    tracepos_model=tracepos_model,
-                    traceprof_model=traceprof_model,
-                    do_fibers=do_fibers,
-                    do_orders=do_orders
-                )
-            else:
-                raise ValueError(f"Unknown extraction method: {self.method}")
-                
-            # Add to output
-            if isinstance(self.input, (datamodels.DataModel, str)):
-                output = output_model
-            elif isinstance(self.input, Sequence):
-                output.append(output_model)
-            elif isinstance(self.input, dict):
-                output[input_keys[_input_i]] = output_model
+        elif self.method.lower() == 'cross_talk':
+            self.extract_cross_talk(
+                input_model=input_model,
+                output_model=output_model,
+                tracepos_model=tracepos_model,
+                traceprof_model=traceprof_model,
+                do_fibers=do_fibers,
+                do_orders=do_orders
+            )
+        else:
+            raise ValueError(f"Unknown extraction method: {self.method}")
+            
+        # Add to output
+        # if isinstance(self.dataset, (datamodels.DataModel, str)):
+        #     output = output_model
+        # elif isinstance(self.dataset, Sequence):
+        #     output.append(output_model)
+        # elif isinstance(self.dataset, dict):
+        #     output[input_keys[_input_i]] = output_model
 
         # Return
-        return dict(output=output)
+        return dict(output=output_model)
 
     def extract_box(
         self,
@@ -229,6 +212,8 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 assert trace_positions.shape[1] == input_data.shape[0], f"Trace positions shape[1]={trace_positions.shape[1]} does not match number of pixels={input_data.shape[0]}"
 
                 # Perform box extraction
+                #breakpoint()
+                # plt.imshow(input_data, vmin=0, vmax=np.nanquantile(input_data, 0.99)); plt.plot(trace_positions[j], np.arange(4096), c='red'); plt.show()
                 result = extract_spectrum_box(
                     input_data=input_data,
                     input_err=input_err,

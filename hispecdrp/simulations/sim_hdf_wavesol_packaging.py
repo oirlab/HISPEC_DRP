@@ -17,7 +17,7 @@ Regenerate (from repo root)::
     python hispecdrp/data/wavesol/regenerate_sim_hdf_line_zp_wavesol.py \\
         --rate-map test_data/e2e_rv0_hdf_trace_linezp/rate_map.fits \\
         --spectrum 'test_data/e2e_rv0_hdf_trace_linezp/*_spec-blaze_correct.fits' \\
-        --mask 'hispecdrp/data/masks/lte049*.e2erval.delta.mas' \\
+        --mask 'hispecdrp/data/masks/lte049*.ccfopt.delta.mas' \\
         --ccf-refine
 """
 
@@ -181,7 +181,16 @@ def load_packaged_sim_hdf_line_zp_wavesol(
             "python hispecdrp/data/wavesol/regenerate_sim_hdf_line_zp_wavesol.py "
             "--rate-map <e2e_rate_map.fits>"
         )
-    wavesol = datamodels.open(str(path))
+    # Packaged FITS historically ships mjd_start=0 → datetime 1858-11-17, which
+    # triggers ERFA "dubious year" when Astropy parses the header. Suppress that
+    # noise here; metadata is normalized below.
+    import warnings
+
+    from erfa import ErfaWarning
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ErfaWarning, message=r".*dubious year.*")
+        wavesol = datamodels.open(str(path))
     if not isinstance(wavesol, LFCWavesolModel):
         # Some open paths return a generic CalibrationModel; re-wrap if needed.
         loaded = wavesol
@@ -204,17 +213,33 @@ def load_packaged_sim_hdf_line_zp_wavesol(
         wavesol.meta.note = PACKAGED_SIM_HDF_LINE_ZP_NOTE
     except Exception:
         pass
-    # Packaged FITS ships with mjd_start=0 / 1858-11-17; sync datetime_obs when the
-    # caller supplied a science MJD so registration joins the same-night version family.
+    # Replace placeholder epoch (MJD 0 / 1858) with a safe default, or sync
+    # datetime_obs when the caller supplied a science MJD for same-night matching.
+    import astropy.time
+
+    _PLACEHOLDER_DT = "1858-11-17T00:00:00.000"
+    # Early-2023 epoch: within IERS leap-second tables (avoids ERFA dubious-year).
+    _SAFE_DEFAULT_MJD = 60000.0
+
     mjd = getattr(wavesol.meta, "mjd_start", None)
     dt = getattr(wavesol.meta, "datetime_obs", None)
-    if mjd is not None and dt in (None, "", "1858-11-17T00:00:00.000"):
-        import astropy.time
-
-        try:
-            wavesol.meta.datetime_obs = astropy.time.Time(
-                float(mjd), format="mjd", scale="utc"
-            ).isot
-        except Exception:
-            pass
+    try:
+        mjd_f = float(mjd) if mjd is not None else None
+    except (TypeError, ValueError):
+        mjd_f = None
+    if mjd_f is None or mjd_f == 0.0 or dt in (None, "", _PLACEHOLDER_DT):
+        if mjd_f is None or mjd_f == 0.0:
+            mjd_f = _SAFE_DEFAULT_MJD
+            try:
+                wavesol.meta.mjd_start = mjd_f
+            except Exception:
+                pass
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ErfaWarning, message=r".*dubious year.*")
+            try:
+                wavesol.meta.datetime_obs = astropy.time.Time(
+                    float(mjd_f), format="mjd", scale="utc"
+                ).isot
+            except Exception:
+                pass
     return wavesol

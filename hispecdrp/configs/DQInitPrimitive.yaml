@@ -1,0 +1,4 @@
+class: DQInitPrimitive
+description: Standard DQ initialization configuration.
+context: {}
+parameters: {}

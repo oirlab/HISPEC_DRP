@@ -1,0 +1,5 @@
+class: TelluricCorrectionPrimitive
+description: Standard telluric correction configuration.
+context: {}
+parameters: {}
+steps: {}

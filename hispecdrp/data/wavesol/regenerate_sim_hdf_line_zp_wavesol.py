@@ -15,7 +15,7 @@ Run from the repository root::
     python hispecdrp/data/wavesol/regenerate_sim_hdf_line_zp_wavesol.py \\
         --rate-map test_data/e2e_rv0_hdf_trace_linezp/rate_map.fits \\
         --spectrum test_data/e2e_rv0_hdf_trace_linezp/*_spec-blaze_correct.fits \\
-        --mask hispecdrp/data/masks/lte049*.e2erval.delta.mas \\
+        --mask hispecdrp/data/masks/lte049*.ccfopt.delta.mas \\
         --ccf-refine --spectrograph BSPEC --known-rv-m-s 0
 """
 
@@ -253,14 +253,13 @@ def _ccf_refine(
         w = np.asarray(getattr(wavesol, f"wave_fib{fiber}"), dtype=np.float64)
         setattr(mm, f"wave_fib{fiber}", w)
         mm.save(str(dest))
-        prim_args = {
+        primitives = {
             "blaze_corr": {"run": False},
             "barycorr": {"run": False},
             "stellar_rv": {
                 "mask_path": str(mask_path),
                 "ccf_input_velocity": float(known_rv_m_s),
                 "ccf_zb": 0.0,
-                "ccf_zb_from_barycorr": False,
                 "window_line_by_line": False,
                 "window_size_um": 0.25,
                 "v_half_window": 15000.0,
@@ -272,13 +271,12 @@ def _ccf_refine(
                 "save_preview": False,
                 "preview_write_png": False,
                 "save_overlay_debug": False,
-                "mask_auto_center_scout": False,
             },
         }
         e2e_support.run_stage2_simulation(
             datamodels.open(str(dest)),
             fiberflat_model=datamodels.open(str(unity)),
-            prim_args=prim_args,
+            primitives=primitives,
             stellar_rv_mask_path=str(mask_path),
             stellar_rv_ccf_input_velocity_m_s=float(known_rv_m_s),
             output_dir=str(output_dir),

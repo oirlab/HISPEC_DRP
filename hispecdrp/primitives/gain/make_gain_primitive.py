@@ -118,7 +118,7 @@ class MakeGainPrimitive(BasePrimitive):
     https://github.com/spacetelescope/romancal
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'max_cores' : 1,
         'init_gain' : None, # None | int, Define the initial gain value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(0.1, 10, 101)).
@@ -157,10 +157,10 @@ class MakeGainPrimitive(BasePrimitive):
         if self.mode.lower() != 'full_detector' and self.mode.lower() != 'per_pixel':
             raise NotImplementedError(f"Only 'full_detector' and 'per_pixel' modes are implemented currently. Not {self.mode}")
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector gain from a list of {nfiles} inputs.")
 
@@ -225,9 +225,14 @@ class MakeGainPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_gain_and_readnoise(delta_readtimes, ramp_arr, dq_raw_arr, _init_center_gain, _init_center_RN,_init_delta_gains,_init_delta_RNs,
-                                      countratesidentical=self.countratesidentical,
-                                      mode = self.mode, method= self.method, max_cores =self.max_cores)
+        max_cores = self.max_cores or 1
+        _out = fit_gain_and_readnoise(
+            delta_readtimes, ramp_arr, dq_raw_arr, _init_center_gain, _init_center_RN,_init_delta_gains,_init_delta_RNs,
+            countratesidentical=self.countratesidentical,
+            mode=self.mode,
+            method=self.method,
+            max_cores=max_cores
+        )
         bestfit_gain, bestfit_rn, cov = _out
 
         # Output

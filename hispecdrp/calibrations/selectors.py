@@ -474,6 +474,9 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
     - Match spectrograph
     - Require master calibration
     - Closest in observation time
+    - Prefer sim-matched nonlin (``meta.note`` / ``sim_matched_nonlin``) when
+      present among candidates, so UTR sims that set ``nonlin_coeffs`` do not
+      silently pick a competing KOA master
     """
 
     def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
@@ -493,7 +496,20 @@ class NonlinearCorrectionSelector(HISPECCalibrationSelector):
         )
 
         return list(rows)
-            
+
+    def select_best(self, input, candidates : list[dict] | dict, **kwargs) -> dict | None:
+        """Prefer sim-matched nonlin when it is among the candidates."""
+        if isinstance(candidates, list) and candidates:
+            tag = "sim_matched_nonlin"
+            preferred = [
+                c
+                for c in candidates
+                if tag in str(c.get("note") or "")
+                or tag in str(c.get("filename") or "")
+            ]
+            if preferred:
+                return super().select_best(input, preferred, **kwargs)
+        return super().select_best(input, candidates, **kwargs) 
 class FiberFlatSelector(HISPECCalibrationSelector):
     """
     Selector for fiber-flat calibration files.

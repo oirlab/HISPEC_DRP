@@ -42,7 +42,7 @@ class MakeBiasPrimitive(BasePrimitive):
 
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model' : 'BiasModel',
         'max_cores' : 1,
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad
@@ -50,10 +50,10 @@ class MakeBiasPrimitive(BasePrimitive):
     }
 
     def _perform(self):
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector bias and kTC noise from a list of {nfiles} inputs.")
 
@@ -67,12 +67,18 @@ class MakeBiasPrimitive(BasePrimitive):
             bias_arr.append(_input.data[0,:,:])
         bias_arr = np.array(bias_arr)
 
-        with numba_thread_scope(self.max_cores):
+        max_cores = self.max_cores or 1
+        with numba_thread_scope(max_cores):
             output_bias.bias = median_axis0_3d(bias_arr)
-            output_bias.ktc = std_axis0_3d_sigclip(bias_arr,nsig=5,min_keep=10)
+            output_bias.ktc = std_axis0_3d_sigclip(bias_arr, nsig=5, min_keep=10)
             output_bias.dq = copy(input_models[0].dq)
-            _find_bad_pixels_bias(output_bias.bias, output_bias.ktc , output_bias.dq,
-                                    self.kTC_threshold, self.bias_threshold)
+            _find_bad_pixels_bias(
+                output_bias.bias,
+                output_bias.ktc,
+                output_bias.dq,
+                self.kTC_threshold,
+                self.bias_threshold
+            )
 
         median_bias_level = np.nanmedian(output_bias.bias)
         output_bias.meta.median_bias_level = median_bias_level

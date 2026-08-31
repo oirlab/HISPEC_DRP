@@ -124,7 +124,7 @@ class MakeNonLinPrimitive(BasePrimitive):
     """
 
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'output_model': 'NonlinearCorrectionModel',
         'max_cores' : 1,
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
@@ -170,10 +170,10 @@ class MakeNonLinPrimitive(BasePrimitive):
             logger.info(f"Running in single_pixel mode. Each detector pixel will be fitted independently and a map of gain and/or readnoise will be returned.")
 
 
-        if isinstance(self.input, (datamodels.DataModel, str)):
-            _input_list_tmp = [self.input]
-        if  isinstance(self.input, Sequence):
-            _input_list_tmp = self.input
+        if isinstance(self.dataset, (datamodels.DataModel, str)):
+            _input_list_tmp = [self.dataset]
+        if  isinstance(self.dataset, Sequence):
+            _input_list_tmp = self.dataset
         nfiles = len(_input_list_tmp)
         logger.info(f"Deriving the detector non linearity polynomial coefficients from a list of {nfiles} inputs.")
 
@@ -209,11 +209,20 @@ class MakeNonLinPrimitive(BasePrimitive):
         ramp_arr = np.array(ramp_arr)
         dq_raw_arr = np.array(dq_raw_arr)
 
-        _out = fit_nonlin_coefs(ramp_arr, dq_raw_arr, gain_model.gain, rn_model.RN,
-                                order = self.order, satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias),
-                                mode = self.mode, use_legendre = self.use_legendre, readstart = self.readstart,
-                                criterion_for_nonlin_thresh = self.criterion_for_nonlin_thresh, criterion_for_nonlin_max = self.criterion_for_nonlin_max,
-                                max_cores =self.max_cores)
+        satval = self.satval_frac*(saturation_model.sat_thresh-bias_model.bias)
+
+        max_cores = self.max_cores or 1
+        _out = fit_nonlin_coefs(
+            ramp_arr, dq_raw_arr, gain_model.gain, rn_model.RN,
+            order=self.order,
+            satval=satval,
+            mode=self.mode,
+            use_legendre=self.use_legendre,
+            readstart=self.readstart,
+            criterion_for_nonlin_thresh=self.criterion_for_nonlin_thresh,
+            criterion_for_nonlin_max=self.criterion_for_nonlin_max,
+            max_cores=max_cores
+        )
         nonlin_coeffs, nonlin_thresh,nonlin_max = _out
 
         # Output

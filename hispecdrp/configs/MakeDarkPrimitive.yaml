@@ -1,0 +1,4 @@
+class: MakeDarkPrimitive
+description: Standard make dark configuration.
+context: {}
+parameters: {}

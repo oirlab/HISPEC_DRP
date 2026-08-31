@@ -9,3 +9,4 @@ Development
    pipelines
    primitives
    selectors
+   configuration

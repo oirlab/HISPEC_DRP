@@ -1,0 +1,4 @@
+class: MakeNonLinPrimitive
+description: Standard make non-linearity primitive configuration.
+context: {}
+parameters: {}

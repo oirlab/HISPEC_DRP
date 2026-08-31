@@ -1,6 +1,6 @@
-=========
+==========
 Line masks
-=========
+==========
 
 This page documents the line-mask formats used by ``ccf_line_mask``, the corresponding utilities in
 :mod:`hispecdrp.utils.line_mask_utils`, and the unit tests that validate mask I/O and mask-building
@@ -8,7 +8,7 @@ behaviors.
 
 
 Line mask formats (``mask_style``)
----------------------------------
+----------------------------------
 
 The line-mask algorithm uses :class:`~hispecdrp.utils.line_mask_utils.MaskLines` as its canonical
 in-memory representation and mask file I/O layer. Masks are stored on disk as ``.mas`` files and
@@ -70,23 +70,26 @@ See ``hispecdrp/data/masks/README.md`` and ``hispecdrp/data/atmosphere/README.md
 and transmission-file notes.
 
 
-Unit tests (``tests/test_line_mask_utils.py``)
-----------------------------------------------
+Unit tests (``tests/stage2/test_line_mask_utils.py``)
+-----------------------------------------------------
 
-The unit tests in ``tests/test_line_mask_utils.py`` validate both small mathematical helpers and
+The unit tests in ``tests/stage2/test_line_mask_utils.py`` validate both small mathematical helpers and
 end-to-end mask I/O behaviors. Highlights:
 
-- **Bundled data access (optional)**:
+- **Bundled data access (optional)**
+
   - ``test_load_mktrans_bundled`` and ``test_mean_transmission_interval`` validate atmospheric
     transmission file loading and a simple velocity-interval mean.
   - ``test_fit_half_width_k2_all_matches_default_constant`` and
     ``test_masklines_tophat_geometry_from_bundled_template_tophat`` exercise bundled ``*.tophat.mas`` masks
     when present; tests skip when those optional files are not packaged.
 
-- **Metadata conventions**:
+- **Metadata conventions**
+
   - ``test_parse_mask_generation_meta_line`` validates parsing of the ``# HISPEC_DRP_MASK_META`` JSON line.
 
-- **Line-center detection math and helpers**:
+- **Line-center detection math and helpers**
+
   - ``test_parabolic_depth_uses_flux_continuum_ratio_not_interp_of_depth`` ensures refined depth is
     computed as \(1 - F(\lambda)/F_c(\lambda)\) with interpolated \(F\) and \(F_c\), not by
     interpolating the ratio-derived depth grid.
@@ -98,7 +101,8 @@ end-to-end mask I/O behaviors. Highlights:
   - ``test_segment_mean_depth_averages_over_interval`` and
     ``test_segment_mean_depth_empty_interval_is_nan`` validate segment averaging behavior.
 
-- **MaskLines I/O and geometry**:
+- **MaskLines I/O and geometry**
+
   - ``test_masklines_delta_zero_width_and_restrict`` validates delta-mask zero widths and
     chunk restriction behavior.
   - ``test_masklines_load_two_column_mas`` validates the two-column ``.mas`` reader.
@@ -106,7 +110,8 @@ end-to-end mask I/O behaviors. Highlights:
     ``test_masklines_load_mask_style_delta_requires_two_columns`` /
     ``test_masklines_load_unknown_mask_style_raises`` validate explicit ``mask_style`` metadata rules.
 
-- **Template-to-mask build**:
+- **Template-to-mask build**
+
   - ``test_build_line_mask_from_template_two_columns`` validates mask writing, metadata presence,
     column schema, and weight normalization for template-built masks.
 

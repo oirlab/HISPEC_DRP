@@ -13,7 +13,7 @@ __all__ = ['ProcessFiberflatsPipeline']
 
 class ProcessFiberflatsPipeline(CalibrationPipeline):
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'use_pipeline_trace_cals' : True # True for boostrapping until we have good trace cals
     }
 
@@ -33,7 +33,7 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
 
         # Coadd individual fiberflat frames for each fiber individually
         # Models split by fiber
-        ff_coadded_models_L0 = self.coadd_frames.apply(self.input)
+        ff_coadded_models_L0 = self.coadd_frames.apply(self.dataset)
 
         ff_coadded_models_L0 = datamodels.group_by_fiber_combination(ff_coadded_models_L0)
         
@@ -63,20 +63,23 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         trace_prof_reg = self.register_traceprof_cal.apply(trace_profile_model)
         
         # Set the trace pos and prof cals in the spectral extraction primitive
-        # NOTE: Final behavior TBD - sometimes we want to sue the these trace cals, sometimes we want older trace cals.
+        # NOTE: Final behavior TBD - sometimes we want to use the these trace cals, sometimes we want older trace cals.
         if self.use_pipeline_trace_cals:
             if self.spec_extract.tracepos is not None:
                 logger.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
-                self.spec_extract.tracepos = trace_pos_reg
+            self.spec_extract.tracepos = trace_pos_reg
             if self.spec_extract.traceprof is not None:
                 logger.warning(f"Overriding spec_extract.traceprof with {trace_prof_reg}.")
-                self.spec_extract.traceprof = trace_prof_reg
+            self.spec_extract.traceprof = trace_prof_reg
 
         # Extract the coadded fiberflats (models split by fiber)
-        ff_coadded_models_L1 = self.spec_extract.apply(ff_coadded_models_L0)
+        ff_coadded_models_L1 = {}
+        for fiber, model in ff_coadded_models_L0.items():
+            ff_coadded_models_L1[fiber] = self.spec_extract.apply(model)
 
         # Set wavelength solution for each model
-        ff_coadded_models_L1 = self.set_wavesol.apply(ff_coadded_models_L1)
+        for fiber, model in ff_coadded_models_L1.items():
+            ff_coadded_models_L1[fiber] = self.set_wavesol.apply(model)
 
         # Create the fiberflat cal
         fiberflat_model = self.make_fiberflat.apply(ff_coadded_models_L1)

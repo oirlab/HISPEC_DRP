@@ -38,7 +38,7 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
     output
         The data model with per-fiber ``barycorr_fib*`` tables.
     """
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'barycorr',
         'max_cores' : 1,
         'solar' : None,
@@ -47,7 +47,7 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
         output_model = self.get_output_model(input_model)
 
         # Observatory

@@ -1,6 +1,9 @@
 # Author: Tim Brandt
 # Shared with HISPEC team in Aug 2025
 #
+# Also returns Poisson / read-noise variance planes using the same weight
+# decomposition as fitramp_Brandt.py / stcal.likely_fit (Brandt 2024).
+#
 # Reference:
 # Brandt, T. D., "Likelihood-based Jump Detection and Cosmic Ray Rejection for Detectors Read Out Up-the-ramp", PASP, 136, 045005 (2024)
 # https://ui.adsabs.harvard.edu/abs/2024PASP..136d5005B/abstract
@@ -216,6 +219,9 @@ def logsum(double [:] x, int n):
 # minor update to the function by JB Ruffio from the original by Tim Brandt to have the read noise (sig) and the gain being an array instead of a scalar.
 # alpha_phnoise and beta_phnoise are now normalized by the gain inside this function instead of outside.
 # this is to be enable the ramp fitting for rows of a 2D detector image where each pixel can have its own read noise
+#
+# Also return var_poisson / var_rnoise using GLS weights
+# (same formulas as fitramp_Brandt.Ramp_Result and stcal.likely_fit).
 def fit_ramps_row(double [:, :] diffs,
               char [:, :] diffs2use,
               double [:] alpha_phnoise,
@@ -235,6 +241,11 @@ def fit_ramps_row(double [:, :] diffs,
 
     cdef double *alpha = <double *> PyMem_Malloc(ndiffs * sizeof(double))
     cdef double *beta = <double *> PyMem_Malloc(ndiffs * sizeof(double))
+    cdef double *aph = <double *> PyMem_Malloc(ndiffs * sizeof(double))
+    cdef double *arn = <double *> PyMem_Malloc(ndiffs * sizeof(double))
+    cdef double *bph = <double *> PyMem_Malloc((ndiffs - 1) * sizeof(double))
+    cdef double *brn = <double *> PyMem_Malloc((ndiffs - 1) * sizeof(double))
+    cdef double *dC_arr = <double *> PyMem_Malloc(ndiffs * sizeof(double))
 
     cdef double *d = <double *> PyMem_Malloc(ndiffs * sizeof(double))
 
@@ -256,17 +267,23 @@ def fit_ramps_row(double [:, :] diffs,
     cdef double [:] uncert = uncert_np
     logdetC_np = np.empty(nramps)
     cdef double [:] logdetC = logdetC_np
+    var_poisson_np = np.empty(nramps)
+    cdef double [:] var_poisson = var_poisson_np
+    var_rnoise_np = np.empty(nramps)
+    cdef double [:] var_rnoise = var_rnoise_np
 
     phi[ndiffs] = 1
     Phi[ndiffs - 1] = 0
 
-    cdef double scale, iscale, logscale  #= log(scale)
+    cdef double scale, iscale, logscale
 
     cdef double Theta_im1, theta_im1, theta_im2, theta_i, Theta_i, ThetaD_i
     cdef double Phi_ip1, phi_ip1, phi_ip2, phi_i, Phi_i
     cdef double theta_0, theta_1, Theta_0, Theta_1, ThetaD_0, ThetaD_1, theta_n
     cdef double _A, _B, _C
     cdef double iT, dC, iC, ctrtguess, rnvar, sgn
+    cdef double w_i, w_ip1, vp, vr, inv_Csum
+    cdef double g, cg, sig2
     cdef char d2u_i, d2u_ip1
 
     theta_0 = 1
@@ -275,24 +292,33 @@ def fit_ramps_row(double [:, :] diffs,
 
     for j in range(nramps):
 
-        scale = countrateguess[j] * alpha_phnoise[0]/gains[j] + sigs[j] ** 2 * alpha_readnoise[0]
+        g = gains[j]
+        cg = countrateguess[j]
+        sig2 = sigs[j] * sigs[j]
+
+        scale = cg * alpha_phnoise[0] / g + sig2 * alpha_readnoise[0]
         logscale = log(scale)
         iscale = 1. / scale
 
-        ctrtguess = iscale * countrateguess[j]
-        rnvar = iscale * sigs[j] ** 2
+        ctrtguess = iscale * cg
+        rnvar = iscale * sig2
 
         d2u_ip1 = diffs2use[0, j]
 
         for i in range(ndiffs):
             d2u_i = d2u_ip1
             d2u[i] = d2u_i
-            alpha[i] = ctrtguess * alpha_phnoise[i]/gains[j] + rnvar * alpha_readnoise[i]
+            # Physical (unscaled) covariance components for variance split.
+            aph[i] = cg * alpha_phnoise[i] / g
+            arn[i] = sig2 * alpha_readnoise[i]
+            alpha[i] = ctrtguess * alpha_phnoise[i] / g + rnvar * alpha_readnoise[i]
             d[i] = diffs[i, j] * d2u_i
 
             if i < ndiffs - 1:
                 d2u_ip1 = diffs2use[i + 1, j]
-                beta[i] = d2u_i * d2u_ip1 * (ctrtguess * beta_phnoise[i]/gains[j] +
+                bph[i] = cg * beta_phnoise[i] / g
+                brn[i] = sig2 * beta_readnoise[i]
+                beta[i] = d2u_i * d2u_ip1 * (ctrtguess * beta_phnoise[i] / g +
                                              rnvar * beta_readnoise[i])
 
         phi[ndiffs - 1] = alpha[ndiffs - 1]
@@ -326,12 +352,14 @@ def fit_ramps_row(double [:, :] diffs,
 
         _A = d[0] * phi[1] * (-2 * ThetaD_0 + d[0] * theta_0)
         dC = -(phi[1] * Theta_0 + theta_0 * Phi[0]) * d2u[0]
+        dC_arr[0] = dC
 
         _B = d[0] * dC
         _C = dC
 
         _A = _A + d[1] * phi[2] * (2 * beta[0] * ThetaD_1 + d[1] * theta_1)
         dC = (phi[2] * Theta_1 + theta_1 * Phi[1]) * d2u[1]
+        dC_arr[1] = dC
 
         _B = _B + d[1] * dC
         _C = _C + dC
@@ -347,6 +375,7 @@ def fit_ramps_row(double [:, :] diffs,
 
             _A = _A + d[i] * phi[i + 1] * (2 * sgn * beta[i - 1] * ThetaD_i + d[i] * theta_i)
             dC = sgn * (phi[i + 1] * Theta_i + theta_i * Phi[i]) * d2u[i]
+            dC_arr[i] = dC
             _B = _B + d[i] * dC
             _C = _C + dC
 
@@ -369,11 +398,46 @@ def fit_ramps_row(double [:, :] diffs,
 
         logdetC[j] = -log(iT) + ndiffs * logscale
 
+        # GLS weights and Poisson / RN variance split (Brandt / stcal).
+        # weight_i = dC_i / sum(dC); use physical (unscaled) cov components.
+        if _C == 0.0 or _C != _C:
+            var_poisson[j] = 0.0
+            var_rnoise[j] = uncert[j] * uncert[j]
+        else:
+            inv_Csum = 1.0 / _C
+            vp = 0.0
+            vr = 0.0
+            for i in range(ndiffs):
+                w_i = dC_arr[i] * inv_Csum
+                vp = vp + w_i * w_i * aph[i]
+                vr = vr + w_i * w_i * arn[i]
+            for i in range(ndiffs - 1):
+                w_i = dC_arr[i] * inv_Csum
+                w_ip1 = dC_arr[i + 1] * inv_Csum
+                # Off-diagonal terms only contribute when both diffs are used
+                # (beta already zeroed via d2u product in the GLS matrix; mirror
+                # that for the physical split).
+                if d2u[i] and d2u[i + 1]:
+                    vp = vp + 2.0 * w_i * w_ip1 * bph[i]
+                    vr = vr + 2.0 * w_i * w_ip1 * brn[i]
+            if vp < 0.0:
+                vp = 0.0
+            if vr < 0.0:
+                vr = 0.0
+            var_poisson[j] = vp
+            var_rnoise[j] = vr
+
     PyMem_Free(alpha)
     PyMem_Free(beta)
+    PyMem_Free(aph)
+    PyMem_Free(arn)
+    PyMem_Free(bph)
+    PyMem_Free(brn)
+    PyMem_Free(dC_arr)
     PyMem_Free(d)
     PyMem_Free(phi)
     PyMem_Free(Phi)
     PyMem_Free(d2u)
 
-    return logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np
+    return (logdetC_np, A_np, B_np, C_np, countrate_np, chisq_np, uncert_np,
+            var_poisson_np, var_rnoise_np)

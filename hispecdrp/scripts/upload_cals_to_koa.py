@@ -22,7 +22,7 @@ import logging
 import os
 
 from hispecdrp.calibrations import HISPECCalibrationStore
-from hispecdrp.utils.logging import LogConfig, ROOT_LOGGER
+from hispecdrp.driver.logging import LogConfig, ROOT_LOGGER
 
 logger = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
 
     Parameters
     ----------
-    input : str or RampModel
+    dataset : str or RampModel
         Input file path or data model to process. Currently, this is expected
         to be a raw (ramp) data product.
     suffix : str or None, optional
@@ -47,7 +47,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
         arrays.
     """
 
-    ARGUMENTS = {
+    PARAMETERS = {
         'suffix' : 'biassub',
         'max_cores' : 1
     }
@@ -62,7 +62,7 @@ class BiasSubtractionPrimitive(BasePrimitive):
     def _perform(self):
 
         # Load the input model
-        input_model = datamodels.open(self.input)
+        input_model = datamodels.open(self.dataset)
 
         # Get the bias model
         bias, _ = self.get_calibration(input_model, 'bias')
@@ -84,10 +84,11 @@ class BiasSubtractionPrimitive(BasePrimitive):
             result.data = result.data.astype(np.float32)
 
         # Perform bias subtraction
+        max_cores = self.max_cores or 1
         _bias_subtraction(
             result.data, result.dq,
             bias_model.bias, bias_model.dq,
-            max_cores=self.max_cores
+            max_cores=max_cores
         )
 
         # Output

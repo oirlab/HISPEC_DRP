@@ -1,0 +1,4 @@
+class: TraceProfilePrimitive
+description: Standard trace profile primitive configuration.
+context: {}
+parameters: {}

@@ -32,3 +32,7 @@ PRIMITIVE_REGISTER = {
             and issubclass(_local_dict[name], BasePrimitive)
             and _local_dict[name] not in (BasePrimitive,)
 }
+
+# Exclude the ``utils`` submodule from ``from hispecdrp.primitives import *``
+# so it cannot shadow ``hispecdrp.utils`` when re-exported from the top package.
+__all__ = [name for name in list(globals()) if not name.startswith("_") and name != "utils"]

@@ -1,0 +1,4 @@
+class: MakeFiberflatPrimitive
+description: Standard make fiber flat primitive configuration.
+context: {}
+parameters: {}

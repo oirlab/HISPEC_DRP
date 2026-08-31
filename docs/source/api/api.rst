@@ -12,4 +12,5 @@ API Reference
    pipelines
    datamodels
    calibrations
+   driver
    utils

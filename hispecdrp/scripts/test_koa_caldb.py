@@ -73,7 +73,7 @@ from hispecdrp.simulations.e2e_support import (
     ensure_output_directory,
     repository_root,
 )
-from hispecdrp.utils.logging import setup_default_logging
+from hispecdrp.driver.logging import setup_default_logging
 
 logger = logging.getLogger(__name__)
 

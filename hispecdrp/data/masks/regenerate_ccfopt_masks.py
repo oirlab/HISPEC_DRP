@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Regenerate CCF-contrast–optimized delta line masks from packaged BT-Settl templates.
+Regenerate CCF-contrast–optimized delta line masks (template-only path).
 
 For each ``*.h5`` under ``hispecdrp/data/templates/`` that has a paired
 ``<stem>.delta.mas`` seed, writes:
@@ -8,8 +8,10 @@ For each ``*.h5`` under ``hispecdrp/data/templates/`` that has a paired
 - ``<stem>.ccfopt.delta.mas`` — two-column mask from
   :func:`hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_template_and_seed`.
 
-Each line center is refined to maximize single-line Gaussian CCF contrast on the
-template at injected RV = 0; weights are proportional to that contrast (sum to 1).
+This is a **fast** refine on the 1D BT-Settl template (injected RV = 0). The
+canonical E2E regenerator (ZEMAX → Stage 0–2 → line-by-line stellar RV) is:
+
+    hispecdrp/simulations/notebooks/ccfopt_mask_from_sim.ipynb
 
 Run from the repository root (after ``pip install -e .`` or with ``PYTHONPATH`` set)::
 

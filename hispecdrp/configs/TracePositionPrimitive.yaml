@@ -1,0 +1,4 @@
+class: TracePositionPrimitive
+description: Standard trace position primitive configuration.
+context: {}
+parameters: {}
