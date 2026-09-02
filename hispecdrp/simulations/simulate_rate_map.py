@@ -267,6 +267,7 @@ class SimulateRateMap:
         except KeyError: 
             sky_flux = sky_flux
             fiber_wavelengths = sky_wl
+            sky_wl, sky_flux = _upsample_spectrum(sky_wl, sky_flux, desired_sampling_resolution=3e5)
             self.fibers[fiber_number] = {
                 "wavelength": sky_wl,
                 "flux": sky_flux,

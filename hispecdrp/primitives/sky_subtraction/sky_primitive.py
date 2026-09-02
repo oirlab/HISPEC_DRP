@@ -141,6 +141,9 @@ class SkySubtractionPrimitive(BasePrimitive):
                     fiberflat_sky_spec_interp = np.interp(fiberflat_sci_wave[order], fiberflat_sky_wave[order], fiberflat_sky_spec[order])
                     fiberflat_ratio = fiberflat_sci_spec[order] / fiberflat_sky_spec_interp
 
+                    if np.all(np.isnan(fiberflat_ratio)):
+                        logger.warning(f"Fiberflat ratio is all NaN for order {order_vec[order]}. Falling back to a ratio of 1.0. Sky subtraction may be inaccurate.")
+                        fiberflat_ratio = 1.0
 
                 sky_spec_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec[order])
                 sky_spec_scaled[order] = sky_spec_interp * fiberflat_ratio
