@@ -18,11 +18,8 @@ class L0Model(DataModel):
     """
 
     EXTENSIONS = create_L0_extensions(name='RATE')
+    _USES_DETECTOR_SIZE = True
 
     @property
     def data_level_suffix(self):
-        return 'rate'
-    
-    @property
-    def primary_extension_name(self):
         return 'rate'

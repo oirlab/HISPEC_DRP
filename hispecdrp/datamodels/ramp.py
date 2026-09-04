@@ -1,5 +1,5 @@
 from .base_model import DataModel
-from .extensions import IMAGE_UINT16_HDU, DQ_RAW, DQ_L0
+from .extensions import IMAGE_HDU, DQ_RAW, DQ_L0
 import numpy as np
 
 __all__ = ['RampModel']
@@ -18,15 +18,12 @@ class RampModel(DataModel):
     DQ_RAW     Image      UInt8       Nreads x 4096 x 4160    None    Data quality flags unique to each pixel and read.
     DQ         Image      UInt32      4096 x 4160             None    Data quality flags that apply to all reads.
     """
-    EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW, **DQ_L0}
+    EXTENSIONS = {'DATA': IMAGE_HDU(np.uint16, ndim=3), **DQ_RAW, **DQ_L0}
+    _USES_DETECTOR_SIZE = True
 
     @property
     def data_level_suffix(self) -> str:
         return "raw"
-    
-    @property
-    def primary_extension_name(self):
-        return 'data'
 
     def get_delta_readtimes(self, n_channels=None, vertical = None) -> np.ndarray:
         """

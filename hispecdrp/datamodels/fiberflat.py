@@ -5,17 +5,6 @@ from .extensions import create_dataspec_extensions, create_specdq_extensions, cr
 __all__ = ['FiberflatModel']
 
 
-def _create_fiberflat_extensions(num_fibers: int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC'))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext.update(create_midtime_extensions(fiber=fiber))
-        ext.update(create_trans_extensions(fiber=fiber))
-    return ext
-
-
 class FiberflatModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The fiber flat model contains the relative transmission of each fiber as a function of wavelength.
@@ -35,12 +24,16 @@ class FiberflatModel(FiberAttributeProxyMixin, CalibrationModel):
     TRANS_FIB#               Image      Float32     Nord x 4096    None      Normalized transmission.
     TRANS_ERR_FIB#           Image      Float32     Nord x 4096    None      Transmission error.
     """
-    CAL_TYPE = 'fiberflat'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_fiberflat_extensions(self.config.num_fibers))
-        return ext
+    EXTENSIONS = {
+        **create_dataspec_extensions(prefix='SPEC'),
+        **create_specdq_extensions(),
+        **create_wave_extensions(),
+        **create_midtime_extensions(),
+        **create_trans_extensions(),
+    }
+
+    CAL_TYPE = 'fiberflat'
 
     def on_init(self):
         super().on_init()

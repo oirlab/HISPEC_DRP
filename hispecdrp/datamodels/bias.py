@@ -1,5 +1,7 @@
+import numpy as np
+
 from .base_model import CalibrationModel
-from .extensions import IMAGE_FLOAT32_HDU, DQ_L0
+from .extensions import IMAGE_HDU, DQ_L0
 
 __all__ = ['BiasModel']
 
@@ -17,11 +19,12 @@ class BiasModel(CalibrationModel):
     DQ         Image      UInt32      4096 x 4160    None    Data quality.
     """
     EXTENSIONS = {
-        f'BIAS': IMAGE_FLOAT32_HDU,
-        f'KTC': IMAGE_FLOAT32_HDU,
+        f'BIAS': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'KTC': IMAGE_HDU(np.float32, ndim=2, default=0),
         **DQ_L0
     }
     CAL_TYPE = 'bias'
+    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()
@@ -29,7 +32,3 @@ class BiasModel(CalibrationModel):
         self.meta.set_default('target_name', self.meta.exposure_type)
         for fiber in range(1, self.num_fibers+1):
             self.meta.set_default(f'object_fiber{fiber}', 'BLOCKED')
-
-    @property
-    def primary_extension_name(self):
-        return 'bias'

@@ -18,6 +18,12 @@ class HISPECConfig:
     instrument_aliases : ClassVar[dict[str, str]] = {'BSPEC': 'HB', 'RSPEC': 'HR'}
     num_fibers : ClassVar[int] = 3
 
+    # (ny, nx) of the detector plane. Used as a last-resort fallback for
+    # `DataModel.shape` on full-detector-plane models (see `_USES_DETECTOR_SIZE`),
+    # only when neither the primary extension's own data nor an explicit
+    # `shape=` constructor override is available.
+    DETECTOR_SIZE : ClassVar[tuple[int, int]] = (4096, 4160)
+
     # TODO: Update LFC params, eventually in calibration DB
     lfc_params : ClassVar[dict[str, float]] = {
         'LFC-B' : {

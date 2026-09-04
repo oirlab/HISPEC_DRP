@@ -5,17 +5,6 @@ from .extensions import create_dataspec_extensions, create_specdq_extensions, cr
 
 __all__ = ['ReferenceEtalonModel']
 
-def _create_refetalon_extensions(num_fibers: int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC'))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_barycorr_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext.update(create_etalonfitparam_extensions(fiber=fiber))
-        ext.update(create_drift_extensions(fiber=fiber))
-    return ext
-
 
 class ReferenceEtalonModel(FiberAttributeProxyMixin, CalibrationModel):
     """
@@ -36,12 +25,17 @@ class ReferenceEtalonModel(FiberAttributeProxyMixin, CalibrationModel):
     ETALON_FITPARAMS_FIB#   Table      See below   See below       See below  Etalon fit parameters for each mode, order, and fiber.
     DRIFT_FIB#              Table      See below   See below       See below  Drift correction table for each fiber.
     """
-    CAL_TYPE = 'ref_etalon'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_refetalon_extensions(self.config.num_fibers))
-        return ext
+    EXTENSIONS = {
+        **create_dataspec_extensions(prefix='SPEC'),
+        **create_specdq_extensions(),
+        **create_barycorr_extensions(),
+        **create_wave_extensions(),
+        **create_etalonfitparam_extensions(),
+        **create_drift_extensions(),
+    }
+
+    CAL_TYPE = 'ref_etalon'
 
     def on_init(self):
         super().on_init()

@@ -1,20 +1,10 @@
+import numpy as np
+
 from .base_model import CalibrationModel
 from .mixins import FiberAttributeProxyMixin
-from .extensions import IMAGE_FLOAT32_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
+from .extensions import IMAGE_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
 __all__ = ['GaussianLSFModel']
-
-
-def _create_gausslsf_extensions(num_fibers : int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext[f'LSF_PARAMS_FIB{fiber}'] = IMAGE_FLOAT32_HDU # Actual LSF Parameters sampled on detector pixels. This might change.
-        ext.update(create_chebyshev_extensions(fiber=fiber))
-        ext.update(create_lfcfitparam_extensions(fiber=fiber))
-    return ext
 
 
 class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
@@ -35,18 +25,23 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
     LFC_FITPARAMS_FIB#       Table      See docs    See docs             See docs LFC fit parameters for each LFC mode, order, and fiber
     LSF_PARAMS_FIB#          Image      Float64     Nord x 4096 x 3      None    LFC spectrum Gaussian LSF parameters (mu, sigma, offset)
     """
-    
+
+    EXTENSIONS = {
+        **create_dataspec_extensions(),
+        **create_specdq_extensions(),
+        **create_wave_extensions(),
+        # 3D (Nord x 4096 x 3), unlike the 2D SPEC/WAVE extensions -> not auto-initialized.
+        'LSF_PARAMS': IMAGE_HDU(np.float32, ndim=3, per_fiber=True),
+        **create_chebyshev_extensions(),
+        **create_lfcfitparam_extensions(),
+    }
+
     CAL_TYPE = 'lsf'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_gausslsf_extensions(self.config.num_fibers))
-        return ext
-    
     def on_init(self):
         super().on_init()
         self.meta.set_default('exposure_type', 'SPEC')
-        
+
     @property
     def primary_extension_name(self):
         for fiber in range(1, self.config.num_fibers + 1):

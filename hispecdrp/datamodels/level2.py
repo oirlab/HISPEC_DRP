@@ -5,26 +5,6 @@ from .extensions import create_dataspec_extensions, create_specdq_extensions, cr
 
 __all__ = ['L2Model']
 
-def _create_l2_extensions(num_fibers : int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC_UNCAL'))
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC'))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext.update(create_drift_extensions(fiber=fiber))
-        ext.update(create_midtime_extensions(fiber=fiber))
-        ext.update(create_barycorr_extensions(fiber=fiber))
-        ext.update(create_starmodel_extensions(fiber=fiber))
-        ext.update(create_throughput_extensions(fiber=fiber))
-        ext.update(create_rv_extensions(fiber=fiber))
-        ext.update(create_sky_extensions(fiber=fiber))
-        ext.update(create_telluric_extensions(fiber=fiber))
-        ext.update(create_trans_extensions(fiber=fiber))
-        ext.update(create_etalonfitparam_extensions(fiber=fiber))
-    return ext
-
 class L2Model(FiberAttributeProxyMixin, DataModel):
     """
     HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements. Data products from BSPEC and RSPEC are still kept separate.
@@ -67,27 +47,27 @@ class L2Model(FiberAttributeProxyMixin, DataModel):
     RVCCFAGG_FIB#                   Table      See below   See below       See below        RVs aggregated across chunks.
     """
 
-    # def __init__(self, *args, **kwargs):
-    #     config = kwargs.get('config', None)
-    #     if config is None:
-    #         config = self._get_instrument_config(
-    #             meta=kwargs.get('meta', None),
-    #             filepath=kwargs.get('filepath', None),
-    #             instrument_name=kwargs.get('instrument_name', None),
-    #         )
-    #     self.EXTENSIONS = self.EXTENSIONS.copy()
-    #     self.EXTENSIONS.update(_create_l2_extensions(config.num_fibers))
-    #     super().__init__(*args, **kwargs)
-
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_l2_extensions(self.config.num_fibers))
-        return ext
+    EXTENSIONS = {
+        **create_dataspec_extensions(prefix='SPEC_UNCAL'),
+        **create_dataspec_extensions(prefix='SPEC'),
+        **create_specdq_extensions(),
+        **create_wave_extensions(),
+        **create_drift_extensions(),
+        **create_midtime_extensions(),
+        **create_barycorr_extensions(),
+        **create_starmodel_extensions(),
+        **create_throughput_extensions(),
+        **create_rv_extensions(),
+        **create_sky_extensions(),
+        **create_telluric_extensions(),
+        **create_trans_extensions(),
+        **create_etalonfitparam_extensions(),
+    }
 
     @property
     def data_level_suffix(self):
         return 'spec'
-    
+
     @property
     def primary_extension_name(self):
         for fiber in range(1, self.config.num_fibers + 1):

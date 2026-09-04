@@ -35,8 +35,18 @@ from koa_middleware.utils import get_koa_id_timestamp_from_datetime, get_env_var
 import logging
 logger = logging.getLogger(__name__)
 
-
 _VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
+
+
+def _build_empty_table(extdef : dict) -> Table:
+    """
+    Build a 0-row :class:`astropy.table.Table` from an extension's ``'columns'`` spec.
+    """
+    cols = [
+        Column(name=name, data=np.empty(0, dtype=dtype))
+        for name, dtype in extdef["columns"].items()
+    ]
+    return Table(cols)
 
 class DataModel:
     """
@@ -70,6 +80,9 @@ class DataModel:
 
     _DEFAULT_INSTRUMENT = 'HISPEC'
 
+    # Whether `shape` may fall back to `self.config.DETECTOR_SIZE` as a last resort.
+    _USES_DETECTOR_SIZE : ClassVar[bool] = False
+
     def __init__(
         self,
         filepath : str | None = None,
@@ -80,6 +93,7 @@ class DataModel:
         config : type | None = None,
         validate_meta : bool = True,
         instrument_name : str | None = None,
+        shape : tuple[int, ...] | None = None,
         **kwargs
     ):
         """
@@ -103,6 +117,8 @@ class DataModel:
             The instrument config class. If None, it will be determined based on the filepath and instrument name.
         validate_meta : bool, optional
             Whether to validate the metadata against the schema. Defaults to True.
+        shape : tuple[int, ...] | None, optional
+            Explicit shape to use for ``model.shape`` when the primary extension has no data of its own yet. Once the primary extension is actually assigned real data, its array shape takes precedence over this override.
         kwargs
             Any valid data attributes.
         """
@@ -116,6 +132,10 @@ class DataModel:
                 filepath=filepath,
                 instrument_name=instrument_name,
             )
+
+        # Explicit shape override (see `shape` property); only used as a fallback
+        # when the primary extension has no real array to derive a shape from.
+        self._shape = shape
 
         # Validate metadata or not
         self._validate_meta = validate_meta
@@ -131,7 +151,10 @@ class DataModel:
             self.init_meta(meta=meta)
             self.meta.filename = os.path.basename(self._filepath)
             if not meta_only:
-                self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
+                self.read_data(
+                    extensions=extensions,
+                    correct_dtypes=correct_dtypes
+                )
         else:
             self._filepath = None
             self.init_meta(meta=meta)
@@ -142,7 +165,23 @@ class DataModel:
         self.on_init()
 
     def _get_extensions(self):
-        return self.EXTENSIONS
+        return self._expand_per_fiber_extensions(self.EXTENSIONS)
+
+    def _expand_per_fiber_extensions(self, extensions: dict) -> dict:
+        """
+        Expand any extension marked ``per_fiber`` (see :func:`.extensions.IMAGE_HDU`
+        / :func:`.extensions.TABLE_HDU`) into one ``<NAME>_FIB{n}`` entry per
+        fiber, for ``n in 1..self.num_fibers``. Extensions without
+        ``per_fiber`` pass through unchanged.
+        """
+        expanded = {}
+        for name, info in extensions.items():
+            if info.get('per_fiber'):
+                for fiber in range(1, self.num_fibers + 1):
+                    expanded[f'{name}_FIB{fiber}'] = info
+            else:
+                expanded[name] = info
+        return expanded
 
     @classmethod
     def _get_instrument_config(
@@ -217,17 +256,19 @@ class DataModel:
                 elif extname not in self.EXTENSIONS:
                     raise ValueError(f"Extension {extname} not found in FITS file: {self._filepath}")
 
-        # Initialize remaining extensions not set by user or FITS file
+        # Initialize remaining extensions not set by user or FITS file.
+        # Table HDUs always get an empty Table now. Image HDUs are left unset so
+        # that accessing them lazily auto-initializes a default array (see
+        # DataModel.__getattr__ / _make_default_array), or resolves to None.
         for extname in self.EXTENSIONS:
             extl = extname.lower()
-            if getattr(self, extl, None) is None:
-                if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, Table({
-                        name: np.array([], dtype=dtype)
-                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    }))
-                else:
-                    setattr(self, extl, None) # Keep Image HDUs as None
+            if extl in self.__dict__:
+                continue
+            info = self.EXTENSIONS[extname]
+            if 'columns' in info:
+                setattr(self, extl, _build_empty_table(info))
+            elif issubclass(info.get('hdu_type'), fits.ImageHDU):
+                setattr(self, extl, None)
     
     def read_extension_data(
         self, hdu : _VALID_HDU,
@@ -264,6 +305,23 @@ class DataModel:
             if getattr(hdu, "name", None) == "RECEIPT":
                 data = migrate_receipt_table(data)
         return data
+
+    def migrate(self) -> Self:
+        """
+        Apply schema migrations to this model's current data, in place.
+
+        Useful for upgrading an already-constructed model -- e.g. one built
+        from kwargs or merged via :meth:`from_datamodels` -- not just data
+        freshly read from a FITS file.
+
+        Returns
+        -------
+        Self
+            The updated model.
+        """
+        if self.receipt is not None:
+            self.receipt = migrate_receipt_table(self.receipt)
+        return self
 
     def save(
         self,
@@ -406,9 +464,13 @@ class DataModel:
         serialize 0-row tables that include object columns (e.g. variable-length
         ``CCF`` arrays) because no row exists to infer inner dtypes
         (:func:`astropy.io.fits.table_to_hdu` / ``ColDefs._init_from_array``).
+
+        Reads the raw (un-auto-initialized) value: this is only called when
+        ``include_empty_extensions=False``, in which case an image extension
+        that was never explicitly set should be treated as missing rather than
+        lazily materialized into a default array just to decide whether to save it.
         """
-        extl = extname.lower()
-        val = getattr(self, extl, None)
+        val = self._raw_extension_value(extname)
         if val is None:
             return True
         if isinstance(val, Table) and len(val) == 0:
@@ -578,6 +640,17 @@ class DataModel:
         if attrl in self.__dict__:
             return self.__dict__[attrl]
 
+        extensions = self.__dict__.get('EXTENSIONS')
+        if extensions is not None:
+            attru = attr.upper()
+            info = extensions.get(attru)
+            if info is not None and info.get('hdu_type') is fits.ImageHDU:
+                default = self._make_default_array(attru, info)
+                if default is not None:
+                    setattr(self, attrl, default)
+                    return default
+                return None
+
         # Or try super's getattr if the parent class has it
         try:
             return super().__getattribute__(attrl)
@@ -585,6 +658,36 @@ class DataModel:
             pass
 
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'")
+
+    def _make_default_array(self, extname : str, info : dict) -> np.ndarray | None:
+        """
+        Lazily build the default array for an image extension, if eligible.
+
+        Only extensions that declare both ``'ndim'`` and ``'default'`` (see
+        :func:`.extensions.IMAGE_HDU`) are eligible, and only once
+        ``model.shape`` is known and has the same number of dimensions.
+
+        Note this also covers the primary extension itself: ``model.shape``
+        reads the primary extension's *raw* value (see the ``shape``
+        property), which is guaranteed unset here (otherwise ``__getattr__``
+        would have found it in ``self.__dict__`` already), so ``self.shape``
+        safely falls through to the ``shape=`` override or
+        ``config.DETECTOR_SIZE`` fallback with no risk of recursion.
+        """
+        default = info.get('default')
+        ndim = info.get('ndim')
+        if default is None or ndim is None:
+            return None
+
+        shape = self.shape
+        if shape is None or len(shape) != ndim:
+            return None
+
+        return np.full(shape, default, dtype=info['dtype'])
+
+    def _raw_extension_value(self, extname : str):
+        """Read an extension's current value without triggering lazy auto-initialization."""
+        return self.__dict__.get(extname.lower())
 
     def __setattr__(self, attr, value):
         if attr.startswith("_") or attr in self._ALLOWED_ATTRIBUTES:
@@ -634,37 +737,19 @@ class DataModel:
             else:
                 raise ValueError(f"Unknown extension: {key.upper()}")
             
-        def _init_empty_table(extdef : dict) -> Table:
-            cols = []
-            for name, spec in extdef["columns"].items():
-                if isinstance(spec, dict):
-                    dtype = spec.get("dtype")
-                    shape = spec.get("shape")
-                else:
-                    dtype = spec
-                    shape = None
-                if shape is not None:
-                    data = np.empty((0, *shape), dtype=dtype)
-                else:
-                    data = np.empty(0, dtype=dtype)
-                cols.append(Column(name=name, data=data))
-            return Table(cols)
-
-        # Initialize remaining extensions
+        # Initialize remaining extensions. Table HDUs always get an empty Table now.
+        # Image HDUs are left unset so that accessing them lazily auto-initializes
+        # a default array (see DataModel.__getattr__ / _make_default_array), or
+        # resolves to None.
         for extname in self.EXTENSIONS:
             extl = extname.lower()
-            if getattr(self, extl, None) is None:
-                if 'columns' in self.EXTENSIONS[extname]:
-                    # setattr(self, extl, Table({
-                    #     name: np.array([], dtype=dtype)
-                    #     for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    # }))
-                    setattr(
-                        self, extl,
-                        _init_empty_table(self.EXTENSIONS[extname])
-                    )
-                else:
-                    setattr(self, extl, None)
+            if extl in self.__dict__:
+                continue
+            info = self.EXTENSIONS[extname]
+            if 'columns' in info:
+                setattr(self, extl, _build_empty_table(info))
+            elif info.get('hdu_type') is not fits.ImageHDU:
+                setattr(self, extl, None) # e.g. PRIMARY
 
     def init_meta(self, meta: dict | MetaModel | None = None):
         """
@@ -756,12 +841,12 @@ class DataModel:
             if hdu_type is fits.PrimaryHDU:
                 continue
             if hdu_type is fits.ImageHDU:
-                data = getattr(self, extl, None)
+                data = self._raw_extension_value(extl)
                 if data is not None:
                     dtype = data.dtype
                     print(f"{extname}\n  dtype: {dtype}\n  shape: {data.shape}")
             elif hdu_type is fits.BinTableHDU:
-                data = getattr(self, extl, None)
+                data = self._raw_extension_value(extl)
                 if data is not None:
                     print(f"{extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
 
@@ -773,7 +858,7 @@ class DataModel:
             hdu_type = info['hdu_type']
             if hdu_type is fits.PrimaryHDU:
                 continue
-            data[extl] = getattr(self, extl, None)
+            data[extl] = self._raw_extension_value(extl)
         return data
 
     @property
@@ -1106,8 +1191,16 @@ class DataModel:
         return extname.upper() in cls.EXTENSIONS
 
     def has_extension_value(self, extname: str) -> bool:
-        """NOTE: Utility of this method TBD"""
-        return getattr(self, extname.upper(), None) is not None
+        """
+        NOTE: Utility of this method TBD
+
+        Reads the raw (un-auto-initialized) value. This must not trigger lazy
+        auto-initialization: several ``primary_extension_name`` overrides call this
+        to find which fiber has actually been set, and lazy auto-initialization
+        itself depends on ``primary_extension_name`` (via ``model.shape``), which
+        would recurse infinitely.
+        """
+        return self._raw_extension_value(extname) is not None
 
     @property
     def primary_extension_name(self):
@@ -1121,14 +1214,37 @@ class DataModel:
 
     @property
     def shape(self):
+        """
+        The shape of the model's primary extension.
+
+        Reads the primary extension's *raw* value (never triggers lazy
+        auto-initialization -- see :meth:`_make_default_array`, which itself
+        depends on this property and would otherwise recurse). If the primary
+        extension has no real array yet, falls back in order to:
+
+        1. The ``shape=`` override passed to the constructor.
+        2. ``self.config.DETECTOR_SIZE``, but only for models that opt in via
+           ``_USES_DETECTOR_SIZE = True`` (full-detector-plane models like
+           ``DQModel`` or ``BiasModel``) -- never for per-fiber spectral
+           models, whose primary shape has nothing to do with the detector's
+           physical size.
+
+        This is what allows single-extension models (e.g. ``DQModel``, whose
+        primary extension is the one being defaulted) to auto-initialize at all.
+        """
         ext = self.primary_extension_name
-        if ext is None:
-            return None
-        val = getattr(self, ext, None)
-        if val is None:
-            return None
-        if isinstance(val, np.ndarray):
-            return val.shape
+        if ext is not None:
+            val = self._raw_extension_value(ext)
+            if isinstance(val, np.ndarray):
+                return val.shape
+
+        shape_override = self.__dict__.get('_shape')
+        if shape_override is not None:
+            return shape_override
+
+        if self._USES_DETECTOR_SIZE:
+            return getattr(self.config, 'DETECTOR_SIZE', None)
+
         return None
 
 class CalibrationModel(DataModel):

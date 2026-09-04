@@ -1,44 +1,10 @@
 from .base_model import CalibrationModel
 from .mixins import FiberAttributeProxyMixin
+from .extensions import IMAGE_HDU
 
-from astropy.io import fits
 import numpy as np
 
 __all__ = ['TraceProfModel']
-
-
-def _create_traceprof_extensions(num_fibers: int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext[f'PROF_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-        ext[f'PROF_ERR_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-        # Spectroperfection moments on the spectral-row grid (n_orders × n_pix).
-        # SHEAR = ∂row/∂col of an iso-λ cut (from LFC spot tilt).
-        # SIGMA_SPEC / SIGMA_SPAT = Gaussian 2nd moments (pixels).
-        # MOM2_CROSS = flux-weighted covariance cov(row, col).
-        ext[f'SHEAR_FIB{fiber}'] = {
-            'hdu_type': fits.ImageHDU,
-            'dtype': np.float64,
-        }
-        ext[f'SIGMA_SPEC_FIB{fiber}'] = {
-            'hdu_type': fits.ImageHDU,
-            'dtype': np.float64,
-        }
-        ext[f'SIGMA_SPAT_FIB{fiber}'] = {
-            'hdu_type': fits.ImageHDU,
-            'dtype': np.float64,
-        }
-        ext[f'MOM2_CROSS_FIB{fiber}'] = {
-            'hdu_type': fits.ImageHDU,
-            'dtype': np.float64,
-        }
-    return ext
 
 
 class TraceProfModel(FiberAttributeProxyMixin, CalibrationModel):
@@ -60,13 +26,20 @@ class TraceProfModel(FiberAttributeProxyMixin, CalibrationModel):
     MOM2_CROSS_FIB#    Image      Float64     n_orders x n_pix  None    cov(row, col) (pix²).
     """
 
+    # NOTE: PROF/PROF_ERR are (Ny x Nx) while the SHEAR/SIGMA_*/MOM2_CROSS family is
+    # (n_orders x n_pix) -- same ndim, different actual shape -- so none of these
+    # declare a `default` (no auto-initialization).
+    EXTENSIONS = {
+        'PROF': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'PROF_ERR': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'SHEAR': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'SIGMA_SPEC': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'SIGMA_SPAT': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'MOM2_CROSS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+    }
+
     CAL_TYPE = 'traceprof'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_traceprof_extensions(self.config.num_fibers))
-        return ext
-    
     def on_init(self):
         super().on_init()
         self.meta.set_default('exposure_type', 'SPEC')

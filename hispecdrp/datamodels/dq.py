@@ -16,6 +16,7 @@ class DQModel(CalibrationModel):
     
     EXTENSIONS = DQ_L0
     CAL_TYPE = 'dq'
+    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()
@@ -23,7 +24,3 @@ class DQModel(CalibrationModel):
         self.meta.set_default('target_name', 'NONE')
         for fiber in range(1, self.num_fibers + 1):
             self.meta.set_default(f'object_fiber{fiber}', 'NONE')
-
-    @property
-    def primary_extension_name(self):
-        return 'dq'

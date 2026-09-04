@@ -1,32 +1,10 @@
 from .base_model import CalibrationModel
 from .mixins import FiberAttributeProxyMixin
+from .extensions import IMAGE_HDU
 
-from astropy.io import fits
 import numpy as np
 
 __all__ = ['TracePosModel']
-
-
-def _create_tracepos_extensions(num_fibers: int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext[f'COEFF_POS_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-        ext[f'COEFF_FWHM_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-        ext[f'POS_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-        ext[f'FWHM_FIB{fiber}'] = {
-            'hdu_type' : fits.ImageHDU,
-            'dtype' : np.float64
-        }
-    return ext
 
 
 class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
@@ -43,13 +21,16 @@ class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
     POS_FIB#          Image      Float64     Nord x Ncoeff    Pixels    Evaluated positions for fiber #.
     FWHM_FIB#         Image      Float64     Nord x Ncoeff    Pixels    Evaluated fwhm for fiber #.
     """
+
+    EXTENSIONS = {
+        'COEFF_POS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'COEFF_FWHM': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'POS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'FWHM': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+    }
+
     CAL_TYPE = 'tracepos'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_tracepos_extensions(self.config.num_fibers))
-        return ext
-    
     def on_init(self):
         super().on_init()
         self.meta.set_default('exposure_type', 'SPEC')

@@ -1,6 +1,8 @@
+import numpy as np
+
 from .base_model import CalibrationModel
 
-from .extensions import IMAGE_FLOAT32_HDU, IMAGE_UINT16_HDU, DQ_L0
+from .extensions import IMAGE_HDU, DQ_L0
 
 __all__ = ['NonlinearCorrectionModel']
 
@@ -18,18 +20,15 @@ class NonlinearCorrectionModel(CalibrationModel):
     NONLIN_MAX       Image      UInt16      4096 x 4160             None    TBD, from JWST.
     """
     EXTENSIONS = {
-        'COEFFS': IMAGE_FLOAT32_HDU,
-        'NONLIN_THRESH' : IMAGE_UINT16_HDU,
-        'NONLIN_MAX' : IMAGE_UINT16_HDU,
+        'COEFFS': IMAGE_HDU(np.float32, ndim=3),
+        'NONLIN_THRESH' : IMAGE_HDU(np.uint16, ndim=2, default=0.9 * np.iinfo(np.uint16).max),
+        'NONLIN_MAX' : IMAGE_HDU(np.uint16, ndim=2, default=np.iinfo(np.uint16).max),
         **DQ_L0
     }
     CAL_TYPE = 'nonlin'
+    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()
         self.meta.set_default('exposure_type', 'DETFLAT')
         self.meta.set_default('target_name', 'WHITELIGHT')
-
-    @property
-    def primary_extension_name(self):
-        return 'coeffs'

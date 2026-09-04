@@ -1,6 +1,8 @@
+import numpy as np
+
 from .base_model import CalibrationModel
 
-from .extensions import IMAGE_FLOAT32_HDU, DQ_L0
+from .extensions import IMAGE_HDU, DQ_L0
 
 __all__ = ['GainModel']
 
@@ -20,12 +22,13 @@ class GainModel(CalibrationModel):
     DQ         Image      UInt32      4096 x 4160    None    Data quality.
     """
     EXTENSIONS = {
-        f'GAIN': IMAGE_FLOAT32_HDU,
-        f'RN': IMAGE_FLOAT32_HDU,
-        f'COV': IMAGE_FLOAT32_HDU,
+        f'GAIN': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'RN': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'COV': IMAGE_HDU(np.float32, ndim=2, default=0),
         **DQ_L0
     }
     CAL_TYPE = 'gain'
+    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()
@@ -33,8 +36,3 @@ class GainModel(CalibrationModel):
         self.meta.set_default('target_name', 'WHITELIGHT')
         for fiber in range(1, self.num_fibers+1):
             self.meta.set_default(f'object_fiber{fiber}', 'BLOCKED')
-
-    @property
-    def primary_extension_name(self):
-        return 'gain'
-    
