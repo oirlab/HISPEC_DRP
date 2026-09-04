@@ -141,7 +141,7 @@ class DataModel:
         self._validate_meta = validate_meta
 
         # Get the extension names now that we know the instrument
-        self.EXTENSIONS = self._get_extensions()
+        self.EXTENSIONS = self._get_extensions(self.num_fibers)
 
         # Set the optional filepath
         if filepath is not None:
@@ -164,20 +164,22 @@ class DataModel:
         # Hook
         self.on_init()
 
-    def _get_extensions(self):
-        return self._expand_per_fiber_extensions(self.EXTENSIONS)
+    @classmethod
+    def _get_extensions(cls, num_fibers : int) -> dict:
+        return cls._expand_per_fiber_extensions(cls.EXTENSIONS, num_fibers)
 
-    def _expand_per_fiber_extensions(self, extensions: dict) -> dict:
+    @classmethod
+    def _expand_per_fiber_extensions(cls, extensions : dict, num_fibers : int) -> dict:
         """
         Expand any extension marked ``per_fiber`` (see :func:`.extensions.IMAGE_HDU`
         / :func:`.extensions.TABLE_HDU`) into one ``<NAME>_FIB{n}`` entry per
-        fiber, for ``n in 1..self.num_fibers``. Extensions without
-        ``per_fiber`` pass through unchanged.
+        fiber, for ``n in 1..num_fibers``. Extensions without ``per_fiber``
+        pass through unchanged.
         """
         expanded = {}
         for name, info in extensions.items():
             if info.get('per_fiber'):
-                for fiber in range(1, self.num_fibers + 1):
+                for fiber in range(1, num_fibers + 1):
                     expanded[f'{name}_FIB{fiber}'] = info
             else:
                 expanded[name] = info
