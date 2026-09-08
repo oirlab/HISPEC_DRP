@@ -90,10 +90,10 @@ class SetInitialWLSPrimitive(BasePrimitive):
                     f'wave_fib{fiber}',
                     np.full((n_orders, n_pix), np.nan, dtype=np.float64)
                 )
-            if getattr(output_model, f'spec_dq_fib{fiber}', None) is None:
+            if getattr(output_model, f'spec_uncal_dq_fib{fiber}', None) is None:
                 setattr(
                     output_model,
-                    f'spec_dq_fib{fiber}',
+                    f'spec_uncal_dq_fib{fiber}',
                     np.zeros((n_orders, n_pix), dtype=np.uint32)
                 )
 
@@ -102,7 +102,7 @@ class SetInitialWLSPrimitive(BasePrimitive):
             dq_cal_arr = getattr(wavesol_model, f'spec_dq_fib{fiber}')
 
             wavesol_output_arr = getattr(output_model, f'wave_fib{fiber}')
-            dq_output_arr = getattr(output_model, f'spec_dq_fib{fiber}')
+            dq_output_arr = getattr(output_model, f'spec_uncal_dq_fib{fiber}')
 
             orders = list(output_model.make_order_vec())
             

@@ -63,127 +63,134 @@ class SkySubtractionPrimitive(BasePrimitive):
 
     def _perform(self):
 
-        if isinstance(self.dataset, (datamodels.DataModel, str)):
-            output = None
-            input = [self.dataset]
-        elif isinstance(self.dataset, Sequence):
-            output = []
-            input = self.dataset
+        # if isinstance(self.dataset, (datamodels.DataModel, str)):
+        #     output = None
+        #     input = [self.dataset]
+        # elif isinstance(self.dataset, Sequence):
+        #     output = []
+        #     input = self.dataset
 
         # Loop over inputs (now a list)
-        for _input in input:
-            # Load the input model
-            input_model = datamodels.open(_input)
+        #for _input in input:
+        # Load the input model
+        input_model = datamodels.open(self.dataset)
 
-             # Init output model
-            output_model = self._model_types(input_model)
-                       
-            # Which orders to process
-            _, do_orders = self.get_do_traces(input_model, [1,2,3], self.do_orders)
-            order_vec = input_model.make_order_vec()
-            n_orders = len(order_vec)
+            # Init output model
+        #output_model = self._model_types(input_model)
+        output_model = self.get_output_model(input_model)
+                    
+        # Which orders to process
+        _, do_orders = self.get_do_traces(input_model, [1,2,3], self.do_orders)
+        order_vec = input_model.make_order_vec()
+        n_orders = len(order_vec)
 
-            # Get calibrations
-            fiberflat, _ = self.get_calibration(input_model, 'fiberflat')
-            fiberflat_model = datamodels.open(fiberflat)
+        # Get calibrations
+        fiberflat, _ = self.get_calibration(input_model, 'fiberflat')
+        fiberflat_model = datamodels.open(fiberflat)
 
-            spec_key = 'SPEC_UNCAL_' if isinstance(input_model, datamodels.level1.L1Model) else 'SPEC_'
+        spec_key = 'SPEC_UNCAL_' if isinstance(input_model, datamodels.level1.L1Model) else 'SPEC_'
 
-            # get science/sky fiber numbers, sky fiber defaults to farthest fiber from tracking axis
-            sci_fib_num, sky_fib_num = self._resolve_fibers(input_model, self.sci_fiber, self.sky_fiber)
+        # get science/sky fiber numbers, sky fiber defaults to farthest fiber from tracking axis
+        sci_fib_num, sky_fib_num = self._resolve_fibers(input_model, self.sci_fiber, self.sky_fiber)
 
-            # get sky, warn if sky fiber seems unusually close or bright
-            sky_spec = getattr(input_model, f'{spec_key}FIB{sky_fib_num}')
-            sky_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sky_fib_num}')
-            sky_wave = getattr(input_model, f"WAVE_FIB{sky_fib_num}")
-            if sky_spec is None or sky_spec_err is None or sky_wave is None:
-                raise ValueError(f"Sky fiber {sky_fib_num} data is missing. Cannot perform sky subtraction.")
-            if input_model.meta.get(f'distance_fiber{sky_fib_num}') is not None:
-                if input_model.meta.get(f'distance_fiber{sky_fib_num}') < 1.0: #TODO check if warning distance is appropriate number
-                    logger.warning(f"Sky fiber {sky_fib_num} is unusually close to the tracking axis. Sky subtraction may be inaccurate.")
-                elif np.nanmedian(sky_spec) > 0.3:  # arbitrary threshold for "too bright" #TODO check brightness number with observed sky brightnesses
-                    logger.warning(f"Sky fiber {sky_fib_num} seems too bright. Sky subtraction may be inaccurate.")
+        # get sky, warn if sky fiber seems unusually close or bright
+        sky_spec = getattr(input_model, f'{spec_key}FIB{sky_fib_num}')
+        sky_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sky_fib_num}')
+        sky_wave = getattr(input_model, f"WAVE_FIB{sky_fib_num}")
+        if sky_spec is None or sky_spec_err is None or sky_wave is None:
+            raise ValueError(f"Sky fiber {sky_fib_num} data is missing. Cannot perform sky subtraction.")
+        if input_model.meta.get(f'distance_fiber{sky_fib_num}') is not None:
+            if input_model.meta.get(f'distance_fiber{sky_fib_num}') < 1.0: #TODO check if warning distance is appropriate number
+                logger.warning(f"Sky fiber {sky_fib_num} is unusually close to the tracking axis. Sky subtraction may be inaccurate.")
+            elif np.nanmedian(sky_spec) > 0.3:  # arbitrary threshold for "too bright" #TODO check brightness number with observed sky brightnesses
+                logger.warning(f"Sky fiber {sky_fib_num} seems too bright. Sky subtraction may be inaccurate.")
 
-            # get science spectrum
-            sci_spec = getattr(input_model, f'{spec_key}FIB{sci_fib_num}')
-            sci_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sci_fib_num}')
-            sci_wave = getattr(input_model, f"WAVE_FIB{sci_fib_num}")
-            if sci_spec is None or sci_spec_err is None or sci_wave is None:
-                raise ValueError(f"Science fiber {sci_fib_num} data is missing. Cannot perform sky subtraction.")
+        # get science spectrum
+        sci_spec = getattr(input_model, f'{spec_key}FIB{sci_fib_num}')
+        sci_spec_err = getattr(input_model, f'{spec_key}ERR_FIB{sci_fib_num}')
+        sci_wave = getattr(input_model, f"WAVE_FIB{sci_fib_num}")
+        if sci_spec is None or sci_spec_err is None or sci_wave is None:
+            raise ValueError(f"Science fiber {sci_fib_num} data is missing. Cannot perform sky subtraction.")
 
-            # get variance and DQ arrays for science and sky fibers
-            sci_var_poisson = getattr(input_model, f'{spec_key}VAR_POISSON_FIB{sci_fib_num}')
-            sci_var_rnoise  = getattr(input_model, f'{spec_key}VAR_RNOISE_FIB{sci_fib_num}')
-            sci_dq          = getattr(input_model, f'SPEC_DQ_FIB{sci_fib_num}')
-            sky_dq          = getattr(input_model, f'SPEC_DQ_FIB{sky_fib_num}')
+        # get variance and DQ arrays for science and sky fibers
+        sci_var_poisson = output_model[sci_fib_num].spec_var_poisson
+        sci_var_rnoise  = output_model[sci_fib_num].spec_var_rnoise
+        sci_dq          = output_model[sci_fib_num].spec_dq
+        sky_dq          = output_model[sky_fib_num].spec_dq
 
-            # get fiberflat spectrum from same fibers as sky/science
-            fiberflat_sky_spec = getattr(fiberflat_model, f"SPEC_FIB{sky_fib_num}")
-            fiberflat_sky_wave = getattr(fiberflat_model, f"WAVE_FIB{sky_fib_num}")
-            fiberflat_sci_spec = getattr(fiberflat_model, f"SPEC_FIB{sci_fib_num}")
-            fiberflat_sci_wave = getattr(fiberflat_model, f"WAVE_FIB{sci_fib_num}")
+        # get fiberflat spectrum from same fibers as sky/science
+        fiberflat_sky_spec = getattr(fiberflat_model, f"SPEC_FIB{sky_fib_num}")
+        fiberflat_sky_wave = getattr(fiberflat_model, f"WAVE_FIB{sky_fib_num}")
+        fiberflat_sci_spec = getattr(fiberflat_model, f"SPEC_FIB{sci_fib_num}")
+        fiberflat_sci_wave = getattr(fiberflat_model, f"WAVE_FIB{sci_fib_num}")
 
-            sci_spec_sky_subtracted     = np.empty_like(sci_spec)
-            sci_spec_sky_subtracted_err = np.empty_like(sci_spec_err)
-            sky_spec_scaled             = np.empty_like(sci_spec)
-            sky_spec_err_scaled         = np.empty_like(sci_spec_err)
-            out_dq                      = np.empty_like(sci_dq)
+        sci_spec_sky_subtracted     = np.empty_like(sci_spec)
+        sci_spec_sky_subtracted_err = np.empty_like(sci_spec_err)
+        sky_spec_scaled             = np.empty_like(sci_spec)
+        sky_spec_err_scaled         = np.empty_like(sci_spec_err)
+        out_dq                      = np.empty_like(sci_dq)
 
-            for order in range(n_orders):
-                if order_vec[order] not in do_orders:
-                    continue
+        for order in range(n_orders):
+            if order_vec[order] not in do_orders:
+                continue
 
-                # get relative transmission ratio from science/sky from fiberflat calibration
-                if fiberflat_sky_spec is None or fiberflat_sci_spec is None:
-                    logger.warning(f"Fiberflat calibration missing for science or sky fiber for order {order_vec[order]}. Sky subtraction may be inaccurate.")
-                    fiberflat_ratio = 1.0
-                else:
-                    fiberflat_sky_spec_interp = np.interp(fiberflat_sci_wave[order], fiberflat_sky_wave[order], fiberflat_sky_spec[order])
-                    fiberflat_ratio = fiberflat_sci_spec[order] / fiberflat_sky_spec_interp
-
-
-                sky_spec_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec[order])
-                sky_spec_scaled[order] = sky_spec_interp * fiberflat_ratio
-
-                # Interpolate sky error onto science wavelength grid and scale by fiberflat
-                sky_spec_err_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec_err[order])
-                sky_spec_err_scaled[order] = sky_spec_err_interp * fiberflat_ratio
-
-                sci_spec_sky_subtracted[order] = sci_spec[order] - sky_spec_scaled[order]
-
-                # Propagate flux errors in quadrature: err = sqrt(sci_err^2 + (scaled_sky_err)^2)
-                sci_spec_sky_subtracted_err[order] = np.sqrt(
-                    sci_spec_err[order]**2 + sky_spec_err_scaled[order]**2
-                )
-
-                out_of_bounds_mask = np.logical_or((sci_wave[order] < np.nanmin(sky_wave[order])), (sci_wave[order] > np.nanmax(sky_wave[order])))
-                out_of_bounds_dq = np.zeros(len(sci_wave[order]), dtype=np.int32) 
-                out_of_bounds_dq[out_of_bounds_mask] = np.int32(1)
-                out_dq[order] = sci_dq[order] | out_of_bounds_dq
-
-            setattr(output_model, f'SPEC_FIB{sci_fib_num}',             sci_spec_sky_subtracted)
-            setattr(output_model, f'SPEC_ERR_FIB{sci_fib_num}',         sci_spec_sky_subtracted_err)
-            setattr(output_model, f'SPEC_VAR_POISSON_FIB{sci_fib_num}', sci_var_poisson.copy())
-            setattr(output_model, f'SPEC_VAR_RNOISE_FIB{sci_fib_num}',  sci_var_rnoise.copy())
-            setattr(output_model, f'SPEC_DQ_FIB{sci_fib_num}',          out_dq)
-            setattr(output_model, f'SKY_FIB{sci_fib_num}',              sky_spec_scaled)
-            setattr(output_model, f'SKY_ERR_FIB{sci_fib_num}',          sky_spec_err_scaled)
-
-            if isinstance(output, list):
-                output.append(output_model)
+            # get relative transmission ratio from science/sky from fiberflat calibration
+            if fiberflat_sky_spec is None or fiberflat_sci_spec is None:
+                logger.warning(f"Fiberflat calibration missing for science or sky fiber for order {order_vec[order]}. Sky subtraction may be inaccurate.")
+                fiberflat_ratio = 1.0
             else:
-                output = output_model
+                fiberflat_sky_spec_interp = np.interp(fiberflat_sci_wave[order], fiberflat_sky_wave[order], fiberflat_sky_spec[order])
+                fiberflat_ratio = fiberflat_sci_spec[order] / fiberflat_sky_spec_interp
 
-        return dict(output=output)
+
+            sky_spec_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec[order])
+            sky_spec_scaled[order] = sky_spec_interp * fiberflat_ratio
+
+            # Interpolate sky error onto science wavelength grid and scale by fiberflat
+            sky_spec_err_interp = np.interp(sci_wave[order], sky_wave[order], sky_spec_err[order])
+            sky_spec_err_scaled[order] = sky_spec_err_interp * fiberflat_ratio
+
+            sci_spec_sky_subtracted[order] = sci_spec[order] - sky_spec_scaled[order]
+
+            # Propagate flux errors in quadrature: err = sqrt(sci_err^2 + (scaled_sky_err)^2)
+            sci_spec_sky_subtracted_err[order] = np.sqrt(
+                sci_spec_err[order]**2 + sky_spec_err_scaled[order]**2
+            )
+
+            out_of_bounds_mask = np.logical_or((sci_wave[order] < np.nanmin(sky_wave[order])), (sci_wave[order] > np.nanmax(sky_wave[order])))
+            out_of_bounds_dq = np.zeros(len(sci_wave[order]), dtype=np.int32) 
+            out_of_bounds_dq[out_of_bounds_mask] = np.int32(1)
+            out_dq[order] = sci_dq[order] | out_of_bounds_dq
+
+        setattr(output_model, f'SPEC_FIB{sci_fib_num}',             sci_spec_sky_subtracted)
+        setattr(output_model, f'SPEC_ERR_FIB{sci_fib_num}',         sci_spec_sky_subtracted_err)
+        setattr(output_model, f'SPEC_VAR_POISSON_FIB{sci_fib_num}', sci_var_poisson.copy())
+        setattr(output_model, f'SPEC_VAR_RNOISE_FIB{sci_fib_num}',  sci_var_rnoise.copy())
+        setattr(output_model, f'SPEC_DQ_FIB{sci_fib_num}',          out_dq)
+        setattr(output_model, f'SKY_FIB{sci_fib_num}',              sky_spec_scaled)
+        setattr(output_model, f'SKY_ERR_FIB{sci_fib_num}',          sky_spec_err_scaled)
+
+        # if isinstance(output, list):
+        #     output.append(output_model)
+        # else:
+        #     output = output_model
+
+        return dict(output=output_model)
     
 
-    def _model_types(self, input_model):
-        if isinstance(input_model, datamodels.level1.L1Model):
-            output_model = self.get_output_model(input_model, output_model='L2Model', include_data=True)
-        elif isinstance(input_model, datamodels.level2.L2Model):
-            output_model = self.get_output_model(input_model, output_model='input', include_data=True)
+    def get_output_model(self, input_model, **kwargs):
+        if isinstance(input_model, datamodels.L1Model):
+            output_model = 'L2Model'
+        elif isinstance(input_model, datamodels.L2Model):
+            output_model = 'input'
         else:
             raise TypeError(f"Unsupported input model type: {type(input_model)}. Expected L1Model or L2Model.")
+        output_model = super().get_output_model(
+            input_model,
+            output_model=output_model,
+            include_data=True,
+            **kwargs
+        )
         return output_model
     
 
