@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import types
+
 from astropy.io import fits
-from astropy.table import Column, Table
 import numpy as np
 
 # NOTE:
@@ -9,12 +10,42 @@ import numpy as np
 # No _HDU = key already specified
 
 
+# Symbolic axis-name strings recognized in an IMAGE_HDU `shape=` spec, mixed
+# in with literal ints as needed, e.g. ('N_ORDERS', 'DETECTOR_SIZE_Y') or
+# ('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'). No constants for these
+# -- just write the bare (case-insensitive, but conventionally uppercase)
+# string:
+#
+#   DETECTOR_SIZE_Y / DETECTOR_SIZE_X -- the detector plane's (ny, nx).
+#   N_ORDERS   -- number of echelle orders.
+#   N_FIBERS   -- number of fibers.
+#   N_READS    -- number of UTR reads.
+#   ANY        -- never resolvable, by design; marks an axis generic
+#                 auto-init can't build (e.g. a per-instance fit result with
+#                 no symbol), forcing a fall-through to
+#                 DataModel.make_default_array.
+#
+# Resolved per-model-instance by DataModel._resolve_shape_axis, in order:
+# (1) inferred from any *other* extension on the same model that's already
+# been assigned real data and whose own declared `shape=` spec uses this
+# same symbol (see DataModel._infer_shape_symbols) -- e.g. explicitly
+# assigning `model.bias = np.ones((10, 10))` lets DETECTOR_SIZE_Y/X resolve
+# to 10 for every other extension on that model, with nothing hardcoded
+# about "bias" being special; (2) each symbol's own independent source, if
+# it has one (DETECTOR_SIZE_Y/X fall back to the constructor's `shape=`
+# override, then config.DETECTOR_SIZE; N_ORDERS to
+# meta.order_start/order_end; N_FIBERS to config.num_fibers). N_READS has
+# no independent source -- it's only ever resolvable via inference.
+
+
 # Common Image HDUs
 def IMAGE_HDU(
-    dtype : type[np.generic],
-    ndim: int,
+    dtype : type[np.generic] | tuple[type[np.generic], ...],
+    shape : tuple | None = None,
     default: float | int | None = None,
-    per_fiber: bool = False
+    enumerate: str | None = None,
+    title: str | None = None,
+    units: str | None = None,
 ) -> dict:
     """
     Build an image extension descriptor.
@@ -22,29 +53,83 @@ def IMAGE_HDU(
     Parameters
     ----------
     dtype
-        Numpy dtype of the array (np.float64, np.int32, etc.).
-    ndim : int
-        Number of dimensions the array is expected to have.
+        Numpy dtype of the array (np.float64, np.int32, etc.). For an
+        extension with more than one legitimate dtype (e.g. RampModel.DATA,
+        uint16 for real detector data vs. float32 for simulations run with
+        ``convert_to_uint16=False``), pass a precedence-ordered tuple or a
+        ``X | Y`` union (e.g. ``np.uint16 | np.float32``); the first entry is
+        canonical -- used to build auto-initialized default arrays, and as the
+        dtype-correction target when the actual array matches none of them.
+        A single dtype is stored as-is (not wrapped in a tuple).
+    shape : tuple | None, optional
+        The array's shape, as a tuple of literal ints and/or the symbolic
+        axis-name strings ``'DETECTOR_SIZE_Y'``, ``'DETECTOR_SIZE_X'``,
+        ``'N_ORDERS'``, ``'N_FIBERS'``, ``'N_READS'``, ``'ANY'`` (matched
+        case-insensitively, but write them uppercase by convention), e.g.
+        ``('N_ORDERS', 'DETECTOR_SIZE_Y')`` or ``('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X')``.
+        Axis order is always Y before X. Resolved per-instance by
+        :meth:`DataModel._resolve_shape`. May be omitted (``None``) when this
+        extension's real shape is always identical to the model's primary
+        extension's (see :attr:`DataModel.primary_extension_name`) -- e.g.
+        ``KTC`` next to ``BIAS``, or ``RATE_ERR`` next to ``RATE`` -- in which
+        case it's filled in from the primary's own ``shape=`` at construction
+        time instead of being repeated here (see
+        :meth:`DataModel._populate_shape_info`). Only useful on a model
+        whose ``primary_extension_name`` is knowable without first resolving
+        any extension's shape (the base first-declared-key default); a model
+        with a dynamic per-fiber override (returning ``None`` until some
+        fiber's data is set) can't use this and must always give its own
+        ``shape=``.
     default : float | int | None, optional
         Fill value used to lazily auto-initialize the array to
-        ``np.full(model.shape, default, dtype=dtype)`` the first time the
-        attribute is accessed, but only when ``ndim == len(model.shape)``.
-        Defaults to ``None``, which opts out of auto-initialization; the
-        attribute then stays ``None`` until explicitly assigned.
-    per_fiber : bool, optional
-        If True, declare this extension once (without a ``_FIB{n}`` suffix)
-        and let ``DataModel._get_extensions`` expand it into one
-        ``<NAME>_FIB{n}`` entry per fiber, for ``n in 1..model.num_fibers``.
+        ``np.full(resolved_shape, default, dtype=dtype)`` the first time the
+        attribute is accessed, once every axis of ``shape`` resolves to a
+        concrete size (an unresolvable axis --
+        e.g. containing ``ANY``, or a symbol with no source available on this
+        model -- means this automatic path doesn't apply). Defaults to
+        ``None``. Regardless of whether ``default`` is given, building the
+        array falls to :meth:`DataModel.make_default_array` whenever the
+        automatic path doesn't apply -- override it in a subclass for
+        extensions needing custom construction (e.g. polynomial coefficients,
+        whose axis sizes are a per-instance fit result with no symbol at all).
+        With no ``default`` and no such override, the attribute stays ``None``
+        until explicitly assigned.
+    enumerate : str | None, optional
+        If given, declare this extension once (without a suffix) and let
+        ``DataModel._get_extensions`` expand it into one
+        ``<NAME>_<enumerate>{n}`` entry per fiber (the format is always
+        ``prefix_{enumerate}#``), for ``n in 1..model.num_fibers``.
+    title : str | None, optional
+        Short human-readable description, purely for documentation -- shown
+        as the "Description" column of the ``Extensions`` table that
+        :meth:`DataModel.extensions_table` generates from ``EXTENSIONS`` and
+        splices into the model class's docstring. Never read by any
+        auto-init or I/O logic.
+    units : str | None, optional
+        Physical units, purely for documentation -- shown as the "Units"
+        column of the same generated table. Never read by any auto-init or
+        I/O logic.
     """
-    info = {'hdu_type': fits.ImageHDU, 'dtype': dtype, 'ndim': ndim}
+    if isinstance(dtype, types.UnionType):
+        dtype = dtype.__args__
+    info = {'hdu_type': fits.ImageHDU, 'dtype': dtype, 'shape': shape}
     if default is not None:
         info['default'] = default
-    if per_fiber:
-        info['per_fiber'] = True
+    if enumerate is not None:
+        info['enumerate'] = enumerate
+    if title is not None:
+        info['title'] = title
+    if units is not None:
+        info['units'] = units
     return info
 
 
-def TABLE_HDU(columns: dict, per_fiber: bool = False) -> dict:
+def TABLE_HDU(
+    columns: dict,
+    enumerate: str | None = None,
+    title: str | None = None,
+    units: str | None = None,
+) -> dict:
     """
     Build a table extension descriptor.
 
@@ -53,14 +138,27 @@ def TABLE_HDU(columns: dict, per_fiber: bool = False) -> dict:
     columns : dict
         Mapping of column name -> dtype (e.g. ``str``, ``np.float64``, ``object``
         for a variable-length array per row, as used by the ``CCF`` column).
-    per_fiber : bool, optional
-        If True, declare this extension once (without a ``_FIB{n}`` suffix)
-        and let ``DataModel._get_extensions`` expand it into one
-        ``<NAME>_FIB{n}`` entry per fiber, for ``n in 1..model.config.num_fibers``. Table extensions are always eagerly initialized as an empty (0-row) Table at datamodel construction, regardless of this flag.
+    enumerate : str | None, optional
+        If given, declare this extension once (without a suffix) and let
+        ``DataModel._get_extensions`` expand it into one
+        ``<NAME>_<enumerate>{n}`` entry per fiber (the format is always
+        ``prefix_{enumerate}#``), for ``n in 1..model.config.num_fibers``.
+        Table extensions are always eagerly initialized as an empty (0-row)
+        Table at datamodel construction, regardless of this flag.
+    title : str | None, optional
+        Short human-readable description, purely for documentation -- see
+        :func:`IMAGE_HDU`'s ``title``.
+    units : str | None, optional
+        Physical units, purely for documentation -- see :func:`IMAGE_HDU`'s
+        ``units``.
     """
     info = {'hdu_type': fits.BinTableHDU, 'columns': columns}
-    if per_fiber:
-        info['per_fiber'] = True
+    if enumerate is not None:
+        info['enumerate'] = enumerate
+    if title is not None:
+        info['title'] = title
+    if units is not None:
+        info['units'] = units
     return info
 
 
@@ -78,26 +176,6 @@ RECEIPT = {
         'CONFIG_FILE' : str, # Path to the configuration file
     })
 }
-
-
-def migrate_receipt_table(table: Table | None) -> Table | None:
-    """
-    Upgrade a RECEIPT table to the current schema by adding any missing columns.
-    """
-    if table is None:
-        return None
-    if not isinstance(table, Table):
-        return table
-
-    missing = [c for c in RECEIPT['RECEIPT']['columns'] if c not in table.colnames]
-    if not missing:
-        return table
-
-    out = table.copy()
-    for name in missing:
-        dtype = RECEIPT['RECEIPT']['columns'][name]
-        out.add_column(Column(name=name, data=np.full(len(out), '', dtype=dtype)))
-    return out
 
 
 CALIBRATIONS = {
@@ -126,57 +204,126 @@ DATA_ANCESTORS = {
 
 #### Raw
 
-DQ_RAW = {'DQ_RAW': IMAGE_HDU(np.uint8, ndim=3, default=0)}
+# DQ_RAW is only ever combined with 'DATA' (shape=(N_READS, DETECTOR_SIZE_Y,
+# DETECTOR_SIZE_X)) as the primary extension (see RampModel), so its own
+# identical shape is inferred rather than repeated (see
+# DataModel._populate_shape_info).
+DQ_RAW = {'DQ_RAW': IMAGE_HDU(np.uint8, default=0, title='Data quality flags unique to each pixel and read.')}
 
 #### L0 (rate maps)
 
-DQ_L0 = {'DQ': IMAGE_HDU(np.uint32, ndim=2, default=0)}
+DQ_L0 = {'DQ': IMAGE_HDU(np.uint32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Data quality.')}
 
-def create_L0_extensions(name : str = 'RATE') -> dict[str, dict]:
+def create_L0_extensions(name : str = 'RATE', title : str = 'Rate map.', units : str | None = 'e-/s') -> dict[str, dict]:
+    # name (the primary) declares shape= explicitly; its siblings below infer
+    # it (see DataModel._populate_shape_info) since it's always identical.
+    var_units = _units_squared(units)
+    base = _base_title(title)
     ext = {
-        f'{name}': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'{name}_ERR': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'{name}_VAR_RNOISE': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'{name}_VAR_POISSON': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'{name}': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title=title, units=units),
+        f'{name}_ERR': IMAGE_HDU(np.float32, default=0, title=f'{base} error (all sources).', units=units),
+        f'{name}_VAR_RNOISE': IMAGE_HDU(np.float32, default=0, title=f'{base} variance (read noise).', units=var_units),
+        f'{name}_VAR_POISSON': IMAGE_HDU(np.float32, default=0, title=f'{base} variance (Poisson).', units=var_units),
     }
     ext.update(DQ_L0)
-    ext['MID_TIME'] = IMAGE_HDU(np.float64, ndim=2, default=0)
+    ext['MID_TIME'] = IMAGE_HDU(np.float64, default=0, title='Exposure mid-point time for each pixel.', units='MJD')
     return ext
 
 
 #### Spectral level extensions (per-fiber)
 #
-# Each of these is declared ONCE, without a fiber suffix, using `per_fiber=True`.
+# Each of these is declared ONCE, without a fiber suffix, using `enumerate='FIB'`.
 # `DataModel._get_extensions` expands each into `<NAME>_FIB{n}` for `n in 1..model.config.num_fibers` when a concrete model's EXTENSIONS includes it.
 
-def create_dataspec_extensions(prefix : str = 'SPEC') -> dict[str, dict]:
+def _units_squared(units : str | None) -> str | None:
+    return f'({units})^2' if units else None
+
+
+def _base_title(title : str | None) -> str | None:
+    """Strip a trailing '.' so a derived title (e.g. '{base} error.') doesn't get a stray one mid-sentence."""
+    return title[:-1] if title and title.endswith('.') else title
+
+
+def create_dataspec_extensions(
+    prefix : str = 'SPEC',
+    title : str | None = None,
+    units : str | None = None,
+    **kwargs
+) -> dict[str, dict]:
+    var_units = _units_squared(units)
+    base = _base_title(title)
     return {
-        prefix: IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
-        f'{prefix}_ERR': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
-        f'{prefix}_VAR_POISSON': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
-        f'{prefix}_VAR_RNOISE': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
+        prefix: IMAGE_HDU(
+            np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=title,
+            units=units,
+            **kwargs
+        ),
+        f'{prefix}_ERR': IMAGE_HDU(
+            np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=base and f'{base} error.',
+            units=units,
+            **kwargs
+        ),
+        f'{prefix}_VAR_POISSON': IMAGE_HDU(
+            np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=base and f'{base} variance (Poisson).',
+            units=var_units,
+            **kwargs
+        ),
+        f'{prefix}_VAR_RNOISE': IMAGE_HDU(
+            np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=base and f'{base} variance (read noise).',
+            units=var_units,
+            **kwargs
+        ),
     }
 
-def create_specdq_extensions() -> dict[str, dict]:
-    return {'SPEC_DQ': IMAGE_HDU(np.uint32, ndim=2, default=0, per_fiber=True)}
-
-def create_sky_extensions() -> dict[str, dict]:
+def create_specdq_extensions(title : str = 'Data quality.', prefix : str = 'SPEC', **kwargs) -> dict[str, dict]:
     return {
-        'SKY': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
-        'SKY_ERR': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
+        f'{prefix}_DQ': IMAGE_HDU(
+            np.uint32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=title,
+            **kwargs
+        )
     }
 
-def create_trans_extensions() -> dict[str, dict]:
+def create_sky_extensions(title : str | None = None, units : str | None = None, **kwargs) -> dict[str, dict]:
+    base = _base_title(title)
     return {
-        'TRANS': IMAGE_HDU(np.float32, ndim=2, default=1, per_fiber=True),
-        'TRANS_ERR': IMAGE_HDU(np.float32, ndim=2, default=1, per_fiber=True),
+        'SKY': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                          title=title, units=units, **kwargs),
+        'SKY_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                              title=base and f'{base} error.', units=units, **kwargs),
     }
 
-def create_throughput_extensions() -> dict[str, dict]:
-    return {'THROUGHPUT': IMAGE_HDU(np.float32, ndim=2, default=1, per_fiber=True)}
+def create_trans_extensions(title : str = 'Transmission correction.', **kwargs) -> dict[str, dict]:
+    base = _base_title(title)
+    return {
+        'TRANS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', title=title, **kwargs),
+        'TRANS_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', title=f'{base} error.', **kwargs),
+    }
 
-def create_wave_extensions() -> dict[str, dict]:
-    return {'WAVE': IMAGE_HDU(np.float64, ndim=2, default=0, per_fiber=True)}
+def create_throughput_extensions(**kwargs) -> dict[str, dict]:
+    return {'THROUGHPUT': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', **kwargs)}
+
+def create_wave_extensions(**kwargs) -> dict[str, dict]:
+    return {'WAVE': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', **kwargs)}
 
 CHEBYSHEV_NORM_HDU = TABLE_HDU({
     'FIBER': str,
@@ -184,13 +331,14 @@ CHEBYSHEV_NORM_HDU = TABLE_HDU({
     'PIXEL_NORM_MAX': np.float64,
     'ORDER_NORM_MIN': np.int16,
     'ORDER_NORM_MAX': np.int16,
-}, per_fiber=True)
+}, enumerate='FIB', title='Chebyshev pixel/order normalization bounds.')
 
 def create_chebyshev_extensions() -> dict[str, dict]:
     return {
-        # NOTE: shape is (n_coeffs_intra_order, n_coeffs_inter_order), unrelated to
-        # model.shape (Nord x 4096), so no default is given (not auto-initialized).
-        'CHEB_COEFFS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        # Real shape is (n_coeffs_intra_order, n_coeffs_inter_order) -- a
+        # per-instance fit result with no symbol, hence ANY for both axes and
+        # no default (not auto-initialized without a make_default_array override).
+        'CHEB_COEFFS': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='Chebyshev coefficients for the wavelength solution.'),
         'CHEB_NORM': CHEBYSHEV_NORM_HDU,
     }
 
@@ -206,7 +354,7 @@ DRIFT_HDU = TABLE_HDU({
     'DRIFT_ERR_WAVE' : np.float64,
     'DRIFT_VEL' : np.float64,
     'DRIFT_ERR_VEL' : np.float64,
-}, per_fiber=True)
+}, enumerate='FIB', title='Drift correction table for each fiber.')
 
 def create_drift_extensions() -> dict[str, dict]:
     return {'DRIFT': DRIFT_HDU}
@@ -229,7 +377,7 @@ ETALONFITPARAMS_HDU = TABLE_HDU({
     'MODE_NUM': np.int16,
     'WAVE': np.float64,
     'ORDER': np.uint16,
-}, per_fiber=True)
+}, enumerate='FIB', title='Etalon fit parameters for each mode, order, and fiber.')
 
 def create_etalonfitparam_extensions() -> dict[str, dict]:
     return {'ETALON_FITPARAMS': ETALONFITPARAMS_HDU}
@@ -252,7 +400,7 @@ LFCFITPARAMS_HDU = TABLE_HDU({
     'MODE_NUM': np.int16,
     'WAVE': np.float64,
     'ORDER': np.uint16,
-}, per_fiber=True)
+}, enumerate='FIB', title='LFC fit parameters for each LFC mode, order, and fiber.')
 
 def create_lfcfitparam_extensions() -> dict[str, dict]:
     return {'LFC_FITPARAMS': LFCFITPARAMS_HDU}
@@ -284,7 +432,7 @@ RVCCF_HDU = TABLE_HDU({
     'V_STEP' : np.float64,  # CCF velocity sampling step (m/s)
     'N_VEL' : np.int32,  # length of CCF(v)
     'CCF' : object,  # object column: each row is a 1D np.ndarray, dtype ``RVCCF_CCF_ELEM_DTYPE``; empty if absent
-}, per_fiber=True)
+}, enumerate='FIB', title='Per-chunk RVs and raw CCF(v) (stellar RV).')
 
 RVCCFAVG_HDU = TABLE_HDU({
     'MBJDW' : np.float64,
@@ -296,7 +444,7 @@ RVCCFAVG_HDU = TABLE_HDU({
     'TELL_ABS' : np.float64,
     'RV_ABS' : np.float64,
     'RV_ABS_ERR' : np.float64,
-}, per_fiber=True)
+}, enumerate='FIB', title='RVs aggregated across chunks (CCF-based).')
 
 RVFWM_HDU = TABLE_HDU({
     'MBJDW' : np.float64,
@@ -314,7 +462,7 @@ RVFWM_HDU = TABLE_HDU({
     'PWV_ERR_FIT' : np.float64,
     'TELLURIC_VEL_FIT' : np.float64,
     'TELLURIC_VEL_ERR_FIT' : np.float64,
-}, per_fiber=True)
+}, enumerate='FIB', title='Per-chunk RVs (first-moment method).')
 
 RVFWMAVG_HDU = TABLE_HDU({
     'MBJDW' : np.float64,
@@ -327,7 +475,7 @@ RVFWMAVG_HDU = TABLE_HDU({
     'BIS' : np.float64,
     'RV_ABS' : np.float64,
     'RV_ABS_ERR' : np.float64,
-}, per_fiber=True)
+}, enumerate='FIB', title='RVs aggregated across chunks (first-moment method).')
 
 def create_rv_extensions() -> dict[str, dict]:
     return {
@@ -340,17 +488,35 @@ def create_rv_extensions() -> dict[str, dict]:
 
 #### Telluric models
 
-def create_telluric_extensions() -> dict[str, dict]:
+def create_telluric_extensions(title : str = 'Telluric model spectrum.') -> dict[str, dict]:
     return {
-        'TEL': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
-        'TEL_ERR': IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True),
+        'TEL': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title),
+        'TEL_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=f'{_base_title(title)} error (all sources).'),
     }
 
 
 #### Stellar models
 
-def create_starmodel_extensions() -> dict[str, dict]:
-    return {'STAR_MOD' : IMAGE_HDU(np.float32, ndim=2, default=0, per_fiber=True)}
+def create_starmodel_extensions(title : str = 'Stellar model spectrum.', units : str | None = None) -> dict[str, dict]:
+    return {'STAR_MOD' : IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title, units=units)}
+
+
+#### Absolute flux calibration
+
+def create_fluxabs_extensions(units : str | None = 'W/m^2/micron') -> dict[str, dict]:
+    var_units = _units_squared(units)
+    return {
+        'FLUX_ABS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                               title='Spectrum in absolute flux units.', units=units),
+        'FLUX_ABS_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                                   title='Absolute spectrum error (all sources).', units=units),
+        'FLUX_ABS_VAR_POISSON': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                                           title='Absolute spectrum variance (Poisson).', units=var_units),
+        'FLUX_ABS_VAR_RNOISE': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                                          title='Absolute spectrum variance (read noise).', units=var_units),
+        'FLUX_ABS_DQ': IMAGE_HDU(np.uint32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
+                                  title='Absolute spectrum data quality.'),
+    }
 
 
 #### Barycentric correction
@@ -362,10 +528,10 @@ BARYCORR_HDU = TABLE_HDU({
     'MBJDW' : np.float64,
     'BERV' : np.float64,
     'BERVW' : np.float64,
-}, per_fiber=True)
+}, enumerate='FIB', title='Barycentric correction information.')
 
-def create_midtime_extensions() -> dict[str, dict]:
-    return {'MID_TIME' : IMAGE_HDU(np.float64, ndim=2, default=0, per_fiber=True)}
+def create_midtime_extensions(title : str = 'Exposure mid-point times.', units : str = 'MJD') -> dict[str, dict]:
+    return {'MID_TIME' : IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title, units=units)}
 
 def create_barycorr_extensions() -> dict[str, dict]:
     return {'BARYCORR' : BARYCORR_HDU}

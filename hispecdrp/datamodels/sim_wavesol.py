@@ -8,19 +8,11 @@ __all__ = ['SimulatedWavesolModel']
 class SimulatedWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The simulated wavelength solution.
-
-    Extensions
-    ----------
-
-    HDU Name    HDU Type   Data Type   Dimensions   Units  Description
-    --------    --------   ---------   ----------   -----  -----------
-    WAVE_FIB#   Image      Float64     Nord x 4096  nm     Simulated wavelength solution.
-    DQ_FIB#     Image      UInt32      Nord x 4096  None   Simulated data quality.
     """
 
     EXTENSIONS = {
-        **create_wave_extensions(),
-        **create_specdq_extensions(),
+        **create_wave_extensions(title='Simulated wavelength solution.', units='nm'),
+        **create_specdq_extensions(title='Simulated data quality.'),
     }
 
     CAL_TYPE = 'sim_wavesol'

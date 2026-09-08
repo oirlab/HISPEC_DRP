@@ -12,30 +12,20 @@ class TraceProfModel(FiberAttributeProxyMixin, CalibrationModel):
     The 2-D spatial profile comes from a fiberflat. Spectroperfection extraction
     also stores iso-λ shear and 2nd-moment LSF/spatial widths measured from
     LFC spots (plus fiberflat spatial moments).
-
-    Extensions
-    ----------
-
-    HDU Name           HDU Type   Data Type   Dimensions        Units   Description
-    --------           --------   ---------   ----------        -----   -----------
-    PROF_FIB#          Image      Float64     Ny x Nx           None    2-D spatial profile (fiberflat).
-    PROF_ERR_FIB#      Image      Float64     Ny x Nx           None    Profile errors for fiber #.
-    SHEAR_FIB#         Image      Float64     n_orders x n_pix  None    Iso-λ shear ∂row/∂col (LFC).
-    SIGMA_SPEC_FIB#    Image      Float64     n_orders x n_pix  None    Spectral Gaussian σ (pix).
-    SIGMA_SPAT_FIB#    Image      Float64     n_orders x n_pix  None    Spatial Gaussian σ (pix).
-    MOM2_CROSS_FIB#    Image      Float64     n_orders x n_pix  None    cov(row, col) (pix²).
     """
 
-    # NOTE: PROF/PROF_ERR are (Ny x Nx) while the SHEAR/SIGMA_*/MOM2_CROSS family is
-    # (n_orders x n_pix) -- same ndim, different actual shape -- so none of these
-    # declare a `default` (no auto-initialization).
+    # NOTE: PROF/PROF_ERR are (Ny x Nx), an ambiguous per-fiber stamp size with
+    # no established symbol -> ANY for both axes. The SHEAR/SIGMA_*/MOM2_CROSS
+    # family is (n_orders x n_pix), matching the same convention as the
+    # spectral extensions (Nord x 4096) -> (N_ORDERS, DETECTOR_SIZE_Y). None of
+    # these declare a `default` (no auto-initialization either way).
     EXTENSIONS = {
-        'PROF': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'PROF_ERR': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'SHEAR': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'SIGMA_SPEC': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'SIGMA_SPAT': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'MOM2_CROSS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'PROF': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='2-D spatial profile (fiberflat).'),
+        'PROF_ERR': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='Profile errors for fiber #.'),
+        'SHEAR': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Iso-λ shear ∂row/∂col (LFC).'),
+        'SIGMA_SPEC': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spectral Gaussian σ (pix).'),
+        'SIGMA_SPAT': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spatial Gaussian σ (pix).'),
+        'MOM2_CROSS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='cov(row, col) (pix²).'),
     }
 
     CAL_TYPE = 'traceprof'

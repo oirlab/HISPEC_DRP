@@ -8,29 +8,14 @@ __all__ = ['FiberflatModel']
 class FiberflatModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The fiber flat model contains the relative transmission of each fiber as a function of wavelength.
-
-    Extensions
-    ----------
-
-    HDU Name                 HDU Type   Data Type   Dimensions     Units     Description
-    --------                 --------   ---------   ----------     -----     -----------
-    SPEC_FIB#                Image      Float32     Nord x 4096    e-/s      Extracted fiber spectrum.
-    SPEC_ERR_FIB#            Image      Float32     Nord x 4096    e-/s      Extracted fiber spectrum errors (all sources).
-    SPEC_VAR_POISSON_FIB#    Image      Float32     Nord x 4096    (e-/s)^2  Extracted fiber spectrum variance (Poisson).
-    SPEC_VAR_RNOISE_FIB#     Image      Float32     Nord x 4096    (e-/s)^2  Extracted fiber spectrum variance (read noise).
-    SPEC_DQ_FIB#             Image      UInt32      Nord x 4096    None      Data quality.
-    WAVE_FIB#                Image      Float64     Nord x 4096    micron    Wavelength solution.
-    MID_TIME_FIB#            Image      Float64     Nord x 4096    MJD       Exposure mid-point times.
-    TRANS_FIB#               Image      Float32     Nord x 4096    None      Normalized transmission.
-    TRANS_ERR_FIB#           Image      Float32     Nord x 4096    None      Transmission error.
     """
 
     EXTENSIONS = {
-        **create_dataspec_extensions(prefix='SPEC'),
+        **create_dataspec_extensions(prefix='SPEC', title='Extracted fiber spectrum.', units='e-/s'),
         **create_specdq_extensions(),
-        **create_wave_extensions(),
+        **create_wave_extensions(title='Wavelength solution.', units='micron'),
         **create_midtime_extensions(),
-        **create_trans_extensions(),
+        **create_trans_extensions(title='Normalized transmission.'),
     }
 
     CAL_TYPE = 'fiberflat'

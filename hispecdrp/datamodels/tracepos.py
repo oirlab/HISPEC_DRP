@@ -10,23 +10,13 @@ __all__ = ['TracePosModel']
 class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     The trace positions are determined from the fiber flat data. They are stored as polynomial coeffs and evaluated positions for each order/fiber.
-
-    Extensions
-    ----------
-
-    HDU Name          HDU Type   Data Type   Dimensions       Units     Description
-    --------          --------   ---------   ----------       -----     -----------
-    COEFF_POS_FIB#    Image      Float64     Nord x Ncoeff    None      Polynomial coefficients for the trace positions of fiber #.
-    COEFF_FWHM_FIB#   Image      Float64     Nord x Ncoeff    None      Polynomial coefficients for the trace widths (FWHM) of fiber #.
-    POS_FIB#          Image      Float64     Nord x Ncoeff    Pixels    Evaluated positions for fiber #.
-    FWHM_FIB#         Image      Float64     Nord x Ncoeff    Pixels    Evaluated fwhm for fiber #.
     """
 
     EXTENSIONS = {
-        'COEFF_POS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'COEFF_FWHM': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'POS': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
-        'FWHM': IMAGE_HDU(np.float64, ndim=2, per_fiber=True),
+        'COEFF_POS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Polynomial coefficients for the trace positions of fiber #.'),
+        'COEFF_FWHM': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Polynomial coefficients for the trace widths (FWHM) of fiber #.'),
+        'POS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated positions for fiber #.', units='Pixels'),
+        'FWHM': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated fwhm for fiber #.', units='Pixels'),
     }
 
     CAL_TYPE = 'tracepos'

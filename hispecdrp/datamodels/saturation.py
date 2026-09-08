@@ -9,18 +9,15 @@ __all__ = ['SaturationModel']
 class SaturationModel(CalibrationModel):
     """
     The saturation specifies the saturation level associated with each pixel.
-
-    Extensions
-    ----------
-
-    HDU Name     HDU Type   Data Type   Dimensions    Units   Description
-    --------     --------   ---------   ----------    -----   -----------
-    SAT_THRESH   Image      UInt16      4096 x 4160   DN      Saturation threshold.
-    DQ           Image      UInt32      4096 x 4160   None    Data quality.
     """
-    EXTENSIONS = {"SAT_THRESH": IMAGE_HDU(np.uint16, ndim=2, default=np.iinfo(np.uint16).max), **DQ_L0}
+    EXTENSIONS = {
+        "SAT_THRESH": IMAGE_HDU(
+            np.uint16, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=np.iinfo(np.uint16).max,
+            title='Saturation threshold.', units='DN',
+        ),
+        **DQ_L0,
+    }
     CAL_TYPE = 'saturation'
-    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()

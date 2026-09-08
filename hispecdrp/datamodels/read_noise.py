@@ -9,20 +9,13 @@ __all__ = ['ReadNoiseModel']
 class ReadNoiseModel(CalibrationModel):
     """
     The read noise specifies the read noise associated with each pixel.
-
-    HDU Name   HDU Type   Data Type   Dimensions    Units   Description
-    --------   --------   ---------   ----------    -----   -----------
-    RN         Image      Float32     4096 x 4160   e-      Read noise data.
-    RN_ERR     Image      Float32     4096 x 4160   e-      Read noise error.
-    DQ         Image      UInt32      4096 x 4160   None    Data quality.
     """
     EXTENSIONS = {
-        f'RN': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'RN_ERR': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'RN': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Read noise data.', units='e-'),
+        f'RN_ERR': IMAGE_HDU(np.float32, default=0, title='Read noise error.', units='e-'),
         **DQ_L0
     }
     CAL_TYPE = 'rn'
-    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()

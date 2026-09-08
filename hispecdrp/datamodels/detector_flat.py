@@ -10,27 +10,15 @@ __all__ = ['DetectorFlatModel']
 class DetectorFlatModel(CalibrationModel):
     """
     The HISPEC detector flat is a 2D image that corrects the intrinsic pixel-to-pixel sensitivity of the detector.
-
-    Extensions
-    ----------
-
-    HDU Name            HDU Type   Data Type   Dimensions     Units   Description
-    --------            --------   ---------   ----------     -----   -----------
-    FLAT                Image      Float32     4096 x 4160    DN      Flat field data.
-    FLAT_ERR            Image      Float32     4096 x 4160    DN      Flat field error.
-    FLAT_VAR_RNOISE     Image      Float32     4096 x 4160    DN^2    Flat field variance (read noise).
-    FLAT_VAR_POISSON    Image      Float32     4096 x 4160    DN^2    Flat field variance (Poisson).
-    DQ                  Image      UInt32      4096 x 4160    None    Data quality.
     """
     EXTENSIONS = {
-        f'FLAT': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'FLAT_ERR': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'FLAT_VAR_RNOISE': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'FLAT_VAR_POISSON': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'FLAT': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Flat field data.', units='DN'),
+        f'FLAT_ERR': IMAGE_HDU(np.float32, default=0, title='Flat field error.', units='DN'),
+        f'FLAT_VAR_RNOISE': IMAGE_HDU(np.float32, default=0, title='Flat field variance (read noise).', units='DN^2'),
+        f'FLAT_VAR_POISSON': IMAGE_HDU(np.float32, default=0, title='Flat field variance (Poisson).', units='DN^2'),
         **DQ_L0
     }
     CAL_TYPE = 'detflat'
-    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()

@@ -8,13 +8,6 @@ __all__ = ['InstrumentParametersModel']
 class InstrumentParametersModel(CalibrationModel):
     """
     Instrument parameters like LFC set points, etc. that are not expected to change frequently but are not necessarily constant over the lifetime of the instrument.
-
-    Extensions
-    ----------
-
-    HDU Name   HDU Type   Data Type   Dimensions  Units     Description
-    --------   --------   ---------   ----------  -----     -----------
-    PARAMS     Table      See docs    See docs    See docs  Instrument parameters.
     """
 
 
@@ -26,7 +19,8 @@ class InstrumentParametersModel(CalibrationModel):
                 'value': float,
                 'unit': str,
                 'comment': str,
-            }
+            },
+            'title': 'Instrument parameters.',
         }
     }
     CAL_TYPE = 'instrument_params'

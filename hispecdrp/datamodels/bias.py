@@ -8,23 +8,13 @@ __all__ = ['BiasModel']
 
 class BiasModel(CalibrationModel):
     """
-
-    Extensions
-    ----------
-
-    HDU Name   HDU Type   Data Type   Dimensions     Units   Description
-    --------   --------   ---------   ----------     -----   -----------
-    BIAS       Image      Float32     4096 x 4160    DN      Bias level.
-    KTC        Image      Float32     4096 x 4160    DN      Bias kTC noise level.
-    DQ         Image      UInt32      4096 x 4160    None    Data quality.
     """
     EXTENSIONS = {
-        f'BIAS': IMAGE_HDU(np.float32, ndim=2, default=0),
-        f'KTC': IMAGE_HDU(np.float32, ndim=2, default=0),
+        f'BIAS': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Bias level.', units='DN'),
+        f'KTC': IMAGE_HDU(np.float32, default=0, title='Bias kTC noise level.', units='DN'),
         **DQ_L0
     }
     CAL_TYPE = 'bias'
-    _USES_DETECTOR_SIZE = True
 
     def on_init(self):
         super().on_init()

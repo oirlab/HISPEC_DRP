@@ -8,25 +8,12 @@ __all__ = ['LFCFitParamsModel']
 class LFCFitParamsModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     Contains the best fit Gaussian parameters for each LFC mode.
-
-    Extensions
-    ----------
-
-    HDU Name                  HDU Type   Data Type   Dimensions      Units      Description
-    --------                  --------   ---------   ----------      -----      -----------
-    SPEC_FIB#                 Image      Float32     Nord x 4096     e-/s       Corresponding LFC spectrum.
-    SPEC_ERR_FIB#             Image      Float32     Nord x 4096     e-/s       LFC spectrum error.
-    SPEC_VAR_POISSON_FIB#     Image      Float32     Nord x 4096     e-/s       LFC spectrum Poisson variance.
-    SPEC_VAR_RNOISE_FIB#      Image      Float32     Nord x 4096     e-/s       LFC spectrum read noise variance.
-    SPEC_DQ_FIB#              Image      UInt32      Nord x 4096     None       LFC spectrum data quality.
-    WAVE_FIB#                 Image      Float64     Nord x 4096     nm         LFC spectrum wavelength grid.
-    LFC_FITPARAMS_FIB#        Table      See below   See below       See below  LFC fit parameters for each LFC mode, order, and fiber.
     """
 
     EXTENSIONS = {
-        **create_dataspec_extensions(prefix='SPEC'),
-        **create_specdq_extensions(),
-        **create_wave_extensions(),
+        **create_dataspec_extensions(prefix='SPEC', title='Corresponding LFC spectrum.', units='e-/s'),
+        **create_specdq_extensions(title='LFC spectrum data quality.'),
+        **create_wave_extensions(title='LFC spectrum wavelength grid.', units='nm'),
         **create_lfcfitparam_extensions(),
     }
 
