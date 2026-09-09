@@ -13,7 +13,7 @@ class FiberflatModel(FiberAttributeProxyMixin, CalibrationModel):
     EXTENSIONS = {
         **create_dataspec_extensions(prefix='SPEC', title='Extracted fiber spectrum.', units='e-/s'),
         **create_specdq_extensions(),
-        **create_wave_extensions(title='Wavelength solution.', units='micron'),
+        **create_wave_extensions(title='Wavelength solution.'),
         **create_midtime_extensions(),
         **create_trans_extensions(title='Normalized transmission.'),
     }

@@ -15,7 +15,7 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
     EXTENSIONS = {
         **create_dataspec_extensions(title='LFC spectrum.', units='e-/s'),
         **create_specdq_extensions(title='LFC spectrum data quality.'),
-        **create_wave_extensions(title='LFC spectrum wavelength grid.', units='micron'),
+        **create_wave_extensions(title='LFC spectrum wavelength grid.'),
         # No default given -> not auto-initialized (behavior unchanged), though
         # the shape (Nord x 4096 x 3: mu, sigma, offset) is now fully resolvable.
         'LSF_PARAMS': IMAGE_HDU(
