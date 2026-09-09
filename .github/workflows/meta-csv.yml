@@ -19,6 +19,7 @@ jobs:
         submodules: true
         fetch-depth: 0
         persist-credentials: true
+        token: ${{ secrets.META_CSV_PUSH_TOKEN }}
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
