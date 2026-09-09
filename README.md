@@ -2,6 +2,9 @@
 
 Data Reduction Pipeline for the HISPEC instrument at the W. M. Keck Observatory, under development.
 
+This work is led from the University of California, San Diego.
+Primary Contact: Jean-Baptiste Ruffio
+
 **Contributors (Alphabetical):**
 Ashley Baker,
 Charles Beichman,
