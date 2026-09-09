@@ -1,8 +1,10 @@
 from __future__ import annotations
 from astropy.io import fits
 from astropy.table import Column, Table
+import builtins
 import numpy as np
 import os
+import csv
 from typing import TYPE_CHECKING
 import astropy.time
 from datetime import datetime
@@ -479,3 +481,22 @@ def get_first_model(dataset : Any, **kwargs) -> DataModel:
         return open(list(dataset.values())[0], **kwargs)
     else:
         raise TypeError(f"Unsupported dataset type: {type(dataset)}")
+
+def meta_to_csv(output_path : str):
+    from .level0 import L0Model
+    props = L0Model().meta._schema["properties"]
+
+    fieldnames = [
+        'PROPERTY', 'TITLE', 'FITS_SECTION', 'FITS_KEYWORD', 'TYPE',
+        'UNIT', 'FITS_HDU', 'CAL_DB',
+        'ENUM', 'DEFAULT', 'MERGE_RULE', 'INCLUDE_ANCESTORS'
+    ]
+
+    with builtins.open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for prop_name, sub_schema in props.items():
+            sub_schema_upper = {k.upper(): v for k, v in sub_schema.items()}
+            sub_schema_upper['PROPERTY'] = prop_name
+            writer.writerow(sub_schema_upper) 
