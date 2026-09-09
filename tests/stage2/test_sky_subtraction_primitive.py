@@ -38,7 +38,7 @@ def test_sky_subtraction_primitive():
         setattr(science_model, f"SPEC_UNCAL_ERR_FIB{fib}", np.ones((n_orders, n_pix)) / 100)
         setattr(science_model, f"SPEC_UNCAL_VAR_POISSON_FIB{fib}", np.zeros((n_orders, n_pix)))
         setattr(science_model, f"SPEC_UNCAL_VAR_RNOISE_FIB{fib}", np.zeros((n_orders, n_pix)))
-        setattr(science_model, f"SPEC_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))
+        setattr(science_model, f"SPEC_UNCAL_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))
         setattr(fiberflat_model, f"SPEC_FIB{fib}", np.ones((n_orders, n_pix)))
         setattr(fiberflat_model, f"SPEC_ERR_FIB{fib}", np.ones((n_orders, n_pix)) / 100)
         setattr(fiberflat_model, f"SPEC_DQ_FIB{fib}", np.zeros((n_orders, n_pix), dtype=np.uint32))

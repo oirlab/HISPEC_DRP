@@ -109,6 +109,19 @@ class BasePipeline(ProcessingComponent):
             prim_config_from_pipe_config = self.config.primitives.get(prim_alias, {})
             prim_config_from_steps_dict = primitives.get(prim_alias, {})
 
+            # Explicit config file for this step (if any). The steps dict (user-provided at
+            # construction time) takes precedence over the pipeline's own config file. If set,
+            # this fully determines the step's config; any resolved `context` for this step is
+            # ignored (mirrors BasePrimitive/BasePipeline.init_config, where an explicit `config`
+            # always wins over `context`).
+            prim_config_file = prim_config_from_steps_dict.get(
+                'config', prim_config_from_pipe_config.get('config')
+            )
+            if prim_config_file is not None:
+                prim_config = ConfigFile.from_file(get_config_filepath(prim_config_file))
+            else:
+                prim_config = None
+
             # Context for this step
             prim_context_from_pipe_config = prim_config_from_pipe_config.get('context', {})
             prim_context_from_steps_dict = prim_config_from_steps_dict.get('context', {})
@@ -130,13 +143,14 @@ class BasePipeline(ProcessingComponent):
 
             prim_pars = prim_pars_from_pipe_config | prim_pars_from_steps_dict
             prim_pars.pop('context', None)
+            prim_pars.pop('config', None)
 
             # Initialize the step
             primitive = prim_class(
                 dataset=self.dataset,
                 parent=self,
                 context=prim_context,
-                config=None,
+                config=prim_config,
                 log_config=self.log_config,
                 **prim_pars
             )

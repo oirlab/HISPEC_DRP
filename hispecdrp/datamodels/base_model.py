@@ -1,5 +1,7 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
+import importlib
 import os
+import re
 from astropy.table import Table, Column
 from astropy.io import fits
 from copy import deepcopy
@@ -22,11 +24,12 @@ from .utils import (
     append_ancestors as _append_ancestors,
     append_receipts as _append_receipts,
     append_calibrations as _append_calibrations,
+    migrate_receipt_table,
 )
 
 from .meta_data import MetaModel, merge_meta, get_meta_schema
 from ..utils import convert_endianness
-from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS, migrate_receipt_table
+from .extensions import RECEIPT, CALIBRATIONS, DATA_ANCESTORS
 from .utils import _set_datetime_meta, _set_koa_meta, _set_target_meta
 
 from koa_middleware import CalibrationStore
@@ -35,8 +38,146 @@ from koa_middleware.utils import get_koa_id_timestamp_from_datetime, get_env_var
 import logging
 logger = logging.getLogger(__name__)
 
-
 _VALID_HDU = fits.ImageHDU | fits.BinTableHDU | fits.PrimaryHDU
+
+# Extensions every model inherits from DataModel itself (see DataModel.EXTENSIONS)
+# -- never model-specific, so left out of a generated extensions table.
+_DOC_TABLE_SPECIAL_EXTENSIONS = ('PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS')
+
+# What '#' means for each recognized `enumerate=<tag>` (see .extensions),
+# spelled out under a generated extensions table wherever it's actually used.
+# An unrecognized tag still gets a (less polished) generic fallback -- see
+# DataModel.extensions_table -- so this only needs entries worth wordsmithing.
+_DOC_TABLE_ENUMERATE_MEANING = {
+    'FIB': 'the fiber number (1..model.num_fibers)',
+}
+
+# Display name for each recognized shape-symbol string (see .extensions),
+# used only to render a friendly "Dimensions" column in a generated
+# extensions table -- has no bearing on actual shape resolution. Axes with
+# no single fixed answer (N_ORDERS varies by config; N_FIBERS/N_READS/ANY
+# have no doc-time source at all) stay symbolic; DETECTOR_SIZE_Y/X are
+# resolved to real numbers where a detector size is available (see
+# extensions_table), falling back to these names otherwise.
+_DOC_TABLE_AXIS_DISPLAY = {
+    'DETECTOR_SIZE_Y': 'Ny',
+    'DETECTOR_SIZE_X': 'Nx',
+    'N_ORDERS': 'Nord',
+    'N_FIBERS': 'Nfib',
+    'N_READS': 'Nreads',
+    'ANY': 'N',
+}
+
+
+def _doc_table_render_axis(axis, detector_size : tuple[int, int] | None = None) -> str:
+    if isinstance(axis, int):
+        return str(axis)
+    axis = axis.upper()
+    if detector_size is not None and axis in ('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'):
+        return str(detector_size[0 if axis == 'DETECTOR_SIZE_Y' else 1])
+    return _DOC_TABLE_AXIS_DISPLAY.get(axis, axis)
+
+
+def _doc_table_render_shape(shape, detector_size : tuple[int, int] | None = None) -> str:
+    if not shape:
+        return ''
+    return ' x '.join(_doc_table_render_axis(axis, detector_size) for axis in shape)
+
+
+def _doc_table_render_dtype_name(dtype : type[np.generic]) -> str:
+    match = re.match(r'([a-z]+)(\d*)', dtype.__name__)
+    kind, bits = match.group(1), match.group(2)
+    kind_display = {'float': 'Float', 'uint': 'UInt', 'int': 'Int', 'bool': 'Bool', 'complex': 'Complex'}
+    return kind_display.get(kind, kind.capitalize()) + bits
+
+
+def _doc_table_render_dtype(dtype) -> str:
+    if dtype is None:
+        return ''
+    dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
+    return ' | '.join(_doc_table_render_dtype_name(d) for d in dtypes)
+
+
+class _classproperty:
+    """
+    A read-only property accessible on the class itself, not just instances.
+
+    Deliberately a non-data descriptor (no ``__set__``): an instance's own
+    ``__dict__`` entry (e.g. ``self.config`` set in ``__init__``) always takes
+    priority over this on that instance. This is only consulted for
+    class-level access (``SomeModel.config``) or from within a classmethod
+    (``cls.config``), where there is no instance to hold a per-instance value.
+    """
+    def __init__(self, fget):
+        self.fget = fget
+
+    def __get__(self, obj, owner):
+        return self.fget(owner)
+
+
+def _build_empty_table_with_cols(extdef : dict) -> Table:
+    """
+    Build a 0-row :class:`astropy.table.Table` from an extension's ``'columns'`` spec.
+    """
+    cols = [
+        Column(name=name, data=np.empty(0, dtype=dtype))
+        for name, dtype in extdef["columns"].items()
+    ]
+    return Table(cols)
+
+
+def _canonical_dtype(dtype_spec):
+    """The dtype to construct/cast to: the first entry if `dtype_spec` is a
+    tuple (see :func:`.extensions.IMAGE_HDU`), else `dtype_spec` itself."""
+    return dtype_spec[0] if isinstance(dtype_spec, tuple) else dtype_spec
+
+
+def _dtype_family(dtype) -> str:
+    """
+    Broad numeric family of a dtype, for kind-aware auto-casting.
+
+    Numpy distinguishes signed ('i') and unsigned ('u') integers, but for
+    auto-casting purposes any integer array should match a declared integer
+    dtype, and any float array should match a declared float dtype.
+    """
+    kind = np.dtype(dtype).kind
+    if kind in ('i', 'u'):
+        return 'integer'
+    if kind == 'f':
+        return 'float'
+    return kind
+
+
+def _correct_image_dtype(data : np.ndarray, dtype_spec, extname : str = '') -> np.ndarray:
+    """
+    Cast an image extension's array to its declared dtype, if needed.
+
+    ``dtype_spec`` is an extension's declared ``'dtype'`` entry (see
+    :func:`.extensions.IMAGE_HDU`): a single numpy scalar type, or a
+    precedence-ordered tuple of them for extensions with more than one
+    legitimate dtype (e.g. ``RampModel.DATA``: uint16 for real detector data,
+    float32 for simulations run with ``convert_to_uint16=False``).
+
+    If ``data``'s dtype already matches one of the declared choices
+    (subtype-wise), it's returned unchanged. Otherwise the declared choice
+    sharing ``data``'s broad numeric family (see :func:`_dtype_family` --
+    e.g. any integer array matches a declared integer dtype, any float array
+    matches a declared float dtype) is used as the cast target, falling back
+    to the first (canonical) declared dtype if none share that family.
+    """
+    choices = dtype_spec if isinstance(dtype_spec, tuple) else (dtype_spec,)
+    if any(np.issubdtype(data.dtype, d) for d in choices):
+        return data
+
+    target = next(
+        (d for d in choices if _dtype_family(d) == _dtype_family(data.dtype)),
+        choices[0],
+    )
+    logger.warning(
+        f"Converting data type of {extname or 'extension'} from {data.dtype} to {np.dtype(target)}"
+    )
+    return data.astype(target, copy=False)
+
 
 class DataModel:
     """
@@ -70,6 +211,117 @@ class DataModel:
 
     _DEFAULT_INSTRUMENT = 'HISPEC'
 
+    # Process-wide default instrument config, settable via
+    # `datamodels.utils.set_instrument`. Only consulted by the `config`
+    # classproperty below when there's no instance (or no per-instance
+    # `self.config` override) to read from -- see `_classproperty`.
+    _config : ClassVar[type | None] = None
+
+    @_classproperty
+    def config(cls) -> type | None:
+        return cls._config
+
+    @classmethod
+    def _doc_default_detector_size(cls) -> tuple[int, int] | None:
+        """
+        Resolve ``(ny, nx)`` purely to render real numbers in a generated
+        extensions table's Dimensions column (see :meth:`extensions_table`)
+        -- from ``cls._DEFAULT_INSTRUMENT``'s config, since this runs from
+        :meth:`__init_subclass__` at class-definition time, before any
+        instance (and so any live ``self.config``/``self.default_detector_size``,
+        which a multi-detector model could have overridden) exists.
+
+        Deliberately does *not* go through :func:`.utils.get_instrument_config`
+        (which reads ``INSTRUMENT_CONFIGS``, a dict this very package's
+        ``__init__.py`` only builds *after* importing every model class --
+        every ``__init_subclass__`` call happens before it exists). Instead
+        imports ``<instrument>_config`` directly by name, matching this
+        package's own ``hispec_config.py``/``parvi_config.py`` convention --
+        that submodule only needs ``base_model``/``meta_data``, already
+        loaded by the time any model class is being defined, regardless of
+        how far this package's own ``__init__.py`` has otherwise gotten.
+
+        Never raises; ``None`` (axes stay symbolic, e.g. ``Ny``/``Nx``) if
+        the default instrument's config can't be resolved this way or has
+        no ``DETECTOR_SIZE``.
+        """
+        try:
+            module = importlib.import_module(f'.{cls._DEFAULT_INSTRUMENT.lower()}_config', package=__package__)
+            config = getattr(module, f'{cls._DEFAULT_INSTRUMENT.upper()}Config')
+        except Exception:
+            return None
+        return getattr(config, 'DETECTOR_SIZE', None)
+
+    @classmethod
+    def extensions_table(cls) -> str:
+        """
+        Render a "HDU Name / HDU Type / Data Type / Dimensions / Units /
+        Description" table straight from ``cls.EXTENSIONS`` -- the same
+        single source of truth auto-init reads, so this can never drift
+        from it the way a hand-written docstring table could. ``title=``/
+        ``units=`` (see :func:`.extensions.IMAGE_HDU`/:func:`.extensions.TABLE_HDU`)
+        fill the Description/Units columns; everything else (name, HDU
+        type, dtype, shape) is read directly off the extension.
+        ``DETECTOR_SIZE_Y``/``DETECTOR_SIZE_X`` render as real numbers (see
+        :meth:`_doc_default_detector_size`); other symbolic axes (``N_ORDERS``,
+        etc.) stay symbolic since they have no single fixed doc-time answer.
+
+        Spliced automatically into the class docstring by
+        :meth:`__init_subclass__` -- call this directly only if you need
+        the table standalone (e.g. to print it, or embed it elsewhere).
+        Returns ``''`` (nothing gets spliced in) when there are no
+        non-special extensions to show, e.g. for an abstract intermediate
+        base class.
+        """
+        detector_size = cls._doc_default_detector_size()
+        rows = []
+        tags = set()
+        # _populate_shape_info fills in 'shape' for an extension that
+        # omitted it (see IMAGE_HDU's shape=None) from its family's
+        # primary, purely for an accurate Dimensions column here -- the
+        # same fill-in auto-init does per-instance at construction time.
+        for name, info in cls._populate_shape_info(cls.EXTENSIONS).items():
+            if name in _DOC_TABLE_SPECIAL_EXTENSIONS:
+                continue
+            tag = info.get('enumerate')
+            hdu_name = f'{name}_{tag}#' if tag else name
+            if tag:
+                tags.add(tag)
+            if info['hdu_type'] is fits.BinTableHDU:
+                hdu_type, dtype, dims = 'Table', 'See docs', 'See docs'
+            else:
+                hdu_type = 'Image'
+                dtype = _doc_table_render_dtype(info.get('dtype'))
+                dims = _doc_table_render_shape(info.get('shape'), detector_size)
+            rows.append([
+                hdu_name, hdu_type, dtype, dims,
+                info.get('units') or '', info.get('title') or '',
+            ])
+        if not rows:
+            return ''
+
+        headers = ['HDU Name', 'HDU Type', 'Data Type', 'Dimensions', 'Units', 'Description']
+        widths = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+
+        def fmt_row(cells):
+            return '    '.join(cell.ljust(width) for cell, width in zip(cells, widths)).rstrip()
+
+        # Explain what '#' means for every enumerate tag actually used below,
+        # e.g. '_FIB#' -> the fiber number -- right under the section header,
+        # so it reads before the table that uses it.
+        lines = []
+        for tag in sorted(tags):
+            meaning = _DOC_TABLE_ENUMERATE_MEANING.get(tag, f'the {tag.lower()} number')
+            lines.append(f"'_{tag}#' in an HDU name denotes {meaning}.")
+        if lines:
+            lines.append('')
+
+        lines.append(fmt_row(headers))
+        lines.append(fmt_row(['-' * width for width in widths]))
+        lines.extend(fmt_row(row) for row in rows)
+
+        return '\n'.join(f'    {line}' for line in lines)
+
     def __init__(
         self,
         filepath : str | None = None,
@@ -80,6 +332,7 @@ class DataModel:
         config : type | None = None,
         validate_meta : bool = True,
         instrument_name : str | None = None,
+        shape : tuple[int, ...] | None = None,
         **kwargs
     ):
         """
@@ -103,6 +356,8 @@ class DataModel:
             The instrument config class. If None, it will be determined based on the filepath and instrument name.
         validate_meta : bool, optional
             Whether to validate the metadata against the schema. Defaults to True.
+        shape : tuple[int, ...] | None, optional
+            Explicit shape to use for ``model.shape`` when the primary extension has no data of its own yet. Once the primary extension is actually assigned real data, its array shape takes precedence over this override.
         kwargs
             Any valid data attributes.
         """
@@ -117,32 +372,87 @@ class DataModel:
                 instrument_name=instrument_name,
             )
 
-        # Validate metadata or not
-        self._validate_meta = validate_meta
+        # Explicit shape override (see `shape` property); only used as a fallback
+        # when the primary extension has no real array to derive a shape from.
+        self._shape = shape
 
         # Get the extension names now that we know the instrument
-        self.EXTENSIONS = self._get_extensions()
+        self.EXTENSIONS = self._get_extensions(self.num_fibers)
 
         # Set the optional filepath
         if filepath is not None:
             if not os.path.isfile(filepath):
                 raise FileNotFoundError(f"File not found: {filepath}")
             self._filepath = os.path.abspath(filepath)
-            self.init_meta(meta=meta)
+            self.init_meta(meta=meta, validate=validate_meta)
             self.meta.filename = os.path.basename(self._filepath)
             if not meta_only:
-                self.read_data(extensions=extensions, correct_dtypes=correct_dtypes)
+                self.read_data(
+                    extensions=extensions,
+                    correct_dtypes=correct_dtypes
+                )
         else:
             self._filepath = None
-            self.init_meta(meta=meta)
+            self.init_meta(meta=meta, validate=validate_meta)
             if not meta_only:
                 self.init_data(correct_dtypes=correct_dtypes, **kwargs)
 
         # Hook
         self.on_init()
 
-    def _get_extensions(self):
-        return self.EXTENSIONS
+    @classmethod
+    def _get_extensions(cls, num_fibers : int) -> dict:
+        extensions = cls._expand_enumerated_extensions(cls.EXTENSIONS, num_fibers)
+        return cls._populate_shape_info(extensions)
+
+    @classmethod
+    def _populate_shape_info(cls, extensions : dict) -> dict:
+        """
+        Fill in ``'shape'`` for any image extension that omitted it (see
+        :func:`.extensions.IMAGE_HDU`'s ``shape=None``), copying the primary
+        extension's declared shape -- the first key not in the reserved
+        special names (``PRIMARY``, ``RECEIPT``, ``DATA_ANCESTORS``,
+        ``CALIBRATIONS``), matching the base :attr:`primary_extension_name`
+        default. A copy of the info dict is only made where a fill-in is
+        actually needed, so shared info dicts (e.g. ``DQ_L0``, reused as-is
+        across many models) are never mutated in place.
+
+        A model with a dynamic ``primary_extension_name`` override
+        (returning ``None`` until some fiber's data is actually set) can't
+        rely on this -- it always declares every extension's own ``shape=``
+        explicitly, so there's nothing left here to fill in for it.
+        """
+        special = ('PRIMARY', 'RECEIPT', 'DATA_ANCESTORS', 'CALIBRATIONS')
+        primary_name = next((name for name in extensions if name not in special), None)
+        primary_shape = extensions[primary_name].get('shape') if primary_name is not None else None
+        if primary_shape is None:
+            return extensions
+
+        populated = {}
+        for name, info in extensions.items():
+            if name != primary_name and 'shape' in info and info.get('shape') is None:
+                info = {**info, 'shape': primary_shape}
+            populated[name] = info
+        return populated
+
+    @classmethod
+    def _expand_enumerated_extensions(cls, extensions : dict, num_fibers : int) -> dict:
+        """
+        Expand any extension marked ``enumerate=<tag>`` (see
+        :func:`.extensions.IMAGE_HDU` / :func:`.extensions.TABLE_HDU`) into
+        one ``<NAME>_<tag>{n}`` entry per fiber -- the format is always
+        ``prefix_{enumerate}#`` -- for ``n in 1..num_fibers``. Extensions
+        without ``enumerate`` pass through unchanged.
+        """
+        expanded = {}
+        for name, info in extensions.items():
+            tag = info.get('enumerate')
+            if tag is not None:
+                for fiber in range(1, num_fibers + 1):
+                    expanded[f'{name}_{tag}{fiber}'] = info
+            else:
+                expanded[name] = info
+        return expanded
 
     @classmethod
     def _get_instrument_config(
@@ -207,6 +517,10 @@ class DataModel:
             do_not_scale_image_data=do_not_scale_image_data
         ) as hdulist:
             for extname in extensions:
+                # PRIMARY never gets a data attribute -- it's header-only and
+                # handled specially by make_hdu.
+                if extname == 'PRIMARY':
+                    continue
                 extl = extname.lower()
                 if extname in hdulist:
                     data = self.read_extension_data(
@@ -217,17 +531,19 @@ class DataModel:
                 elif extname not in self.EXTENSIONS:
                     raise ValueError(f"Extension {extname} not found in FITS file: {self._filepath}")
 
-        # Initialize remaining extensions not set by user or FITS file
+        # Initialize remaining extensions not set by user or FITS file.
+        # Table HDUs always get an empty Table now. Everything else (image
+        # extensions, and PRIMARY, which never gets an attribute at all) is
+        # left unset, so that accessing an image extension lazily
+        # auto-initializes a default array (see DataModel.__getattr__ /
+        # _make_default_array), or resolves to None via __getattr__.
         for extname in self.EXTENSIONS:
             extl = extname.lower()
-            if getattr(self, extl, None) is None:
-                if 'columns' in self.EXTENSIONS[extname]:
-                    setattr(self, extl, Table({
-                        name: np.array([], dtype=dtype)
-                        for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    }))
-                else:
-                    setattr(self, extl, None) # Keep Image HDUs as None
+            if extl in self.__dict__:
+                continue
+            info = self.EXTENSIONS[extname]
+            if 'columns' in info:
+                setattr(self, extl, _build_empty_table_with_cols(info))
     
     def read_extension_data(
         self, hdu : _VALID_HDU,
@@ -252,18 +568,33 @@ class DataModel:
         hdu_type = type(hdu)
         data = hdu.data
         if hdu_type is fits.ImageHDU:
-            dtype = self.EXTENSIONS[hdu.name]['dtype']
             if data is not None:
-                if not np.issubdtype(data.dtype, dtype):
-                    if correct_dtype:
-                        logger.warning(f"Converting data type of {hdu.name} from {hdu.data.dtype} to {dtype}")
-                        data = data.astype(dtype, copy=False)
+                if correct_dtype:
+                    dtype = self.EXTENSIONS[hdu.name]['dtype']
+                    data = _correct_image_dtype(data, dtype, extname=hdu.name)
                 data = convert_endianness(data, output_endianness='little')
         elif hdu_type is fits.BinTableHDU:
             data = Table(data)
             if getattr(hdu, "name", None) == "RECEIPT":
                 data = migrate_receipt_table(data)
         return data
+
+    def migrate(self) -> Self:
+        """
+        Apply schema migrations to this model's current data, in place.
+
+        Useful for upgrading an already-constructed model -- e.g. one built
+        from kwargs or merged via :meth:`from_datamodels` -- not just data
+        freshly read from a FITS file.
+
+        Returns
+        -------
+        Self
+            The updated model.
+        """
+        if self.receipt is not None:
+            self.receipt = migrate_receipt_table(self.receipt)
+        return self
 
     def save(
         self,
@@ -406,9 +737,13 @@ class DataModel:
         serialize 0-row tables that include object columns (e.g. variable-length
         ``CCF`` arrays) because no row exists to infer inner dtypes
         (:func:`astropy.io.fits.table_to_hdu` / ``ColDefs._init_from_array``).
+
+        Reads the raw (un-auto-initialized) value: this is only called when
+        ``include_empty_extensions=False``, in which case an image extension
+        that was never explicitly set should be treated as missing rather than
+        lazily materialized into a default array just to decide whether to save it.
         """
-        extl = extname.lower()
-        val = getattr(self, extl, None)
+        val = self._raw_extension_value(extname)
         if val is None:
             return True
         if isinstance(val, Table) and len(val) == 0:
@@ -497,9 +832,11 @@ class DataModel:
         # Convert Image HDU data to correct dtype if needed
         elif hdu_class is fits.ImageHDU:
             data = getattr(self, extl, None)
-            if data is not None and correct_dtypes:
-                dtype = self.EXTENSIONS[extname]['dtype']
-                data = data.astype(dtype)
+            if data is not None:
+                if correct_dtypes:
+                    dtype = self.EXTENSIONS[extname]['dtype']
+                    data = _correct_image_dtype(data, dtype, extname=extname)
+                data = convert_endianness(data, output_endianness='little')
             hdu = hdu_class(data=data, name=extname)
         
         # Nothing special for BIN tables
@@ -540,6 +877,15 @@ class DataModel:
             if 'RECEIPT' in cls.EXTENSIONS:
                 cls.EXTENSIONS = {**{k: v for k, v in cls.EXTENSIONS.items() if k != 'RECEIPT'}, 'RECEIPT': cls.EXTENSIONS['RECEIPT']}
 
+        # Splice a generated "Extensions" table (see extensions_table) onto
+        # the docstring now that EXTENSIONS is in its final, fully-merged
+        # form -- keeps the docstring in sync with EXTENSIONS automatically
+        # instead of relying on a hand-maintained table that can drift.
+        table = cls.extensions_table()
+        if table:
+            doc = (cls.__doc__ or '').rstrip()
+            cls.__doc__ = f"{doc}\n\n    Extensions\n    ----------\n\n{table}\n    "
+
     def copy(self) -> Self:
         """
         Create a deep copy of the DataModel object.
@@ -578,13 +924,176 @@ class DataModel:
         if attrl in self.__dict__:
             return self.__dict__[attrl]
 
-        # Or try super's getattr if the parent class has it
-        try:
-            return super().__getattribute__(attrl)
-        except AttributeError:
-            pass
+        attru = attr.upper()
+        info = self.EXTENSIONS.get(attru)
+        if info is not None and info.get('hdu_type') is fits.ImageHDU:
+            default = self._make_default_array(attru, info)
+            if default is not None:
+                setattr(self, attrl, default)
+                return default
+            return None
 
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attr}'")
+
+    def _infer_shape_symbols(self) -> dict:
+        """
+        Scan every currently-set image extension and, for each, match its
+        real array shape positionally against its own declared ``shape=``
+        spec (see :func:`.extensions.IMAGE_HDU`; populated for every
+        extension, even one that omitted it itself, by
+        :meth:`_populate_shape_info` at construction time), recording
+        ``{symbol: size}`` for every non-literal, non-``ANY`` symbol
+        position.
+
+        This is what lets e.g. an explicitly-assigned
+        ``model.bias = np.ones((10, 10))`` inform the shape used to
+        auto-init ``model.ktc``, ``model.dq``, etc. on that same model --
+        nothing is hardcoded about "bias" being special; *any* extension
+        whose declared shape shares a symbol with another can inform it, as
+        long as it's actually been set. Also the only source ``N_READS`` (no
+        independent resolver -- see :meth:`_resolve_shape_axis`) ever has.
+        """
+        inferred = {}
+        for extname, info in self.EXTENSIONS.items():
+            spec = info.get('shape')
+            if spec is None:
+                continue
+            val = self._raw_extension_value(extname)
+            if not isinstance(val, np.ndarray) or val.ndim != len(spec):
+                continue
+            for axis, size in zip(spec, val.shape):
+                if isinstance(axis, str) and axis.upper() != 'ANY':
+                    inferred[axis.upper()] = size
+        return inferred
+
+    @property
+    def default_detector_size(self) -> tuple[int, ...] | None:
+        """
+        This model's ``(ny, nx)`` detector plane size -- the last-resort
+        source for the ``DETECTOR_SIZE_Y``/``DETECTOR_SIZE_X`` shape-symbol
+        resolvers (see :meth:`_resolve_shape_axis`) when no extension's
+        already-set real data and no explicit constructor ``shape=``
+        override provide it instead.
+
+        Defaults to ``config.DETECTOR_SIZE``, which is all a single-detector
+        instrument ever needs. An instrument with multiple, differently
+        sized detectors has no single automatic answer -- override this
+        property (in a subclass, or an intermediate base shared by that
+        detector's models) to compute the right one from whatever instance
+        state actually distinguishes them, e.g.::
+
+            @property
+            def default_detector_size(self):
+                return self.config.DETECTOR_SIZES.get(self.meta.instrument_mode)
+        """
+        return getattr(self.config, 'DETECTOR_SIZE', None)
+
+    def _resolve_shape_axis(self, axis, inferred : dict) -> int | None:
+        """
+        Resolve one axis of a ``shape=`` spec (see :func:`.extensions.IMAGE_HDU`)
+        to a concrete size, or ``None`` if it can't be resolved on this model
+        right now.
+
+        A string axis is matched case-insensitively against the recognized
+        symbolic names (``DETECTOR_SIZE_Y``, ``DETECTOR_SIZE_X``,
+        ``N_ORDERS``, ``N_FIBERS``, ``N_READS``, ``ANY``). Checked in order:
+        (1) ``inferred`` (see :meth:`_infer_shape_symbols`); (2) the symbol's
+        own independent source, if it has one -- ``DETECTOR_SIZE_Y``/
+        ``DETECTOR_SIZE_X`` fall back to the constructor's ``shape=``
+        override, then :attr:`default_detector_size`; ``N_ORDERS`` to
+        ``meta.order_start``/``order_end``; ``N_FIBERS`` to
+        ``config.num_fibers``. ``N_READS`` and any other symbol with no
+        independent source are only ever resolvable via ``inferred``. ``ANY``
+        is never resolvable at all, by design.
+        """
+        if isinstance(axis, int):
+            return axis
+        axis = axis.upper()
+        if axis == 'ANY':
+            return None
+        if axis in inferred:
+            return inferred[axis]
+        if axis == 'DETECTOR_SIZE_Y' or axis == 'DETECTOR_SIZE_X':
+            size = self.__dict__.get('_shape') or self.default_detector_size
+            if size is None:
+                return None
+            return size[-2] if axis == 'DETECTOR_SIZE_Y' else size[-1]
+        if axis == 'N_ORDERS':
+            start, end = self.meta.order_start, self.meta.order_end
+            if start is None or end is None:
+                return None
+            return abs(end - start) + 1
+        if axis == 'N_FIBERS':
+            return self.config.num_fibers
+        return None
+
+    def _resolve_shape(self, shape_spec) -> tuple[int, ...] | None:
+        """
+        Resolve a full ``shape=`` spec (see :func:`.extensions.IMAGE_HDU`) to
+        a concrete shape tuple, or ``None`` if any axis can't be resolved.
+        """
+        if shape_spec is None:
+            return None
+        inferred = self._infer_shape_symbols()
+        resolved = []
+        for axis in shape_spec:
+            size = self._resolve_shape_axis(axis, inferred)
+            if size is None:
+                return None
+            resolved.append(size)
+        return tuple(resolved)
+
+    def _make_default_array(self, extname : str, info : dict) -> np.ndarray | None:
+        """
+        Lazily build the default array for an image extension, if eligible.
+
+        If the extension declares ``'default'`` (see :func:`.extensions.IMAGE_HDU`)
+        and its ``'shape'`` spec (populated for every extension by
+        :meth:`_populate_shape_info` at construction time) fully resolves
+        (see :meth:`_resolve_shape`), the array is built directly as
+        ``np.full(resolved_shape, default, dtype=...)``. Otherwise, building
+        it is delegated to :meth:`make_default_array` -- tried
+        unconditionally, whether or not ``default`` was given -- which
+        subclasses can override for extensions whose shape can't be expressed
+        with the available symbols (e.g. polynomial coefficients, a
+        per-instance fit result).
+        """
+        default = info.get('default')
+        if default is not None:
+            shape = self._resolve_shape(info.get('shape'))
+            if shape is not None:
+                return np.full(shape, default, dtype=_canonical_dtype(info['dtype']))
+
+        return self.make_default_array(extname, info)
+
+    def make_default_array(self, extname : str, info : dict) -> np.ndarray | None:
+        """
+        Build a default array for an image extension whose shape can't be
+        resolved from its declared ``shape=`` spec alone.
+
+        Called by :meth:`_make_default_array` whenever the automatic
+        ``np.full(resolved_shape, default, dtype=...)`` path doesn't apply --
+        e.g. an extension containing ``ANY`` in its ``shape=`` (like
+        polynomial coefficients, whose axis sizes are a per-instance fit
+        result with no symbol at all), or one with no ``default`` given.
+
+        Override in a subclass to handle specific extension names, falling
+        back to ``super().make_default_array(extname, info)``. The base
+        implementation returns ``None`` (no custom default), so models that
+        don't override this see no behavior change.
+
+        Parameters
+        ----------
+        extname : str
+            The extension name (uppercase).
+        info : dict
+            The extension's declared descriptor (see :func:`.extensions.IMAGE_HDU`).
+        """
+        return None
+
+    def _raw_extension_value(self, extname : str):
+        """Read an extension's current value without triggering lazy auto-initialization."""
+        return self.__dict__.get(extname.lower())
 
     def __setattr__(self, attr, value):
         if attr.startswith("_") or attr in self._ALLOWED_ATTRIBUTES:
@@ -628,45 +1137,28 @@ class DataModel:
                     setattr(self, keyl, val)
                 elif isinstance(val, np.ndarray):
                     if correct_dtypes:
-                        setattr(self, keyl, val.astype(self.EXTENSIONS[keyu]['dtype']))
-                    else:
-                        setattr(self, keyl, val)
+                        val = _correct_image_dtype(val, self.EXTENSIONS[keyu]['dtype'], extname=keyu)
+                    val = convert_endianness(val, output_endianness='little')
+                    setattr(self, keyl, val)
+                else:
+                    raise ValueError(f"Invalid data type for extension {keyu}: {type(val)}")
             else:
                 raise ValueError(f"Unknown extension: {key.upper()}")
             
-        def _init_empty_table(extdef : dict) -> Table:
-            cols = []
-            for name, spec in extdef["columns"].items():
-                if isinstance(spec, dict):
-                    dtype = spec.get("dtype")
-                    shape = spec.get("shape")
-                else:
-                    dtype = spec
-                    shape = None
-                if shape is not None:
-                    data = np.empty((0, *shape), dtype=dtype)
-                else:
-                    data = np.empty(0, dtype=dtype)
-                cols.append(Column(name=name, data=data))
-            return Table(cols)
-
-        # Initialize remaining extensions
+        # Initialize remaining extensions. Table HDUs always get an empty Table now.
+        # Everything else (image extensions, and PRIMARY, which never gets an
+        # attribute at all) is left unset, so that accessing an image extension
+        # lazily auto-initializes a default array (see DataModel.__getattr__ /
+        # _make_default_array), or resolves to None via __getattr__.
         for extname in self.EXTENSIONS:
             extl = extname.lower()
-            if getattr(self, extl, None) is None:
-                if 'columns' in self.EXTENSIONS[extname]:
-                    # setattr(self, extl, Table({
-                    #     name: np.array([], dtype=dtype)
-                    #     for name, dtype in self.EXTENSIONS[extname]['columns'].items()
-                    # }))
-                    setattr(
-                        self, extl,
-                        _init_empty_table(self.EXTENSIONS[extname])
-                    )
-                else:
-                    setattr(self, extl, None)
+            if extl in self.__dict__:
+                continue
+            info = self.EXTENSIONS[extname]
+            if 'columns' in info:
+                setattr(self, extl, _build_empty_table_with_cols(info))
 
-    def init_meta(self, meta: dict | MetaModel | None = None):
+    def init_meta(self, meta: dict | MetaModel | None = None, validate : bool = True):
         """
         Initialize the metadata and optionally merge in provided metadata.
 
@@ -674,6 +1166,12 @@ class DataModel:
         ----------
         meta : dict or MetaModel, optional
             Existing metadata to store or merge.
+        validate : bool, optional
+            Whether the resulting :class:`MetaModel` validates values against
+            the schema on every assignment. Only applies when a new
+            ``MetaModel`` is built here (from a dict or ``None``) -- an
+            already-built ``MetaModel`` passed in via ``meta`` keeps its own
+            ``validate`` setting as-is.
         """
 
         # Get meta schema
@@ -698,7 +1196,7 @@ class DataModel:
             if meta:
                 merged |= meta
 
-            self.meta = MetaModel(meta_schema, merged)
+            self.meta = MetaModel(meta_schema, merged, validate=validate)
 
     def read_meta_from_fits_headers(self, schema : dict) -> dict:
         """
@@ -756,12 +1254,12 @@ class DataModel:
             if hdu_type is fits.PrimaryHDU:
                 continue
             if hdu_type is fits.ImageHDU:
-                data = getattr(self, extl, None)
+                data = self._raw_extension_value(extl)
                 if data is not None:
                     dtype = data.dtype
                     print(f"{extname}\n  dtype: {dtype}\n  shape: {data.shape}")
             elif hdu_type is fits.BinTableHDU:
-                data = getattr(self, extl, None)
+                data = self._raw_extension_value(extl)
                 if data is not None:
                     print(f"{extname}\n  columns: {list(data.columns)}\n  nrows: {len(data)})")
 
@@ -773,7 +1271,7 @@ class DataModel:
             hdu_type = info['hdu_type']
             if hdu_type is fits.PrimaryHDU:
                 continue
-            data[extl] = getattr(self, extl, None)
+            data[extl] = self._raw_extension_value(extl)
         return data
 
     @property
@@ -890,6 +1388,13 @@ class DataModel:
     
     def make_order_vec(self) -> np.ndarray:
         return self._make_order_vec(self.meta.order_start, self.meta.order_end)
+
+    @property
+    def n_orders(self) -> int:
+        """
+        Return the number of orders in the model based on the order_start and order_end metadata.
+        """
+        return abs(self.meta.order_end - self.meta.order_start) + 1
         
     @staticmethod
     def _make_order_vec(order_start : int, order_end : int) -> np.ndarray:
@@ -912,34 +1417,34 @@ class DataModel:
         step = 1 if order_end >= order_start else -1
         return np.arange(order_start, order_end + step, step).astype(np.int16)
 
-    @property
-    def traces(self):
-        """
-        Convenience property to return a dictionary of traces for each fiber in the model.
-        This is useful when the fiber is a dynamic variable and can be used in place of getattr(model, '<attr>_fib{fiber}').
-        By default, any attribute with '_fib' in its name is included.
-        This property may be removed in future versions unless it demonstrates significant utility.
-        This property should not be used in large for loops if the rest of the computation is trivial as it adds some overhead.
+    # @property
+    # def traces(self):
+    #     """
+    #     Convenience property to return a dictionary of traces for each fiber in the model.
+    #     This is useful when the fiber is a dynamic variable and can be used in place of getattr(model, '<attr>_fib{fiber}').
+    #     By default, any attribute with '_fib' in its name is included.
+    #     This property may be removed in future versions unless it demonstrates significant utility.
+    #     This property should not be used in large for loops if the rest of the computation is trivial as it adds some overhead.
 
-        Examples:
-            >>> model.traces # -> {1 : {'wave' : ..., 'spec' : ..., 'spec_err' : ...}, 2 : {...}, ...}
-            >>> model.traces[1]['wave'] # Equivalent to model.wave_fib1
+    #     Examples:
+    #         >>> model.traces # -> {1 : {'wave' : ..., 'spec' : ..., 'spec_err' : ...}, 2 : {...}, ...}
+    #         >>> model.traces[1]['wave'] # Equivalent to model.wave_fib1
 
-        Returns:
-            dict: A dictionary where keys are fiber numbers and values are dictionaries of attributes without the '_fib#' suffix.
-        """
-        trace_data = {}
-        for attr in self.EXTENSIONS:
-            attrl = attr.lower()
-            if '_fib' in attrl:
-                try:
-                    kind, fiber = attrl.rsplit('_fib', 1)
-                    fiber = int(fiber)
-                except ValueError:
-                    continue
-                trace_data.setdefault(fiber, {})
-                trace_data[fiber][kind] = getattr(self, attr, None)
-        return trace_data
+    #     Returns:
+    #         dict: A dictionary where keys are fiber numbers and values are dictionaries of attributes without the '_fib#' suffix.
+    #     """
+    #     trace_data = {}
+    #     for attr in self.EXTENSIONS:
+    #         attrl = attr.lower()
+    #         if '_fib' in attrl:
+    #             try:
+    #                 kind, fiber = attrl.rsplit('_fib', 1)
+    #                 fiber = int(fiber)
+    #             except ValueError:
+    #                 continue
+    #             trace_data.setdefault(fiber, {})
+    #             trace_data[fiber][kind] = getattr(self, attr, None)
+    #     return trace_data
 
     def load_calibration_from_role(
         self,
@@ -1103,11 +1608,55 @@ class DataModel:
     
     @classmethod
     def has_extension(cls, extname: str) -> bool:
-        return extname.upper() in cls.EXTENSIONS
+        """
+        Whether ``extname`` (case-insensitive) is a valid extension for this class.
+
+        Cheap: never rebuilds the enumerated-expanded ``EXTENSIONS`` dict (see
+        :meth:`_expand_enumerated_extensions`) -- pattern-matches
+        ``<BASE>_<tag>{n}`` (the format is always ``prefix_{enumerate}#``)
+        against ``cls.EXTENSIONS``'s ``enumerate``-marked base entries instead.
+
+        A ``_<tag>{n}`` suffix is bounds-checked against ``cls.config.num_fibers``
+        when ``cls.config`` is set (see the ``config`` classproperty and
+        :func:`datamodels.utils.set_instrument`); otherwise any ``_<tag>{n}``
+        suffix on an ``enumerate``-marked base is accepted without a bound.
+        """
+        extname = extname.upper()
+
+        info = cls.EXTENSIONS.get(extname)
+        if info is not None:
+            # An enumerate-marked base name (e.g. 'SPEC') is never itself a
+            # real extension -- only its _<tag>{n} expansions are.
+            return info.get('enumerate') is None
+
+        for base, base_info in cls.EXTENSIONS.items():
+            tag = base_info.get('enumerate')
+            if tag is None:
+                continue
+            prefix = f'{base}_{tag}'
+            if not extname.startswith(prefix):
+                continue
+            suffix = extname[len(prefix):]
+            if not suffix.isdigit():
+                continue
+            config = cls.config
+            return config is None or 1 <= int(suffix) <= config.num_fibers
+        return False
 
     def has_extension_value(self, extname: str) -> bool:
-        """NOTE: Utility of this method TBD"""
-        return getattr(self, extname.upper(), None) is not None
+        """
+        Whether ``extname`` (case-insensitive) is both a valid extension for
+        this model and currently holds a value.
+
+        Reads the raw (un-auto-initialized) value. This must not trigger lazy
+        auto-initialization: several ``primary_extension_name`` overrides call this
+        to find which fiber has actually been set, and lazy auto-initialization
+        itself depends on ``primary_extension_name`` (via ``model.shape``), which
+        would recurse infinitely.
+        """
+        if not self.has_extension(extname):
+            return False
+        return self._raw_extension_value(extname) is not None
 
     @property
     def primary_extension_name(self):
@@ -1121,15 +1670,29 @@ class DataModel:
 
     @property
     def shape(self):
+        """
+        The shape of the model's primary extension.
+
+        Reads the primary extension's *raw* value (never triggers lazy
+        auto-initialization). If the primary extension has no real array yet,
+        falls back to the ``shape=`` override passed to the constructor, else
+        ``None``.
+
+        Note this is unrelated to auto-init's own shape resolution (see
+        :meth:`_resolve_shape_axis`), which no longer depends on this
+        property or ``primary_extension_name`` at all -- it resolves each
+        symbol (``DETECTOR_SIZE_Y``, ``N_ORDERS``, etc.) independently, so
+        this property stays a simple, general-purpose reflection of "what's
+        actually been assigned to the primary extension" for any other code
+        that reads ``model.shape`` directly.
+        """
         ext = self.primary_extension_name
-        if ext is None:
-            return None
-        val = getattr(self, ext, None)
-        if val is None:
-            return None
-        if isinstance(val, np.ndarray):
-            return val.shape
-        return None
+        if ext is not None:
+            val = self._raw_extension_value(ext)
+            if isinstance(val, np.ndarray):
+                return val.shape
+
+        return self.__dict__.get('_shape')
 
 class CalibrationModel(DataModel):
 

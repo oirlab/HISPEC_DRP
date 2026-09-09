@@ -46,6 +46,7 @@ class MetaModel(MutableMapping):
         self._validate = validate
         self._schema = schema
         self._data = {}
+        self._validators = {}
         if meta is not None:
             for k, v in meta.items():
                 self[k] = v
@@ -91,6 +92,10 @@ class MetaModel(MutableMapping):
         result._validate = self._validate
         result._schema = copy.deepcopy(self._schema, memo)
         result._data = copy.deepcopy(self._data, memo)
+        # Not copied: rebuilt lazily against the copied schema on first use
+        # (see validate()), since a Validator is a cheap-to-rebuild cache,
+        # not real state.
+        result._validators = {}
 
         return result
     
@@ -114,21 +119,30 @@ class MetaModel(MutableMapping):
         ValueError
             If the value does not conform to the schema.
         """
-        
+
         # Get the sub-schema for the property
         sub_schema = self._schema['properties'].get(prop_name)
         if sub_schema is None:
             raise KeyError(f"Property '{prop_name}' not found in metadata schema.")
-        
+
         # Accept None values
         if value is None:
             return
-        
+
         try:
-            jsonschema.validate(
-                instance=value,
-                schema=sub_schema,
-            )
+            validator = self._validators[prop_name]
+        except KeyError:
+            # jsonschema.validate() re-resolves the validator class and
+            # re-checks the schema itself (check_schema) on every call --
+            # ~150x slower than reusing a precompiled Validator, and the
+            # schema for a given property never changes after load, so
+            # build it once here and cache it.
+            cls = jsonschema.validators.validator_for(sub_schema)
+            cls.check_schema(sub_schema)
+            validator = self._validators[prop_name] = cls(sub_schema)
+
+        try:
+            validator.validate(value)
         except jsonschema.ValidationError as e:
             raise ValueError(f"Invalid value for '{prop_name}': {e.message}") from None
     
@@ -265,6 +279,8 @@ class MetaModel(MutableMapping):
         dict
             Dictionary of metadata grouped by FITS section.
             Keys are section names and values are dictionaries of metadata properties.
+            Sections are ordered as they first appear in the metadata schema
+            YAML file (``self._schema['properties']`` preserves that order).
         """
 
         sections = {}
@@ -272,21 +288,12 @@ class MetaModel(MutableMapping):
             sec = sub.get("fits_section", "Core")
             sections.setdefault(sec, {})[name] = self._data.get(name)
 
-        # Core first, then alphabetical
-        ordered = {}
-        if "Core" in sections:
-            ordered["Core"] = sections["Core"]
-
-        for sec in sorted(sections):
-            if sec != "Core":
-                ordered[sec] = sections[sec]
-
         if not flat:
-            return ordered
+            return sections
 
         # Flatten
         out = {}
-        for sec_dict in ordered.values():
+        for sec_dict in sections.values():
             out.update(sec_dict)
 
         return out
@@ -303,17 +310,25 @@ class MetaModel(MutableMapping):
 
     def pprint(self, show_none : bool = False, header_style : bool = True):
         """
-        Pretty-print the metadata.
+        Pretty-print the metadata, grouped by FITS section.
 
         Parameters
         ----------
         show_none : bool, optional
             Whether to show metadata fields with None values. Defaults to False.
         """
-        for attr, sub_schema in self._schema['properties'].items():
-            val = self[attr]
-            if not val is None or show_none:
+        for section_name, section_attrs in self.group_meta_by_section().items():
+            attrs = [attr for attr in section_attrs if self[attr] is not None or show_none]
+            if not attrs:
+                continue
 
+            print('=' * 40)
+            print(f'  {section_name}')
+            print('=' * 40)
+
+            for attr in attrs:
+                sub_schema = self._schema['properties'][attr]
+                val = self[attr]
                 unit = sub_schema['unit']
 
                 if header_style:

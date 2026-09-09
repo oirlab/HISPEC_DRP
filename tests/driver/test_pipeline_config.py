@@ -83,6 +83,117 @@ def test_pipeline_custom_config_file(tmp_path):
     assert pipe.ramp_fit.mcds_num_coadd == mcds_num_coadd
 
 
+def test_pipeline_primitive_config_field(tmp_path, monkeypatch):
+    """A primitive's ``primitives.<alias>.config`` entry should load that specific
+    primitive config file, with sibling keys overriding its parameters and any
+    sibling ``context`` ignored."""
+
+    input_model = make_ramp_model(source=np.ones((10, 10)))
+
+    # A standalone primitive config file for FitRampPrimitive
+    ramp_config = {
+        'class': 'FitRampPrimitive',
+        'context': {},
+        'parameters': {
+            'method': 'mcds',
+            'mcds_num_coadd': 7,
+        },
+    }
+    ramp_config_path = os.path.join(tmp_path, 'my_ramp_config.yaml')
+    save_config_yaml(ramp_config, ramp_config_path)
+
+    # Reference by full filepath, override "method" with a sibling key, and
+    # include a "context" that would otherwise select the quicklook config --
+    # it should be ignored since an explicit config is given.
+    pipe_config = {
+        'class': 'Stage0Pipeline',
+        'context': {},
+        'primitives': {
+            'ramp_fit': {
+                'config': ramp_config_path,
+                'context': {'quicklook': True},
+                'method': 'cds',
+            }
+        },
+    }
+    pipe = Stage0Pipeline(dataset=input_model, config=pipe_config)
+
+    assert os.path.abspath(pipe.ramp_fit.config.filepath) == os.path.abspath(ramp_config_path)
+    assert pipe.ramp_fit.method == 'cds'  # sibling key override
+    assert pipe.ramp_fit.mcds_num_coadd == 7  # from referenced config file
+
+    # Reference by base filename only, resolved via os.getcwd()
+    monkeypatch.chdir(tmp_path)
+    pipe_config['primitives']['ramp_fit']['config'] = 'my_ramp_config.yaml'
+    pipe = Stage0Pipeline(dataset=input_model, config=pipe_config)
+    assert os.path.abspath(pipe.ramp_fit.config.filepath) == os.path.abspath(ramp_config_path)
+    assert pipe.ramp_fit.method == 'cds'
+    assert pipe.ramp_fit.mcds_num_coadd == 7
+
+
+def test_pipeline_primitive_config_field_ignores_context(tmp_path):
+    """When ``primitives.<alias>`` specifies an explicit ``config``, any sibling
+    ``context`` must be ignored entirely -- it must not affect which config file
+    is used, even though the context given would otherwise select a different
+    (quicklook) config file via auto-configuration."""
+
+    input_model = make_ramp_model(source=np.ones((10, 10)))
+
+    ramp_config = {
+        'class': 'FitRampPrimitive',
+        'context': {},
+        'parameters': {
+            'method': 'mcds',
+            'mcds_num_coadd': 5,
+        },
+    }
+    ramp_config_path = os.path.join(tmp_path, 'explicit_ramp_config.yaml')
+    save_config_yaml(ramp_config, ramp_config_path)
+
+    # A context that would normally select FitRampPrimitive-QL.yaml (method='ols')
+    # if it were honored -- it must be ignored since "config" is explicitly set.
+    primitives = {
+        'ramp_fit': {
+            'config': ramp_config_path,
+            'context': {'quicklook': True},
+        }
+    }
+
+    pipe = Stage0Pipeline(dataset=input_model, primitives=primitives)
+
+    assert os.path.abspath(pipe.ramp_fit.config.filepath) == os.path.abspath(ramp_config_path)
+    assert pipe.ramp_fit.method == 'mcds'
+    assert pipe.ramp_fit.mcds_num_coadd == 5
+
+
+def test_pipeline_primitive_context_scoped_to_single_primitive():
+    """A ``context`` set under ``primitives.<alias>`` should only affect that
+    primitive's auto-selected config file, not the rest of the pipeline."""
+
+    input_model = make_ramp_model(source=np.ones((10, 10)))
+
+    primitives = {
+        'ramp_fit': {
+            'context': {
+                'quicklook': True,
+            }
+        }
+    }
+
+    pipe = Stage0Pipeline(dataset=input_model, primitives=primitives)
+
+    # ramp_fit should have auto-selected the quicklook config file
+    assert pipe.ramp_fit.config.context['quicklook'] is True
+    assert pipe.ramp_fit.method == 'ols'
+
+    # All other primitives should be unaffected and keep their default (non-quicklook) config
+    for prim_alias in pipe.PRIMITIVES:
+        if prim_alias == 'ramp_fit':
+            continue
+        prim = getattr(pipe, prim_alias)
+        assert prim.config.context['quicklook'] in (False, None)
+
+
 def test_pipeline_call_interface(tmp_path):
 
     shape = (10, 10)

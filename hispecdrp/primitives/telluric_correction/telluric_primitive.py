@@ -62,60 +62,60 @@ class TelluricCorrectionPrimitive(BasePrimitive):
 
     def _perform(self):
         
-        if isinstance(self.dataset, (datamodels.DataModel, str)):
-            output = None
-            input = [self.dataset]
-        elif isinstance(self.dataset, Sequence):
-            output = []
-            input = self.dataset
+        # if isinstance(self.dataset, (datamodels.DataModel, str)):
+        #     output = None
+        #     input = [self.dataset]
+        # elif isinstance(self.dataset, Sequence):
+        #     output = []
+        #     input = self.dataset
 
         # Loop over inputs (now a list)
-        for _input in input:
-            # Load the input model
-            input_model = datamodels.open(_input)
+        #for _input in input:
+        # Load the input model
+        input_model = datamodels.open(self.dataset)
 
-             # Init output model
-            output_model = self.get_output_model(input_model, output_model='L2Model', include_data=True)
+        # Init output model
+        output_model = self.get_output_model(input_model, output_model='L2Model', include_data=True)
 
-            # Get calibrations
-            lsf, _ = self.get_calibration(input_model, 'lsf')
-            lsf_model = datamodels.open(lsf)
-                       
-            # Which orders to process
-            _, do_orders = self.get_do_traces(input_model, [1,2,3], self.do_orders)
-            order_vec = input_model.make_order_vec()
-            n_orders = len(order_vec)
+        # Get calibrations
+        lsf, _ = self.get_calibration(input_model, 'lsf')
+        lsf_model = datamodels.open(lsf)
+                    
+        # Which orders to process
+        _, do_orders = self.get_do_traces(input_model, [1,2,3], self.do_orders)
+        order_vec = input_model.make_order_vec()
+        n_orders = len(order_vec)
 
-            spec_key = 'SPEC_UNCAL_' if isinstance(input_model, datamodels.level1.L1Model) else 'SPEC_'
+        spec_key = 'SPEC_UNCAL_' if isinstance(input_model, datamodels.level1.L1Model) else 'SPEC_'
 
-            # get science/sky fiber numbers, sky fiber defaults to farthest fiber from tracking axis
-            for fiber in range(1,4):
-                if input_model.meta.get(f'object_fiber{fiber}', '').upper() == 'SCIENCE' and self.sci_fiber == None:
-                    sci_fib_num = fiber
-                elif self.sci_fiber != None:
-                    sci_fib_num = self.sci_fiber
-                    logger.info(f'Science fiber manually set to fiber {sci_fib_num}')
+        # get science/sky fiber numbers, sky fiber defaults to farthest fiber from tracking axis
+        for fiber in range(1,4):
+            if input_model.meta.get(f'object_fiber{fiber}', '').upper() == 'SCIENCE' and self.sci_fiber == None:
+                sci_fib_num = fiber
+            elif self.sci_fiber != None:
+                sci_fib_num = self.sci_fiber
+                logger.info(f'Science fiber manually set to fiber {sci_fib_num}')
 
-            if self.method == 'airmass_scaling':
-                output_model = airmass_scale_singlemodel(
-                    input_model,
-                    output_model,
-                    lsf_model,
-                    sci_fib_num,
-                    spec_key,
-                    order_vec,
-                    do_orders,
-                )
-            else:
-                raise ValueError(self.method+' is not a recognized telluric correction method.')
+        if self.method == 'airmass_scaling':
+            output_model = airmass_scale_singlemodel(
+                input_model,
+                output_model,
+                lsf_model,
+                sci_fib_num,
+                spec_key,
+                order_vec,
+                do_orders,
+            )
+        else:
+            raise ValueError(self.method+' is not a recognized telluric correction method.')
 
 
-            if isinstance(output, list):
-                output.append(output_model)
-            else:
-                output = output_model
+        # if isinstance(output, list):
+        #     output.append(output_model)
+        # else:
+        #     output = output_model
 
-        return dict(output=output)
+        return dict(output=output_model)
 
     def _create_preview(self):
         """

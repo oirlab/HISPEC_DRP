@@ -76,10 +76,10 @@ def airmass_scale_singlemodel(
     airmass_scaled_telluric_trans = telluric_trans ** airmass
 
     # get observed spectrum from fiber
-    fiber_spec      = getattr(input_model, f'{spec_key}FIB{fiber_number}')
-    fiber_spec_err  = getattr(input_model, f'{spec_key}ERR_FIB{fiber_number}')
-    fiber_wave      = getattr(input_model, f"WAVE_FIB{fiber_number}")
-    fiber_dq        = getattr(input_model, f'SPEC_DQ_FIB{fiber_number}')
+    fiber_spec = output_model[fiber_number].spec
+    fiber_spec_err = output_model[fiber_number].spec_err
+    fiber_wave = output_model[fiber_number].wave
+    fiber_dq = output_model[fiber_number].spec_dq
 
     # get lsf data for fiber
     fiber_lsf_params = getattr(lsf_model, f"LSF_PARAMS_FIB{fiber_number}")
@@ -97,7 +97,7 @@ def airmass_scale_singlemodel(
             airmass_scaled_telluric_trans,
             fiber_wave[o],
             fiber_lsf_params[o],
-                )
+        )
 
         # some cosntraint to add dq flag for low telluric transmission regions, e.g. < threshold
         fiber_dq[o, np.where(convolved_telluric_trans[o] < dq_threshold)] = 1
@@ -105,10 +105,10 @@ def airmass_scale_singlemodel(
         corrected_spec[o] = fiber_spec[o] / convolved_telluric_trans[o]
         corrected_spec_err[o] = fiber_spec_err[o] / convolved_telluric_trans[o]
 
-    setattr(output_model, f'TEL_FIB{fiber_number}', convolved_telluric_trans)
-    setattr(output_model, f'SPEC_FIB{fiber_number}', corrected_spec)
-    setattr(output_model, f'SPEC_ERR_FIB{fiber_number}', corrected_spec_err)
-    setattr(output_model, f'SPEC_DQ_FIB{fiber_number}', fiber_dq)
+    output_model[fiber_number].tel = convolved_telluric_trans
+    output_model[fiber_number].spec = corrected_spec
+    output_model[fiber_number].spec_err = corrected_spec_err
+    output_model[fiber_number].spec_dq = fiber_dq
 
     return output_model
 

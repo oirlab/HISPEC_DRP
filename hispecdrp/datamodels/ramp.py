@@ -1,5 +1,5 @@
 from .base_model import DataModel
-from .extensions import IMAGE_UINT16_HDU, DQ_RAW, DQ_L0
+from .extensions import IMAGE_HDU, DQ_RAW, DQ_L0
 import numpy as np
 
 __all__ = ['RampModel']
@@ -8,25 +8,21 @@ __all__ = ['RampModel']
 class RampModel(DataModel):
     """
     The Teledyne Hawaii HXRG detectors use up-the-ramp (UTR) non-destructive reads, so raw data is a cube where each 2D slice is a single read.
-
-    Extensions
-    ----------
-
-    HDU Name   HDU Type   Data Type   Dimensions              Units   Description
-    --------   --------   ---------   ----------              -----   -----------
-    DATA       Image      UInt16      Nreads x 4096 x 4160    DN      Raw UTR data.
-    DQ_RAW     Image      UInt8       Nreads x 4096 x 4160    None    Data quality flags unique to each pixel and read.
-    DQ         Image      UInt32      4096 x 4160             None    Data quality flags that apply to all reads.
     """
-    EXTENSIONS = {'DATA': IMAGE_UINT16_HDU, **DQ_RAW, **DQ_L0}
+    # uint16 for real detector data; float32 also accepted for simulations run
+    # with convert_to_uint16=False that intentionally keep continuous DN.
+    EXTENSIONS = {
+        'DATA': IMAGE_HDU(np.uint16 | np.float32, shape=('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), title='Raw UTR data.', units='DN'),
+        **DQ_RAW,
+        **DQ_L0,
+    }
+    # DQ_L0's generic 'Data quality.' title doesn't distinguish DQ from
+    # DQ_RAW here -- sharpen it for this model specifically.
+    EXTENSIONS['DQ'] = {**EXTENSIONS['DQ'], 'title': 'Data quality flags that apply to all reads.'}
 
     @property
     def data_level_suffix(self) -> str:
         return "raw"
-    
-    @property
-    def primary_extension_name(self):
-        return 'data'
 
     def get_delta_readtimes(self, n_channels=None, vertical = None) -> np.ndarray:
         """

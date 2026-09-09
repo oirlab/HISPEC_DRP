@@ -5,43 +5,22 @@ from .extensions import create_dataspec_extensions, create_specdq_extensions, cr
 
 __all__ = ['ReferenceEtalonModel']
 
-def _create_refetalon_extensions(num_fibers: int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC'))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_barycorr_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext.update(create_etalonfitparam_extensions(fiber=fiber))
-        ext.update(create_drift_extensions(fiber=fiber))
-    return ext
-
 
 class ReferenceEtalonModel(FiberAttributeProxyMixin, CalibrationModel):
     """
     Contains the reference etalon and corresponding parameters for wavelength drift corrections.
-
-    Extensions
-    ----------
-
-    HDU Name                HDU Type   Data Type   Dimensions      Units      Description
-    --------                --------   ---------   ----------      -----      -----------
-    SPEC_FIB#               Image      Float32     Nord x 4096     e-/s       Corresponding etalon spectrum.
-    SPEC_ERR_FIB#           Image      Float32     Nord x 4096     e-/s       Etalon spectrum error.
-    SPEC_VAR_POISSON_FIB#   Image      Float32     Nord x 4096     e-/s       Etalon spectrum Poisson variance.
-    SPEC_VAR_RNOISE_FIB#    Image      Float32     Nord x 4096     e-/s       Etalon spectrum read noise variance.
-    SPEC_DQ_FIB#            Image      UInt32      Nord x 4096     None       Etalon spectrum data quality.
-    MID_TIME_FIB#           Image      Float64     Nord x 4096     s          Mid time for each exposure.
-    WAVE_FIB#               Image      Float64     Nord x 4096     nm         Etalon spectrum wavelength grid.
-    ETALON_FITPARAMS_FIB#   Table      See below   See below       See below  Etalon fit parameters for each mode, order, and fiber.
-    DRIFT_FIB#              Table      See below   See below       See below  Drift correction table for each fiber.
     """
-    CAL_TYPE = 'ref_etalon'
 
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_refetalon_extensions(self.config.num_fibers))
-        return ext
+    EXTENSIONS = {
+        **create_dataspec_extensions(prefix='SPEC', title='Corresponding etalon spectrum.', units='e-/s'),
+        **create_specdq_extensions(title='Etalon spectrum data quality.'),
+        **create_barycorr_extensions(),
+        **create_wave_extensions(title='Etalon spectrum wavelength grid.', units='nm'),
+        **create_etalonfitparam_extensions(),
+        **create_drift_extensions(),
+    }
+
+    CAL_TYPE = 'ref_etalon'
 
     def on_init(self):
         super().on_init()
