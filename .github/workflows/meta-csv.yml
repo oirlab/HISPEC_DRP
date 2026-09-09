@@ -33,17 +33,17 @@ jobs:
     - name: Install the package
       run: |
         pip install .
-    - name: Generate meta.csv
+    - name: Generate hispec_metadata_schema.csv
       run: |
-        python -c "from hispecdrp.datamodels.utils import meta_to_csv; meta_to_csv('hispecdrp/datamodels/meta.csv')"
-    - name: Commit meta.csv if changed
+        python -c "from hispecdrp.datamodels.utils import meta_to_csv; meta_to_csv('hispecdrp/datamodels/metadata_schemas/hispec_metadata_schema.csv')"
+    - name: Commit hispec_metadata_schema.csv if changed
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add hispecdrp/datamodels/meta.csv
+        git add hispecdrp/datamodels/metadata_schemas/hispec_metadata_schema.csv
         if git diff --cached --quiet; then
-          echo "meta.csv unchanged"
+          echo "hispec_metadata_schema.csv unchanged"
         else
-          git commit -m "Update meta.csv [skip ci]"
+          git commit -m "Update hispec_metadata_schema.csv [skip ci]"
           git push
         fi

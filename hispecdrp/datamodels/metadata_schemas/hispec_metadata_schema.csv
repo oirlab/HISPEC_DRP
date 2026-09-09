@@ -1,0 +1,79 @@
+PROPERTY,TITLE,FITS_SECTION,FITS_KEYWORD,TYPE,UNIT,FITS_HDU,CAL_DB,ENUM,DEFAULT,MERGE_RULE,INCLUDE_ANCESTORS
+datetime_obs,Exposure observation datetime in format YYYY-MM-DDTHH:MM:SS.SSS,CORE,DATETOBS,string,,PRIMARY,datetime_obs,,,min,True
+last_processed,ISO 8601 datetime file was last processed YYYY-MM-DDTHH:MM:SS.SSS,CORE,LASTPROC,string,,PRIMARY,last_processed,,,drop,True
+filename,Name of the file,CORE,FILENAME,string,,PRIMARY,filename,,,drop,True
+file_type,Type of file,CORE,FILETYPE,string,,PRIMARY,,,FITS,first,False
+telescope,Telescope used to acquire the data,CORE,TELESCOP,string,,PRIMARY,,['Keck-II'],Keck-II,first,False
+model_type,Type of data model,CORE,DATAMODL,string,,PRIMARY,,,,drop,False
+drp_version,DRP version used to create this file,CORE,DRPVER,string,,PRIMARY,drp_version,,,drop,False
+note,Custom note,CORE,NOTE,string,,PRIMARY,note,,,drop,False
+cal_id,Unique calibration identifier,CALIBRATION,CALID,string,,PRIMARY,id,,,first,False
+cal_type,Type of calibration,CALIBRATION,CALTYPE,string,,PRIMARY,cal_type,,,first,False
+master_cal,Appropriate for calibrating data?,CALIBRATION,MASTCAL,boolean,,PRIMARY,master_cal,,,first,False
+cal_version,Calibration version,CALIBRATION,CALVER,string,,PRIMARY,cal_version,,,first,False
+origin,Origin of the calibration file,CALIBRATION,ORIGIN,string,,PRIMARY,origin,"['KECK', 'LOCAL']",,first,False
+exposure_type,Type of exposure,EXPOSURE,IMTYPE,string,,PRIMARY,,"['DARK', 'BIAS', 'DETFLAT', 'SPEC', 'NONE']",,first,False
+mjd_start,Exposure start Modified Julian Date of first read,EXPOSURE,MJDST,number,,PRIMARY,mjd_start,,,first,False
+mjd_mid,Exposure mid-point Modified Julian Date,EXPOSURE,MJDMID,number,,PRIMARY,,,,mean,False
+mbjd_mid,Exposure mid-point Modified Julian Date,EXPOSURE,MBJDMID,number,,PRIMARY,,,,mean,False
+read_mode,Readout mode,EXPOSURE,READMODE,string,,PRIMARY,read_mode,,DEFAULT,first,False
+exposure_time,Effective exposure time,EXPOSURE,EXPTIME,number,sec,PRIMARY,,,0,sum,True
+clock_rate,Clock rate of the readout of the detector,EXPOSURE,CLOCKRAT,number,Hz,PRIMARY,,,,first,False
+target_name,"Target or object name, internal or on-sky",TARGET,OBJECT,string,,PRIMARY,target_name,,,first,True
+target_ra,Target Right Ascension,TARGET,RA,number,degrees,PRIMARY,,,,mean,False
+target_dec,Target Declination,TARGET,DEC,number,degrees,PRIMARY,,,,mean,False
+target_ra_uncertainty,Target RA uncertainty,TARGET,URA,number,degrees,PRIMARY,,,,mean,False
+target_dec_uncertainty,Target Dec uncertainty,TARGET,UDEC,number,degrees,PRIMARY,,,,mean,False
+target_rapm,Target proper motion in RA,TARGET,RAPM,number,degrees,PRIMARY,,,,mean,False
+target_decpm,Target proper motion in Dec,TARGET,DECPM,number,degrees,PRIMARY,,,,mean,False
+airmass_start,Airmass at start of exposure,TARGET,AIRMAST,number,,PRIMARY,,,,first,False
+airmass_end,Airmass at end of exposure,TARGET,AIRMAEND,number,,PRIMARY,,,,first,False
+azimuth_start,Azimuth at start of exposure,TARGET,AZST,number,,PRIMARY,,,,first,False
+azimuth_end,Azimuth at end of exposure,TARGET,AZEND,number,,PRIMARY,,,,first,False
+elevation_start,Elevation at start of exposure,TARGET,ELSTART,number,,PRIMARY,,,,first,False
+elevation_end,Elevation at end of exposure,TARGET,ELEND,number,,PRIMARY,,,,first,False
+equinox,Equinox of coordinates,TARGET,EQUINOX,string,,PRIMARY,,,2000,first,False
+object_fiber1,Object name in fiber 1,TARGET,OBJFIB1,string,,PRIMARY,object_fiber1,"['SCIENCE', 'WHITELIGHT', 'LFC-R', 'LFC-B', 'ETALON-R', 'ETALON-B', 'UNe', 'GASCELL', 'SKY', 'SPECKLE', 'BLOCKED', 'NONE']",NONE,fiber_state,True
+object_fiber2,Object name in fiber 2,TARGET,OBJFIB2,string,,PRIMARY,object_fiber2,"['SCIENCE', 'WHITELIGHT', 'LFC-R', 'LFC-B', 'ETALON-R', 'ETALON-B', 'UNe', 'GASCELL', 'SKY', 'SPECKLE', 'BLOCKED', 'NONE']",NONE,fiber_state,True
+object_fiber3,Object name in fiber 3,TARGET,OBJFIB3,string,,PRIMARY,object_fiber3,"['SCIENCE', 'WHITELIGHT', 'LFC-R', 'LFC-B', 'ETALON-R', 'ETALON-B', 'UNe', 'GASCELL', 'SKY', 'SPECKLE', 'BLOCKED', 'NONE']",NONE,first,True
+distance_fiber1,Distance of fiber 1 from tracking axis,TARGET,DISTFIB1,number,arcseconds,PRIMARY,,,,first,True
+distance_fiber2,Distance of fiber 2 from tracking axis,TARGET,DISTFIB2,number,arcseconds,PRIMARY,,,,first,True
+distance_fiber3,Distance of fiber 3 from tracking axis,TARGET,DISTFIB3,number,arcseconds,PRIMARY,,,,first,True
+target_gaia_epoch,Epoch of Gaia coordinates,TARGET,GAIAEPCH,number,year,PRIMARY,,,2016.5,first,False
+target_gaia_id,Gaia DR3 source ID,TARGET,GAIAID,string,,PRIMARY,,,,first,False
+target_gaia_px,Gaia DR3 parallax,TARGET,GAIAPX,number,mas,PRIMARY,,,,first,False
+target_gaia_ra,Gaia DR3 RA,TARGET,GAIARA,number,degrees,PRIMARY,,,,first,False
+target_gaia_dec,Gaia DR3 Dec,TARGET,GAIADEC,number,degrees,PRIMARY,,,,first,False
+target_gaia_decpm,Gaia DR3 proper motion in Dec,TARGET,GAIADCPM,number,degrees,PRIMARY,,,,first,False
+target_gaia_rapm,Gaia DR3 proper motion in RA,TARGET,GAIARAPM,number,degrees,PRIMARY,,,,first,False
+target_gaia_teff,Gaia DR3 effective temperature,TARGET,GAIATEFF,number,K,PRIMARY,,,,first,False
+target_gaia_rvsys,Gaia DR3 radial velocity,TARGET,GAIARVSY,number,km/s,PRIMARY,,,,first,False
+target_gaia_vbroad,Gaia DR3 broadening (vsini),TARGET,GAIAVBRO,number,km/s,PRIMARY,,,,first,False
+target_2mass_id,2MASS ID,TARGET,TMASSID,string,,PRIMARY,,,,first,False
+target_2mass_mag_j,2MASS J-band magnitude,TARGET,TMAGJ,number,,PRIMARY,,,,first,False
+target_2mass_mag_h,2MASS H-band magnitude,TARGET,TMAGH,number,,PRIMARY,,,,first,False
+target_2mass_mag_ks,2MASS Ks-band magnitude,TARGET,TMAGKS,number,,PRIMARY,,,,first,False
+force_berv_m_s,Forced barycentric Earth radial velocity (simulations),TARGET,FBERV,number,m/s,PRIMARY,,,,first,False
+instrument_name,Instrument name,INSTRUMENT,INSTRUME,string,,PRIMARY,,['HISPEC'],HISPEC,first,False
+instrument_era,Instrument era specified with semver,INSTRUMENT,INSTERA,string,,PRIMARY,instrument_era,,,first,False
+instrument_mode,Instrument mode,INSTRUMENT,INSTMODE,string,,PRIMARY,instrument_mode,"['YJHK', 'YJ', 'HK']",,first,False
+lfc_nu0,LFC nu0,INSTRUMENT,LFCNU0,number,GHz,PRIMARY,,,,first,False
+lfc_delta_nu,LFC delta nu,INSTRUMENT,LFCDELNU,number,GHz,PRIMARY,,,,first,False
+order_start,Starting echelle order of the data array,INSTRUMENT,ORDERST,integer,,PRIMARY,,,,first,False
+order_end,End echelle order of the data array,INSTRUMENT,ORDEREND,integer,,PRIMARY,,,,first,False
+spectrograph,Spectrograph name,INSTRUMENT,SPECTROG,string,,PRIMARY,spectrograph,"['BSPEC', 'RSPEC']",,first,False
+n_channels,Number of spectral channels,INSTRUMENT,NCHANLS,integer,,PRIMARY,,,64,first,False
+n_refpixs,Number of reference pixels on each side of the detector,INSTRUMENT,NREFPXS,integer,,PRIMARY,,,4,first,False
+ref_channel_position,Position of the reference channel in the data array,INSTRUMENT,REFCHPOS,string,,PRIMARY,,"['TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'NONE']",RIGHT,first,False
+channels_are_vertical,Are the spectral channels aligned vertically in the data array?,INSTRUMENT,CHANVERT,boolean,,PRIMARY,,,True,first,False
+orders_are_vertical,Are the echelle orders aligned vertically in the data array?,INSTRUMENT,ORDVERT,boolean,,PRIMARY,,,True,first,False
+koa_id,KOA ID,KOA,KOAID,string,,PRIMARY,koa_id,,,drop,False
+koa_filepath,KOA file handle,KOA,KOAFILEP,string,,PRIMARY,koa_filepath,,,drop,False
+koa_date_obs,KOA observation date YYYY-MM-DD,KOA,DATE-OBS,string,,PRIMARY,,,,first,False
+koa_utc_obs,KOA observation UTC HH:MM:SS.S,KOA,UT,string,,PRIMARY,,,,first,False
+program_name,Program name,PROGRAM,PROGNAME,string,,PRIMARY,,,,first,False
+data_quality,Data quality flag at the exposure level,DATA_QUALITY,DATAQUAL,string,,PRIMARY,data_quality,"['GOOD', 'BAD']",GOOD,first,False
+median_dark_current,Median dark current,DATA_QUALITY,MEDDARK,number,DN/s,PRIMARY,,,,mean,True
+median_bias_level,Median bias level,DATA_QUALITY,MEDBIAS,number,DN,PRIMARY,,,,mean,True
+median_kTC_level,Median kTC noise level,DATA_QUALITY,MEDKTC,number,DN,PRIMARY,,,,mean,True
+median_flat_whitelamp_intensity,Median flat white lamp intensity,DATA_QUALITY,MEDFLAT,number,DN/s,PRIMARY,,,,mean,True
