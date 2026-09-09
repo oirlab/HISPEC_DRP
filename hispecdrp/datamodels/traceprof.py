@@ -20,12 +20,12 @@ class TraceProfModel(FiberAttributeProxyMixin, CalibrationModel):
     # spectral extensions (Nord x 4096) -> (N_ORDERS, DETECTOR_SIZE_Y). None of
     # these declare a `default` (no auto-initialization either way).
     EXTENSIONS = {
-        'PROF': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='2-D spatial profile (fiberflat).'),
-        'PROF_ERR': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='Profile errors for fiber #.'),
-        'SHEAR': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Iso-λ shear ∂row/∂col (LFC).'),
-        'SIGMA_SPEC': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spectral Gaussian σ (pix).'),
-        'SIGMA_SPAT': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spatial Gaussian σ (pix).'),
-        'MOM2_CROSS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='cov(row, col) (pix²).'),
+        'PROF': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), enumerate='FIB', title='2-D spatial profile (fiberflat).', default=0),
+        'PROF_ERR': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), enumerate='FIB', title='Profile errors for fiber #.',  default=0),
+        'SHEAR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Iso-λ shear ∂row/∂col (LFC).',  default=0),
+        'SIGMA_SPEC': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spectral Gaussian σ (pix).', default=0),
+        'SIGMA_SPAT': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='Spatial Gaussian σ (pix).', default=0),
+        'MOM2_CROSS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), enumerate='FIB', title='cov(row, col) (pix²).',  default=0),
     }
 
     CAL_TYPE = 'traceprof'

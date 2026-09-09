@@ -12,9 +12,27 @@ class GainModel(CalibrationModel):
     The detector gain specifies the conversion factor between electrons and data numbers (DN) for each pixel in the detector.
     """
     EXTENSIONS = {
-        f'GAIN': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Gain map.', units='DN'),
-        f'RN': IMAGE_HDU(np.float32, default=0, title='Read noise map.', units='DN'),
-        f'COV': IMAGE_HDU(np.float32, default=0, title='Covariance map.', units='DN^2'),
+        f'GAIN': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Gain map.',
+            units='DN'
+        ),
+        f'RN': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Read noise map.',
+            units='DN'
+        ),
+        f'COV': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Covariance map.',
+            units='DN^2'
+        ),
         **DQ_L0
     }
     CAL_TYPE = 'gain'
