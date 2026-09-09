@@ -403,7 +403,7 @@ def find_trace_positions(
             #plt.plot(good, trace_centroids[i, good], 'o')
             #plt.plot(np.arange(ny), np.polyval(coeffs_pos[i, :], np.arange(ny)))
             # plt.plot(good, trace_centroids[i, good] - np.polyval(coeffs_pos[i, :], good), 'o'); plt.show()
-            plt.show()
+            #plt.show()
         good = np.where(np.isfinite(trace_widths[i, :]))[0]
         if len(good) >= deg_width + 1:
             coeffs_width[i, :] = np.polyfit(good, trace_widths[i, good], deg_width)

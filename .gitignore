@@ -98,7 +98,7 @@ docs/_build/
 docs/build/
 # Generated at Sphinx conf import from _static/notebooks/*.ipynb
 docs/source/_static/basic_usage_notebook_embed.js
-docs/source/_static/notebook_embeds.*.js
+docs/source/_static/notebook_embeds*.js
 docs/html
 docs/doctrees
 **/api/generated/**

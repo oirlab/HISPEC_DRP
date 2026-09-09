@@ -51,104 +51,69 @@ def make_stage0_cals(
     kTC_noise : float | None = 50.0,
     dark_current : float | None = 0.0,
     flat_level : float | None = 1.0,
-    saturation_threshold : int | None = 65535
 ):
 
     cals = {}
 
     # --- Create DQ init map ---
-    dqinit_map = np.zeros(shape, dtype=np.uint32)
-    
-    # set row to bad
-    dqinit_model = datamodels.DQModel(
-        dq=dqinit_map,
-        meta=meta
-    )
-    cals['dq'] = dqinit_model
-    
+    cals['dq'] = datamodels.DQModel(shape=shape, meta=meta)
+
     if nonlin_coeffs is not None:
         nonlin_coeffs = np.broadcast_to(nonlin_coeffs[::-1, None, None], (np.size(nonlin_coeffs), *shape))
         max = np.full(shape, fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
         thresh = max
-        nonlin_model = datamodels.NonlinearCorrectionModel(
+        cals['nonlin'] = datamodels.NonlinearCorrectionModel(meta=meta)
+        cals['nonlin'].coeffs
+        cals['nonlin'] = datamodels.NonlinearCorrectionModel(
             coeffs=nonlin_coeffs,
             nonlin_thresh=thresh,
             nonlin_max=max,
+            dq=cals['dq'].dq,
             meta=meta,
-            dq=dqinit_map,
         )
-        cals['nonlin'] = nonlin_model
 
     # --- Create saturation threshold map ---
-    if saturation_threshold is not None:
-        saturation_threshold = np.iinfo(np.uint16).max  # DN
-        saturation_map = np.full(shape, saturation_threshold, dtype=np.uint16)
-        saturation_model = datamodels.SaturationModel(
-            sat_thresh=saturation_map,
-            meta=meta,
-            dq=dqinit_map,
-        )
-        cals['saturation'] = saturation_model
+    cals['saturation'] = datamodels.SaturationModel(shape=shape, meta=meta)
 
     # --- Create random gain map ---
     if gain is not None:
-        gain_map = np.full(shape, gain, dtype=np.float32)
-        gain_model = datamodels.GainModel(
-            gain=gain_map,
+        cals['gain'] = datamodels.GainModel(
+            gain=np.full(shape, gain, dtype=np.float32),
             cov=np.zeros((2, 2, *shape), dtype=np.float32),
             meta=meta,
-            dq=dqinit_map,
         )
-        cals['gain'] = gain_model
 
     gain_map = cals['gain'].gain if 'gain' in cals else np.ones(shape, dtype=np.float32)
 
     # --- Create bias map ---
     if bias is not None:
-        bias_map = np.full(shape, bias, dtype=np.float32)
         bias_model = datamodels.BiasModel(
-            bias=bias_map / gain_map,  # Bias DataModel in DN
-            ktc=np.full_like(bias_map, kTC_noise / gain_map),  # KTC noise in DN RMS
+            bias=np.full(shape, bias / gain_map, dtype=np.float32),  # Bias DataModel in DN
+            ktc=np.full(shape, kTC_noise / gain_map, dtype=np.float32),  # KTC noise in DN RMS
             meta=meta,
-            dq=dqinit_map,
         )
         cals['bias'] = bias_model
 
     # --- Create random read noise map ---
     if read_noise is not None:
-        rn_map = np.full(shape, read_noise, dtype=np.float32)
         rn_model = datamodels.ReadNoiseModel(
-            rn=rn_map / gain_map,  # read noise DataModel in DN RMS
-            rn_err=np.zeros_like(rn_map),
+            rn=np.full(shape, read_noise, dtype=np.float32) / gain_map,  # read noise DataModel in DN RMS
             meta=meta,
-            dq=dqinit_map,
         )
         cals['rn'] = rn_model
 
     # --- Create random dark current map ---
     if dark_current is not None:
-        dark_map = np.full(shape, dark_current, dtype=np.float32)
-        dark_model = datamodels.DarkModel(
-            rate=dark_map / gain_map,  # dark current DataModel in DN RMS
-            rate_err=np.zeros_like(dark_map),
-            rate_var_rnoise=np.zeros_like(dark_map),
-            rate_var_poisson=np.zeros_like(dark_map),
+        cals['dark'] = datamodels.DarkModel(
+            rate=np.full(shape, dark_current / gain_map, dtype=np.float32),  # dark current DataModel in DN RMS
             meta=meta,
-            dq=dqinit_map,
         )
-        cals['dark'] = dark_model
 
     if flat_level is not None:
-        flat_map = np.full(shape, flat_level, dtype=np.float32)
-        flat_model = datamodels.DetectorFlatModel(
-            flat=flat_map,
-            flat_err=np.zeros_like(flat_map),
-            flat_var_rnoise=np.zeros_like(flat_map),
-            flat_var_poisson=np.zeros_like(flat_map),
+        cals['detflat'] = datamodels.DetectorFlatModel(
+            flat=np.full(shape, flat_level, dtype=np.float32),
             meta=meta,
-            dq=dqinit_map,
         )
-        cals['detflat'] = flat_model
 
     return cals
 

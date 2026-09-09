@@ -1,5 +1,5 @@
 Data Handling
--------------
+=============
 
 Open Model
 ++++++++++
@@ -66,6 +66,46 @@ Instead of reading in a datamodel from a file, one can instantiate a datamodel f
 
 
 **NOTE**: When instantiating new datamodels without a file, one should at minimum pass the ``datetime_obs`` keyword to the metadata, or it will adopt the current time as the observation time.
+
+
+Auto Initialization
+-------------------
+
+Datamodels containing array extensions can be auto initialized to a given shape with a default fill value. The array is auto initialized upon the first attribute access.
+
+.. code-block:: python
+
+    from hispecdrp import datamodels
+    model = datamodels.L0Model(
+        rate=np.ones((4096, 4160), dtype=np.float32),
+    )
+    print(model.has_extension('rate_err')) # -> True
+    print(model.has_extension_value('rate_err')) # -> False
+    print(model.rate_err) # -> array of shape (4096, 4160) filled with zeros
+
+
+Fiber Views
+-----------
+
+Many models have extensions enumerated by fiber (e.g, ``model.spec_fib1, model.spec_fib2, model.spec_fib3``). 
+
+Instead of accessing the fiber extensions directly, one can use
+
+.. code-block:: python
+
+    from hispecdrp import datamodels
+    model = datamodels.L2Model()
+    
+    model[1].spec # => model.spec_fib1
+    model[2].spec # => model.spec_fib2
+
+    # Alternatively:
+    model.spec[1] # => model.spec_fib1
+
+    # Other exts:
+    model[1].wave # => model.wave_fib1
+    model[1].spec_err # => model.spec_err_fib1
+
 
 Processing History
 ++++++++++++++++++

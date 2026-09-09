@@ -66,7 +66,7 @@ class MakeFiberflatPrimitive(BasePrimitive):
             setattr(
                 ff_output_model,
                 f'SPEC_DQ_FIB{fiber}',
-                getattr(ff_model, f'SPEC_DQ_FIB{fiber}')
+                getattr(ff_model, f'SPEC_UNCAL_DQ_FIB{fiber}')
             )
 
             setattr(

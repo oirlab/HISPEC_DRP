@@ -1,93 +1,38 @@
 
 from .base_model import DataModel
 from .mixins import FiberAttributeProxyMixin
-from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_drift_extensions, create_etalonfitparam_extensions
+from .extensions import create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_midtime_extensions, create_barycorr_extensions, create_starmodel_extensions, create_throughput_extensions, create_rv_extensions, create_sky_extensions, create_telluric_extensions, create_trans_extensions, create_drift_extensions, create_etalonfitparam_extensions, create_fluxabs_extensions
 
 __all__ = ['L2Model']
-
-def _create_l2_extensions(num_fibers : int):
-    ext = {}
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC_UNCAL'))
-    for fiber in range(1, num_fibers + 1):
-        ext.update(create_dataspec_extensions(fiber=fiber, prefix='SPEC'))
-        ext.update(create_specdq_extensions(fiber=fiber))
-        ext.update(create_wave_extensions(fiber=fiber))
-        ext.update(create_drift_extensions(fiber=fiber))
-        ext.update(create_midtime_extensions(fiber=fiber))
-        ext.update(create_barycorr_extensions(fiber=fiber))
-        ext.update(create_starmodel_extensions(fiber=fiber))
-        ext.update(create_throughput_extensions(fiber=fiber))
-        ext.update(create_rv_extensions(fiber=fiber))
-        ext.update(create_sky_extensions(fiber=fiber))
-        ext.update(create_telluric_extensions(fiber=fiber))
-        ext.update(create_trans_extensions(fiber=fiber))
-        ext.update(create_etalonfitparam_extensions(fiber=fiber))
-    return ext
 
 class L2Model(FiberAttributeProxyMixin, DataModel):
     """
     HISPEC Level 2 (L2) data products are fully calibrated science-level data. These products retain the original Level 1 spectra to simplify tracking of data processing steps. Additionally, they include advanced calibrations such as sky subtraction, blaze correction, telluric correction, and stellar radial velocity (RV) measurements. Data products from BSPEC and RSPEC are still kept separate.
-
-    Extensions
-    ----------
-
-    HDU Name                        HDU Type   Data Type   Dimensions      Units            Description
-    --------                        --------   ---------   ----------      -----            -----------
-    SPEC_UNCAL_FIB#                 Image      Float32     Nord x 4096     e-/s             L1 spectrum.
-    SPEC_UNCAL_ERR_FIB#             Image      Float32     Nord x 4096     e-/s             L1 spectrum error (all sources).
-    SPEC_UNCAL_VAR_POISSON_FIB#     Image      Float32     Nord x 4096     e-/s             L1 spectrum variance (Poisson).
-    SPEC_UNCAL_VAR_RNOISE_FIB#      Image      Float32     Nord x 4096     e-/s             L1 spectrum variance (read noise).
-    SPEC_UNCAL_DQ_FIB#              Image      Float32     Nord x 4096     e-/s             L1 spectrum data quality.
-    SPEC_FIB#                       Image      Float32     Nord x 4096     e-/s (or W/m²/µm) Calibrated spectrum.
-    SPEC_ERR_FIB#                   Image      Float32     Nord x 4096     e-/s             Calibrated spectrum error (all sources).
-    SPEC_VAR_POISSON_FIB#           Image      Float32     Nord x 4096     (e-/s)²          Calibrated spectrum variance (Poisson).
-    SPEC_VAR_RNOISE_FIB#            Image      Float32     Nord x 4096     (e-/s)²          Calibrated spectrum variance (read noise).
-    SPEC_DQ_FIB#                    Image      Uint32      Nord x 4096     None             Calibrated spectrum data-quality flags.
-    MID_TIME_FIB#                   Image      Float32     Nord x 4096     MJD              Flux-weighted exposure mid-point times.
-    BARY_CORR_FIB#                  Table      See below   See below       See below        Barycentric correction information.
-    WAVE_FIB#                       Image      Float64     Nord x 4096     micron           Drift corrected wavelength solution in rest frame of the instrument.
-    TRANS_FIB#                      Image      Float32     Nord x 4096     None             Transmission correction.
-    TRANS_ERR_FIB#                  Image      Float32     Nord x 4096     None             Transmission correction error (all sources).
-    SKY_FIB#                        Image      Float32     Nord x 4096     None             Sky spectrum or model.
-    SKY_ERR_FIB#                    Image      Float32     Nord x 4096     None             Sky spectrum error (all sources).
-    STAR_MOD_FIB#                   Image      Float32     Nord x 4096     W/m²/µm         Stellar model spectrum Doppler shifted according to Barycenter OR RVs.
-    E2E_TPUT_FIB#                   Image      Float32     Nord x 4096     None             End-to-end throughput derived from STAR_MOD.
-    TEL_FIB#                        Image      Float32     Nord x 4096     None             Telluric model spectrum.
-    TEL_ERR_FIB#                    Image      Float32     Nord x 4096     None             Telluric model spectrum error (all sources).
-    FLUX_ABS_FIB#                   Image      Float32     Nord x 4096     W/m²/µm         Spectrum in absolute flux units.
-    FLUX_ABS_ERR_FIB#               Image      Float32     Nord x 4096     W/m²/µm         Absolute spectrum error (all sources).
-    FLUX_ABS_VAR_POISSON_FIB#       Image      Float32     Nord x 4096     (W/m²/µm)²      Absolute spectrum variance (Poisson).
-    FLUX_ABS_VAR_RNOISE_FIB#        Image      Float32     Nord x 4096     (W/m²/µm)²      Absolute spectrum variance (read noise).
-    DRIFT_PIX_FIB#                  Image      Float64     Nord x 4096     e-/s             Drift measured by etalon in pixels for each pixel.
-    DRIFT_ERR_PIX_FIB#              Image      Float64     Nord x 4096     e-/s             Drift error in pixels for each pixel.
-    DRIFT_WAVE_FIB3#                Image      Float64     Nord x 4096     e-/s             Drift measured by etalon in microns for each pixel.
-    DRIFT_ERR_WAVE_FIB#             Image      Float64     Nord x 4096     e-/s             Drift error in microns for each pixel.
-    RVCCF_FIB#                      Table      See below   See below       See below        Per-chunk RVs and raw CCF(v) (stellar RV).
-    RVCCFAGG_FIB#                   Table      See below   See below       See below        RVs aggregated across chunks.
     """
 
-    # def __init__(self, *args, **kwargs):
-    #     config = kwargs.get('config', None)
-    #     if config is None:
-    #         config = self._get_instrument_config(
-    #             meta=kwargs.get('meta', None),
-    #             filepath=kwargs.get('filepath', None),
-    #             instrument_name=kwargs.get('instrument_name', None),
-    #         )
-    #     self.EXTENSIONS = self.EXTENSIONS.copy()
-    #     self.EXTENSIONS.update(_create_l2_extensions(config.num_fibers))
-    #     super().__init__(*args, **kwargs)
-
-    def _get_extensions(self):
-        ext = self.EXTENSIONS.copy()
-        ext.update(_create_l2_extensions(self.config.num_fibers))
-        return ext
+    EXTENSIONS = {
+        **create_dataspec_extensions(prefix='SPEC_UNCAL', title='L1 spectrum.', units='e-/s'),
+        **create_specdq_extensions(prefix='SPEC_UNCAL', title='Uncalibrated spectrum data-quality flags.'),
+        **create_dataspec_extensions(prefix='SPEC', title='Calibrated spectrum.', units='e-/s'),
+        **create_specdq_extensions(title='Calibrated spectrum data-quality flags.'),
+        **create_wave_extensions(title='Drift corrected wavelength solution in rest frame of the instrument.'),
+        **create_drift_extensions(),
+        **create_midtime_extensions(title='Flux-weighted exposure mid-point times.'),
+        **create_barycorr_extensions(),
+        **create_starmodel_extensions(title='Stellar model spectrum Doppler shifted according to Barycenter OR RVs.', units='W/m^2/micron'),
+        **create_throughput_extensions(title='End-to-end throughput derived from STAR_MOD.'),
+        **create_rv_extensions(),
+        **create_sky_extensions(title='Sky spectrum or model.', units='e-/s'),
+        **create_telluric_extensions(),
+        **create_trans_extensions(),
+        **create_etalonfitparam_extensions(),
+        **create_fluxabs_extensions(),
+    }
 
     @property
     def data_level_suffix(self):
         return 'spec'
-    
+
     @property
     def primary_extension_name(self):
         for fiber in range(1, self.config.num_fibers + 1):
@@ -96,3 +41,20 @@ class L2Model(FiberAttributeProxyMixin, DataModel):
             if self.has_extension_value(f'spec_uncal_fib{fiber}'):
                 return f'spec_uncal_fib{fiber}'
         return None
+
+    @classmethod
+    def from_datamodels(cls, *args, **kwargs) -> 'DataModel':
+
+        # Initialize the L2 model
+        model_out = super().from_datamodels(*args, **kwargs)
+
+        # Copy the uncal spectrum into the calibrated spectrum
+        for fiber in range(1, model_out.num_fibers + 1):
+            if model_out.has_extension_value(f'spec_uncal_fib{fiber}'):
+                model_out[fiber].spec = model_out[fiber].spec_uncal.copy()
+                model_out[fiber].spec_err = model_out[fiber].spec_uncal_err.copy()
+                model_out[fiber].spec_var_rnoise = model_out[fiber].spec_uncal_var_rnoise.copy()
+                model_out[fiber].spec_var_poisson = model_out[fiber].spec_uncal_var_poisson.copy()
+                model_out[fiber].spec_dq = model_out[fiber].spec_uncal_dq.copy()
+
+        return model_out

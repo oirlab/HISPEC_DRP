@@ -5,6 +5,61 @@ import numpy as np
 import os
 from hispecdrp.utils import download_gdrive_file
 
+
+def test_datamodel_default_extensions():
+    """
+    Single-extension-family calibration/data models (BiasModel, DarkModel,
+    DetectorFlatModel, GainModel, ReadNoiseModel, SaturationModel, RampModel,
+    L0Model, DQModel, NonlinearCorrectionModel) should NOT override
+    `primary_extension_name`: the base `DataModel` default (the first
+    non-special key declared in `EXTENSIONS`) already resolves to the right
+    extension for these. Multi-fiber models (e.g. L1Model, L2Model,
+    GaussianLSFModel) must keep their dynamic override, since the base
+    default can't know which fiber was actually populated.
+    """
+    primary_ext_names = {
+        datamodels.BiasModel: 'bias',
+        datamodels.DarkModel: 'rate',
+        datamodels.DetectorFlatModel: 'flat',
+        datamodels.GainModel: 'gain',
+        datamodels.ReadNoiseModel: 'rn',
+        datamodels.SaturationModel: 'sat_thresh',
+        datamodels.RampModel: 'data',
+        datamodels.L0Model: 'rate',
+        datamodels.DQModel: 'dq',
+        datamodels.NonlinearCorrectionModel: 'coeffs',
+    }
+    for cls, expected in primary_ext_names.items():
+        assert 'primary_extension_name' not in cls.__dict__, (
+            f"{cls.__name__} should rely on DataModel's default primary_extension_name"
+        )
+        model = cls()
+        assert model.primary_extension_name.lower() == expected
+        # DETECTOR_SIZE_Y/X fallback: with no data or explicit `shape=` given
+        # anywhere on the model, sibling extensions declared with
+        # shape=(DETECTOR_SIZE_Y, DETECTOR_SIZE_X) (e.g. DQ, present on every
+        # one of these models) still auto-initialize to the real detector size.
+        # (`model.shape` itself is a separate, simpler property that only
+        # reflects the primary extension's actually-assigned data -- it has no
+        # detector-size fallback of its own.)
+        assert model.dq.shape == model.config.DETECTOR_SIZE
+
+    # Multi-fiber models must keep their dynamic override (returns None until a
+    # fiber's extension is actually set -- the static base default would guess wrong).
+    multi_fiber_models = [
+        datamodels.GaussianLSFModel,
+        datamodels.L1Model,
+        datamodels.L2Model,
+        datamodels.ReferenceEtalonModel,
+        datamodels.FiberflatModel,
+    ]
+    for cls in multi_fiber_models:
+        assert 'primary_extension_name' in cls.__dict__, (
+            f"{cls.__name__} must keep its dynamic primary_extension_name override"
+        )
+        model = cls()
+        assert model.primary_extension_name is None
+
 def test_hispec_level0(tmp_path, datadir):
     
     # Science file (just tellurics)
@@ -58,9 +113,8 @@ def test_hispec_level0(tmp_path, datadir):
 
 def test_parvi_level0(tmp_path, datadir):
 
-    import os
-    os.environ['HISPECDRP_INSTRUMENT_NAME'] = 'PARVI'
-    
+    datamodels.set_instrument('PARVI')
+
     # Science file (just tellurics)
     filepath = download_gdrive_file('PR.20260131.80205.77_rate-SOLAR.fits', output_dir=datadir)
 

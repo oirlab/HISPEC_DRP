@@ -46,6 +46,18 @@ class _FiberView:
     def __repr__(self):
         return f'<_FiberView fiber={self._fiber!r}>'
 
+    def __dir__(self):
+        # e.g. 'SPEC_ERR_FIB1' -> 'spec_err', for fiber=1 -- so
+        # `model[1].<TAB>` completes to the same names `model.<TAB>_fib1`
+        # would, without the suffix.
+        suffix = f'_FIB{self._fiber}'.upper()
+        bases = (
+            extname[:-len(suffix)].lower()
+            for extname in self._model.EXTENSIONS
+            if extname.upper().endswith(suffix)
+        )
+        return sorted({*super().__dir__(), *bases})
+
 
 class FiberAttributeProxyMixin:
     """
