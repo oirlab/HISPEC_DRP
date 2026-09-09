@@ -1,5 +1,6 @@
 from __future__ import annotations # NOTE: Not needed in Python 3.13+
 import importlib
+import inspect
 import os
 import re
 from astropy.table import Table, Column
@@ -253,25 +254,28 @@ class DataModel:
         return getattr(config, 'DETECTOR_SIZE', None)
 
     @classmethod
-    def extensions_table(cls) -> str:
+    def _extensions_rows(cls) -> tuple[list[str], list[list[str]], list[str]]:
         """
-        Render a "HDU Name / HDU Type / Data Type / Dimensions / Units /
-        Description" table straight from ``cls.EXTENSIONS`` -- the same
-        single source of truth auto-init reads, so this can never drift
-        from it the way a hand-written docstring table could. ``title=``/
-        ``units=`` (see :func:`.extensions.IMAGE_HDU`/:func:`.extensions.TABLE_HDU`)
-        fill the Description/Units columns; everything else (name, HDU
-        type, dtype, shape) is read directly off the extension.
-        ``DETECTOR_SIZE_Y``/``DETECTOR_SIZE_X`` render as real numbers (see
-        :meth:`_doc_default_detector_size`); other symbolic axes (``N_ORDERS``,
-        etc.) stay symbolic since they have no single fixed doc-time answer.
+        Shared data behind both :meth:`extensions_table` (plain aligned text,
+        for standalone/interactive use, e.g. ``help()``) and the RST table
+        spliced into the class docstring by :meth:`__init_subclass__` --
+        one source of truth read straight from ``cls.EXTENSIONS``, so
+        neither can drift from it the way a hand-written docstring table
+        could. ``title=``/``units=`` (see :func:`.extensions.IMAGE_HDU`/
+        :func:`.extensions.TABLE_HDU`) fill the Description/Units columns;
+        everything else (name, HDU type, dtype, shape) is read directly off
+        the extension. ``DETECTOR_SIZE_Y``/``DETECTOR_SIZE_X`` render as
+        real numbers (see :meth:`_doc_default_detector_size`); other
+        symbolic axes (``N_ORDERS``, etc.) stay symbolic since they have no
+        single fixed doc-time answer.
 
-        Spliced automatically into the class docstring by
-        :meth:`__init_subclass__` -- call this directly only if you need
-        the table standalone (e.g. to print it, or embed it elsewhere).
-        Returns ``''`` (nothing gets spliced in) when there are no
-        non-special extensions to show, e.g. for an abstract intermediate
-        base class.
+        Returns
+        -------
+        headers : list[str]
+        rows : list[list[str]]
+        tag_notes : list[str]
+            One explanatory line per enumerate tag in use, e.g. "'_FIB#' in
+            an HDU name denotes the fiber number."
         """
         detector_size = cls._doc_default_detector_size()
         rows = []
@@ -297,22 +301,40 @@ class DataModel:
                 hdu_name, hdu_type, dtype, dims,
                 info.get('units') or '', info.get('title') or '',
             ])
+
+        headers = ['HDU Name', 'HDU Type', 'Data Type', 'Dimensions', 'Units', 'Description']
+        # Explain what '#' means for every enumerate tag actually used below,
+        # e.g. '_FIB#' -> the fiber number -- read before the table that uses it.
+        tag_notes = [
+            f"'_{tag}#' in an HDU name denotes "
+            f"{_DOC_TABLE_ENUMERATE_MEANING.get(tag, f'the {tag.lower()} number')}."
+            for tag in sorted(tags)
+        ]
+        return headers, rows, tag_notes
+
+    @classmethod
+    def extensions_table(cls) -> str:
+        """
+        Render the "HDU Name / HDU Type / Data Type / Dimensions / Units /
+        Description" table from :meth:`_extensions_rows` as plain,
+        whitespace-aligned text -- the layout ``help()`` and other
+        interactive tools show. Spliced into the class docstring (as a
+        proper RST table, not this plain-text form) by
+        :meth:`__init_subclass__`; call this directly only if you need the
+        plain-text table standalone (e.g. to print it, or embed it
+        elsewhere). Returns ``''`` when there are no non-special extensions
+        to show, e.g. for an abstract intermediate base class.
+        """
+        headers, rows, tag_notes = cls._extensions_rows()
         if not rows:
             return ''
 
-        headers = ['HDU Name', 'HDU Type', 'Data Type', 'Dimensions', 'Units', 'Description']
         widths = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
 
         def fmt_row(cells):
             return '    '.join(cell.ljust(width) for cell, width in zip(cells, widths)).rstrip()
 
-        # Explain what '#' means for every enumerate tag actually used below,
-        # e.g. '_FIB#' -> the fiber number -- right under the section header,
-        # so it reads before the table that uses it.
-        lines = []
-        for tag in sorted(tags):
-            meaning = _DOC_TABLE_ENUMERATE_MEANING.get(tag, f'the {tag.lower()} number')
-            lines.append(f"'_{tag}#' in an HDU name denotes {meaning}.")
+        lines = list(tag_notes)
         if lines:
             lines.append('')
 
@@ -877,14 +899,56 @@ class DataModel:
             if 'RECEIPT' in cls.EXTENSIONS:
                 cls.EXTENSIONS = {**{k: v for k, v in cls.EXTENSIONS.items() if k != 'RECEIPT'}, 'RECEIPT': cls.EXTENSIONS['RECEIPT']}
 
-        # Splice a generated "Extensions" table (see extensions_table) onto
+        # Splice a generated "Extensions" table (see _extensions_rows) onto
         # the docstring now that EXTENSIONS is in its final, fully-merged
         # form -- keeps the docstring in sync with EXTENSIONS automatically
         # instead of relying on a hand-maintained table that can drift.
-        table = cls.extensions_table()
-        if table:
-            doc = (cls.__doc__ or '').rstrip()
-            cls.__doc__ = f"{doc}\n\n    Extensions\n    ----------\n\n{table}\n    "
+        headers, rows, tag_notes = cls._extensions_rows()
+        if rows:
+            # inspect.cleandoc (not just .rstrip()) matters here: Python's compiler
+            # only started dedenting docstrings at compile time in 3.13, so on
+            # 3.11/3.12 cls.__doc__ still carries its raw 4-space source indent.
+            # Without normalizing that away first, appending our own lines below
+            # at a *guessed* indent goes wrong on whichever Python version guessed
+            # wrong -- e.g. appending at 4 spaces when the base doc is already
+            # dedented to 0 makes our lines look more indented than the paragraph
+            # above them, which RST reads as a block quote (hence the stray left
+            # border). Normalize once here so both this text and the appended
+            # block always share the same, known 0-indent baseline.
+            doc = inspect.cleandoc(cls.__doc__ or '').rstrip()
+            # A raw "Extensions\n----------" section title isn't one of the
+            # numpydoc sections napoleon rewrites (Parameters, Returns, ...), so it
+            # reaches docutils as a literal RST section title -- which autodoc's
+            # "Unexpected section title" rejects, since a directive's content may
+            # only hold body elements, not structural ones. Plain **bold** text is
+            # a body element instead (and, unlike `.. rubric::`, isn't italicized
+            # by the theme). The table itself is a real `list-table` (relative
+            # column widths from the same character counts extensions_table()
+            # uses for alignment) so it renders as an actual bordered table, not a
+            # preformatted/code-block one.
+            widths = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+
+            def rst_row(cells):
+                first, *rest = cells
+                out = [f'   * - {first}']
+                out.extend(f'     - {cell}' for cell in rest)
+                return out
+
+            block = ['**Extensions**', '']
+            block += list(tag_notes)
+            if tag_notes:
+                block.append('')
+            block += [
+                '.. list-table::',
+                '   :header-rows: 1',
+                '   :widths: ' + ' '.join(str(w) for w in widths),
+                '',
+            ]
+            block += rst_row(headers)
+            for row in rows:
+                block += rst_row(row)
+
+            cls.__doc__ = f"{doc}\n\n" + '\n'.join(block)
 
     def copy(self) -> Self:
         """
