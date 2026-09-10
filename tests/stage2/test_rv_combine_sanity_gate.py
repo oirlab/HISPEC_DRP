@@ -68,6 +68,39 @@ def test_error_aware_rejection_keeps_large_err_outside_mad():
     assert int(np.sum(inlier)) == rvs.size
 
 
+def test_aggregate_rv_err_is_max_of_ivw_and_scatter_se():
+    """Quoted fiber σ is max(photon IVW, MAD/√N), not IVW of oversized bars alone."""
+    # Tight cluster with huge formal σ → IVW stays large, scatter_se is small.
+    rvs = np.linspace(-1.0, 1.0, 16)
+    errs_large = np.full(16, 1000.0)
+    _, rv_std_large, _, _, scatter_se = combine_stellar_rv_chunk_estimates(
+        rvs, errs_large, outlier_sigma=4.0, chunk_rv_max_abs_m_s=1.0e6
+    )
+    assert scatter_se < 10.0
+    assert rv_std_large >= scatter_se
+    assert rv_std_large > 100.0
+
+    # Same RVs with tiny photon σ → IVW ≪ scatter; report scatter_se.
+    errs_tiny = np.full(16, 0.01)
+    _, rv_std_tiny, _, ivw, scatter_tiny = combine_stellar_rv_chunk_estimates(
+        rvs, errs_tiny, outlier_sigma=4.0, chunk_rv_max_abs_m_s=1.0e6
+    )
+    assert scatter_tiny > 0.1
+    assert ivw < scatter_tiny
+    np.testing.assert_allclose(rv_std_tiny, scatter_tiny, rtol=1e-6, atol=1e-9)
+
+
+def test_aggregate_rv_err_ignores_exploded_formal_sigma():
+    """Infinite-S/N Hessian blow-up must not set the quoted bar; use MAD/√N."""
+    rvs = np.linspace(-0.05, 0.05, 32)
+    errs = np.full(32, 1.0e14)
+    _, rv_std, _, _, scatter_se = combine_stellar_rv_chunk_estimates(
+        rvs, errs, outlier_sigma=4.0, chunk_rv_max_abs_m_s=1.0e6
+    )
+    assert scatter_se < 1.0
+    np.testing.assert_allclose(rv_std, scatter_se, rtol=1e-6, atol=1e-12)
+
+
 def test_error_aware_rejection_drops_formal_outlier():
     """A chunk outside both the MAD envelope and its formal σ must be rejected."""
     rvs = np.concatenate([np.linspace(-0.2, 0.2, 12), [8.0]])

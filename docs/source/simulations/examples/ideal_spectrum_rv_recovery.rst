@@ -1,16 +1,21 @@
 Ideal-Spectrum RV Recovery
 ==========================
 
-From the rest-frame **BT-Settl lte040** (4000 K) template, we simulate an
-**LSF-matched** BSPEC L2 (HDF PSF→1-D LSF after paint) then recover its injected
-RV with the matched ``*.lsf.ccfopt.delta.mas`` line mask and
-``StellarRVPrimitive``.  In this example, this is done for injected RVs from
-0–50 km/s in steps of 10 km/s and the injected versus recovered RVs are plotted
-at the end, including the recovered RV uncertainty and residual.
+From the rest-frame **BT-Settl lte040** (4000 K) template, we simulate a
+**native** BSPEC L2 (Doppler paint, no HDF LSF) then recover its injected RV
+with the packaged full-band ``*.ccfopt.delta.mas`` line mask and
+:func:`~hispecdrp.simulations.spectra.recover_stellar_rv`.  That packaged mask
+is the default
+:func:`~hispecdrp.utils.line_mask_utils.paired_line_mask_path_for_template`
+product (``mask_style="ccfopt.delta"``, ~887 lines).  In this example, this is
+done for injected RVs from 0–50 km/s in steps of 10 km/s and the injected
+versus recovered RVs are plotted at the end, including the recovered RV
+uncertainty and residual.
 
-Build the full-band LSF mask first with :doc:`build_ccfopt_mask_ideal_spectrum`
-(or point ``MASK_PATH`` at that product). The packaged
-``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke file only.
+The packaged ``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke file and is
+not used here. For an LSF-matched closed loop, set ``APPLY_LSF = True`` and
+pass a full-band ``*.lsf.ccfopt.delta.mas`` from
+:func:`~hispecdrp.simulations.spectra.ensure_lsf_ccfopt_mask`.
 
 .. raw:: html
 
@@ -43,46 +48,45 @@ Imports and output directory
 1. Configure template and mask
 ------------------------------
 
-Packaged lte040 template and an **LSF-matched** ``*.lsf.ccfopt.delta.mas`` line
-mask. Recovery uses ccfopt line-by-line defaults on the full BSPEC echelle
-range. Prefer the mask written by :doc:`build_ccfopt_mask_ideal_spectrum`; the
-``paired_line_mask_path_for_template`` fallback is the packaged smoke product.
+Packaged lte040 template and the packaged full-band **native**
+``*.ccfopt.delta.mas`` line mask (default ``ccfopt.delta`` pairing). Recovery
+uses ccfopt line-by-line defaults on the full BSPEC echelle range.
 
 .. code-block:: python
 
-   from pathlib import Path
-
-   from hispecdrp.utils.line_mask_utils import paired_line_mask_path_for_template
+   from hispecdrp.utils.line_mask_utils import (
+       paired_line_mask_path_for_template,
+       read_mask_generation_meta,
+   )
 
    FIBER = 1
    BULK_RV_KM_S = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
    TEMPLATE = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5"
-   APPLY_LSF = True
-   MASK_STEM = Path(TEMPLATE).stem + ".lsf.ccfopt.delta.mas"
-   MASK_LOCAL = OUT / MASK_STEM
-   if MASK_LOCAL.is_file():
-       MASK_PATH = str(MASK_LOCAL)
-   else:
-       MASK_PATH = paired_line_mask_path_for_template(
-           TEMPLATE, mask_style="lsf.ccfopt.delta"
-       )
-
+   APPLY_LSF = False
+   MASK_PATH = paired_line_mask_path_for_template(TEMPLATE, mask_style="ccfopt.delta")
+   meta = read_mask_generation_meta(MASK_PATH) or {}
    print(f"mask: {MASK_PATH}")
+   print(
+       f"n_lines={meta.get('n_lines')}  n_seed={meta.get('n_seed_lines')}  "
+       f"n_drop={meta.get('n_dropped_lines')}"
+   )
 
 2. Inject, recover, and collate
 -------------------------------
 
 For each bulk shift, :func:`~hispecdrp.simulations.spectra.build_l2`
-injects the template into a BSPEC L2 and convolves with the HDF LSF
-(``apply_lsf=True``), then :class:`~hispecdrp.primitives.StellarRVPrimitive`
-recovers RV with the matched LSF ccfopt mask and line-by-line ``ccf_line_mask``.
+injects the template into a native BSPEC L2 (``apply_lsf=False``), then
+:func:`~hispecdrp.simulations.spectra.recover_stellar_rv` runs the same
+line-by-line ``ccf_line_mask`` path as
+:func:`~hispecdrp.simulations.spectra.build_ccfopt_mask`
+(:data:`~hispecdrp.utils.line_mask_utils.IDEAL_SPECTRUM_STELLAR_RV_KW`)
+with the packaged ``*.ccfopt.delta.mas`` mask.
 
 .. code-block:: python
 
    import numpy as np
 
-   from hispecdrp.primitives import StellarRVPrimitive
-   from hispecdrp.simulations.spectra import build_l2, quiet_pipeline_logging
+   from hispecdrp.simulations.spectra import build_l2, recover_stellar_rv
 
    hdr = (
        f"{'bulk_km/s':>10}  {'injected_m/s':>14}  {'recovered_m/s':>16}  "
@@ -95,32 +99,29 @@ recovers RV with the matched LSF ccfopt mask and line-by-line ``ccf_line_mask``.
    rec_m_s = []
    err_m_s = []
 
-   # This suppresses logging from the pipeline so the output is cleaner
-   with quiet_pipeline_logging():
-       for bulk in BULK_RV_KM_S:
-           l2 = build_l2(
-               bulk,
-               template=TEMPLATE,
-               fiber=FIBER,
-               apply_lsf=APPLY_LSF,
-           )
-           inj = float(bulk) * 1000.0
-           out = StellarRVPrimitive.call(
-               l2,
-               mask_path=str(MASK_PATH),
-               ccf_input_velocity=inj,
-           )
-           avg = getattr(out, f"rvccfavg_fib{FIBER}")
-           rec = float(avg["RV"][0])
-           err = float(avg["RV_ERR"][0])
-           bias = rec - inj
-           inj_m_s.append(inj)
-           rec_m_s.append(rec)
-           err_m_s.append(err)
-           print(
-               f"{bulk:10.1f}  {inj:14.4f}  {rec:16.6f}  {err:12.6f}  "
-               f"{bias:12.6e}  {bias * 1e3:10.4f}"
-           )
+   for bulk in BULK_RV_KM_S:
+       l2 = build_l2(
+           bulk,
+           template=TEMPLATE,
+           fiber=FIBER,
+           apply_lsf=APPLY_LSF,
+       )
+       inj, rec, err = recover_stellar_rv(
+           l2,
+           bulk,
+           template=TEMPLATE,
+           mask_path=str(MASK_PATH),
+           spectrograph="BSPEC",
+           fiber=FIBER,
+       )
+       bias = rec - inj
+       inj_m_s.append(inj)
+       rec_m_s.append(rec)
+       err_m_s.append(err)
+       print(
+           f"{bulk:10.1f}  {inj:14.4f}  {rec:16.6f}  {err:12.6f}  "
+           f"{bias:12.6e}  {bias * 1e3:10.4f}"
+       )
 
    inj_m_s = np.asarray(inj_m_s, dtype=float)
    rec_m_s = np.asarray(rec_m_s, dtype=float)
@@ -149,8 +150,8 @@ a zoomed scale so bias can be compared with the reported ``RV_ERR`` bars.
        inj_m_s,
        rec_m_s,
        err_m_s,
-       title="BT-Settl lte040 (LSF-matched): injected vs recovered RV",
-       out_path=OUT / "lte040_lsf_simulated_vs_recovered_rv.png",
+       title="BT-Settl lte040 (native): injected vs recovered RV",
+       out_path=OUT / "lte040_simulated_vs_recovered_rv.png",
    )
    if summary.get("out_path"):
        print("wrote", summary["out_path"])

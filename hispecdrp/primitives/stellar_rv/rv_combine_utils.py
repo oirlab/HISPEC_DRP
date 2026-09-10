@@ -84,7 +84,8 @@ def weighted_mean_rv(
 # Formal per-chunk CCF σ is typically ~3–4× too small vs order-to-order scatter
 # on e2e simulations (Fisher / Gaussian cov ignores mask systematics). Inflate
 # before IVW *weighting* so the weighted mean is not dominated by underdispersed
-# chunks. The reported aggregate σ is always the *uninflated* IVW SE of inliers.
+# chunks. The reported aggregate σ is max(uninflated IVW SE, MAD/√N), which
+# converges to MAD/√N as per-chunk σ → 0.
 DEFAULT_CHUNK_RV_ERR_INFLATION = 3.5
 
 
@@ -103,8 +104,13 @@ def combine_rv_estimates_median_mad_weighted(
     :func:`combine_rvs_median_mad` (``|Δ| <= outlier_sigma * max(MAD, σ_i)``).
     Per-chunk ``rv_errs`` are scaled by ``rv_err_inflation`` only for IVW
     *weights* (default 3.5) so the mean is not dominated by underdispersed
-    formal σ. The reported ``rv_std`` is the **uninflated** IVW standard error
-    of the inlier mean (:math:`\\sigma = [\\sum_i \\sigma_i^{-2}]^{-1/2}`).
+    formal σ. The reported ``rv_std`` is
+    :math:`\\max(\\sigma_{\\mathrm{IVW}},\\,\\mathrm{MAD}/\\sqrt{N})` of the
+    inliers: photon-weighted IVW when it is honest, and the empirical line
+    scatter when formal σ are optimistic or systematics dominate.
+    As per-chunk σ → 0 (infinite S/N), this converges to ``MAD/√N``.
+    If the median formal σ is >10⁶× the inlier MAD (broken Hessian), IVW is
+    discarded and ``MAD/√N`` is reported.
     Inflated IVW SE and empirical ``MAD/√N`` are returned as ``rv_std_internal``
     and ``scatter_se`` for diagnostics.
     """
@@ -136,6 +142,23 @@ def combine_rv_estimates_median_mad_weighted(
         rv_std = float(rv_std_internal)
     else:
         rv_std = scatter_se
+    if math.isfinite(scatter_se) and scatter_se > 0.0:
+        if math.isfinite(rv_std) and rv_std > 0.0:
+            rv_std = max(float(rv_std), float(scatter_se))
+        else:
+            rv_std = float(scatter_se)
+        # Exploded formal σ (ill-conditioned Hessian at infinite S/N) make IVW
+        # >> MAD. That is not a photon error; quote the empirical floor.
+        if n_in >= 3:
+            med_err = float(np.median(rv_errs[inlier]))
+            mad_disp = scatter_se * math.sqrt(float(n_in))
+            if (
+                math.isfinite(med_err)
+                and math.isfinite(mad_disp)
+                and mad_disp > 0.0
+                and med_err > 1.0e6 * mad_disp
+            ):
+                rv_std = float(scatter_se)
     # Prefer the inlier median when formal-IVW and median disagree — common when
     # a few chunks still have underestimated σ after inflation. Keep IVW σ.
     if n_in >= 3 and math.isfinite(rv_mean):
@@ -167,7 +190,8 @@ def combine_stellar_rv_chunk_estimates(
     Applies a **sanity gate**, error-aware MAD rejection
     (``|Δ| <= outlier_sigma * max(MAD, σ_i)``), and inverse-variance weighting
     (:func:`combine_rv_estimates_median_mad_weighted`). The reported aggregate
-    ``rv_std`` is the uninflated IVW SE of the inliers.
+    ``rv_std`` is :math:`\\max(\\sigma_{\\mathrm{IVW}},\\,\\mathrm{MAD}/\\sqrt{N})`
+    of the inliers.
 
     When ``chunk_rv_prior_m_s`` is finite, the gate keeps ``|RV − prior| <= half_width`` (default
     ``DEFAULT_CHUNK_RV_PRIOR_HALF_WIDTH_M_S``) and MAD rejection is anchored to the prior. Otherwise

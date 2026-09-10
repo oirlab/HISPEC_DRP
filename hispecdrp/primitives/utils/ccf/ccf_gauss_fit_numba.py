@@ -46,6 +46,31 @@ def _nanmedian_1d(a: np.ndarray) -> float:
 
 
 @njit(cache=True, inline="always")
+def _median_positive_1d(w: np.ndarray) -> float:
+    """Median of finite ``w > 0``; ``1`` if none (weight renormalization)."""
+    n = w.size
+    tmp = np.empty(n, dtype=np.float64)
+    m = 0
+    for i in range(n):
+        wi = w[i]
+        if np.isfinite(wi) and wi > 0.0:
+            tmp[m] = wi
+            m += 1
+    if m == 0:
+        return 1.0
+    for i in range(1, m):
+        key = tmp[i]
+        j = i - 1
+        while j >= 0 and tmp[j] > key:
+            tmp[j + 1] = tmp[j]
+            j -= 1
+        tmp[j + 1] = key
+    if m % 2 == 1:
+        return float(tmp[m // 2])
+    return 0.5 * (float(tmp[m // 2 - 1]) + float(tmp[m // 2]))
+
+
+@njit(cache=True, inline="always")
 def _mad_1d(a: np.ndarray, med: float) -> float:
     n = a.size
     tmp = np.empty(n, dtype=np.float64)
@@ -151,6 +176,13 @@ def _lm_gauss_fixed_baseline(
     ys = 1.0 / ymax if ymax > 0.0 else 1.0
     amp *= ys
     b_s = baseline * ys
+    # Renormalize inverse-variance weights to median 1 so the Hessian stays in
+    # float64 as σ_meas → 0. Restore σ_μ by ys / √w_med (y-scale × weight scale).
+    w_med = 1.0
+    if use_w:
+        w_med = _median_positive_1d(w)
+        if not (np.isfinite(w_med) and w_med > 0.0):
+            w_med = 1.0
 
     lam = 1e-3
     prev_chi2 = 1e300
@@ -169,7 +201,7 @@ def _lm_gauss_fixed_baseline(
                 continue
             wi = 1.0
             if use_w:
-                wi = w[i]
+                wi = w[i] / w_med
                 if not (np.isfinite(wi) and wi > 0.0):
                     continue
             if sig <= 1e-30:
@@ -249,7 +281,7 @@ def _lm_gauss_fixed_baseline(
                 continue
             wi = 1.0
             if use_w:
-                wi = w[i]
+                wi = w[i] / w_med
                 if not (np.isfinite(wi) and wi > 0.0):
                     continue
             x = (vi - mu_try) / sig_try
@@ -287,7 +319,7 @@ def _lm_gauss_fixed_baseline(
             continue
         wi = 1.0
         if use_w:
-            wi = w[i]
+            wi = w[i] / w_med
             if not (np.isfinite(wi) and wi > 0.0):
                 continue
         x = (vi - mu) / sig
@@ -313,6 +345,14 @@ def _lm_gauss_fixed_baseline(
         c11 = (H00 * H22 - H02 * H02) / det
         if np.isfinite(c11) and c11 > 0.0:
             mu_err = math.sqrt(c11)
+            # y was scaled by ys; weights were divided by w_med. σ_μ in original
+            # CCF units is σ_hat × ys / √w_med. As σ_meas → 0, w_med → ∞ and
+            # σ_μ converges to the numerical floor applied by the caller.
+            if use_w and ys > 0.0:
+                mu_err *= ys / math.sqrt(w_med)
+            # Ill-conditioned Hessian → unusable σ (can be >> CCF width).
+            if not (np.isfinite(mu_err) and mu_err > 0.0) or mu_err > 1.0e3 * max(sig, 1.0e-12):
+                mu_err = np.nan
 
     amp_out = amp / ys
     return float(mu), float(mu_err), float(amp_out), float(sig), True
@@ -353,7 +393,13 @@ def _window_gauss_fit(
         vv[j] = vi
         yy[j] = yi
         if use_err and ccf_err.size == n and np.isfinite(ccf_err[i]) and ccf_err[i] > 0.0:
-            ww[j] = 1.0 / (ccf_err[i] * ccf_err[i])
+            sig_e = float(ccf_err[i])
+            # Cap 1/σ² so inverse-variance does not overflow at infinite S/N.
+            if sig_e < 1.0e-150:
+                ww[j] = 1.0e300
+            else:
+                inv = 1.0 / (sig_e * sig_e)
+                ww[j] = inv if np.isfinite(inv) and inv > 0.0 else 1.0e300
         else:
             ww[j] = 1.0
         j += 1
@@ -438,6 +484,7 @@ def _fit_one_ccf_row(
     init_sig_m_s: float,
     maxiter: int,
     min_points: int,
+    sqrt_nsp: float,
 ) -> tuple[float, float, bool]:
     """Peak-up CCF row → ``(rv_m_s, rv_err_m_s, ok)``.
 
@@ -521,14 +568,23 @@ def _fit_one_ccf_row(
 
     if not np.isfinite(mu_f):
         return np.nan, np.nan, False
-    # Convert km/s → m/s. Floor formal σ so a near-singular Hessian cannot report ~0.
+    # Convert km/s → m/s. Oversampled CCF bins that share detector pixels are
+    # not independent: inflate σ_μ by √nsp. Keep only a tiny numerical floor.
     mu_m = float(mu_f) * 1000.0
     dv_m = (span * 1000.0) / max(n_fin - 1, 1)
-    err_floor = max(abs(dv_m) * 0.5, 1.0)
+    nsp_fac = float(sqrt_nsp) if np.isfinite(sqrt_nsp) and sqrt_nsp > 0.0 else 1.0
+    ax = abs(mu_m)
+    if ax < 1.0e-30:
+        ax = 1.0
+    err_floor = max(1.0e-9 * ax, 1.0e-12)
     if np.isfinite(err_f) and err_f > 0.0:
-        err_m = max(float(err_f) * 1000.0, err_floor)
+        err_m = max(float(err_f) * 1000.0 * nsp_fac, err_floor)
+    elif use_err:
+        # Weighted fit found μ but Fisher σ overflowed or was singular
+        # (infinite S/N): converge to the numerical minimum.
+        err_m = err_floor
     else:
-        err_m = max(abs(dv_m) * 2.0 / math.sqrt(float(n_fin)), err_floor)
+        err_m = max(abs(dv_m) * 2.0 / math.sqrt(float(n_fin)) * nsp_fac, err_floor)
     return mu_m, float(err_m), True
 
 
@@ -544,6 +600,7 @@ def _fit_ccf_rv_rows_numba_impl(
     init_sig_m_s: float,
     maxiter: int,
     min_points: int,
+    sqrt_nsp: float,
     out_rv: np.ndarray,
     out_rv_err: np.ndarray,
     out_ok: np.ndarray,
@@ -561,6 +618,7 @@ def _fit_ccf_rv_rows_numba_impl(
             init_sig_m_s,
             maxiter,
             min_points,
+            sqrt_nsp,
         )
         out_rv[i] = rv
         out_rv_err[i] = rv_err
@@ -579,6 +637,7 @@ def fit_ccf_rv_rows_numba(
     levmar_maxiter: int = 450,
     min_points: int = 5,
     max_cores: int | None = None,
+    pix_size_m_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Parallel Gaussian centroids for peak-up CCF rows.
@@ -593,6 +652,10 @@ def fit_ccf_rv_rows_numba(
         Optional per-sample σ, same shape as ``ccf_rows``.
     gaussian_seed_mean_m_s :
         Optional discrete-peak seed center (m s⁻¹).
+    pix_size_m_s :
+        Detector pixel width in velocity (m s⁻¹). When set, ``σ_μ`` is inflated
+        by ``√nsp`` with ``nsp = max(pix_size / Δv_grid, 1)`` so oversampled
+        CCF bins that share pixels are not treated as independent.
     max_cores :
         Numba thread cap for ``prange``.
 
@@ -619,6 +682,18 @@ def fit_ccf_rv_rows_numba(
     else:
         er = np.ones_like(rows)
 
+    sqrt_nsp = 1.0
+    if pix_size_m_s is not None and math.isfinite(float(pix_size_m_s)) and float(pix_size_m_s) > 0.0:
+        dv = 0.0
+        if int(vg.size) >= 2:
+            for i in range(int(vg.size) - 1):
+                d = abs(float(vg[i + 1]) - float(vg[i]))
+                if math.isfinite(d) and d > 0.0:
+                    if dv <= 0.0 or d < dv:
+                        dv = d
+        if dv > 0.0:
+            sqrt_nsp = math.sqrt(max(float(pix_size_m_s) / dv, 1.0))
+
     seed = (
         float(gaussian_seed_mean_m_s)
         if gaussian_seed_mean_m_s is not None and math.isfinite(float(gaussian_seed_mean_m_s))
@@ -640,6 +715,7 @@ def fit_ccf_rv_rows_numba(
             float(initial_stddev_m_s),
             int(levmar_maxiter),
             int(min_points),
+            float(sqrt_nsp),
             out_rv,
             out_err,
             out_ok,
