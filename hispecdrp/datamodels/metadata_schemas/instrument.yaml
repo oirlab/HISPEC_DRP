@@ -7,72 +7,86 @@ properties:
     fits_keyword: INSTRUME
     default: HISPEC
     enum: ["HISPEC"]
+    source: ICS
 
   instrument_era:
     title: "Instrument era specified with semver"
     fits_keyword: INSTERA
     cal_db: true
+    source: ICS
+    default: "0.0.1"
 
   instrument_mode:
     title: "Instrument mode"
     fits_keyword: INSTMODE
     enum: ["YJHK", "YJ", "HK"]
     cal_db: true
+    source: ICS
 
   lfc_nu0:
     title: "LFC nu0"
     fits_keyword: LFCNU0
     type: number
     unit: GHz
+    source: ICS
 
   lfc_delta_nu:
     title: "LFC delta nu"
     fits_keyword: LFCDELNU
     type: number
     unit: GHz
+    source: ICS
 
   order_start:
     title: "Starting echelle order of the data array"
     fits_keyword: ORDERST
     type: integer
+    source: ICS
 
   order_end:
     title: "End echelle order of the data array"
     fits_keyword: ORDEREND
     type: integer
+    source: ICS
 
   spectrograph:
     title: "Spectrograph name"
     fits_keyword: SPECTROG
     enum: ["BSPEC", "RSPEC"]
     cal_db: true
+    source: ICS
 
   n_channels:
     title: "Number of spectral channels"
     fits_keyword: NCHANLS
     default: 64 # Sensitive to light
     type: integer
+    source: ICS
 
   n_refpixs:
     title: "Number of reference pixels on each side of the detector"
     fits_keyword: NREFPXS
     default: 4
     type: integer
+    source: ICS
 
   ref_channel_position:
     title: "Position of the reference channel in the data array"
     fits_keyword: REFCHPOS
     default: RIGHT
     enum: [TOP, BOTTOM, LEFT, RIGHT, NONE]
+    source: ICS
 
   channels_are_vertical:
     title: "Are the spectral channels aligned vertically in the data array?"
     fits_keyword: CHANVERT
     default: true
     type: boolean
+    source: ICS
 
   orders_are_vertical:
     title: "Are the echelle orders aligned vertically in the data array?"
     fits_keyword: ORDVERT
     default: true
     type: boolean
+    source: ICS

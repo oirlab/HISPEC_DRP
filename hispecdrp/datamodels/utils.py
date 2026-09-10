@@ -382,6 +382,8 @@ def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> '
         model.meta.set_default('target_gaia_px', gaia_data['parallax'])
         model.meta.set_default('target_gaia_ra', gaia_data['ra'])
         model.meta.set_default('target_gaia_dec', gaia_data['dec'])
+        model.meta.set_default('target_gaia_ra_unc', gaia_data['ra_error'])
+        model.meta.set_default('target_gaia_dec_unc', gaia_data['dec_error'])
         model.meta.set_default('target_gaia_rapm', gaia_data['pmra'])
         model.meta.set_default('target_gaia_decpm', gaia_data['pmdec'])
         model.meta.set_default('target_gaia_teff', gaia_data['teff_gspphot'])
@@ -488,7 +490,7 @@ def meta_to_csv(output_path : str):
 
     fieldnames = [
         'PROPERTY', 'TITLE', 'FITS_SECTION', 'FITS_KEYWORD', 'TYPE',
-        'UNIT', 'FITS_HDU', 'CAL_DB',
+        'UNIT', 'FITS_HDU', 'CAL_DB', 'SOURCE',
         'ENUM', 'DEFAULT', 'MERGE_RULE', 'INCLUDE_ANCESTORS'
     ]
 

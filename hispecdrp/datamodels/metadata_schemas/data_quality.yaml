@@ -9,6 +9,7 @@ properties:
     default: GOOD
     enum: [GOOD, BAD]
     cal_db: true
+    source: DRP
 
   median_dark_current:
     title: "Median dark current"
@@ -17,6 +18,7 @@ properties:
     type: number
     merge_rule: mean
     include_ancestors: true
+    source: DRP
 
   median_bias_level:
     title: "Median bias level"
@@ -25,6 +27,7 @@ properties:
     type: number
     merge_rule: mean
     include_ancestors: true
+    source: DRP
 
   median_kTC_level:
     title: "Median kTC noise level"
@@ -33,6 +36,7 @@ properties:
     type: number
     merge_rule: mean
     include_ancestors: true
+    source: DRP
 
   median_flat_whitelamp_intensity:
     title: "Median flat white lamp intensity"
@@ -41,4 +45,5 @@ properties:
     type: number
     merge_rule: mean
     include_ancestors: true
+    source: DRP
   

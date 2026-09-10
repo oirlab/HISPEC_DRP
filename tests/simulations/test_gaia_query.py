@@ -37,6 +37,11 @@ def test_gaia_query_auto():
     assert abs(model.meta.target_gaia_ra - source_params["ra"]) < 1e-4
     assert abs(model.meta.target_gaia_dec - source_params["dec"]) < 1e-2
 
+    # Gaia DR3 astrometric uncertainties (mas) should be populated and sub-mas for
+    # a bright, well-measured source like HD 189733.
+    assert 0 < model.meta.target_gaia_ra_unc < 1.0
+    assert 0 < model.meta.target_gaia_dec_unc < 1.0
+
     # Check 2mass cross match
     assert model.meta.target_2mass_id == source_params["source_id_2mass"]
 
@@ -60,6 +65,9 @@ def test_gaia_query_by_coordinates():
     assert abs(result["dec"] - source_params["dec"]) < 1e-2
     assert 4800 < result["teff_gspphot"] < 5200  # early K dwarf
     assert abs(result["radial_velocity"] - source_params["radial_velocity"]) < 0.5
+    # Astrometric uncertainties (mas) -- sub-mas for a bright, well-measured source.
+    assert 0 < result["ra_error"] < 1.0
+    assert 0 < result["dec_error"] < 1.0
 
 
 def test_gaia_query_by_source_id():
@@ -73,6 +81,9 @@ def test_gaia_query_by_source_id():
     assert abs(result["dec"] - source_params["dec"]) < 1e-2
     assert 4800 < result["teff_gspphot"] < 5200  # early K dwarf
     assert abs(result["radial_velocity"] - source_params["radial_velocity"]) < 0.5
+    # Astrometric uncertainties (mas) -- sub-mas for a bright, well-measured source.
+    assert 0 < result["ra_error"] < 1.0
+    assert 0 < result["dec_error"] < 1.0
 
 
 def test_gaia_to_2mass_crossmatch():

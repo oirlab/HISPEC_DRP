@@ -6,6 +6,7 @@ properties:
     title: "Type of exposure"
     fits_keyword: IMTYPE
     enum: ["DARK", "BIAS", "DETFLAT", "SPEC", "NONE"]
+    source: ICS
 
   mjd_start:
     title: "Exposure start Modified Julian Date of first read"
@@ -13,18 +14,21 @@ properties:
     type: number
     cal_db: true
     merge_rule: first
+    source: ICS
 
   mjd_mid:
     title: "Exposure mid-point Modified Julian Date"
     fits_keyword: MJDMID
     type: number
     merge_rule: mean
+    source: DRP
   
   mbjd_mid:
     title: "Exposure mid-point Modified Julian Date"
     fits_keyword: MBJDMID
     type: number
     merge_rule: mean
+    source: DRP
 
   # Update this with enum once we have a defined set of read modes
   read_mode:
@@ -32,6 +36,7 @@ properties:
     fits_keyword: READMODE
     cal_db: true
     default: 'DEFAULT'
+    source: ICS
 
   exposure_time:
     title: "Effective exposure time"
@@ -41,9 +46,35 @@ properties:
     default: 0
     merge_rule: sum
     include_ancestors: true
+    source: ICS
 
   clock_rate:
     title: "Clock rate of the readout of the detector"
     fits_keyword: CLOCKRAT
     type: number
     unit: Hz
+    source: ICS
+
+  exposure_seq_id:
+    title: "Exposure sequence ID"
+    fits_keyword: EXPSQID
+    type: string
+    cal_db: true
+    merge_rule: first
+    source: ICS
+
+  exposure_seq_num:
+    title: "Exposure number in the sequence"
+    fits_keyword: EXPSQNUM
+    type: integer
+    cal_db: true
+    merge_rule: first
+    source: ICS
+
+  exposure_seq_total:
+    title: "Total number of exposures in the sequence"
+    fits_keyword: EXPSQTOT
+    type: integer
+    cal_db: true
+    merge_rule: first
+    source: ICS
