@@ -6,25 +6,30 @@ properties:
     title: "Unique calibration identifier"
     fits_keyword: CALID
     cal_db: id
+    source: DRP
 
   cal_type:
     title: "Type of calibration"
     fits_keyword: CALTYPE
     cal_db: true
+    source: DRP
 
   master_cal:
     title: "Appropriate for calibrating data?"
     fits_keyword: MASTCAL
     type: boolean
     cal_db: true
+    source: DRP
 
   cal_version:
     title: "Calibration version"
     fits_keyword: CALVER
     cal_db: true
+    source: DRP
 
   origin: # NOTE: This may get moved to core.yaml.
     title: "Origin of the calibration file"
     fits_keyword: ORIGIN
     enum: [KECK, LOCAL]
     cal_db: true
+    source: DRP

@@ -7,17 +7,21 @@ properties:
     fits_keyword: KOAID
     cal_db: true
     merge_rule: drop
+    source: DRP
 
   koa_filepath:
     title: "KOA file handle"
     fits_keyword: KOAFILEP
     cal_db: true
     merge_rule: drop
+    source: DRP
 
   koa_date_obs:
     title: "KOA observation date YYYY-MM-DD"
     fits_keyword: DATE-OBS
+    source: DRP
 
   koa_utc_obs:
     title: "KOA observation UTC HH:MM:SS.S"
     fits_keyword: UT
+    source: DRP

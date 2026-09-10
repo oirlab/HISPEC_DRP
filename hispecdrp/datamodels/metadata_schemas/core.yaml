@@ -8,6 +8,7 @@ properties:
     cal_db: true
     include_ancestors: true
     merge_rule: min
+    source: ICS
 
   last_processed:
     title: "ISO 8601 datetime file was last processed YYYY-MM-DDTHH:MM:SS.SSS"
@@ -15,6 +16,7 @@ properties:
     merge_rule: drop
     include_ancestors: true
     cal_db: true
+    source: DRP
     
   filename:
     title: "Name of the file"
@@ -22,31 +24,37 @@ properties:
     cal_db: true
     merge_rule: drop
     include_ancestors: true
+    source: ICS
 
   file_type:
     title: "Type of file"
     fits_keyword: FILETYPE
     default: FITS
+    source: ICS
 
   telescope:
     title: "Telescope used to acquire the data"
     fits_keyword: TELESCOP
     default: Keck-II
     enum: ["Keck-II"]
+    source: ICS
 
   model_type:
     title: "Type of data model"
     fits_keyword: DATAMODL
     merge_rule: drop
+    source: ICS
 
   drp_version:
     title: "DRP version used to create this file"
     fits_keyword: DRPVER
     cal_db: true
     merge_rule: drop
+    source: ICS
 
   note:
     title: "Custom note"
     fits_keyword: NOTE
     cal_db: true
     merge_rule: drop
+    source: DRP
