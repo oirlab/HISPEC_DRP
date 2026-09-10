@@ -490,7 +490,7 @@ def meta_to_csv(output_path : str):
 
     fieldnames = [
         'PROPERTY', 'TITLE', 'FITS_SECTION', 'FITS_KEYWORD', 'TYPE',
-        'UNIT', 'FITS_HDU', 'CAL_DB',
+        'UNIT', 'FITS_HDU', 'CAL_DB', 'SOURCE',
         'ENUM', 'DEFAULT', 'MERGE_RULE', 'INCLUDE_ANCESTORS'
     ]
 
