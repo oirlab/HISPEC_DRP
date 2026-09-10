@@ -51,6 +51,16 @@ def _line_mask_rv(*, spec_err: float, v_step_m_s: float, depth: float = 0.40):
     return float(rvs[i]), float(errs[i]), median_pixel_dv_m_s(wave)
 
 
+def test_science_centroid_spec_err_ignores_zero_uncal_without_warning():
+    spec = np.array([2.0, 0.0, 4.0])
+    spec_err = np.array([0.2, 0.3, 0.4])
+    uncal = np.array([1.0, 0.0, 2.0])
+    uncal_err = np.array([0.01, 0.0, 0.02])
+    with np.errstate(divide="raise", invalid="raise"):
+        phot = science_centroid_spec_err(spec, spec_err, uncal, uncal_err)
+    np.testing.assert_allclose(phot, [0.02, 0.3, 0.04], rtol=1e-12)
+
+
 def test_science_centroid_spec_err_drops_blaze_floor():
     spec_uncal = np.full(8, 100.0)
     spec_uncal_err = np.full(8, 1.0)

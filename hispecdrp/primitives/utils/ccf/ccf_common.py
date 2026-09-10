@@ -105,7 +105,9 @@ def science_centroid_spec_err(
         & (np.abs(uncal) > 0.0)
         & (uncal_err >= 0.0)
     )
-    mapped = np.abs(flux) * np.abs(uncal_err / uncal)
+    ratio = np.full(flux.shape, np.nan, dtype=np.float64)
+    np.divide(uncal_err, uncal, out=ratio, where=good)
+    mapped = np.abs(flux) * np.abs(ratio)
     use = good & np.isfinite(mapped) & (mapped > 0.0)
     return np.where(use, mapped, out)
 

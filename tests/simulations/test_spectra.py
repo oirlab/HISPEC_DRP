@@ -2,7 +2,12 @@
 
 from pathlib import Path
 
-from hispecdrp.simulations.spectra import build_ccfopt_mask, build_l2, paint_order_list
+from hispecdrp.simulations.spectra import (
+    build_ccfopt_mask,
+    build_l2,
+    ensure_lsf_ccfopt_mask,
+    paint_order_list,
+)
 
 LTE040 = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5"
 
@@ -56,6 +61,20 @@ def test_build_l2_single_order_shape():
     assert l2.meta.order_end == 130
     assert l2.spec_fib1.shape == (1, 4096)
     assert l2.wave_fib1.shape == (1, 4096)
+    from hispecdrp.simulations.e2e_gaia import DEFAULT_E2E_MJD_START
+
+    assert l2.meta.mjd_start == DEFAULT_E2E_MJD_START
+    assert l2.meta.datetime_obs
+
+
+def test_ensure_lsf_ccfopt_mask_reuses_full_band(tmp_path):
+    dest = tmp_path / f"{Path(LTE040).stem}.lsf.ccfopt.delta.mas"
+    dest.write_text(
+        '# HISPEC_DRP_MASK_META {"n_lines": 867, "n_seed_lines": 1066}\n'
+        "1000.0 1.0\n"
+    )
+    path = ensure_lsf_ccfopt_mask(LTE040, tmp_path, fiber=1)
+    assert path == str(dest)
 
 
 def test_build_ccfopt_mask_narrow_orders(tmp_path):
