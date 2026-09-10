@@ -12,10 +12,34 @@ class DetectorFlatModel(CalibrationModel):
     The HISPEC detector flat is a 2D image that corrects the intrinsic pixel-to-pixel sensitivity of the detector.
     """
     EXTENSIONS = {
-        f'FLAT': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Flat field data.', units='DN'),
-        f'FLAT_ERR': IMAGE_HDU(np.float32, default=0, title='Flat field error.', units='DN'),
-        f'FLAT_VAR_RNOISE': IMAGE_HDU(np.float32, default=0, title='Flat field variance (read noise).', units='DN^2'),
-        f'FLAT_VAR_POISSON': IMAGE_HDU(np.float32, default=0, title='Flat field variance (Poisson).', units='DN^2'),
+        f'FLAT': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Flat field data.',
+            units='DN'
+        ),
+        f'FLAT_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Flat field error.',
+            units='DN'
+        ),
+        f'FLAT_VAR_RNOISE': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Flat field variance (read noise).',
+            units='DN^2'
+        ),
+        f'FLAT_VAR_POISSON': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Flat field variance (Poisson).',
+            units='DN^2'
+        ),
         **DQ_L0
     }
     CAL_TYPE = 'detflat'

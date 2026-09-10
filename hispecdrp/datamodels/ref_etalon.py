@@ -12,10 +12,10 @@ class ReferenceEtalonModel(FiberAttributeProxyMixin, CalibrationModel):
     """
 
     EXTENSIONS = {
-        **create_dataspec_extensions(prefix='SPEC', title='Corresponding etalon spectrum.', units='e-/s'),
+        **create_dataspec_extensions(prefix='SPEC', title='Etalon spectrum.', units='e-/s'),
         **create_specdq_extensions(title='Etalon spectrum data quality.'),
         **create_barycorr_extensions(),
-        **create_wave_extensions(title='Etalon spectrum wavelength grid.', units='nm'),
+        **create_wave_extensions(title='Etalon spectrum wavelength grid.'),
         **create_etalonfitparam_extensions(),
         **create_drift_extensions(),
     }

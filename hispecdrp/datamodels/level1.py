@@ -12,7 +12,7 @@ class L1Model(FiberAttributeProxyMixin, DataModel):
     EXTENSIONS = {
         **create_dataspec_extensions(prefix='SPEC_UNCAL', title='Extracted 1D spectra.', units='e-/s'),
         **create_specdq_extensions(prefix='SPEC_UNCAL', title='Uncalibrated spectrum data-quality flags.'),
-        **create_wave_extensions(title='Wavelength solution.', units='micron'),
+        **create_wave_extensions(title='Wavelength solution.'),
         **create_midtime_extensions(),
         **create_barycorr_extensions(),
     }

@@ -15,8 +15,8 @@ class TracePosModel(FiberAttributeProxyMixin, CalibrationModel):
     EXTENSIONS = {
         'COEFF_POS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Polynomial coefficients for the trace positions of fiber #.'),
         'COEFF_FWHM': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Polynomial coefficients for the trace widths (FWHM) of fiber #.'),
-        'POS': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated positions for fiber #.', units='Pixels'),
-        'FWHM': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated fwhm for fiber #.', units='Pixels'),
+        'POS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated positions for fiber #.', units='Pixels'),
+        'FWHM': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'ANY'), enumerate='FIB', title='Evaluated fwhm for fiber #.', units='Pixels'),
     }
 
     CAL_TYPE = 'tracepos'

@@ -11,10 +11,31 @@ class DarkModel(CalibrationModel):
     The dark current (and any other contribution to the dark) is assumed to be linear with time and is stored as a rate map product (e-/s).
     """
     EXTENSIONS = {
-        f'RATE': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Dark current data.', units='DN'),
-        f'RATE_ERR': IMAGE_HDU(np.float32, default=0, title='Dark current error (all sources).', units='DN'),
-        f'RATE_VAR_RNOISE': IMAGE_HDU(np.float32, default=0, title='Dark current variance (read noise).', units='DN^2'),
-        f'RATE_VAR_POISSON': IMAGE_HDU(np.float32, default=0, title='Dark current variance (Poisson).', units='DN^2'),
+        f'RATE': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title='Dark current data.',
+            units='DN'
+        ),
+        f'RATE_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title='Dark current error (all sources).',
+            units='DN'
+        ),
+        f'RATE_VAR_RNOISE': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title='Dark current variance (read noise).',
+            units='DN^2'
+        ),
+        f'RATE_VAR_POISSON': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title='Dark current variance (Poisson).',
+            units='DN^2'
+        ),
         **DQ_L0
     }
     CAL_TYPE = 'dark'

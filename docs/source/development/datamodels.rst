@@ -41,51 +41,48 @@ To implement a new data model, create a new class that inherits from the appropr
 2. EXTENSIONS
 ~~~~~~~~~~~~~
 
-Specify the ``EXTENSIONS`` class attribute for any new extensions that are not already specified in the parent class. Each extension must specify the HDU type (e.g. ``fits.ImageHDU`` or ``fits.BinTableHDU``) and for tables, the column names and types.
+Specify the ``EXTENSIONS`` class attribute for any new extensions that are not already specified in the parent class. Build each entry with :func:`~hispecdrp.datamodels.extensions.IMAGE_HDU` or :func:`~hispecdrp.datamodels.extensions.TABLE_HDU` rather than a raw dict -- both return the same extension-info dict shape, but validate their arguments and keep the model's docstring in sync automatically (see below).
 
 Example:
 
 .. code-block:: python
 
+    from .extensions import IMAGE_HDU, TABLE_HDU
+
     class MyDataModel(DataModel):
         """A data model for my data products."""
 
         EXTENSIONS = {
-            'MYDATA': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.float32,
-            }
-            'MYDATA_ERR': {
-                'hdu_type' : fits.ImageHDU,
-                'dtype' : np.float32,
-            }
-            'MYDATA_TABLE': {
-                'hdu_type' : fits.BinTableHDU,
-                'columns' : {
-                    'col_name1': np.float32,
-                    'col_name2': np.int16,
-                    'col_name3': str,
-                }
-            }
+            'MYDATA': IMAGE_HDU(
+                np.float32,
+                shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+                default=0,
+                title='My data.',
+                units='DN',
+            ),
+            'MYDATA_ERR': IMAGE_HDU(np.float32, default=0, title='My data error.', units='DN'),
+            'MYDATA_TABLE': TABLE_HDU({
+                'col_name1': np.float32,
+                'col_name2': np.int16,
+                'col_name3': str,
+            }),
         }
 
-**Note**: There are several helpful methods and pre-defined extensions within :py:mod:`~hispecdrp.datamodels.extensions`.
+Key arguments (see each function's docstring for the full list):
 
-**Note**: If the datamodel's extensions are dependent on the number of fibers, then the extensions can be generated dynamically within the datamodel's ``_get_extensions`` method, which is called during initialization after the instrument configuration is determined. By default, this method just returns the extensions at ``cls.EXTENSIONS``. If the extensions depend on the number of fibers, then this method can be overridden to generate the extensions dynamically based on the instrument configuration. Access ``self.config.num_fibers`` to get the number of fibers from the instrument configuration:
+- **dtype** / **columns** -- the array dtype (``IMAGE_HDU``) or a ``{column: dtype}`` mapping (``TABLE_HDU``).
+- **shape** (``IMAGE_HDU`` only) -- a tuple of literal ints and/or symbolic axis names, matched case-insensitively but written uppercase by convention. Omit it when this extension always matches the model's primary extension's shape (e.g. ``MYDATA_ERR`` above) -- it's filled in automatically at construction time. Valid symbolic names:
 
-For example, the :py:class:`~hispecdrp.datamodels.level2.L2Model` data extensions are specified as:
+    - ``DETECTOR_SIZE_Y`` / ``DETECTOR_SIZE_X`` - from the constructor's ``shape=`` override, else :attr:`~hispecdrp.datamodels.base_model.DataModel.default_detector_size`.
+    - ``N_ORDERS`` - from ``meta.order_start``/``meta.order_end``.
+    - ``N_FIBERS`` - from ``config.num_fibers``.
+    - ``N_READS`` - no independent source; only resolvable when inferred from another extension's already-set real array data using the same symbol.
+    - ``ANY`` - never resolvable, by design; the axis is left unconstrained.
+- **default** (``IMAGE_HDU`` only) -- fill value used to lazily auto-initialize the array the first time it's accessed, once its shape resolves.
+- **enumerate** -- declare the extension once (e.g. ``enumerate='FIB'``) and it automatically expands into one ``<NAME>_FIB{n}`` entry per fiber; no per-model override needed for extensions that depend on the number of fibers.
+- **title** / **units** -- documentation only, never read by I/O or auto-init logic. They fill the "Description"/"Units" columns of the ``Extensions`` table that's generated from ``EXTENSIONS`` and spliced into the model's own docstring (see :meth:`~hispecdrp.datamodels.base_model.DataModel.extensions_table`).
 
-.. code-block:: python
-
-    class MyDataModel(DataModel):
-        ...
-
-        def _get_extensions(self) -> dict:
-            ext = self.EXTENSIONS.copy()
-            ext.update(_create_l2_extensions(self.config.num_fibers))
-            return ext
-
-where ``_create_l2_extensions`` is a helper function that generates the extensions based on the number of fibers.
+**Note**: :py:mod:`~hispecdrp.datamodels.extensions` also has higher-level helpers (e.g. ``create_dataspec_extensions``, ``create_specdq_extensions``) that wrap ``IMAGE_HDU``/``TABLE_HDU`` for common per-fiber extension groups -- check there before writing a new extension by hand.
 
 
 3. Data Level Suffix

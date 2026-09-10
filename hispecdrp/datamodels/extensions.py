@@ -208,11 +208,25 @@ DATA_ANCESTORS = {
 # DETECTOR_SIZE_X)) as the primary extension (see RampModel), so its own
 # identical shape is inferred rather than repeated (see
 # DataModel._populate_shape_info).
-DQ_RAW = {'DQ_RAW': IMAGE_HDU(np.uint8, default=0, title='Data quality flags unique to each pixel and read.')}
+DQ_RAW = {
+    'DQ_RAW': IMAGE_HDU(
+        dtype=np.uint8,
+        default=0,
+        title='Data quality flags unique to each pixel and read.',
+        shape=('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+    )
+}
 
 #### L0 (rate maps)
 
-DQ_L0 = {'DQ': IMAGE_HDU(np.uint32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title='Data quality.')}
+DQ_L0 = {
+    'DQ': IMAGE_HDU(
+        dtype=np.uint32,
+        shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+        default=0,
+        title='Data quality.'
+    )
+}
 
 def create_L0_extensions(name : str = 'RATE', title : str = 'Rate map.', units : str | None = 'e-/s') -> dict[str, dict]:
     # name (the primary) declares shape= explicitly; its siblings below infer
@@ -220,13 +234,39 @@ def create_L0_extensions(name : str = 'RATE', title : str = 'Rate map.', units :
     var_units = _units_squared(units)
     base = _base_title(title)
     ext = {
-        f'{name}': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0, title=title, units=units),
-        f'{name}_ERR': IMAGE_HDU(np.float32, default=0, title=f'{base} error (all sources).', units=units),
-        f'{name}_VAR_RNOISE': IMAGE_HDU(np.float32, default=0, title=f'{base} variance (read noise).', units=var_units),
-        f'{name}_VAR_POISSON': IMAGE_HDU(np.float32, default=0, title=f'{base} variance (Poisson).', units=var_units),
+        f'{name}': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0,
+            title=title,
+            units=units
+        ),
+        f'{name}_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title=f'{base} error (all sources).',
+            units=units
+        ),
+        f'{name}_VAR_RNOISE': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title=f'{base} variance (read noise).',
+            units=var_units
+        ),
+        f'{name}_VAR_POISSON': IMAGE_HDU(
+            dtype=np.float32,
+            default=0,
+            title=f'{base} variance (Poisson).',
+            units=var_units
+        ),
     }
     ext.update(DQ_L0)
-    ext['MID_TIME'] = IMAGE_HDU(np.float64, default=0, title='Exposure mid-point time for each pixel.', units='MJD')
+    ext['MID_TIME'] = IMAGE_HDU(
+        dtype=np.float64,
+        default=0,
+        title='Exposure mid-point time for each pixel.',
+        units='MJD'
+    )
     return ext
 
 
@@ -254,7 +294,7 @@ def create_dataspec_extensions(
     base = _base_title(title)
     return {
         prefix: IMAGE_HDU(
-            np.float32,
+            dtype=np.float32,
             shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
             default=0,
             enumerate='FIB',
@@ -263,7 +303,7 @@ def create_dataspec_extensions(
             **kwargs
         ),
         f'{prefix}_ERR': IMAGE_HDU(
-            np.float32,
+            dtype=np.float32,
             shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
             default=0,
             enumerate='FIB',
@@ -272,7 +312,7 @@ def create_dataspec_extensions(
             **kwargs
         ),
         f'{prefix}_VAR_POISSON': IMAGE_HDU(
-            np.float32,
+            dtype=np.float32,
             shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
             default=0,
             enumerate='FIB',
@@ -281,7 +321,7 @@ def create_dataspec_extensions(
             **kwargs
         ),
         f'{prefix}_VAR_RNOISE': IMAGE_HDU(
-            np.float32,
+            dtype=np.float32,
             shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
             default=0,
             enumerate='FIB',
@@ -294,7 +334,7 @@ def create_dataspec_extensions(
 def create_specdq_extensions(title : str = 'Data quality.', prefix : str = 'SPEC', **kwargs) -> dict[str, dict]:
     return {
         f'{prefix}_DQ': IMAGE_HDU(
-            np.uint32,
+            dtype=np.uint32,
             shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
             default=0,
             enumerate='FIB',
@@ -306,24 +346,69 @@ def create_specdq_extensions(title : str = 'Data quality.', prefix : str = 'SPEC
 def create_sky_extensions(title : str | None = None, units : str | None = None, **kwargs) -> dict[str, dict]:
     base = _base_title(title)
     return {
-        'SKY': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                          title=title, units=units, **kwargs),
-        'SKY_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                              title=base and f'{base} error.', units=units, **kwargs),
+        'SKY': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=title,
+            units=units,
+            **kwargs
+        ),
+        'SKY_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=base and f'{base} error.',
+            units=units,
+            **kwargs
+        ),
     }
 
 def create_trans_extensions(title : str = 'Transmission correction.', **kwargs) -> dict[str, dict]:
     base = _base_title(title)
     return {
-        'TRANS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', title=title, **kwargs),
-        'TRANS_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', title=f'{base} error.', **kwargs),
+        'TRANS': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=1,
+            enumerate='FIB',
+            title=title,
+            **kwargs
+        ),
+        'TRANS_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=1,
+            enumerate='FIB',
+            title=f'{base} error.',
+            **kwargs
+        ),
     }
 
 def create_throughput_extensions(**kwargs) -> dict[str, dict]:
-    return {'THROUGHPUT': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=1, enumerate='FIB', **kwargs)}
+    return {
+        'THROUGHPUT': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=1,
+            enumerate='FIB',
+            **kwargs
+        )
+    }
 
 def create_wave_extensions(**kwargs) -> dict[str, dict]:
-    return {'WAVE': IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', **kwargs)}
+    return {
+        'WAVE': IMAGE_HDU(
+            dtype=np.float64,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            units='micron',
+            **kwargs,
+        )
+    }
 
 CHEBYSHEV_NORM_HDU = TABLE_HDU({
     'FIBER': str,
@@ -338,7 +423,12 @@ def create_chebyshev_extensions() -> dict[str, dict]:
         # Real shape is (n_coeffs_intra_order, n_coeffs_inter_order) -- a
         # per-instance fit result with no symbol, hence ANY for both axes and
         # no default (not auto-initialized without a make_default_array override).
-        'CHEB_COEFFS': IMAGE_HDU(np.float64, shape=('ANY', 'ANY'), enumerate='FIB', title='Chebyshev coefficients for the wavelength solution.'),
+        'CHEB_COEFFS': IMAGE_HDU(
+            dtype=np.float64,
+            shape=('ANY', 'ANY'),
+            enumerate='FIB',
+            title='Chebyshev coefficients for the wavelength solution.'
+        ),
         'CHEB_NORM': CHEBYSHEV_NORM_HDU,
     }
 
@@ -490,15 +580,36 @@ def create_rv_extensions() -> dict[str, dict]:
 
 def create_telluric_extensions(title : str = 'Telluric model spectrum.') -> dict[str, dict]:
     return {
-        'TEL': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title),
-        'TEL_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=f'{_base_title(title)} error (all sources).'),
+        'TEL': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=1,
+            enumerate='FIB',
+            title=title
+        ),
+        'TEL_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=f'{_base_title(title)} error (all sources).'
+        ),
     }
 
 
 #### Stellar models
 
 def create_starmodel_extensions(title : str = 'Stellar model spectrum.', units : str | None = None) -> dict[str, dict]:
-    return {'STAR_MOD' : IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title, units=units)}
+    return {
+        'STAR_MOD' : IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title=title,
+            units=units
+        )
+    }
 
 
 #### Absolute flux calibration
@@ -506,16 +617,45 @@ def create_starmodel_extensions(title : str = 'Stellar model spectrum.', units :
 def create_fluxabs_extensions(units : str | None = 'W/m^2/micron') -> dict[str, dict]:
     var_units = _units_squared(units)
     return {
-        'FLUX_ABS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                               title='Spectrum in absolute flux units.', units=units),
-        'FLUX_ABS_ERR': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                                   title='Absolute spectrum error (all sources).', units=units),
-        'FLUX_ABS_VAR_POISSON': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                                           title='Absolute spectrum variance (Poisson).', units=var_units),
-        'FLUX_ABS_VAR_RNOISE': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                                          title='Absolute spectrum variance (read noise).', units=var_units),
-        'FLUX_ABS_DQ': IMAGE_HDU(np.uint32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB',
-                                  title='Absolute spectrum data quality.'),
+        'FLUX_ABS': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title='Spectrum in absolute flux units.',
+            units=units
+        ),
+        'FLUX_ABS_ERR': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title='Absolute spectrum error (all sources).',
+            units=units
+        ),
+        'FLUX_ABS_VAR_POISSON': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title='Absolute spectrum variance (Poisson).',
+            units=var_units
+        ),
+        'FLUX_ABS_VAR_RNOISE': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title='Absolute spectrum variance (read noise).',
+            units=var_units
+        ),
+        'FLUX_ABS_DQ': IMAGE_HDU(
+            dtype=np.uint32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+            default=0,
+            enumerate='FIB',
+            title='Absolute spectrum data quality.'
+        ),
     }
 
 
@@ -531,7 +671,14 @@ BARYCORR_HDU = TABLE_HDU({
 }, enumerate='FIB', title='Barycentric correction information.')
 
 def create_midtime_extensions(title : str = 'Exposure mid-point times.', units : str = 'MJD') -> dict[str, dict]:
-    return {'MID_TIME' : IMAGE_HDU(np.float64, shape=('N_ORDERS', 'DETECTOR_SIZE_Y'), default=0, enumerate='FIB', title=title, units=units)}
+    return {'MID_TIME' : IMAGE_HDU(
+        dtype=np.float64,
+        shape=('N_ORDERS', 'DETECTOR_SIZE_Y'),
+        default=0,
+        enumerate='FIB',
+        title=title,
+        units=units
+    )}
 
 def create_barycorr_extensions() -> dict[str, dict]:
     return {'BARYCORR' : BARYCORR_HDU}

@@ -12,7 +12,12 @@ class RampModel(DataModel):
     # uint16 for real detector data; float32 also accepted for simulations run
     # with convert_to_uint16=False that intentionally keep continuous DN.
     EXTENSIONS = {
-        'DATA': IMAGE_HDU(np.uint16 | np.float32, shape=('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), title='Raw UTR data.', units='DN'),
+        'DATA': IMAGE_HDU(
+            dtype=np.uint16 | np.float32,
+            shape=('N_READS', 'DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            title='Raw UTR data.',
+            units='DN'
+        ),
         **DQ_RAW,
         **DQ_L0,
     }

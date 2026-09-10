@@ -13,12 +13,16 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
     """
 
     EXTENSIONS = {
-        **create_dataspec_extensions(title='Corresponding LFC spectrum.', units='e-/s'),
+        **create_dataspec_extensions(title='LFC spectrum.', units='e-/s'),
         **create_specdq_extensions(title='LFC spectrum data quality.'),
-        **create_wave_extensions(title='LFC spectrum wavelength grid.', units='nm'),
+        **create_wave_extensions(title='LFC spectrum wavelength grid.'),
         # No default given -> not auto-initialized (behavior unchanged), though
         # the shape (Nord x 4096 x 3: mu, sigma, offset) is now fully resolvable.
-        'LSF_PARAMS': IMAGE_HDU(np.float32, shape=('N_ORDERS', 'DETECTOR_SIZE_Y', 3), enumerate='FIB', title='LFC spectrum Gaussian LSF parameters (mu, sigma, offset).'),
+        'LSF_PARAMS': IMAGE_HDU(
+            dtype=np.float32,
+            shape=('N_ORDERS', 'DETECTOR_SIZE_Y', 3), enumerate='FIB',
+            title='LFC spectrum Gaussian LSF parameters (mu, sigma, offset).'
+        ),
         **create_chebyshev_extensions(),
         **create_lfcfitparam_extensions(),
     }

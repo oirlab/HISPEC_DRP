@@ -12,8 +12,11 @@ class SaturationModel(CalibrationModel):
     """
     EXTENSIONS = {
         "SAT_THRESH": IMAGE_HDU(
-            np.uint16, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=np.iinfo(np.uint16).max,
-            title='Saturation threshold.', units='DN',
+            dtype=np.uint16,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=np.iinfo(np.uint16).max,
+            title='Saturation threshold.',
+            units='DN',
         ),
         **DQ_L0,
     }

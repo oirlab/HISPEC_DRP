@@ -11,9 +11,9 @@ class LFCFitParamsModel(FiberAttributeProxyMixin, CalibrationModel):
     """
 
     EXTENSIONS = {
-        **create_dataspec_extensions(prefix='SPEC', title='Corresponding LFC spectrum.', units='e-/s'),
+        **create_dataspec_extensions(prefix='SPEC', title='LFC spectrum.', units='e-/s'),
         **create_specdq_extensions(title='LFC spectrum data quality.'),
-        **create_wave_extensions(title='LFC spectrum wavelength grid.', units='nm'),
+        **create_wave_extensions(title='LFC spectrum wavelength grid.'),
         **create_lfcfitparam_extensions(),
     }
 

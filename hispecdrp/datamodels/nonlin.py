@@ -14,9 +14,23 @@ class NonlinearCorrectionModel(CalibrationModel):
         # Ncoeff is a per-instance fit result with no symbol (ANY); the default
         # placeholder built below always uses 2 coefficients (an identity
         # linear fit: offset=0, slope=1), regardless of what a real fit uses.
-        'COEFFS': IMAGE_HDU(np.float32, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X', 'ANY'), title='Polynomial coeffs describing the nonlinearity.'),
-        'NONLIN_THRESH' : IMAGE_HDU(np.uint16, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=0.9 * np.iinfo(np.uint16).max, title='TBD, from JWST.'),
-        'NONLIN_MAX' : IMAGE_HDU(np.uint16, shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'), default=np.iinfo(np.uint16).max, title='TBD, from JWST.'),
+        'COEFFS': IMAGE_HDU(
+            dtype=np.float64,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X', 'ANY'),
+            title='Polynomial coeffs describing the nonlinearity.'
+        ),
+        'NONLIN_THRESH' : IMAGE_HDU(
+            dtype=np.uint16,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=0.9 * np.iinfo(np.uint16).max,
+            title='TBD, from JWST.'
+        ),
+        'NONLIN_MAX' : IMAGE_HDU(
+            dtype=np.uint16,
+            shape=('DETECTOR_SIZE_Y', 'DETECTOR_SIZE_X'),
+            default=np.iinfo(np.uint16).max,
+            title='TBD, from JWST.'
+        ),
         **DQ_L0
     }
     CAL_TYPE = 'nonlin'

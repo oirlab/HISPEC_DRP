@@ -15,7 +15,7 @@ class L2Model(FiberAttributeProxyMixin, DataModel):
         **create_specdq_extensions(prefix='SPEC_UNCAL', title='Uncalibrated spectrum data-quality flags.'),
         **create_dataspec_extensions(prefix='SPEC', title='Calibrated spectrum.', units='e-/s'),
         **create_specdq_extensions(title='Calibrated spectrum data-quality flags.'),
-        **create_wave_extensions(title='Drift corrected wavelength solution in rest frame of the instrument.', units='micron'),
+        **create_wave_extensions(title='Drift corrected wavelength solution in rest frame of the instrument.'),
         **create_drift_extensions(),
         **create_midtime_extensions(title='Flux-weighted exposure mid-point times.'),
         **create_barycorr_extensions(),

@@ -11,7 +11,7 @@ class SimulatedWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
     """
 
     EXTENSIONS = {
-        **create_wave_extensions(title='Simulated wavelength solution.', units='nm'),
+        **create_wave_extensions(title='Simulated wavelength solution.'),
         **create_specdq_extensions(title='Simulated data quality.'),
     }
 
