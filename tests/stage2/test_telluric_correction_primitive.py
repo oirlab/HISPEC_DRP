@@ -74,7 +74,7 @@ def test_telluric_correction_primitive():
         )
         setattr(
             science_model,
-            f"SPEC_DQ_FIB{fiber}",
+            f"SPEC_UNCAL_DQ_FIB{fiber}",
             np.zeros((n_orders, n_pix), dtype=np.uint32),
         )
 

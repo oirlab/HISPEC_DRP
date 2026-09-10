@@ -18,6 +18,19 @@ class HISPECConfig:
     instrument_aliases : ClassVar[dict[str, str]] = {'BSPEC': 'HB', 'RSPEC': 'HR'}
     num_fibers : ClassVar[int] = 3
 
+    # (ny, nx) of the detector plane. Read by DataModel.default_detector_size
+    # (the base implementation just returns config.DETECTOR_SIZE) to resolve
+    # the DETECTOR_SIZE_Y/DETECTOR_SIZE_X symbols in an IMAGE_HDU `shape=`
+    # spec (see DataModel._resolve_shape_axis), as a last resort when no
+    # extension's already-set real data and no explicit `shape=` constructor
+    # override provide it instead. HISPEC has one detector, so this default
+    # is all that's needed; an instrument with multiple, differently sized
+    # detectors would instead give this config class one attribute per
+    # detector (e.g. IFS_DETECTOR_SIZE, IMG_DETECTOR_SIZE) and override
+    # `default_detector_size` on the relevant model classes to pick between
+    # them from instance state (e.g. self.meta.instrument_mode).
+    DETECTOR_SIZE : ClassVar[tuple[int, int]] = (4096, 4160)
+
     # TODO: Update LFC params, eventually in calibration DB
     lfc_params : ClassVar[dict[str, float]] = {
         'LFC-B' : {

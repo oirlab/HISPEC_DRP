@@ -1014,11 +1014,9 @@ def simulate_ramp_from_rate_map(
     if convert_to_uint16:
         fname = ramp_filename or DEFAULT_SIMULATED_RAMP_FILENAME
     else:
-        # Keep continuous DN on disk/in-memory (RampModel default HDU is uint16).
-        from ..datamodels.extensions import IMAGE_FLOAT32_HDU
-
+        # Keep continuous DN on disk/in-memory. RampModel.DATA declares both
+        # uint16 (real detector data) and float32 (this path) as valid dtypes.
         fname = ramp_filename or DEFAULT_SIMULATED_RAMP_FLOAT32_FILENAME
-        ramp_model.EXTENSIONS = {**type(ramp_model).EXTENSIONS, "DATA": IMAGE_FLOAT32_HDU}
         ramp_model.data = np.asarray(ramp_model.data, dtype=np.float32)
     ramp_model.meta.filename = fname
     return ramp_model

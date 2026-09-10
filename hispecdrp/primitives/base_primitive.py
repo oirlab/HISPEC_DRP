@@ -11,7 +11,7 @@ from koa_middleware.utils import is_valid_uuid
 import hispecdrp
 from .. import datamodels
 from ..datamodels import DataModel
-from ..datamodels.extensions import migrate_receipt_table
+from ..datamodels.utils import migrate_receipt_table
 from ..driver.logging import logging_context
 from ..calibrations.utils import get_calibration_selector_type
 from ..calibrations import HISPECCalibrationStore

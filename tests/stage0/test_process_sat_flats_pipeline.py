@@ -50,7 +50,6 @@ def test_process_sat_flats_pipeline(tmp_path):
         kTC_noise=kTC_noise,
         dark_current=None,
         flat_level=None,
-        saturation_threshold=65535,
     )
 
     # --- Create a fake UTR cube ---

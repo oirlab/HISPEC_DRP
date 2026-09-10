@@ -1,6 +1,10 @@
 from __future__ import annotations
 from astropy.io import fits
+from astropy.table import Column, Table
+import builtins
+import numpy as np
 import os
+import csv
 from typing import TYPE_CHECKING
 import astropy.time
 from datetime import datetime
@@ -9,6 +13,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 from koa_middleware.utils import generate_koa_filehandle
+from .extensions import RECEIPT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -158,6 +163,37 @@ def get_instrument_config(
         config_class = None
     
     return config_class
+
+
+def set_instrument(instrument_name : str) -> type:
+    """
+    Set the process-wide default instrument.
+
+    Sets the ``HISPECDRP_INSTRUMENT_NAME`` environment variable, so that any
+    newly constructed model with no more specific instrument source
+    (``instrument_name=``, ``meta``, or ``filepath``) resolves ``self.config``
+    to this instrument's config class -- see ``DataModel._get_instrument_config``.
+    Also sets ``DataModel._config`` (the ``config`` classproperty's backing
+    attribute), so that ``SomeModel.config`` / ``cls.config`` -- accessible with
+    no instance at all, e.g. from a classmethod -- resolves to it too.
+
+    Parameters
+    ----------
+    instrument_name : str
+        The instrument name (e.g. ``'HISPEC'``, ``'PARVI'``).
+
+    Returns
+    -------
+    config_class : type
+        The instrument config class that was set.
+    """
+    from .base_model import DataModel
+
+    config_class = get_instrument_config(instrument_name=instrument_name)
+    os.environ['HISPECDRP_INSTRUMENT_NAME'] = instrument_name
+    DataModel._config = config_class
+    return config_class
+
 
 def get_instrument_name(input : str | fits.HDUList):
     """
@@ -346,6 +382,8 @@ def _set_target_meta(model: 'DataModel', gaia_id : int | str | None = None) -> '
         model.meta.set_default('target_gaia_px', gaia_data['parallax'])
         model.meta.set_default('target_gaia_ra', gaia_data['ra'])
         model.meta.set_default('target_gaia_dec', gaia_data['dec'])
+        model.meta.set_default('target_gaia_ra_unc', gaia_data['ra_error'])
+        model.meta.set_default('target_gaia_dec_unc', gaia_data['dec_error'])
         model.meta.set_default('target_gaia_rapm', gaia_data['pmra'])
         model.meta.set_default('target_gaia_decpm', gaia_data['pmdec'])
         model.meta.set_default('target_gaia_teff', gaia_data['teff_gspphot'])
@@ -394,9 +432,26 @@ def _as_model_list(other: DataModel | list[DataModel] | dict[DataModel]) -> list
         return other
     raise ValueError(f"Expected DataModel, list, or dict — got {type(other).__name__}")
 
-def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
-    from .extensions import migrate_receipt_table
+def migrate_receipt_table(table: Table | None) -> Table | None:
+    """
+    Upgrade a RECEIPT table to the current schema by adding any missing columns.
+    """
+    if table is None:
+        return None
+    if not isinstance(table, Table):
+        return table
 
+    missing = [c for c in RECEIPT['RECEIPT']['columns'] if c not in table.colnames]
+    if not missing:
+        return table
+
+    out = table.copy()
+    for name in missing:
+        dtype = RECEIPT['RECEIPT']['columns'][name]
+        out.add_column(Column(name=name, data=np.full(len(out), '', dtype=dtype)))
+    return out
+
+def append_receipts(target: DataModel, other: DataModel | list[DataModel] | dict[DataModel]) -> None:
     target.receipt = migrate_receipt_table(target.receipt)
     for model in _as_model_list(other):
         src = migrate_receipt_table(model.receipt)
@@ -428,3 +483,22 @@ def get_first_model(dataset : Any, **kwargs) -> DataModel:
         return open(list(dataset.values())[0], **kwargs)
     else:
         raise TypeError(f"Unsupported dataset type: {type(dataset)}")
+
+def meta_to_csv(output_path : str):
+    from .level0 import L0Model
+    props = L0Model().meta._schema["properties"]
+
+    fieldnames = [
+        'PROPERTY', 'TITLE', 'FITS_SECTION', 'FITS_KEYWORD', 'TYPE',
+        'UNIT', 'FITS_HDU', 'CAL_DB', 'SOURCE',
+        'ENUM', 'DEFAULT', 'MERGE_RULE', 'INCLUDE_ANCESTORS'
+    ]
+
+    with builtins.open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for prop_name, sub_schema in props.items():
+            sub_schema_upper = {k.upper(): v for k, v in sub_schema.items()}
+            sub_schema_upper['PROPERTY'] = prop_name
+            writer.writerow(sub_schema_upper) 

@@ -13,6 +13,7 @@ $defs:
       "BLOCKED", "NONE"
     ]
     default: "NONE"
+    source: ICS
 
 type: object
 properties:
@@ -21,6 +22,7 @@ properties:
     fits_keyword: OBJECT
     cal_db: true
     include_ancestors: true
+    source: ICS
 
   target_ra:
     title: "Target Right Ascension"
@@ -28,6 +30,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: mean
+    source: ICS
 
   target_dec:
     title: "Target Declination"
@@ -35,20 +38,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: mean
-
-  target_ra_uncertainty:
-    title: "Target RA uncertainty"
-    fits_keyword: URA
-    type: number
-    unit: degrees
-    merge_rule: mean
-
-  target_dec_uncertainty:
-    title: "Target Dec uncertainty"
-    fits_keyword: UDEC
-    type: number
-    unit: degrees
-    merge_rule: mean
+    source: ICS
 
   target_rapm:
     title: "Target proper motion in RA"
@@ -56,6 +46,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: mean
+    source: ICS
 
   target_decpm:
     title: "Target proper motion in Dec"
@@ -63,41 +54,49 @@ properties:
     type: number
     unit: degrees
     merge_rule: mean
+    source: ICS
 
   airmass_start:
     title: "Airmass at start of exposure"
     fits_keyword: AIRMAST
     type: number
+    source: ICS
 
   airmass_end:
     title: "Airmass at end of exposure"
     fits_keyword: AIRMAEND
     type: number
+    source: ICS
 
   azimuth_start:
     title: "Azimuth at start of exposure"
     fits_keyword: AZST
     type: number
+    source: ICS
 
   azimuth_end:
     title: "Azimuth at end of exposure"
     fits_keyword: AZEND
     type: number
+    source: ICS
 
   elevation_start:
     title: "Elevation at start of exposure"
     fits_keyword: ELSTART
     type: number
+    source: ICS
 
   elevation_end:
     title: "Elevation at end of exposure"
     fits_keyword: ELEND
     type: number
+    source: ICS
 
   equinox:
     title: "Equinox of coordinates"
     fits_keyword: EQUINOX
     default: "2000"
+    source: ICS
 
   object_fiber1:
     allOf:
@@ -107,6 +106,7 @@ properties:
       cal_db: true
       include_ancestors: true
       merge_rule: fiber_state
+      source: ICS
 
   object_fiber2:
     allOf:
@@ -116,6 +116,7 @@ properties:
       cal_db: true
       include_ancestors: true
       merge_rule: fiber_state
+      source: ICS
 
   object_fiber3:
     allOf:
@@ -124,6 +125,7 @@ properties:
       fits_keyword: OBJFIB3
       cal_db: true
       include_ancestors: true
+      source: ICS
 
   distance_fiber1:
       title: "Distance of fiber 1 from tracking axis"
@@ -131,6 +133,7 @@ properties:
       include_ancestors: true
       type: number
       unit: arcseconds
+      source: ICS
 
   distance_fiber2:
       title: "Distance of fiber 2 from tracking axis"
@@ -138,6 +141,7 @@ properties:
       include_ancestors: true
       type: number
       unit: arcseconds
+      source: ICS
 
   distance_fiber3:
       title: "Distance of fiber 3 from tracking axis"
@@ -145,6 +149,7 @@ properties:
       include_ancestors: true
       type: number
       unit: arcseconds
+      source: ICS
 
   # Target OB contents
   # NOTE: Final home TBD
@@ -155,12 +160,14 @@ properties:
     unit: year
     default: 2016.5
     merge_rule: first
+    source: ICS
   
   target_gaia_id:
     title: "Gaia DR3 source ID"
     fits_keyword: GAIAID
     type: string
     merge_rule: first
+    source: ICS
 
   target_gaia_px:
     title: "Gaia DR3 parallax"
@@ -168,6 +175,7 @@ properties:
     type: number
     unit: mas
     merge_rule: first
+    source: ICS
 
   target_gaia_ra:
     title: "Gaia DR3 RA"
@@ -175,6 +183,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: first
+    source: ICS
 
   target_gaia_dec:
     title: "Gaia DR3 Dec"
@@ -182,6 +191,23 @@ properties:
     type: number
     unit: degrees
     merge_rule: first
+    source: ICS
+
+  target_gaia_ra_unc:
+    title: "Gaia DR3 RA uncertainty"
+    fits_keyword: GAIAURA
+    type: number
+    unit: mas
+    merge_rule: first
+    source: ICS
+
+  target_gaia_dec_unc:
+    title: "Gaia DR3 Dec uncertainty"
+    fits_keyword: GAIAUDEC
+    type: number
+    unit: mas
+    merge_rule: first
+    source: ICS
 
   target_gaia_decpm:
     title: "Gaia DR3 proper motion in Dec"
@@ -189,6 +215,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: first
+    source: ICS
 
   target_gaia_rapm:
     title: "Gaia DR3 proper motion in RA"
@@ -196,6 +223,7 @@ properties:
     type: number
     unit: degrees
     merge_rule: first
+    source: ICS
 
   target_gaia_teff:
     title: "Gaia DR3 effective temperature"
@@ -203,6 +231,7 @@ properties:
     type: number
     unit: K
     merge_rule: first
+    source: ICS
 
   target_gaia_rvsys:
     title: "Gaia DR3 radial velocity"
@@ -210,6 +239,7 @@ properties:
     type: number
     unit: km/s
     merge_rule: first
+    source: ICS
 
   target_gaia_vbroad:
     title: "Gaia DR3 broadening (vsini)"
@@ -217,30 +247,35 @@ properties:
     type: number
     unit: km/s
     merge_rule: first
+    source: ICS
 
   target_2mass_id:
     title: "2MASS ID"
     fits_keyword: TMASSID
     type: string
     merge_rule: first
+    source: ICS
 
   target_2mass_mag_j:
     title: "2MASS J-band magnitude"
     fits_keyword: TMAGJ
     type: number
     merge_rule: first
+    source: ICS
 
   target_2mass_mag_h:
     title: "2MASS H-band magnitude"
     fits_keyword: TMAGH
     type: number
     merge_rule: first
+    source: ICS
 
   target_2mass_mag_ks:
     title: "2MASS Ks-band magnitude"
     fits_keyword: TMAGKS
     type: number
     merge_rule: first
+    source: ICS
 
   force_berv_m_s:
     title: "Forced barycentric Earth radial velocity (simulations)"
@@ -248,3 +283,4 @@ properties:
     type: number
     unit: m/s
     merge_rule: first
+    source: DRP

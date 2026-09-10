@@ -40,7 +40,7 @@ Primitive and pipeline config files have the following five top-level fields:
 
 **Pipeline** config files can additionally specify:
 
-- **primitives** (optional, pipelines only) -- Per-primitive overrides for ``context`` or ``parameters``.
+- **primitives** (optional, pipelines only) -- Per-primitive overrides for ``config``, ``context``, or ``parameters``.
 
 .. code-block:: yaml
     :caption: stage0_pipeline_config.yaml
@@ -53,6 +53,32 @@ Primitive and pipeline config files have the following five top-level fields:
         output_dir: /path/to/output_dir/ # Save file immediately after ramp fitting.
         method: mcds
         mcds_num_coadd: 5
+
+Each entry under ``primitives`` supports the following optional keys:
+
+- **config** -- The base filename (resolved against the current working directory, then
+  ``hispecdrp/configs/``) or full filepath of a primitive config file to use for this step,
+  instead of auto-selecting one based on context. Any sibling keys (or ``parameters``) override
+  values loaded from that file. If ``config`` is given, any sibling ``context`` is ignored.
+
+  .. code-block:: yaml
+
+      primitives:
+        ramp_fit:
+          config: "my_config_file.yaml"
+          method: cds # Overrides the value loaded from "my_config_file.yaml".
+
+- **context** -- Context used to auto-select a config file for this step (ignored if ``config``
+  is also given). See `Auto-Configuration`_ below.
+
+  .. code-block:: yaml
+
+      primitives:
+        ramp_fit:
+          context:
+            quicklook: true # Only look for ramp fitting config files with quicklook=true.
+
+- **parameters** (or bare sibling keys, as shown above) -- Parameter overrides for this step.
 
 Using Config Files
 ------------------

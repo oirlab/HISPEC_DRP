@@ -90,40 +90,40 @@ class SpectralExtractionPrimitive(BasePrimitive):
 
         # Initialize output arrays for all fibers if not already set.
         # Mock / sim L0s may omit mid_time (or dq); fall back to safe dtypes.
-        dq_dtype = (
-            input_model.dq.dtype
-            if getattr(input_model, "dq", None) is not None
-            else np.uint32
-        )
-        mid_time = getattr(input_model, "mid_time", None)
-        mid_time_dtype = (
-            mid_time.dtype if mid_time is not None else np.float64
-        )
-        for fiber in do_fibers:
-            if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
-                setattr(
-                    output_model, f'SPEC_UNCAL_FIB{fiber}',
-                    np.full((n_orders, npix), np.nan, dtype=np.float32)
-                )
-                setattr(
-                    output_model, f'SPEC_UNCAL_ERR_FIB{fiber}',
-                    np.full((n_orders, npix), np.nan, dtype=np.float32)
-                )
-                setattr(
-                    output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, npix), np.nan, dtype=np.float32)
-                )
-                setattr(
-                    output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}',
-                    np.full((n_orders, npix), np.nan, dtype=np.float32)
-                )
-                setattr(
-                    output_model, f'SPEC_DQ_FIB{fiber}',
-                    np.zeros((n_orders, npix), dtype=dq_dtype)
-                )
-                setattr(
-                    output_model, f'MID_TIME_FIB{fiber}',
-                    np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
-                )
+        # dq_dtype = (
+        #     input_model.dq.dtype
+        #     if getattr(input_model, "dq", None) is not None
+        #     else np.uint32
+        # )
+        #mid_time = getattr(input_model, "mid_time", None)
+        # mid_time_dtype = (
+        #     mid_time.dtype if mid_time is not None else np.float64
+        # )
+        #for fiber in do_fibers:
+            # if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
+            #     setattr(
+            #         output_model, f'SPEC_UNCAL_FIB{fiber}',
+            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
+            #     )
+            #     setattr(
+            #         output_model, f'SPEC_UNCAL_ERR_FIB{fiber}',
+            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
+            #     )
+            #     setattr(
+            #         output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, npix), np.nan, dtype=np.float32)
+            #     )
+            #     setattr(
+            #         output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}',
+            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
+            #     )
+            #     setattr(
+            #         output_model, f'SPEC_DQ_FIB{fiber}',
+            #         np.zeros((n_orders, npix), dtype=dq_dtype)
+            #     )
+            #     setattr(
+            #         output_model, f'MID_TIME_FIB{fiber}',
+            #         np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
+            #     )
 
         # Dispatch to extraction method
         if self.method.lower() == 'box':
@@ -189,7 +189,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
             err_out = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')
             var_rnoise_out = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
             var_poisson_out = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
-            dq_out = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+            dq_out = getattr(output_model, f'SPEC_UNCAL_DQ_FIB{fiber}')
             mid_time_out = getattr(output_model, f'MID_TIME_FIB{fiber}')
 
             for j, order in enumerate(order_vec):
@@ -264,7 +264,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
             err_out = getattr(output_model, f'SPEC_UNCAL_ERR_FIB{fiber}')
             var_rnoise_out = getattr(output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}')
             var_poisson_out = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
-            dq_out = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+            dq_out = getattr(output_model, f'SPEC_UNCAL_DQ_FIB{fiber}')
             mid_time_out = getattr(output_model, f'MID_TIME_FIB{fiber}')
 
             for j, order in enumerate(order_vec):
@@ -397,7 +397,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
                 var_poisson_output_fiber = getattr(output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}')
                 var_poisson_output_fiber[i, :] = result['var_poisson'][j, :]
 
-                dq_output_fiber = getattr(output_model, f'SPEC_DQ_FIB{fiber}')
+                dq_output_fiber = getattr(output_model, f'SPEC_UNCAL_DQ_FIB{fiber}')
                 dq_output_fiber[i, :] = result['dq'][j, :]
 
                 mid_time_output_fiber = getattr(output_model, f'MID_TIME_FIB{fiber}')
