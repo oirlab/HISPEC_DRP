@@ -1396,9 +1396,10 @@ def create_ramp_and_calibrations(
     shape: tuple[int, int] | None = None,
     *,
     fibers: list[int] | None = None,
+    fiber_spectra: dict[int, tuple] | None = None,
     spectrum_wavelengths=None,
     spectrum_flux=None,
-    radial_velocity_km_s: float = 0.0,
+    radial_velocity_km_s: float | dict[int, float] = 0.0,
     output_dir: str = ".",
     calibration_models: dict[str, datamodels.CalibrationModel] | None = None,
     use_master_calibrations: bool = False,
@@ -1416,83 +1417,189 @@ def create_ramp_and_calibrations(
     sync_caldb_first: bool = True,
     template_mag_ab: float | None = None,
     template_2mass_band: str | None = None,
-    template_filename: str | None = None,
+    template_filename: str | dict[int, str] | None = None,
+    save_ramp: bool = False,
     overwrite_ramp: bool = False,
     target_meta: dict | None = None,
     seed: int | None = None,
     sky_filename: str | None = None,
-    sky_fiber: int | None = None,
+    apply_sky: bool | list[int] = False,
+    apply_e2e_throughput: bool | list[int] = False,
     **cal_kw,
 ) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel]]:
     """
     Create calibration models and a simulated ramp (no Stage 0 pipeline).
 
-    Use this to separate simulation setup from running Stage 0. If ``rate_map``
-    is None, a default rate map is generated. Calibrations are either fetched
-    from the store (when ``use_master_calibrations`` is True), passed in via
-    ``calibration_models``, or created via
-    :func:`create_simulated_calibration_models`(shape, **cal_kw).
+    Each fiber may independently have:
+        - an explicitly supplied spectrum,
+        - a template spectrum loaded from file,
+        - no input spectrum,
+        - sky background,
+        - end-to-end throughput,
+        - a radial velocity.
 
     Parameters
     ----------
     rate_map : np.ndarray or None, optional
-        2D rate map in e-/s/pixel. If None, a default is created via SimulateRateMap.
+        2D rate map in e-/s/pixel. If None, a default is created via
+        SimulateRateMap.
+
     shape : tuple of int or None, optional
-        (ny, nx) for dummy calibrations when ``calibration_models`` is None and
-        ``use_master_calibrations`` is False and ``rate_map`` is unavailable.
-        Normally inferred from ``rate_map``; default is
-        :data:`~hispecdrp.simulations.e2e_support.DEFAULT_HISPEC_DETECTOR_SHAPE`.
+        (ny, nx) for dummy calibrations when ``calibration_models`` is None
+        and ``use_master_calibrations`` is False and ``rate_map`` is
+        unavailable.
+
     fibers : list of int or None, optional
-        Fiber numbers (1, 2, 3, and/or 4) to place spectra on when building the
-        default rate map. Only 1, 2, 3 are supported by SimulateRateMap; others
-        are ignored for rate map creation. If None, default is [1].
-    spectrum_wavelengths : array-like with units or None, optional
-        Wavelength array for the input spectrum when building the default rate
-        map. If None (and spectrum_flux is None), a flat spectrum is used.
-    spectrum_flux : array-like with units or None, optional
-        Flux array for the input spectrum. Must be provided with
-        spectrum_wavelengths to use an input spectrum.
-    radial_velocity_km_s : float, optional
-        Radial velocity in km/s to apply to the input spectrum before generating
-        the rate map (Doppler shift). Must be in the range -500 to 500. The
-        template is densified first, then shifted via
-        ``SimulateRateMap.apply_radial_velocity`` (``λ × (1+z)``) before
-        ``create_native_rate_map``. Default is 0.0.
+        Fiber numbers to include in the simulation. If None, defaults to
+        ``DEFAULT_RATE_MAP_FIBERS``.
+
+    fiber_spectra : dict[int, tuple] or None, optional
+        Per-fiber input spectra. Maps fiber number to a
+        ``(wavelength, flux)`` tuple.
+
+        Example::
+
+            fiber_spectra = {
+                1: (wl_star, flux_star),
+                2: (wl_planet, flux_planet),
+            }
+
+        Fibers omitted from this dictionary may instead use
+        ``template_filename`` or have no input spectrum.
+
+    spectrum_wavelengths : array-like or None, optional
+        Common wavelength array for fibers when using a common spectrum.
+
+        This is retained for backwards compatibility. It must be supplied
+        together with ``spectrum_flux``.
+
+    spectrum_flux : array-like or None, optional
+        Common flux array for fibers when using a common spectrum.
+
+    radial_velocity_km_s : float or dict[int, float], optional
+        Radial velocity in km/s.
+
+        A scalar applies the same RV to every fiber.
+
+        A dictionary allows a different RV for each fiber::
+
+            radial_velocity_km_s = {
+                1: 0.0,
+                2: 25.4,
+                3: -12.7,
+            }
+
+        Fibers not present in the dictionary use 0 km/s.
+
+    template_filename : str, dict[int, str], or None, optional
+        Template spectrum filename.
+
+        A string applies the same template to all fibers that do not have
+        an explicit spectrum.
+
+        A dictionary allows a different template for each fiber::
+
+            template_filename = {
+                1: "star.fits",
+                2: "planet.fits",
+                3: "reference.fits",
+            }
+
+        An explicitly supplied ``fiber_spectra[f]`` takes precedence over
+        ``template_filename``.
+
+        If neither a spectrum nor template is provided for a fiber, the
+        default BT-Settl template is used.
+
+        To create a genuinely spectrum-free fiber, use
+        ``fiber_spectra`` and explicitly specify ``None`` for the
+        corresponding template using the behavior described below.
+
+    template_mag_ab : float or None, optional
+        AB magnitude used to normalize loaded templates.
+
+    template_2mass_band : str or None, optional
+        2MASS band used for template normalization. Must be J, H, or K.
+
+    sky_filename : str or None, optional
+        MK sky background filename.
+
+    apply_sky : bool or list[int], optional
+        Controls which fibers receive sky background.
+
+        ``False``
+            No sky background.
+
+        ``True``
+            Apply sky to all active fibers.
+
+        ``[1, 3]``
+            Apply sky only to fibers 1 and 3.
+
+        A fiber does not need to have an input spectrum in order to receive
+        sky background.
+
+    apply_e2e_throughput : bool or list[int], optional
+        Controls which fibers receive end-to-end throughput.
+
+        ``False``
+            No throughput.
+
+        ``True``
+            Apply throughput to all active fibers.
+
+        ``[1, 2]``
+            Apply throughput only to fibers 1 and 2.
+
     output_dir : str, optional
-        Directory for saving the rate map when building the default rate map
-        (when ``rate_map`` is None). Default is ".".
+        Directory for saving the rate map.
+
     calibration_models : dict or None, optional
-        Calibration models to use. If None, master or dummy models are used.
+        Calibration models to use.
+
     use_master_calibrations : bool, optional
-        If True and ``calibration_models`` is None, fetch from calibration store.
+        If True and ``calibration_models`` is None, fetch master
+        calibrations.
+
     readtime : float, optional
-        Time between reads in seconds. Default is 1.7.
+        Time between reads in seconds.
+
     n_reads : int, optional
-        Number of reads. Default is 10.
+        Number of reads.
+
     spectrograph : str, optional
-        Spectrograph name. Default is "RSPEC".
+        Spectrograph name. Default is ``"RSPEC"``.
+
     max_cores : int, optional
-        Cores for ramp creation. Default is 1.
+        Cores for ramp creation.
+
     poisson_noise : bool, optional
-        Whether to add Poisson noise in create_ramp. Default is True.
+        Whether to add Poisson noise in create_ramp.
+
     convert_to_uint16 : bool, optional
-        Whether to convert ramp data to uint16. Default is True.
+        Whether to convert ramp data to uint16.
+
     seed : int or None, optional
-        RNG seed for UTR noise (Poisson / read / kTC). ``None`` is nondeterministic.
+        RNG seed for UTR noise.
+
     instrument_name, instrument_era, mjd_start, datetime_obs : optional
         Used when ``use_master_calibrations`` is True.
+
     connect_remote : bool, optional
         Whether to connect to remote when fetching master calibrations.
+
     sync_caldb_first : bool, optional
         When using master calibrations, sync store first.
-    template_mag_ab, template_2mass_band : optional
-        When building the default rate map from the bundled BT-Settl template, normalize
-        to this AB magnitude in the given 2MASS band (``'J'``, ``'H'``, ``'K'``, or
-        ``'Ks'``).
-    sky_filename : string, optional
-        MK sky background filename to be used as sky background on sky fiber.
-    sky_fiber : int, optional
-        Fiber number to which only the sky background is applied.
+
+    save_ramp : bool, optional
+        Whether to save the simulated ramp.
+
+    overwrite_ramp : bool, optional
+        Whether to overwrite an existing ramp.
+
+    target_meta : dict or None, optional
+        Metadata to add to the output ramp.
+
     **cal_kw
         Passed to :func:`create_simulated_calibration_models` when creating dummy
         calibrations. Also accepts ``nonlin_coeffs`` (UTR forward ``np.polyval``
@@ -1507,15 +1614,19 @@ def create_ramp_and_calibrations(
 
     Returns
     -------
-    tuple of (RampModel, dict, ndarray)
-        ``(ramp_model, calibration_models, rate_map)``. Pass the first two to
-        :func:`run_stage0_simulation` to run the Stage 0 pipeline. ``rate_map`` is the
-        2D e-/s/pixel array used for ramp simulation (same data as ``rate_map.fits``).
+    tuple
+        ``(ramp_model, calibration_models)``.
     """
+
+    # ------------------------------------------------------------------
+    # Validate template normalization arguments
+    # ------------------------------------------------------------------
     if (template_mag_ab is not None) ^ (template_2mass_band is not None):
         raise ValueError(
-            "template_mag_ab and template_2mass_band must both be set or both be None."
+            "template_mag_ab and template_2mass_band must both be set "
+            "or both be None."
         )
+
     # UTR forward nonlinearity (np.polyval high→low). Default is identity so
     # Stage 0 nonlin_corr is a matched no-op unless the caller opts into a
     # realistic forward poly (e.g. DEFAULT_UTR_FORWARD_NONLIN_POLY).
@@ -1525,7 +1636,9 @@ def create_ramp_and_calibrations(
     kTC_noise = cal_kw.pop("kTC_noise", None)
     clip_ramps = cal_kw.pop("clip_ramps", None)
     ramp_filename = cal_kw.pop("ramp_filename", None)
+    
     _band: str | None = None
+
     if template_2mass_band is not None:
         try:
             _band = normalize_2mass_band(template_2mass_band)
@@ -1534,58 +1647,376 @@ def create_ramp_and_calibrations(
                 "template_2mass_band must be one of 'J', 'H', 'K', or 'Ks'"
             ) from exc
 
+    # ------------------------------------------------------------------
+    # Validate common spectrum inputs
+    # ------------------------------------------------------------------
+    if fiber_spectra is not None and (
+        spectrum_wavelengths is not None
+        or spectrum_flux is not None
+    ):
+        raise ValueError(
+            "Use either fiber_spectra or spectrum_wavelengths/"
+            "spectrum_flux, not both."
+        )
+
+    if (
+        fiber_spectra is None
+        and (
+            spectrum_wavelengths is not None
+            or spectrum_flux is not None
+        )
+        and (
+            spectrum_wavelengths is None
+            or spectrum_flux is None
+        )
+    ):
+        raise ValueError(
+            "spectrum_wavelengths and spectrum_flux must both be "
+            "provided when supplying a common input spectrum."
+        )
+
+    # ------------------------------------------------------------------
+    # Normalize fibers
+    # ------------------------------------------------------------------
+    if fibers is None:
+        fibers = list(e2e_support.DEFAULT_RATE_MAP_FIBERS)
+    else:
+        fibers = list(fibers)
+
+    requested_fibers = set(fibers)
+
+    if fiber_spectra is not None:
+        requested_fibers.update(fiber_spectra.keys())
+
+    if isinstance(template_filename, dict):
+        requested_fibers.update(template_filename.keys())
+
+    # SimulateRateMap currently supports fibers 1, 2, and 3.
+    unsupported_fibers = requested_fibers - {1, 2, 3}
+
+    if unsupported_fibers:
+        logger.warning(
+            "Ignoring unsupported fibers: %s",
+            sorted(unsupported_fibers),
+        )
+
+    fibers = sorted(requested_fibers & {1, 2, 3})
+
+    # ------------------------------------------------------------------
+    # Normalize sky application
+    # ------------------------------------------------------------------
+    if apply_sky is True:
+        sky_fibers = fibers.copy()
+
+    elif apply_sky is False:
+        sky_fibers = []
+
+    elif isinstance(apply_sky, (list, tuple, np.ndarray)):
+        sky_fibers = list(apply_sky)
+
+        unsupported_sky_fibers = set(sky_fibers) - set(fibers)
+
+        if unsupported_sky_fibers:
+            logger.warning(
+                "Ignoring sky application for inactive/unsupported "
+                "fibers: %s",
+                sorted(unsupported_sky_fibers),
+            )
+
+        sky_fibers = [
+            f for f in sky_fibers
+            if f in fibers
+        ]
+
+    else:
+        raise TypeError(
+            "apply_sky must be a bool or a list of fiber numbers."
+        )
+
+    if sky_fibers and sky_filename is None:
+        raise ValueError(
+            "sky_filename must be provided when apply_sky is True "
+            "or specifies one or more fibers."
+        )
+
+    # ------------------------------------------------------------------
+    # Normalize E2E throughput application
+    # ------------------------------------------------------------------
+    if apply_e2e_throughput is True:
+        throughput_fibers = fibers.copy()
+
+    elif apply_e2e_throughput is False:
+        throughput_fibers = []
+
+    elif isinstance(
+        apply_e2e_throughput,
+        (list, tuple, np.ndarray),
+    ):
+        throughput_fibers = list(apply_e2e_throughput)
+
+        unsupported_throughput_fibers = (
+            set(throughput_fibers) - set(fibers)
+        )
+
+        if unsupported_throughput_fibers:
+            logger.warning(
+                "Ignoring E2E throughput application for "
+                "inactive/unsupported fibers: %s",
+                sorted(unsupported_throughput_fibers),
+            )
+
+        throughput_fibers = [
+            f for f in throughput_fibers
+            if f in fibers
+        ]
+
+    else:
+        raise TypeError(
+            "apply_e2e_throughput must be a bool or a list "
+            "of fiber numbers."
+        )
+
+    # ------------------------------------------------------------------
+    # Validate fiber_spectra
+    # ------------------------------------------------------------------
+    if fiber_spectra is not None:
+
+        invalid_spectrum_fibers = (
+            set(fiber_spectra.keys()) - {1, 2, 3}
+        )
+
+        if invalid_spectrum_fibers:
+            logger.warning(
+                "Ignoring spectra for unsupported fibers: %s",
+                sorted(invalid_spectrum_fibers),
+            )
+
+    # ------------------------------------------------------------------
+    # Validate template_filename
+    # ------------------------------------------------------------------
+    if isinstance(template_filename, dict):
+
+        invalid_template_fibers = (
+            set(template_filename.keys()) - {1, 2, 3}
+        )
+
+        if invalid_template_fibers:
+            logger.warning(
+                "Ignoring templates for unsupported fibers: %s",
+                sorted(invalid_template_fibers),
+            )
+
+    elif template_filename is not None:
+
+        if not isinstance(template_filename, str):
+            raise TypeError(
+                "template_filename must be a string, a dictionary "
+                "mapping fiber numbers to strings, or None."
+            )
+
+    # ------------------------------------------------------------------
+    # Prepare output/calibration environment
+    # ------------------------------------------------------------------
     output_dir = e2e_support.ensure_output_directory(output_dir)
     e2e_support.ensure_koa_calibration_cache_env(output_dir)
 
+    # ------------------------------------------------------------------
+    # Build rate map if one was not supplied
+    # ------------------------------------------------------------------
     if rate_map is None:
-        if fibers is None:
-            fibers = list(e2e_support.DEFAULT_RATE_MAP_FIBERS)
+
         logger.info(
-            "Building default rate map (fibers=%s, spectrograph=%s, output_dir=%s).",
+            "Building default rate map (fibers=%s, spectrograph=%s, "
+            "output_dir=%s).",
             fibers,
             spectrograph,
             output_dir,
         )
+
         srm = SimulateRateMap()
         srm.output_directory = output_dir
         srm.rate_map_outname = DEFAULT_RATE_MAP_FILENAME
+
         import astropy.units as u
 
-        if spectrum_wavelengths is not None and spectrum_flux is not None:
-            wl = spectrum_wavelengths
-            flux = spectrum_flux
-        else:
-            template_path = get_spectrum_path(
-                template_filename or e2e_support.DEFAULT_TEMPLATE_FILENAME,
-                base_dir=e2e_support.templates_data_dir(),
+        # ==============================================================
+        # Construct spectrum for each fiber
+        # ==============================================================
+
+        for f in fibers:
+
+            wl = None
+            flux = None
+
+            # ----------------------------------------------------------
+            # 1. Explicitly supplied spectrum
+            # ----------------------------------------------------------
+            if (
+                fiber_spectra is not None
+                and f in fiber_spectra
+            ):
+
+                spectrum = fiber_spectra[f]
+
+                if (
+                    not isinstance(spectrum, (tuple, list))
+                    or len(spectrum) != 2
+                ):
+                    raise ValueError(
+                        f"fiber_spectra[{f}] must be a "
+                        "(wavelength, flux) tuple."
+                    )
+
+                wl, flux = spectrum
+
+                if wl is None or flux is None:
+                    raise ValueError(
+                        f"fiber_spectra[{f}] contains None. "
+                        "Both wavelength and flux must be provided."
+                    )
+
+                logger.info(
+                    "Using explicitly supplied spectrum for fiber %s.",
+                    f,
+                )
+
+            # ----------------------------------------------------------
+            # 2. Fiber-specific template
+            # ----------------------------------------------------------
+            elif (
+                isinstance(template_filename, dict)
+                and f in template_filename
+            ):
+
+                template_path = get_spectrum_path(
+                    template_filename[f],
+                    base_dir=e2e_support.templates_data_dir(),
+                )
+
+                logger.info(
+                    "Loading template for fiber %s: %s",
+                    f,
+                    template_path,
+                )
+
+                wl, flux = load_btsettl_spectrum(
+                    template_path,
+                    mag_ab=template_mag_ab,
+                    filter_band=_band,
+                )
+
+            # ----------------------------------------------------------
+            # 3. Common explicitly supplied spectrum
+            # ----------------------------------------------------------
+            elif (
+                spectrum_wavelengths is not None
+                and spectrum_flux is not None
+            ):
+
+                wl = spectrum_wavelengths
+                flux = spectrum_flux
+
+                logger.info(
+                    "Using common supplied spectrum for fiber %s.",
+                    f,
+                )
+
+            # ----------------------------------------------------------
+            # 4. Common template filename
+            # ----------------------------------------------------------
+            elif isinstance(template_filename, str):
+
+                template_path = get_spectrum_path(
+                    template_filename,
+                    base_dir=e2e_support.templates_data_dir(),
+                )
+
+                logger.info(
+                    "Loading common template for fiber %s: %s",
+                    f,
+                    template_path,
+                )
+
+                wl, flux = load_btsettl_spectrum(
+                    template_path,
+                    mag_ab=template_mag_ab,
+                    filter_band=_band,
+                )
+
+            # ----------------------------------------------------------
+            # 5. Default BT-Settl template
+            # ----------------------------------------------------------
+            elif fiber_spectra is None:
+
+                template_path = get_spectrum_path(
+                    e2e_support.DEFAULT_TEMPLATE_FILENAME,
+                    base_dir=e2e_support.templates_data_dir(),
+                )
+
+                logger.info(
+                    "Loading default BT-Settl template for fiber %s.",
+                    f,
+                )
+
+                wl, flux = load_btsettl_spectrum(
+                    template_path,
+                    mag_ab=template_mag_ab,
+                    filter_band=_band,
+                )
+
+            # ----------------------------------------------------------
+            # 6. No spectrum
+            # ----------------------------------------------------------
+            else:
+
+                logger.info(
+                    "No input spectrum assigned to fiber %s.",
+                    f,
+                )
+
+                continue
+
+            # ==========================================================
+            # Validate and sort spectrum
+            # ==========================================================
+
+            wl_val = np.asarray(
+                getattr(wl, "value", wl),
+                dtype=np.float64,
             )
-            wl, flux = load_btsettl_spectrum(
-                template_path,
-                mag_ab=template_mag_ab,
-                filter_band=_band,
+
+            flux_val = np.asarray(
+                getattr(flux, "value", flux),
             )
-            wl_val = np.asarray(getattr(wl, "value", wl), dtype=np.float64)
+
+            if wl_val.ndim != 1 or flux_val.ndim != 1:
+                raise ValueError(
+                    f"Spectrum for fiber {f} must have one-dimensional "
+                    "wavelength and flux arrays."
+                )
+
+            if len(wl_val) != len(flux_val):
+                raise ValueError(
+                    f"Spectrum for fiber {f} has mismatched wavelength "
+                    f"and flux lengths: {len(wl_val)} vs "
+                    f"{len(flux_val)}."
+                )
+
             sort_idx = np.argsort(wl_val)
+
             wl = wl[sort_idx]
             flux = flux[sort_idx]
-        # Densify the native template once, then Doppler-shift that densified
-        # grid (λ × (1+z)). Keep densify-only PCHIP (no global linear rebuild),
-        # which previously downsampled already-dense BSPEC BT-Settl lines.
-        for f in fibers:
-            if f in (1, 2, 3) and f != sky_fiber:
-                srm.set_fiber_spectrum(
-                    fiber_number=f,
-                    spectrum_wavelengths=wl,
-                    spectrum_flux=flux,
-                    continuous=False,
-                )
-            elif f == sky_fiber and sky_filename is not None:
-                srm.set_fiber_spectrum(
-                    fiber_number=f,
-                    spectrum_wavelengths=wl,
-                    spectrum_flux=np.zeros_like(flux),
-                    continuous=False,
-                )
+
+            srm.set_fiber_spectrum(
+                fiber_number=f,
+                spectrum_wavelengths=wl,
+                spectrum_flux=flux,
+                continuous=False,
+            )
+
+        # ==============================================================
+        # Densify each fiber independently
+        # ==============================================================
 
         from .simulate_rate_map import (
             _check_wavelength_sampling,
@@ -1593,47 +2024,141 @@ def create_ramp_and_calibrations(
         )
 
         for f in fibers:
-            if f not in (1, 2, 3) or f not in srm.fibers:
+
+            if f not in srm.fibers:
                 continue
+
             fib = srm.fibers[f]
+
+            # Skip fibers with no input spectrum.
+            if "wavelength" not in fib or "flux" not in fib:
+                continue
+
             w_f = fib["wavelength"]
             fl_f = fib["flux"]
-            if not _check_wavelength_sampling(w_f, min_resolution=3e5):
+
+            if fl_f.unit.is_equivalent(u.ph/u.s):
+                fib['continuous'] = False
+                continue
+            else:
+                fib['continuous'] = True
+
+            if not _check_wavelength_sampling(
+                w_f,
+                min_resolution=3e5,
+            ):
                 logger.info(
-                    "Densifying fiber=%s spectrum to R>=3e5 before Doppler "
-                    "(PCHIP, densify-only)",
+                    "Densifying fiber=%s spectrum to R>=3e5 before "
+                    "Doppler (PCHIP, densify-only).",
                     f,
                 )
+
                 w_f, fl_f = _upsample_spectrum(
-                    w_f, fl_f, desired_sampling_resolution=3e5
+                    w_f,
+                    fl_f,
+                    desired_sampling_resolution=3e5,
                 )
+
                 fib["wavelength"] = w_f
                 fib["flux"] = fl_f
-            fib["continuous"] = True
-        if radial_velocity_km_s != 0.0:
-            if not (-500.0 <= radial_velocity_km_s <= 500.0):
+
+        # ==============================================================
+        # Apply radial velocity independently to each fiber
+        # ==============================================================
+
+        for f in fibers:
+
+            if f not in srm.fibers:
+                continue
+
+            fib = srm.fibers[f]
+
+            # A sky-only fiber has no spectrum and therefore no RV shift.
+            if "wavelength" not in fib or "flux" not in fib:
+                continue
+
+            if isinstance(radial_velocity_km_s, dict):
+                rv_km_s = radial_velocity_km_s.get(f, 0.0)
+            else:
+                rv_km_s = radial_velocity_km_s
+
+            if not (-500.0 <= rv_km_s <= 500.0):
                 raise ValueError(
-                    f"radial_velocity_km_s must be in [-500, 500], got {radial_velocity_km_s}"
+                    f"radial_velocity_km_s for fiber {f} must be "
+                    f"in [-500, 500], got {rv_km_s}"
                 )
-            rv_quantity = radial_velocity_km_s * u.km / u.s
+
+            if rv_km_s == 0.0:
+                continue
+
+            rv_quantity = rv_km_s * u.km / u.s
+
             logger.info(
-                "Applying densified-template Doppler shift (topocentric) "
+                "Applying densified-template Doppler shift "
+                "(topocentric) to fiber %s: "
                 "radial_velocity_km_s=%.6f",
-                float(radial_velocity_km_s),
+                f,
+                float(rv_km_s),
             )
-            for f in fibers:
-                if f in (1, 2, 3):
-                    srm.apply_radial_velocity(fiber_number=f, rv=rv_quantity)
-        if sky_filename is not None:
-            for f in fibers:
-                if f in (1, 2, 3):
-                    logger.info("Adding sky background to fiber %s.", f)
-                    srm.add_sky_background(fiber_number=f, sky_filename=sky_filename)
+
+            srm.apply_radial_velocity(
+                fiber_number=f,
+                rv=rv_quantity,
+            )
+
+        # ==============================================================
+        # Apply sky background
+        # ==============================================================
+
+        if sky_fibers:
+
+            for f in sky_fibers:
+
+                logger.info(
+                    "Adding sky background to fiber %s.",
+                    f,
+                )
+
+                srm.add_sky_background(
+                    fiber_number=f,
+                    sky_filename=sky_filename,
+                )
+
+        # ==============================================================
+        # Apply end-to-end throughput
+        # ==============================================================
+
+        for f in throughput_fibers:
+
+            logger.info(
+                "Applying E2E throughput to fiber %s.",
+                f,
+            )
+
+            srm.apply_throughput_total(
+                fiber_number=f,
+                mode="NGS",
+            )
+
+        # ==============================================================
+        # Create native rate map
+        # ==============================================================
 
         rate_map = srm.create_native_rate_map(
-            spectrograph=spectrograph, method="prf_convolution"
+            spectrograph=spectrograph,
+            method="prf_convolution",
+            save=True,
         )
-        logger.debug("Rate map shape: %s", getattr(rate_map, "shape", None))
+
+        logger.debug(
+            "Rate map shape: %s",
+            getattr(rate_map, "shape", None),
+        )
+
+    # ------------------------------------------------------------------
+    # calibration/ramp creation code from the original
+    # ------------------------------------------------------------------
+
 
     if calibration_models is None:
         if use_master_calibrations:
@@ -1714,7 +2239,7 @@ def create_ramp_and_calibrations(
         os.path.abspath(output_dir),
         ramp_model.meta.filename or DEFAULT_SIMULATED_RAMP_FILENAME,
     )
-    if overwrite_ramp or not os.path.isfile(ramp_path):
+    if save_ramp and overwrite_ramp or not os.path.isfile(ramp_path):
         ramp_model.save(filepath=ramp_path)
 
     rm = np.asarray(rate_map, dtype=np.float64)
@@ -1737,140 +2262,233 @@ def create_ramp_from_spectrum(
     *,
     spectrograph: str = "BSPEC",
     fibers: list[int] | None = None,
-    template_filename: str | None = None,
+
+    # --------------------------------------------------------------
+    # Spectrum inputs
+    # --------------------------------------------------------------
+    fiber_spectra: dict[int, tuple] | None = None,
+    template_filename: str | dict[int, str] | None = None,
     mag_ab: float | None = 10.0,
     mag_vega: float | None = None,
     filter_band: str | None = "J",
     spectrum_wavelengths=None,
     spectrum_flux=None,
-    radial_velocity_km_s: float = 0.0,
+
+    # --------------------------------------------------------------
+    # Radial velocity
+    # --------------------------------------------------------------
+    radial_velocity_km_s: float | dict[int, float] = 0.0,
     barycentric_velocity_km_s: float | None = 0.0,
     inject_rv_via: str = "spectrum",
+
+    # --------------------------------------------------------------
+    # Calibration / ramp options
+    # --------------------------------------------------------------
     use_master_calibrations: bool = True,
     connect_remote: bool = False,
     sync_caldb_first: bool = False,
     n_reads: int = 10,
     overwrite_ramp: bool = True,
+
+    # --------------------------------------------------------------
+    # Stage 1 calibration registration
+    # --------------------------------------------------------------
     register_wavesol: bool = True,
     register_stage1_sims: bool = True,
     reuse_stage1_sims: bool = True,
     extraction_aperture: float = 10.0,
+
+    # --------------------------------------------------------------
+    # Noise
+    # --------------------------------------------------------------
     seed: int | None = 0,
+
+    # --------------------------------------------------------------
+    # Sky / throughput
+    # --------------------------------------------------------------
     sky_filename: str | None = None,
-    sky_fiber: int | None = None,
+    apply_sky: bool | list[int] = False,
+    apply_e2e_throughput: bool | list[int] = False,
+
     **kwargs,
-) -> tuple[datamodels.RampModel, dict[str, datamodels.CalibrationModel], np.ndarray]:
+) -> tuple[
+    datamodels.RampModel,
+    dict[str, datamodels.CalibrationModel],
+    np.ndarray,
+]:
     """
-    Build a native rate map from a 1D spectrum and return a simulated ``RampModel``.
+    Build a native rate map from one or more spectra and return a
+    simulated ``RampModel``.
 
-    Convenience wrapper around :func:`create_ramp_and_calibrations` for the common
-    notebook / user path: stamp fibers with a BT-Settl (or custom) spectrum via
-    :class:`~hispecdrp.simulations.simulate_rate_map.SimulateRateMap`, then simulate
-    an up-the-ramp readout using master calibrations from ``KOA_CALIBRATION_CACHE``
-    (when ``use_master_calibrations`` is True).
-
-    When ``register_stage1_sims`` is True (default), builds sim-HDF ``tracepos`` /
-    ``traceprof`` / ``fiberflat`` plus the packaged line-ZP ``lfc_wavesol`` and
-    registers them in the local caldb so Stage 1/2 default selectors resolve them
-    (until those products are available from remote KOA). With
-    ``reuse_stage1_sims=True`` (default), products already under
-    ``<output_dir>/cals`` are reused instead of re-simulating fiberflat rates.
-    When only ``register_wavesol`` is True, registers the packaged line-ZP WAVE alone.
-
-    The returned ``calibration_models`` dict always includes ``wavesol``: the
-    packaged sim-HDF **line-ZP** ``LFCWavesolModel`` (with baked CCF-order refine
-    when present). That product is registered into the local caldb with a
-    distinctive ``meta.note`` so Stage 1 ``set_wavesol`` selects it by default
-    even when a same-night geometric ``lfc_wavesol`` is also cached. When Stage-1
-    sims are registered, ``trace_pos``, ``trace_prof``, and ``fiberflat`` are
-    also attached to ``calibration_models``.
-
-    By default (``inject_rv_via='spectrum'``), stellar RV is applied physically:
-    densify the 1D template, Doppler-shift that densified spectrum
-    (``λ × (1+z)``), paint with ZEMAX, and attach the **unscaled** packaged WAVE
-    for every injected RV. Pass ``inject_rv_via='wavesol'`` to keep the older
-    closed-loop path (paint at RV=0, scale WAVE by ``(1+z)``) for comparison.
+    Convenience wrapper around
+    :func:`create_ramp_and_calibrations`.
 
     Parameters
     ----------
     output_dir : str
         Directory for the rate map and raw ramp products.
+
     spectrograph : str, optional
-        ``'BSPEC'`` or ``'RSPEC'``. Default ``'BSPEC'``.
+        ``'BSPEC'`` or ``'RSPEC'``. Default is ``'BSPEC'``.
+
     fibers : list of int or None, optional
-        Fiber numbers to illuminate (1–3). Default ``[2]`` (fiber-2 RV path until
-        packaged WAVE/masks are validated for fibers 1 and 3).
-    template_filename : str or None, optional
-        BT-Settl HDF5 filename under the package templates directory. Ignored when
-        ``spectrum_wavelengths`` and ``spectrum_flux`` are provided. Default is the
-        E2E default template when neither a custom spectrum nor this name is given.
-    mag_ab, mag_vega, filter_band : optional
-        Normalize the BT-Settl template to a 2MASS magnitude
-        (``'J'``, ``'H'``, ``'K'``, or ``'Ks'``). Provide either AB or Vega;
-        ``mag_vega`` overrides ``mag_ab`` when both are set. Vega→AB uses fixed
-        Blanton & Roweis (2007) offsets (J: +0.91, H: +1.39, Ks: +1.85).
-        A magnitude requires ``filter_band``; set both magnitude args and
-        ``filter_band`` to ``None`` to skip template normalization.
+        Fiber numbers to simulate. Default is ``[2]``.
+
+    fiber_spectra : dict[int, tuple] or None, optional
+        Per-fiber explicitly supplied spectra.
+
+        Example::
+
+            fiber_spectra = {
+                1: (wl_star, flux_star),
+                2: (wl_etalon, flux_etalon),
+            }
+
+        A fiber omitted from this dictionary may instead use a template
+        specified by ``template_filename`` or have no input spectrum.
+
+    template_filename : str, dict[int, str], or None, optional
+        Template spectrum filename.
+
+        A string applies the same template to all fibers that do not
+        have an explicitly supplied spectrum.
+
+        A dictionary allows different templates for different fibers::
+
+            template_filename = {
+                1: "star.fits",
+                2: "planet.fits",
+                3: "companion.fits",
+            }
+
+        An explicitly supplied ``fiber_spectra[f]`` takes precedence.
+
+        If neither an explicit spectrum nor a template is supplied for
+        a fiber, the default template is used according to the
+        behavior of ``create_ramp_and_calibrations``.
+
+    mag_ab, filter_band : optional
+        Normalize loaded templates to this AB magnitude in the
+        specified 2MASS band (``'J'``, ``'H'``, or ``'K'``).
+
     spectrum_wavelengths, spectrum_flux : optional
-        Custom 1D spectrum (with units). When both are set, the template is not loaded.
-    radial_velocity_km_s : float, optional
-        Injected stellar radial velocity (km/s). Interpretation depends on
-        ``inject_rv_via`` (see below). Default 0.
+        Common 1D spectrum. These are retained for compatibility with
+        the original wrapper interface.
+
+    radial_velocity_km_s : float or dict[int, float], optional
+        Injected radial velocity in km/s.
+
+        A scalar applies the same RV to all fibers.
+
+        A dictionary allows a different RV for each fiber::
+
+            radial_velocity_km_s = {
+                1: 0.0,
+                2: 25.4,
+                3: -12.7,
+            }
+
     barycentric_velocity_km_s : float or None, optional
-        Known barycentric Earth radial velocity for the simulated exposure (km/s).
-        Default ``0.0`` stamps ``meta.force_berv_m_s`` so Stage-2 barycorr writes
-        BERV=0 and is a no-op for the CCF. Pass ``None`` to leave BERV unset
-        (barycorrpy will require target coordinates).
+        Barycentric velocity stored in the target metadata.
+
     inject_rv_via : {'spectrum', 'wavesol'}, optional
-        How to realize ``radial_velocity_km_s``. ``'spectrum'`` (default): densify
-        then Doppler-paint the 1D template; WAVE stays at the packaged line-ZP
-        bake (RV=0 wavelengths). ``'wavesol'``: paint at RV=0 and scale the
-        returned / Stage-1 WAVE by ``(1+z)`` (legacy closed-loop path).
+        How to realize ``radial_velocity_km_s``.
+
+        ``'spectrum'``:
+            Doppler-shift the input spectrum before painting it.
+
+        ``'wavesol'``:
+            Paint at zero RV and apply the RV through the WAVE solution.
+
+        The ``'wavesol'`` mode is retained primarily for compatibility
+        with the previous closed-loop validation path.
+
     use_master_calibrations : bool, optional
-        Fetch Stage-0 masters from the KOA local caldb. Default True.
+        Fetch Stage-0 masters from the KOA local caldb.
+
     connect_remote, sync_caldb_first : bool, optional
-        Remote KOA options for master-cal lookup. Defaults False (use local cache).
+        Remote KOA options for master-cal lookup.
+
     n_reads : int, optional
-        Number of UTR reads. Default 10.
+        Number of UTR reads.
+
     overwrite_ramp : bool, optional
-        Overwrite an existing ramp FITS under ``output_dir``. Default True.
+        Overwrite an existing ramp FITS.
+
     register_wavesol : bool, optional
-        Register a simulated ``lfc_wavesol`` (packaged line-ZP when available) when
-        ``register_stage1_sims`` is False. Default True.
+        Register the packaged WAVE solution.
+
     register_stage1_sims : bool, optional
-        Register sim-HDF Stage-1 products (traces, fiberflat, packaged WAVE).
-        Default True. Implies WAVE registration.
+        Register simulated Stage-1 calibration products.
+
     reuse_stage1_sims : bool, optional
-        When True (default), reuse Stage-1 masters / fiberflat rate frames already
-        present under ``<output_dir>/cals``. Set False to force re-simulation.
+        Reuse existing Stage-1 calibration products.
+
     extraction_aperture : float, optional
         Box-extraction aperture (pixels) used when building / caching sim-HDF
         Stage-1 fiberflat masters. Default ``10``. Science Stage-1 extraction
         still needs the same value in ``spec_extract`` prim args.
     seed : int or None, optional
-        UTR noise seed (default ``0``). Keep fixed so the packaged WAVE CCF bake
-        transfers across notebook re-runs; change only when intentionally drawing
-        a new noise realization.
-    sky_filename : string, optional
-        MK sky background filename to be used as sky background on sky fiber.
-    sky_fiber : int, optional
-        Fiber number to which only the sky background is applied.
+        UTR noise seed.
+
+    sky_filename : str or None, optional
+        MK sky background filename.
+
+    apply_sky : bool or list[int], optional
+        Controls which fibers receive sky background.
+
+        ``False``:
+            No sky.
+
+        ``True``:
+            Apply sky to all active fibers.
+
+        ``[1, 3]``:
+            Apply sky only to fibers 1 and 3.
+
+        A fiber does not need an input spectrum to receive sky.
+
+    apply_e2e_throughput : bool or list[int], optional
+        Controls which fibers receive end-to-end throughput.
+
+        ``False``:
+            No throughput.
+
+        ``True``:
+            Apply throughput to all active fibers.
+
+        ``[1, 2]``:
+            Apply throughput only to fibers 1 and 2.
+
     **kwargs
-        Forwarded to :func:`create_ramp_and_calibrations`.
+        Additional arguments forwarded to
+        :func:`create_ramp_and_calibrations`.
 
     Returns
     -------
     tuple
-        ``(ramp_model, calibration_models, rate_map)``. ``calibration_models``
-        includes Stage-0 masters plus ``wavesol`` (packaged line-ZP) and, when
-        Stage-1 sims are built, ``trace_pos`` / ``trace_prof`` / ``fiberflat``.
+        ``(ramp_model, calibration_models, rate_map)``.
     """
+
+    # ------------------------------------------------------------------
+    # Default fibers
+    # ------------------------------------------------------------------
     if fibers is None:
         fibers = [2]
-    target_meta = dict(kwargs.pop("target_meta", None) or {})
-    if barycentric_velocity_km_s is not None:
-        target_meta["force_berv_m_s"] = float(barycentric_velocity_km_s) * 1000.0
 
+    # ------------------------------------------------------------------
+    # Target metadata
+    # ------------------------------------------------------------------
+    target_meta = dict(kwargs.pop("target_meta", None) or {})
+
+    if barycentric_velocity_km_s is not None:
+        target_meta["force_berv_m_s"] = (
+            float(barycentric_velocity_km_s) * 1000.0
+        )
+
+    # ------------------------------------------------------------------
+    # Validate RV injection mode
+    # ------------------------------------------------------------------
     if spectrum_wavelengths is None or spectrum_flux is None:
         mag_ab, filter_band = resolve_twomass_mag_ab(
             mag_ab=mag_ab,
@@ -1885,52 +2503,151 @@ def create_ramp_from_spectrum(
                 float(mag_ab),
             )
 
-    inject_mode = str(inject_rv_via or "spectrum").strip().lower()
+    inject_mode = str(
+        inject_rv_via or "spectrum"
+    ).strip().lower()
+
     if inject_mode not in ("spectrum", "wavesol"):
         raise ValueError(
-            f"inject_rv_via must be 'spectrum' or 'wavesol', got {inject_rv_via!r}"
-        )
-    inject_rv_km_s = float(radial_velocity_km_s)
-    use_wave_inject = inject_mode == "wavesol"
-    paint_rv_km_s = 0.0 if use_wave_inject else inject_rv_km_s
-    if use_wave_inject and inject_rv_km_s != 0.0:
-        logger.info(
-            "inject_rv_via='wavesol': painting spectrum at RV=0 and "
-            "injecting radial_velocity_km_s=%.6f via WAVE×(1+z)",
-            inject_rv_km_s,
-        )
-    elif inject_rv_km_s != 0.0:
-        logger.info(
-            "inject_rv_via='spectrum': densify→Doppler-paint "
-            "radial_velocity_km_s=%.6f; WAVE left at packaged line-ZP bake",
-            inject_rv_km_s,
+            "inject_rv_via must be 'spectrum' or 'wavesol', "
+            f"got {inject_rv_via!r}"
         )
 
-    ramp_model, calibration_models, rate_map = create_ramp_and_calibrations(
-        rate_map=None,
-        output_dir=output_dir,
-        spectrograph=spectrograph,
-        fibers=fibers,
-        spectrum_wavelengths=spectrum_wavelengths,
-        spectrum_flux=spectrum_flux,
-        radial_velocity_km_s=paint_rv_km_s,
-        template_filename=template_filename,
-        template_mag_ab=mag_ab,
-        template_2mass_band=filter_band,
-        use_master_calibrations=use_master_calibrations,
-        connect_remote=connect_remote,
-        sync_caldb_first=sync_caldb_first,
-        n_reads=n_reads,
-        overwrite_ramp=overwrite_ramp,
-        target_meta=target_meta or None,
-        seed=seed,
-        sky_filename=sky_filename,
-        sky_fiber=sky_fiber,
-        **kwargs,
+    # ------------------------------------------------------------------
+    # Determine RV used when painting the spectrum.
+    #
+    # The wavesol injection path currently operates on a scalar RV,
+    # whereas the spectrum injection path can pass through a per-fiber
+    # RV dictionary.
+    # ------------------------------------------------------------------
+    if inject_mode == "wavesol":
+
+        if isinstance(radial_velocity_km_s, dict):
+            raise ValueError(
+                "inject_rv_via='wavesol' currently requires "
+                "radial_velocity_km_s to be a scalar."
+            )
+
+        inject_rv_km_s = float(radial_velocity_km_s)
+        paint_rv_km_s = 0.0
+
+        if inject_rv_km_s != 0.0:
+            logger.info(
+                "inject_rv_via='wavesol': painting spectrum at RV=0 "
+                "and injecting radial_velocity_km_s=%.6f via "
+                "WAVE×(1+z)",
+                inject_rv_km_s,
+            )
+
+    else:
+
+        inject_rv_km_s = radial_velocity_km_s
+        paint_rv_km_s = radial_velocity_km_s
+
+        if isinstance(paint_rv_km_s, dict):
+
+            nonzero_rvs = {
+                f: rv
+                for f, rv in paint_rv_km_s.items()
+                if rv != 0.0
+            }
+
+            if nonzero_rvs:
+                logger.info(
+                    "inject_rv_via='spectrum': applying per-fiber "
+                    "radial velocities: %s",
+                    nonzero_rvs,
+                )
+
+        elif paint_rv_km_s != 0.0:
+
+            logger.info(
+                "inject_rv_via='spectrum': densify→Doppler-paint "
+                "radial_velocity_km_s=%.6f",
+                float(paint_rv_km_s),
+            )
+
+    # ------------------------------------------------------------------
+    # Create ramp and calibrations
+    # ------------------------------------------------------------------
+    ramp_model, calibration_models, rate_map = (
+        create_ramp_and_calibrations(
+            rate_map=None,
+            output_dir=output_dir,
+            spectrograph=spectrograph,
+            fibers=fibers,
+
+            # ----------------------------------------------------------
+            # Generalized spectrum inputs
+            # ----------------------------------------------------------
+            fiber_spectra=fiber_spectra,
+            spectrum_wavelengths=spectrum_wavelengths,
+            spectrum_flux=spectrum_flux,
+            template_filename=template_filename,
+
+            # ----------------------------------------------------------
+            # RV
+            # ----------------------------------------------------------
+            radial_velocity_km_s=paint_rv_km_s,
+
+            # ----------------------------------------------------------
+            # Template normalization
+            # ----------------------------------------------------------
+            template_mag_ab=mag_ab,
+            template_2mass_band=filter_band,
+
+            # ----------------------------------------------------------
+            # Calibration options
+            # ----------------------------------------------------------
+            use_master_calibrations=use_master_calibrations,
+            connect_remote=connect_remote,
+            sync_caldb_first=sync_caldb_first,
+            n_reads=n_reads,
+            overwrite_ramp=overwrite_ramp,
+
+            # ----------------------------------------------------------
+            # Metadata / noise
+            # ----------------------------------------------------------
+            target_meta=target_meta or None,
+            seed=seed,
+
+            # ----------------------------------------------------------
+            # Sky / throughput
+            # ----------------------------------------------------------
+            sky_filename=sky_filename,
+            apply_sky=apply_sky,
+            apply_e2e_throughput=apply_e2e_throughput,
+
+            # ----------------------------------------------------------
+            # Additional calibration arguments
+            # ----------------------------------------------------------
+            **kwargs,
+        )
     )
-    ramp_meta = getattr(ramp_model, "meta", None)
-    wavesol_meta = _wavesol_meta_from_ramp(ramp_meta, spectrograph, kwargs.get("instrument_era", "0.0.1"))
+
+    # ------------------------------------------------------------------
+    # Wavesol metadata
+    # ------------------------------------------------------------------
+    ramp_meta = getattr(
+        ramp_model,
+        "meta",
+        None,
+    )
+
+    wavesol_meta = _wavesol_meta_from_ramp(
+        ramp_meta,
+        spectrograph,
+        kwargs.get(
+            "instrument_era",
+            "0.0.1",
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # Register Stage-1 simulations
+    # ------------------------------------------------------------------
     if register_stage1_sims:
+
         bundle = register_sim_stage1_calibrations(
             output_dir,
             rate_map,
@@ -1941,34 +2658,87 @@ def create_ramp_from_spectrum(
             extraction_aperture=float(extraction_aperture),
             reuse_existing=bool(reuse_stage1_sims),
         )
-        for key in ("trace_pos", "trace_prof", "fiberflat", "wavesol"):
+
+        for key in (
+            "trace_pos",
+            "trace_prof",
+            "fiberflat",
+            "wavesol",
+        ):
+
             model = bundle.get(key)
+
             if model is not None:
                 calibration_models[key] = model
+
+    # ------------------------------------------------------------------
+    # Register/load wavesol
+    # ------------------------------------------------------------------
     elif register_wavesol:
+
         register_sim_lfc_wavesol(
             spectrograph,
             meta=wavesol_meta,
             connect_remote=False,
             prefer_packaged_line_zp=True,
         )
-        calibration_models["wavesol"] = _load_pipeline_example_wavesol(
-            spectrograph, meta=wavesol_meta
+
+        calibration_models["wavesol"] = (
+            _load_pipeline_example_wavesol(
+                spectrograph,
+                meta=wavesol_meta,
+            )
         )
+
     else:
-        calibration_models["wavesol"] = _load_pipeline_example_wavesol(
-            spectrograph, meta=wavesol_meta
+
+        calibration_models["wavesol"] = (
+            _load_pipeline_example_wavesol(
+                spectrograph,
+                meta=wavesol_meta,
+            )
         )
-    if use_wave_inject and inject_rv_km_s != 0.0 and calibration_models.get("wavesol") is not None:
-        _scale_wavesol_for_injected_rv(calibration_models["wavesol"], inject_rv_km_s)
+
+    # ------------------------------------------------------------------
+    # Apply wavesol RV injection when requested
+    # ------------------------------------------------------------------
+    if (
+        inject_mode == "wavesol"
+        and (
+            isinstance(inject_rv_km_s, (int, float))
+            and inject_rv_km_s != 0.0
+        )
+        and calibration_models.get("wavesol") is not None
+    ):
+
+        _scale_wavesol_for_injected_rv(
+            calibration_models["wavesol"],
+            inject_rv_km_s,
+        )
+
     elif calibration_models.get("wavesol") is not None:
-        meta = getattr(calibration_models["wavesol"], "meta", None)
+
+        meta = getattr(
+            calibration_models["wavesol"],
+            "meta",
+            None,
+        )
+
         if meta is not None:
+
             try:
-                meta.injected_rv_km_s = inject_rv_km_s
-                meta.injected_rv_via = "spectrum"
+                if isinstance(inject_rv_km_s, dict):
+                    meta.injected_rv_km_s = 0.0
+                else:
+                    meta.injected_rv_km_s = float(
+                        inject_rv_km_s
+                    )
+
+                meta.injected_rv_via = inject_mode
+
             except Exception:
                 pass
+
     return ramp_model, calibration_models, rate_map
 
 

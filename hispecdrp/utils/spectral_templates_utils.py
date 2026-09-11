@@ -78,6 +78,7 @@ __all__ = [
     "resolve_stellar_template_to_log_micron",
     "get_skybackground_path",
     "load_sky_spectrum",
+    "etalon_line_list",
 ]
 
 
@@ -666,3 +667,128 @@ def load_sky_spectrum(filepath: str, wl_min_um: float = 0.8, wl_max_um: float = 
     sky_flux = sky_flux[mask]
 
     return sky_wl.to(u.micron), sky_flux.to(u.erg / (u.s * u.cm**2 * u.AA)) 
+
+def etalon_line_list(
+    fsr: u.Quantity,
+    wavelength_range: tuple[u.Quantity, u.Quantity],
+    n_cavity: float,
+    wavelength_meas: u.Quantity,
+    finesse_meas: np.ndarray,
+    peak_trans_meas: np.ndarray,
+):
+    """Generate an etalon resonance line list over a wavelength range.
+
+    The resonance wavelengths are calculated using the ideal Fabry–Pérot
+    etalon resonance condition,
+
+        lambda_m = 2 * n * d / m,
+
+    where ``m`` is the integer resonance order and ``d`` is the cavity
+    length. The cavity length is inferred from the supplied free spectral
+    range (FSR) using
+
+        FSR = c / (2 * n * d).
+
+    The measured finesse and peak transmission are linearly interpolated
+    onto the calculated resonance wavelengths.
+
+    This function calculates only the resonance positions; it does not
+    evaluate the full Airy/Fabry–Pérot transmission profile between
+    resonances.
+
+    Parameters
+    ----------
+    fsr : astropy.units.Quantity
+        Free spectral range of the etalon. Converted internally to Hz.
+
+    wavelength_range : tuple[astropy.units.Quantity, astropy.units.Quantity]
+        Minimum and maximum wavelengths to include. Converted internally
+        to nm for calculating the resonance orders.
+
+    n_cavity : float
+        Refractive index inside the etalon cavity.
+
+    wavelength_meas : astropy.units.Quantity
+        Wavelengths at which the finesse and peak transmission were measured.
+        These values should be sorted in increasing wavelength for use with
+        ``numpy.interp``.
+
+    finesse_meas : numpy.ndarray
+        Measured finesse values corresponding to ``wavelength_meas``.
+
+    peak_trans_meas : numpy.ndarray
+        Measured peak transmission values corresponding to
+        ``wavelength_meas``.
+
+    Returns
+    -------
+    order : numpy.ndarray
+        Integer Fabry–Pérot resonance orders corresponding to each line.
+
+    wavelength : astropy.units.Quantity
+        Resonance wavelengths, returned in microns.
+
+    finesse : numpy.ndarray
+        Finesse interpolated from ``finesse_meas`` at each resonance
+        wavelength.
+
+    transmission : numpy.ndarray
+        Peak transmission interpolated from ``peak_trans_meas`` at each
+        resonance wavelength.
+
+    Notes
+    -----
+    The resonance positions assume an ideal, plane-parallel Fabry–Pérot
+    etalon with normal incidence. Dispersion in the cavity refractive index
+    is not included because ``n_cavity`` is treated as a constant.
+
+    ``numpy.interp`` uses the endpoint values when a calculated resonance
+    lies outside the range of ``wavelength_meas``. Therefore, the measured
+    wavelength range should generally cover the requested resonance range
+    if extrapolation by constant endpoint values is not desired.
+    """
+
+    from astropy import units as u
+    from astropy.constants import c
+
+    fsr = fsr.to(u.Hz)
+    wl_min, wl_max = [x.to(u.nm) for x in wavelength_range]
+    wavelength_meas = wavelength_meas.to(u.nm)
+
+    finesse_meas = np.asarray(finesse_meas, dtype=float)
+    peak_trans_meas = np.asarray(peak_trans_meas, dtype=float)
+
+    # FSR = c / (2 n d)
+    d = c / (2 * n_cavity * fsr)
+
+    # Resonance condition: lambda_m = 2 n d / m
+    m_max = int(np.floor(
+        (2 * n_cavity * d / wl_min).decompose().value
+    ))
+    m_min = int(np.ceil(
+        (2 * n_cavity * d / wl_max).decompose().value
+    ))
+
+    order = np.arange(m_min, m_max + 1)
+
+    wavelength = (2 * n_cavity * d / order).to(u.nm)
+
+    # Keep only requested wavelength range
+    mask = (wavelength >= wl_min) & (wavelength <= wl_max)
+
+    order = order[mask]
+    wavelength = wavelength[mask]
+
+    finesse = np.interp(
+        wavelength.value,
+        wavelength_meas.value,
+        finesse_meas,
+    )
+
+    transmission = np.interp(
+        wavelength.value,
+        wavelength_meas.value,
+        peak_trans_meas,
+    )
+
+    return order, wavelength.to(u.micron), finesse, transmission
