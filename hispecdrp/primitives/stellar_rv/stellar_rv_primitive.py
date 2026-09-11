@@ -14,6 +14,7 @@ from ..base_primitive import BasePrimitive
 from ... import datamodels
 from ...datamodels.dqflags import DQ_FLAGS
 from ...datamodels.extensions import RVCCF_CCF_ELEM_DTYPE
+from ..utils.ccf.ccf_common import science_centroid_spec_err
 
 from .rv_combine_utils import (
     DEFAULT_CHUNK_RV_MAX_ABS_M_S,
@@ -85,6 +86,9 @@ def _fiber_l2_bundle(input_model, fiber: str):
         dq = np.zeros_like(spec, dtype=np.uint32)
     else:
         dq = np.asarray(dq, dtype=np.uint32)
+    uncal = getattr(input_model, f"SPEC_UNCAL_FIB{fiber}", None)
+    uncal_err = getattr(input_model, f"SPEC_UNCAL_ERR_FIB{fiber}", None)
+    err = science_centroid_spec_err(spec, err, uncal, uncal_err)
     return spec, err, dq, getattr(input_model, wa)
 
 

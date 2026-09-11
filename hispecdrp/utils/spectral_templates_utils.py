@@ -243,6 +243,26 @@ def vacuum_wavelength_nm_to_air_nm(
     return air.reshape(orig_shape)
 
 
+def _coalesce_existing_spectrum_path(resolved: str) -> str:
+    """Prefer ``resolved`` if it exists; else a Dropbox conflicted-copy sibling."""
+    if os.path.isfile(resolved):
+        return resolved
+    parent = os.path.dirname(resolved)
+    name = os.path.basename(resolved)
+    stem, ext = os.path.splitext(name)
+    if not os.path.isdir(parent) or ext.lower() != ".h5":
+        return resolved
+    candidates = [
+        os.path.join(parent, fn)
+        for fn in os.listdir(parent)
+        if fn != name and fn.startswith(stem) and fn.lower().endswith(".h5")
+    ]
+    if not candidates:
+        return resolved
+    candidates.sort(key=os.path.getmtime, reverse=True)
+    return candidates[0]
+
+
 def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
     """
     Resolve a spectrum file path, optionally relative to a package data directory.
@@ -259,23 +279,18 @@ def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
     -------
     str
         Absolute filesystem path (``os.path.join(base_dir, path)`` when ``path`` is
-        relative).
-
-    Notes
-    -----
-    Does not check that the file exists. Templates shipped under
-    ``hispecdrp/data/templates/`` are often referenced with an absolute or
-    cwd-relative path instead of this helper.
+        relative). If that file is missing, a same-stem ``*.h5`` sibling is used
+        when present (Dropbox ``conflicted copy`` names).
 
     See Also
     --------
     load_btsettl_spectrum : Open resolved BT-Settl HDF5 files.
     """
     if os.path.isabs(path):
-        return path
+        return _coalesce_existing_spectrum_path(path)
     if base_dir is None:
         base_dir = _DEFAULT_SPECTRUM_DATA_DIR
-    return os.path.join(base_dir, path)
+    return _coalesce_existing_spectrum_path(os.path.join(base_dir, path))
 
 
 def get_skybackground_path(path: str, base_dir: str | None = None) -> str:

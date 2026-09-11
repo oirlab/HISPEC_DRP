@@ -28,14 +28,17 @@ from ..utils.line_mask_utils import (
     build_ccfopt_line_mask_from_l2_line_by_line_rv,
     build_line_mask_from_template,
     paired_line_mask_path_for_template,
+    read_mask_generation_meta,
 )
 from ..primitives import StellarRVPrimitive
+from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import SimulateRateMap
 
 __all__ = [
     "build_ccfopt_mask",
     "build_ccfopt_mask_lsf_matched",
+    "ensure_lsf_ccfopt_mask",
     "build_l2",
     "build_l2_lsf_matched",
     "build_l2_and_recover_rv",
@@ -179,6 +182,7 @@ def build_l2(
     spec_err_floor: float = 1.0e-6,
     spec_err_relative: float = 1.0e-6,
     apply_lsf: bool = False,
+    mjd_start: float | None = None,
 ) -> datamodels.L2Model:
     """
     Build a noiseless L2 with a Doppler-shifted template on the instrument grid.
@@ -216,6 +220,10 @@ def build_l2(
         If True, convolve each order with the HDF PSF→1-D LSF after paint so
         the L2 matches instrument-apparent line shapes (for ccfopt masks and
         fidelity vs extracted spectra).
+    mjd_start
+        Observation start MJD. Default is the E2E / UTR simulation epoch
+        (:data:`~hispecdrp.simulations.e2e_gaia.DEFAULT_E2E_MJD_START`) so
+        datamodel init does not warn and invent wall-clock time.
 
     Returns
     -------
@@ -261,6 +269,7 @@ def build_l2(
             "order_end": oen,
             "spectrograph": spectrograph,
             "instrument_name": "HISPEC",
+            "mjd_start": resolve_e2e_mjd_start(mjd_start),
         }
     )
     model.meta.order_start = ost
@@ -375,6 +384,40 @@ def build_ccfopt_mask(
         **ccfopt_overrides,
     )
     return str(seed_mask), ccfopt_path, l2
+
+
+def ensure_lsf_ccfopt_mask(
+    template: str,
+    output_dir: str | Path,
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    min_lines: int = 100,
+    **build_kwargs,
+) -> str:
+    """
+    Return a full-band ``*.lsf.ccfopt.delta.mas`` path, building it if needed.
+
+    The packaged ``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke file
+    (``n_lines=18``). Ideal-spectrum recovery needs the full echelle product
+    written by :func:`build_ccfopt_mask` with ``apply_lsf=True``.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / f"{Path(template).stem}.lsf.ccfopt.delta.mas"
+    meta = read_mask_generation_meta(str(dest)) if dest.is_file() else None
+    n_lines = int((meta or {}).get("n_lines") or 0)
+    if dest.is_file() and n_lines >= int(min_lines):
+        return str(dest)
+    _, path, _ = build_ccfopt_mask(
+        template,
+        out_dir,
+        spectrograph=spectrograph,
+        fiber=fiber,
+        apply_lsf=True,
+        **build_kwargs,
+    )
+    return path
 
 
 def build_ccfopt_mask_lsf_matched(

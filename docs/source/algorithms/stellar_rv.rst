@@ -92,9 +92,9 @@ The stellar RV primitive writes two main product tables per fiber:
 
 ``RVCCFAVG_FIB*``
    Aggregate RV and uncertainty for the fiber. The RV combination uses robust outlier rejection
-   (median/MAD) followed by an inverse-variance weighted mean; the reported uncertainty is a
-   conservative combination of internal inverse-variance standard error and the observed chunk
-   scatter.
+   (median/MAD) followed by an inverse-variance weighted mean; the reported uncertainty is
+   :math:`\\max(\\sigma_{\\mathrm{IVW}},\\,\\mathrm{MAD}/\\sqrt{N})`. In the infinite-S/N
+   limit this converges to the empirical ``MAD/√N`` floor.
 
 For details of the combination logic, see
 :func:`~hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_rv_estimates_median_mad_weighted`.
@@ -170,7 +170,11 @@ does when ``algorithm="ccf_line_mask"`` for one fiber (the template-CCF algorith
      (Numba Lagrange sampler; ``mask_ccf_pixel_interp_order`` / ``max_cores``)
    - Legacy / template helpers: :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv`
 
-   The reported chunk ``RV`` / ``RV_ERR`` are the Gaussian centroid and its Gaussian uncertainty.
+   The reported chunk ``RV`` / ``RV_ERR`` are the Gaussian centroid and its
+   photon-weighted Gaussian uncertainty (interpolated science-pixel errors,
+   oversampling-corrected). Fiberflat / blaze terms in ``SPEC_ERR`` are not
+   used as independent CCF-bin noise. Per-chunk ``RV_ERR`` decreases with S/N
+   and converges to a numerical floor in the noiseless limit.
    A discrete-peak Numba seed may be used only when the Gaussian fit does not succeed.
 
    **CCF sign convention:** stored CCF rows (RVCCF / preview slots) follow the negated convention

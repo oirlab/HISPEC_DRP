@@ -90,8 +90,9 @@ range). Equivalent helper: :func:`~hispecdrp.simulations.spectra.build_ccfopt_ma
 Run :class:`~hispecdrp.primitives.StellarRVPrimitive` on the LSF-matched L2 and
 ccfopt mask. The ``RVCCF`` table has more rows than mask lines because echelle
 orders can measure the same line more than once; aggregate RV should still be
-near zero. Use this mask in :doc:`ideal_spectrum_rv_recovery` with
-``build_l2(..., apply_lsf=True)`` for like-to-like bulk-RV recovery.
+near zero. The :doc:`ideal_spectrum_rv_recovery` example uses the packaged
+native ``*.ccfopt.delta.mas`` with ``build_l2(..., apply_lsf=False)``. Use this
+LSF mask with ``apply_lsf=True`` for a like-to-like LSF closed loop.
 
 .. code-block:: python
 
