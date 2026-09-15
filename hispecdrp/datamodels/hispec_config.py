@@ -1,5 +1,7 @@
 import importlib.resources
 import logging
+
+from astropy.units import Hz
 from .base_model import DataModel
 from .meta_data import read_meta_schema
 
@@ -33,9 +35,12 @@ class HISPECConfig:
 
     # TODO: Update LFC params, eventually in calibration DB
     lfc_params : ClassVar[dict[str, float]] = {
+        # NOTE: From https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/docs/source/info/data_format.rst
+        # LFCFRREF	20000000000.0	LFC filtered Offset Freq RR Filter setpoint(Hz)
+        # LFCCEOFR	5220000000.0	LFC CEO Filtered Setpoint Freq (Hz)
         'LFC-B' : {
-            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
-            'delta_nu' : 10.000000174E9, # Hz
+            'nu0' : 5.22E9, # Hz
+            'delta_nu' : 20E9, # Hz
         },
         'LFC-R' : {
             'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
