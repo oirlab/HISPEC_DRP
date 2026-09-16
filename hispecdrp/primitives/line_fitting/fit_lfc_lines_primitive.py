@@ -7,6 +7,7 @@ from ..utils.spectral_utils import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants
+import plotly.graph_objects as go
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -60,7 +61,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'fwhm_bounds' : (1.0, 3.0),
+        'fwhm_bounds' : (1.0, 7.0),
         'mu_bounds' : (-1.0, 1.0),
         'max_fit_window' : 14,
         'do_fibers' : None,
@@ -172,6 +173,283 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
         return dict(output=output_model, fit_results=fit_results)
+
+    def _create_preview(self):
+        """
+        Build an interactive preview comparing each fitted LFC line's Gaussian
+        model to the underlying spectral data.
+ 
+        Navigation is three-level: a *fiber* dropdown, an *order* dropdown
+        (options depend on the selected fiber), and a *line* slider that
+        scrolls through only the lines fit within the selected order (options
+        depend on the selected fiber+order). This keeps each slider short
+        even when thousands of lines were fit overall. Each step shows two
+        traces: the raw data (with error bars) in a window around the line,
+        and the reconstructed Gaussian fit curve.
+        """
+        output_model = self._output['output']
+        fit_results = self._output['fit_results']
+ 
+        # Recompute the same fiber/order selection used in _perform so that
+        # fit_results[fiber][i] lines up with do_orders[i].
+        do_fibers, do_orders = self.get_do_traces(output_model, self.do_fibers, self.do_orders)
+ 
+        sigma_scale = 2 * np.sqrt(2 * np.log(2))  # FWHM -> sigma
+        half_win = self.max_fit_window / 2.0
+ 
+        # --- Build a nested fiber -> order -> line structure ---
+        fiber_meta = []
+        for fiber in do_fibers:
+            if fiber not in fit_results:
+                continue
+ 
+            wave     = getattr(output_model, f'wave_fib{fiber}')
+            spec     = getattr(output_model, f'spec_fib{fiber}')
+            spec_err = getattr(output_model, f'spec_err_fib{fiber}')
+            n_pix    = spec.shape[1]
+            pix_arr  = np.arange(n_pix)
+ 
+            order_entries = []
+            for oi_idx, order in enumerate(do_orders):
+                oi = int(np.abs(order - output_model.meta.order_start))
+                order_fits = fit_results[fiber][oi_idx] if oi_idx < len(fit_results[fiber]) else []
+ 
+                lines = []
+                for line_fit in order_fits:
+                    mu = getattr(line_fit, 'mu', np.nan)
+                    if not np.isfinite(mu):
+                        continue
+ 
+                    amp      = getattr(line_fit, 'amplitude', np.nan)
+                    amp_err  = getattr(line_fit, 'amplitude_err', np.nan)
+                    mu_err   = getattr(line_fit, 'mu_err', np.nan)
+                    fwhm     = getattr(line_fit, 'fwhm', np.nan)
+                    fwhm_err = getattr(line_fit, 'fwhm_err', np.nan)
+ 
+                    # Data window around the line, padded a bit beyond the fit window for context
+                    lo = max(int(np.floor(mu - 1.5 * half_win)), 0)
+                    hi = min(int(np.ceil(mu + 1.5 * half_win)), n_pix - 1)
+                    if hi <= lo:
+                        continue
+                    x_data = pix_arr[lo:hi + 1]
+                    y_data = spec[oi, lo:hi + 1]
+                    yerr_data = spec_err[oi, lo:hi + 1]
+ 
+                    # Reconstructed Gaussian model curve, densely sampled
+                    x_model = np.linspace(x_data[0], x_data[-1], 200)
+                    sigma = fwhm / sigma_scale if np.isfinite(fwhm) and fwhm > 0 else np.nan
+                    if np.isfinite(sigma) and np.isfinite(amp):
+                        y_model = amp * np.exp(-0.5 * ((x_model - mu) / sigma) ** 2)
+                    else:
+                        y_model = np.full_like(x_model, np.nan)
+ 
+                    wave_val = np.interp(mu, pix_arr, wave[oi, :]) if wave is not None else np.nan
+ 
+                    lines.append(dict(
+                        mu=mu, mu_err=mu_err,
+                        amp=amp, amp_err=amp_err,
+                        fwhm=fwhm, fwhm_err=fwhm_err,
+                        wave=wave_val,
+                        x_data=x_data, y_data=y_data, yerr_data=yerr_data,
+                        x_model=x_model, y_model=y_model,
+                    ))
+ 
+                if lines:
+                    order_entries.append(dict(order=order, lines=lines))
+ 
+            if order_entries:
+                fiber_meta.append(dict(fiber=fiber, orders=order_entries))
+            else:
+                logger.warning(f"No valid line fits to preview for fiber {fiber}.")
+ 
+        fig = go.Figure()
+ 
+        if not fiber_meta:
+            logger.warning("No LFC line fits available to preview.")
+            fig.update_layout(title='No LFC line fits available to preview.')
+            self._output['preview'] = dict(html=None, png=None, fig=fig)
+            return
+ 
+        def _line_title(fiber, order, line, line_idx, n_lines):
+            wave_str = f", λ={line['wave']:.5f} µm" if np.isfinite(line['wave']) else ""
+            return (
+                f"LFC Line Fit — Fiber {fiber}, Order {order}, "
+                f"Line {line_idx + 1}/{n_lines}{wave_str}<br>"
+                f"µ = {line['mu']:.3f} ± {line['mu_err']:.3f} px  |  "
+                f"FWHM = {line['fwhm']:.3f} ± {line['fwhm_err']:.3f} px  |  "
+                f"Amp = {line['amp']:.4g} ± {line['amp_err']:.4g}"
+            )
+ 
+        traces_per_line = 2  # data + Gaussian fit curve
+ 
+        # Absolute trace offset for the start of each (fiber, order) block
+        order_base = []
+        offset = 0
+        for meta in fiber_meta:
+            fiber_bases = []
+            for order_entry in meta['orders']:
+                fiber_bases.append(offset)
+                offset += len(order_entry['lines']) * traces_per_line
+            order_base.append(fiber_bases)
+        total_traces = offset
+ 
+        def make_visibility(f_idx, o_idx, l_idx):
+            vis = [False] * total_traces
+            base = order_base[f_idx][o_idx] + l_idx * traces_per_line
+            vis[base] = True
+            vis[base + 1] = True
+            return vis
+ 
+        # --- Build all traces up front (data + fit curve for every line, every order, every fiber) ---
+        for f_idx, meta in enumerate(fiber_meta):
+            for o_idx, order_entry in enumerate(meta['orders']):
+                for l_idx, line in enumerate(order_entry['lines']):
+                    visible = (f_idx == 0 and o_idx == 0 and l_idx == 0)
+ 
+                    fig.add_trace(go.Scatter(
+                        x           = line['x_data'],
+                        y           = line['y_data'],
+                        error_y     = dict(type='data', array=line['yerr_data'], visible=True),
+                        mode        = 'markers',
+                        name        = 'Data',
+                        marker      = dict(color='steelblue', size=7),
+                        legendgroup = 'data',
+                        showlegend  = True,
+                        visible     = visible,
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x           = line['x_model'],
+                        y           = line['y_model'],
+                        mode        = 'lines',
+                        name        = 'Gaussian fit',
+                        line        = dict(color='crimson', width=2),
+                        legendgroup = 'fit',
+                        showlegend  = True,
+                        visible     = visible,
+                    ))
+ 
+        # --- Line slider steps (scrolls through the lines within one fiber+order) ---
+        def build_line_slider_steps(f_idx, o_idx):
+            meta = fiber_meta[f_idx]
+            order_entry = meta['orders'][o_idx]
+            n_lines = len(order_entry['lines'])
+            steps = []
+            for l_idx, line in enumerate(order_entry['lines']):
+                steps.append(dict(
+                    method = 'update',
+                    label  = str(l_idx + 1),
+                    args   = [
+                        {'visible': make_visibility(f_idx, o_idx, l_idx)},
+                        {'title': _line_title(meta['fiber'], order_entry['order'], line, l_idx, n_lines)},
+                    ],
+                ))
+            return steps
+ 
+        # --- Order dropdown buttons (options depend on the selected fiber) ---
+        def build_order_dropdown_buttons(f_idx):
+            meta = fiber_meta[f_idx]
+            buttons = []
+            for o_idx, order_entry in enumerate(meta['orders']):
+                n_lines = len(order_entry['lines'])
+                buttons.append(dict(
+                    label  = f"Order {order_entry['order']}",
+                    method = 'update',
+                    args   = [
+                        {'visible': make_visibility(f_idx, o_idx, 0)},
+                        {
+                            'title': _line_title(meta['fiber'], order_entry['order'], order_entry['lines'][0], 0, n_lines),
+                            # Update only the line slider (leave both dropdowns untouched)
+                            'sliders[0].steps':  build_line_slider_steps(f_idx, o_idx),
+                            'sliders[0].active': 0,
+                        },
+                    ],
+                ))
+            return buttons
+ 
+        # --- Fiber dropdown buttons (rewrite the order dropdown + line slider) ---
+        fiber_buttons = []
+        for f_idx, meta in enumerate(fiber_meta):
+            first_order_entry = meta['orders'][0]
+            n_lines = len(first_order_entry['lines'])
+            fiber_buttons.append(dict(
+                label  = f'Fiber {meta["fiber"]}',
+                method = 'update',
+                args   = [
+                    {'visible': make_visibility(f_idx, 0, 0)},
+                    {
+                        'title': _line_title(meta['fiber'], first_order_entry['order'], first_order_entry['lines'][0], 0, n_lines),
+                        # Rebuild the order dropdown's own buttons for this fiber...
+                        'updatemenus[1].buttons': build_order_dropdown_buttons(f_idx),
+                        'updatemenus[1].active':  0,
+                        # ...and reset the line slider to this fiber's first order
+                        'sliders[0].steps':  build_line_slider_steps(f_idx, 0),
+                        'sliders[0].active': 0,
+                    },
+                ],
+            ))
+ 
+        fig.update_layout(
+            title = _line_title(
+                fiber_meta[0]['fiber'], fiber_meta[0]['orders'][0]['order'],
+                fiber_meta[0]['orders'][0]['lines'][0], 0, len(fiber_meta[0]['orders'][0]['lines']),
+            ),
+            updatemenus = [
+                dict(  # [0] fiber dropdown
+                    buttons     = fiber_buttons,
+                    direction   = 'down',
+                    showactive  = True,
+                    x           = 1.0,
+                    xanchor     = 'right',
+                    y           = 1.15,
+                    yanchor     = 'top',
+                    bgcolor     = '#f0f0f0',
+                    bordercolor = '#cccccc',
+                ),
+                dict(  # [1] order dropdown — options for the initial fiber
+                    buttons     = build_order_dropdown_buttons(0),
+                    direction   = 'down',
+                    showactive  = True,
+                    x           = 1.0,
+                    xanchor     = 'right',
+                    y           = 1.0,
+                    yanchor     = 'top',
+                    bgcolor     = '#f0f0f0',
+                    bordercolor = '#cccccc',
+                ),
+            ],
+            sliders = [dict(
+                active       = 0,
+                currentvalue = dict(prefix='Line: ', font=dict(size=14)),
+                pad          = dict(t=50),
+                steps        = build_line_slider_steps(0, 0),
+            )],
+            xaxis         = dict(title='Pixel', showgrid=True, gridcolor='rgba(200,200,200,0.3)'),
+            yaxis         = dict(title='Flux (e-/s)', showgrid=True, gridcolor='rgba(200,200,200,0.3)'),
+            plot_bgcolor  = '#ffffff',
+            paper_bgcolor = '#ffffff',
+            font          = dict(color='#000000'),
+            legend        = dict(bgcolor='#ffffff'),
+            height        = 550,
+            margin        = dict(t=140),
+        )
+ 
+        base_path        = output_model._generate_output_path(output_dir=self.output_dir, suffix=self.suffix)
+        output_path_html = base_path.replace('.fits', '_preview.html')
+        output_path_png  = base_path.replace('.fits', '_preview.png')
+ 
+        if self.save_preview:
+            fig.write_html(output_path_html, include_plotlyjs='cdn')
+            fig.write_image(output_path_png, scale=2)
+ 
+        if self.show_preview:
+            fig.show()
+ 
+        self._output['preview'] = {
+            'html': output_path_html,
+            'png':  output_path_png,
+            'fig':  fig,
+        }
+
 
 
 def gen_lfc_modes(
