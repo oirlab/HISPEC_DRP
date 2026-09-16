@@ -156,7 +156,11 @@ class FitLFCLinesPrimitive(BasePrimitive):
                         'FWHM_PIX' : _fit_results[i].fwhm,
                         'FWHM_ERR_PIX' : _fit_results[i].fwhm_err,
                     }
-                    wave_closest = wave[oi, int(r['MU_PIX'])]
+                    try:
+                        wave_closest = wave[oi, int(r['MU_PIX'])]
+                    except ValueError:
+                        logger.warning(f'Failed to fit comb line {i} in order {order}.')
+                        continue
                     line_wave, _, line_num = _get_closest_lfc_mode(
                         lfc_nu0, lfc_delta_nu, wave_closest
                     )
@@ -245,9 +249,9 @@ def _get_closest_lfc_mode(
     Parameters
     ----------
     nu0 : float
-        The central frequency (pump line) of the LFC in GHz.
+        The central frequency (pump line) of the LFC in Hz.
     delta_nu : float
-        The frequency spacing of the LFC modes in GHz.
+        The frequency spacing of the LFC modes in Hz.
     wave : float
         The wavelength value in microns.
 
