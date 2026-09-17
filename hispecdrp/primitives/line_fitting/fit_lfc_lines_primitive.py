@@ -72,6 +72,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
         'line_source' : 'peaks', # 'wavesol' (all lines) or 'peaks' (only lines found by find_peaks)
         'min_line_spacing' : 10, # Minimum number of pixels between lines
         'background_filter_width' : 31, # Pixels
+        'preview_n_lines_per_order' : 25, # Max lines shown per order in the preview slider. None = show all.
     }
 
     def _perform(self):
@@ -180,12 +181,17 @@ class FitLFCLinesPrimitive(BasePrimitive):
         model to the underlying spectral data.
  
         Navigation is three-level: a *fiber* dropdown, an *order* dropdown
-        (options depend on the selected fiber), and a *line* slider that
-        scrolls through only the lines fit within the selected order (options
-        depend on the selected fiber+order). This keeps each slider short
-        even when thousands of lines were fit overall. Each step shows two
-        traces: the raw data (with error bars) in a window around the line,
-        and the reconstructed Gaussian fit curve.
+        (options depend on the selected fiber), and a *line* slider (options
+        depend on the selected fiber+order).
+ 
+        For speed and file size, this keeps exactly two persistent traces in
+        the figure (the data points and the Gaussian fit curve) and swaps
+        their x/y data on each dropdown/slider interaction, rather than
+        pre-building a trace pair per line and toggling visibility across
+        thousands of traces (which scales quadratically with the number of
+        lines and is what made this slow). Additionally, at most
+        ``preview_n_lines_per_order`` lines (evenly sampled) are included per
+        order; set it to None to include every fitted line.
         """
         output_model = self._output['output']
         fit_results = self._output['fit_results']
@@ -196,8 +202,9 @@ class FitLFCLinesPrimitive(BasePrimitive):
  
         sigma_scale = 2 * np.sqrt(2 * np.log(2))  # FWHM -> sigma
         half_win = self.max_fit_window / 2.0
+        n_preview = self.preview_n_lines_per_order
  
-        # --- Build a nested fiber -> order -> line structure ---
+        # --- Build a nested fiber -> order -> line structure (sampled per order) ---
         fiber_meta = []
         for fiber in do_fibers:
             if fiber not in fit_results:
@@ -214,12 +221,22 @@ class FitLFCLinesPrimitive(BasePrimitive):
                 oi = int(np.abs(order - output_model.meta.order_start))
                 order_fits = fit_results[fiber][oi_idx] if oi_idx < len(fit_results[fiber]) else []
  
-                lines = []
-                for line_fit in order_fits:
-                    mu = getattr(line_fit, 'mu', np.nan)
-                    if not np.isfinite(mu):
-                        continue
+                # Cheaply filter to fits with a finite centroid before doing any
+                # array slicing / curve reconstruction work.
+                valid_fits = [lf for lf in order_fits if np.isfinite(getattr(lf, 'mu', np.nan))]
+                if not valid_fits:
+                    continue
  
+                n_total = len(valid_fits)
+                if n_preview is not None and n_total > n_preview:
+                    sample_idx = np.unique(np.linspace(0, n_total - 1, n_preview).astype(int))
+                    sampled_fits = [valid_fits[i] for i in sample_idx]
+                else:
+                    sampled_fits = valid_fits
+ 
+                lines = []
+                for line_fit in sampled_fits:
+                    mu       = line_fit.mu
                     amp      = getattr(line_fit, 'amplitude', np.nan)
                     amp_err  = getattr(line_fit, 'amplitude_err', np.nan)
                     mu_err   = getattr(line_fit, 'mu_err', np.nan)
@@ -255,7 +272,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     ))
  
                 if lines:
-                    order_entries.append(dict(order=order, lines=lines))
+                    order_entries.append(dict(order=order, lines=lines, n_total=n_total))
  
             if order_entries:
                 fiber_meta.append(dict(fiber=fiber, orders=order_entries))
@@ -270,77 +287,56 @@ class FitLFCLinesPrimitive(BasePrimitive):
             self._output['preview'] = dict(html=None, png=None, fig=fig)
             return
  
-        def _line_title(fiber, order, line, line_idx, n_lines):
+        def _line_title(fiber, order, line, line_idx, n_shown, n_total):
             wave_str = f", λ={line['wave']:.5f} µm" if np.isfinite(line['wave']) else ""
+            sample_note = f" (sampled {n_shown} of {n_total} fit)" if n_total > n_shown else ""
             return (
                 f"LFC Line Fit — Fiber {fiber}, Order {order}, "
-                f"Line {line_idx + 1}/{n_lines}{wave_str}<br>"
+                f"Line {line_idx + 1}/{n_shown}{sample_note}{wave_str}<br>"
                 f"µ = {line['mu']:.3f} ± {line['mu_err']:.3f} px  |  "
                 f"FWHM = {line['fwhm']:.3f} ± {line['fwhm_err']:.3f} px  |  "
                 f"Amp = {line['amp']:.4g} ± {line['amp_err']:.4g}"
             )
  
-        traces_per_line = 2  # data + Gaussian fit curve
+        def _line_data_update(line):
+            # Only 2 traces ever exist (data, fit), so these arrays map 1:1 to them.
+            return {
+                'x': [line['x_data'], line['x_model']],
+                'y': [line['y_data'], line['y_model']],
+                'error_y.array': [line['yerr_data'], line['yerr_data']],
+            }
  
-        # Absolute trace offset for the start of each (fiber, order) block
-        order_base = []
-        offset = 0
-        for meta in fiber_meta:
-            fiber_bases = []
-            for order_entry in meta['orders']:
-                fiber_bases.append(offset)
-                offset += len(order_entry['lines']) * traces_per_line
-            order_base.append(fiber_bases)
-        total_traces = offset
+        # --- The only two traces in the figure; their data gets swapped on interaction ---
+        first_line = fiber_meta[0]['orders'][0]['lines'][0]
+        fig.add_trace(go.Scatter(
+            x           = first_line['x_data'],
+            y           = first_line['y_data'],
+            error_y     = dict(type='data', array=first_line['yerr_data'], visible=True),
+            mode        = 'markers',
+            name        = 'Data',
+            marker      = dict(color='steelblue', size=7),
+        ))
+        fig.add_trace(go.Scatter(
+            x           = first_line['x_model'],
+            y           = first_line['y_model'],
+            mode        = 'lines',
+            name        = 'Gaussian fit',
+            line        = dict(color='crimson', width=2),
+        ))
  
-        def make_visibility(f_idx, o_idx, l_idx):
-            vis = [False] * total_traces
-            base = order_base[f_idx][o_idx] + l_idx * traces_per_line
-            vis[base] = True
-            vis[base + 1] = True
-            return vis
- 
-        # --- Build all traces up front (data + fit curve for every line, every order, every fiber) ---
-        for f_idx, meta in enumerate(fiber_meta):
-            for o_idx, order_entry in enumerate(meta['orders']):
-                for l_idx, line in enumerate(order_entry['lines']):
-                    visible = (f_idx == 0 and o_idx == 0 and l_idx == 0)
- 
-                    fig.add_trace(go.Scatter(
-                        x           = line['x_data'],
-                        y           = line['y_data'],
-                        error_y     = dict(type='data', array=line['yerr_data'], visible=True),
-                        mode        = 'markers',
-                        name        = 'Data',
-                        marker      = dict(color='steelblue', size=7),
-                        legendgroup = 'data',
-                        showlegend  = True,
-                        visible     = visible,
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x           = line['x_model'],
-                        y           = line['y_model'],
-                        mode        = 'lines',
-                        name        = 'Gaussian fit',
-                        line        = dict(color='crimson', width=2),
-                        legendgroup = 'fit',
-                        showlegend  = True,
-                        visible     = visible,
-                    ))
- 
-        # --- Line slider steps (scrolls through the lines within one fiber+order) ---
+        # --- Line slider steps (scrolls through the (sampled) lines within one fiber+order) ---
         def build_line_slider_steps(f_idx, o_idx):
             meta = fiber_meta[f_idx]
             order_entry = meta['orders'][o_idx]
-            n_lines = len(order_entry['lines'])
+            n_shown = len(order_entry['lines'])
             steps = []
             for l_idx, line in enumerate(order_entry['lines']):
                 steps.append(dict(
                     method = 'update',
                     label  = str(l_idx + 1),
                     args   = [
-                        {'visible': make_visibility(f_idx, o_idx, l_idx)},
-                        {'title': _line_title(meta['fiber'], order_entry['order'], line, l_idx, n_lines)},
+                        _line_data_update(line),
+                        {'title': _line_title(meta['fiber'], order_entry['order'], line, l_idx, n_shown, order_entry['n_total'])},
                     ],
                 ))
             return steps
@@ -350,14 +346,17 @@ class FitLFCLinesPrimitive(BasePrimitive):
             meta = fiber_meta[f_idx]
             buttons = []
             for o_idx, order_entry in enumerate(meta['orders']):
-                n_lines = len(order_entry['lines'])
+                n_shown = len(order_entry['lines'])
+                label = f"Order {order_entry['order']}"
+                if order_entry['n_total'] > n_shown:
+                    label += f" ({n_shown}/{order_entry['n_total']})"
                 buttons.append(dict(
-                    label  = f"Order {order_entry['order']}",
+                    label  = label,
                     method = 'update',
                     args   = [
-                        {'visible': make_visibility(f_idx, o_idx, 0)},
+                        _line_data_update(order_entry['lines'][0]),
                         {
-                            'title': _line_title(meta['fiber'], order_entry['order'], order_entry['lines'][0], 0, n_lines),
+                            'title': _line_title(meta['fiber'], order_entry['order'], order_entry['lines'][0], 0, n_shown, order_entry['n_total']),
                             # Update only the line slider (leave both dropdowns untouched)
                             'sliders[0].steps':  build_line_slider_steps(f_idx, o_idx),
                             'sliders[0].active': 0,
@@ -370,14 +369,14 @@ class FitLFCLinesPrimitive(BasePrimitive):
         fiber_buttons = []
         for f_idx, meta in enumerate(fiber_meta):
             first_order_entry = meta['orders'][0]
-            n_lines = len(first_order_entry['lines'])
+            n_shown = len(first_order_entry['lines'])
             fiber_buttons.append(dict(
                 label  = f'Fiber {meta["fiber"]}',
                 method = 'update',
                 args   = [
-                    {'visible': make_visibility(f_idx, 0, 0)},
+                    _line_data_update(first_order_entry['lines'][0]),
                     {
-                        'title': _line_title(meta['fiber'], first_order_entry['order'], first_order_entry['lines'][0], 0, n_lines),
+                        'title': _line_title(meta['fiber'], first_order_entry['order'], first_order_entry['lines'][0], 0, n_shown, first_order_entry['n_total']),
                         # Rebuild the order dropdown's own buttons for this fiber...
                         'updatemenus[1].buttons': build_order_dropdown_buttons(f_idx),
                         'updatemenus[1].active':  0,
@@ -391,7 +390,8 @@ class FitLFCLinesPrimitive(BasePrimitive):
         fig.update_layout(
             title = _line_title(
                 fiber_meta[0]['fiber'], fiber_meta[0]['orders'][0]['order'],
-                fiber_meta[0]['orders'][0]['lines'][0], 0, len(fiber_meta[0]['orders'][0]['lines']),
+                fiber_meta[0]['orders'][0]['lines'][0], 0,
+                len(fiber_meta[0]['orders'][0]['lines']), fiber_meta[0]['orders'][0]['n_total'],
             ),
             updatemenus = [
                 dict(  # [0] fiber dropdown
