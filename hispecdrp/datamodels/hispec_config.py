@@ -137,11 +137,12 @@ class HISPECConfig:
                 model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
-        # TODO: Defaults need to know which LFC, ignore until we have a more robust way to determine this from the metadata
-        # if model.meta.lfc_nu0 is None:
-        #     model.meta.lfc_nu0 = cls.lfc_params[model.meta.spectrograph]['nu0']
-        # if model.meta.lfc_delta_nu is None:
-        #     model.meta.lfc_delta_nu = cls.lfc_params[model.meta.spectrograph]['delta_nu']
+        if model.meta.lfc_nu0 is None:
+            key = 'LFC-B' if model.meta.spectrograph == 'BSPEC' else 'LFC-R'
+            model.meta.lfc_nu0 = cls.lfc_params[key]['nu0']
+        if model.meta.lfc_delta_nu is None:
+            key = 'LFC-B' if model.meta.spectrograph == 'BSPEC' else 'LFC-R'
+            model.meta.lfc_delta_nu = cls.lfc_params[key]['delta_nu']
         
         return model
     
