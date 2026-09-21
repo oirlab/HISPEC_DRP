@@ -182,6 +182,12 @@ def fit_line_gauss(
     else:
         y_err_fit = np.ones_like(y_fit)
 
+    bad_errs = np.where((y_err_fit <= 0) | (~np.isfinite(y_err_fit)))[0]
+    if len(bad_errs) == len(y_fit):
+        y_err_fit = np.ones_like(y_fit)
+    elif len(bad_errs) > 0:
+        return _output_badfit()
+
     # Normalize. Emission: anchor peak to ~1 (subtract floor, divide by peak).
     # Absorption: a continuum is present by definition; anchor the continuum to
     # ~1 (divide by a robust continuum level) and let the dip go below 1. Do NOT
@@ -264,6 +270,13 @@ def fit_line_gauss(
     except np.linalg.LinAlgError:
         logger.exception("Covariance matrix could not be computed. Fit may be degenerate.")
         return _output_badfit()
+
+    #breakpoint()
+    # import matplotlib.pyplot as plt
+    # if np.random.randint(0, 20) == 0:
+    #     plt.plot(x_fit, y_fit, 'k.')
+    #     plt.plot(x_fit, _gauss_emission_model(pbest, x_fit), 'r-')
+    #     plt.show()
 
     # ``(J^T J)^{-1}`` is only approximately a covariance. On a poorly constrained
     # line the inverse can put negative values on the diagonal; ``sqrt`` of those
