@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.interpolate import interp1d
+from numba import njit
 
 from ...datamodels import hispec_config
 
@@ -196,3 +197,58 @@ def convolve_l2_with_hdf_lsf(
         sig = sigma_pix_from_hdf_lsf(spectrograph, fiber, od, wave_2d[i])
         out[i] = convolve_order_spectrum_gaussian_lsf(wave_2d[i], flux_2d[i], sig)
     return out
+
+
+@njit(nogil=True)
+def _convolve_numba_1d_chromatic(
+    spec_padded : np.ndarray,
+    kernels : np.ndarray,
+    spec_out : np.ndarray,
+) -> None:
+    kernel_size = kernels.shape[1]
+    for i in range(len(spec_out)):
+        s = 0.0
+        for j in range(kernel_size):
+            ii = i + j
+            s += spec_padded[ii] * kernels[i, j]
+        spec_out[i] = s
+    return spec_out
+
+def convolve_numba_1d_chromatic(
+    spec : np.ndarray,
+    kernels : np.ndarray,
+    spec_out : np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Convolve a 1-D spectrum with a wavelength-dependent LSF using Numba.
+
+    Parameters
+    ----------
+    spec : np.ndarray
+        Input 1-D spectrum to convolve.
+    spec_out : np.ndarray or None
+        Output array to store the convolved spectrum. If None, a new array is created.
+    kernels : np.ndarray
+        2-D array of LSFs, where each row corresponds to the LSF at a specific wavelength in the input spectrum.
+
+    Returns
+    -------
+    np.ndarray
+        The convolved spectrum, stored in `spec_out` if provided, otherwise a new array.
+    """
+    kernel_size = kernels.shape[1]
+    n_pad = kernel_size // 2
+    if kernel_size % 2 == 0:
+        raise ValueError(f"Kernel size must be odd; got {kernel_size}")
+    spec_padded = np.pad(spec, n_pad, mode='edge')
+    if spec_out is None:
+        spec_out = np.full_like(spec, np.nan)
+
+    if spec_out.shape != spec.shape:
+        raise ValueError(f"Output array shape {spec_out.shape} does not match input spectrum shape {spec.shape}")
+
+    if kernels.shape[0] != spec.shape[0]:
+        raise ValueError(f"Kernels shape {kernels.shape} does not match input spectrum length {spec.shape[0]}")
+
+    _convolve_numba_1d_chromatic(spec_padded, kernels, spec_out)
+    return spec_out
