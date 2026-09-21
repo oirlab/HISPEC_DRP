@@ -55,6 +55,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
         'do_orders' : None,
         'pix_range' : None,
         'output_model' : 'L1Model',
+        'reverse_spectral_axis' : True,
     }
 
     CALIBRATIONS = {
@@ -85,45 +86,6 @@ class SpectralExtractionPrimitive(BasePrimitive):
 
         # Which fibers and orders to process
         do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
-        order_vec = input_model.make_order_vec()
-        n_orders = len(order_vec)
-
-        # Initialize output arrays for all fibers if not already set.
-        # Mock / sim L0s may omit mid_time (or dq); fall back to safe dtypes.
-        # dq_dtype = (
-        #     input_model.dq.dtype
-        #     if getattr(input_model, "dq", None) is not None
-        #     else np.uint32
-        # )
-        #mid_time = getattr(input_model, "mid_time", None)
-        # mid_time_dtype = (
-        #     mid_time.dtype if mid_time is not None else np.float64
-        # )
-        #for fiber in do_fibers:
-            # if not output_model.has_extension_value(f"spec_uncal_fib{fiber}"):
-            #     setattr(
-            #         output_model, f'SPEC_UNCAL_FIB{fiber}',
-            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
-            #     )
-            #     setattr(
-            #         output_model, f'SPEC_UNCAL_ERR_FIB{fiber}',
-            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
-            #     )
-            #     setattr(
-            #         output_model, f'SPEC_UNCAL_VAR_POISSON_FIB{fiber}', np.full((n_orders, npix), np.nan, dtype=np.float32)
-            #     )
-            #     setattr(
-            #         output_model, f'SPEC_UNCAL_VAR_RNOISE_FIB{fiber}',
-            #         np.full((n_orders, npix), np.nan, dtype=np.float32)
-            #     )
-            #     setattr(
-            #         output_model, f'SPEC_DQ_FIB{fiber}',
-            #         np.zeros((n_orders, npix), dtype=dq_dtype)
-            #     )
-            #     setattr(
-            #         output_model, f'MID_TIME_FIB{fiber}',
-            #         np.full((n_orders, npix), np.nan, dtype=mid_time_dtype)
-            #     )
 
         # Dispatch to extraction method
         if self.method.lower() == 'box':
@@ -154,14 +116,16 @@ class SpectralExtractionPrimitive(BasePrimitive):
             )
         else:
             raise ValueError(f"Unknown extraction method: {self.method}")
-            
-        # Add to output
-        # if isinstance(self.dataset, (datamodels.DataModel, str)):
-        #     output = output_model
-        # elif isinstance(self.dataset, Sequence):
-        #     output.append(output_model)
-        # elif isinstance(self.dataset, dict):
-        #     output[input_keys[_input_i]] = output_model
+
+        if self.reverse_spectral_axis:
+            for fiber in do_fibers:
+                output_model[fiber].spec_uncal = output_model[fiber].spec_uncal[:, ::-1]
+                output_model[fiber].spec_uncal_err = output_model[fiber].spec_uncal_err[:, ::-1]
+                output_model[fiber].spec_uncal_var_rnoise = output_model[fiber].spec_uncal_var_rnoise[:, ::-1]
+                output_model[fiber].spec_uncal_var_poisson = output_model[fiber].spec_uncal_var_poisson[:, ::-1]
+                output_model[fiber].spec_uncal_dq = output_model[fiber].spec_uncal_dq[:, ::-1]
+                output_model[fiber].mid_time = output_model[fiber].mid_time[:, ::-1]
+
 
         # Return
         return dict(output=output_model)

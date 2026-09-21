@@ -297,6 +297,7 @@ class SimulateRateMap:
 
     def get_wavelength_solution(self,
                                 spectrograph: str = "BSPEC",
+                                reverse_spectral_axis : bool = True
                                 ) -> dict[int, dict[str, np.ndarray]]:
         """Get wavelength solution from HDF model file as a nested dictionary of the form:
         {order_number: {'wavelengths': np.ndarray, 'x': np.ndarray, 'y': np.ndarray}}
@@ -378,6 +379,8 @@ class SimulateRateMap:
                     "pixel": np.arange(4096),
                     "wavelength": inv_w[::-1] # reverse to match detector orientation
                 }
+                if reverse_spectral_axis:
+                    self.wavelength_solution[fiber][int(od)]['wavelength'] = self.wavelength_solution[fiber][int(od)]['wavelength'][::-1]
 
         return self.wavelength_solution
 
