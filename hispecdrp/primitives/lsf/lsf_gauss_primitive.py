@@ -112,11 +112,12 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
             )
             fit_results.append(fit_result)
 
-            nx = getattr(input_model, f'spec_fib{fiber}').shape[1]
+            output_model[fiber].cheb_coeffs = fit_result['coeffs']
+
+            nx = input_model[fiber].spec.shape[1]
             pixel_vec = np.arange(nx)
             order_vec = input_model.make_order_vec()
             lsfnorm_table.add_row({
-                'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
                 'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
                 'ORDER_NORM_MIN': fit_result['order_bounds'][0],
@@ -128,7 +129,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
                 order_vec,
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
-            setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
+            output_model[fiber].lsf_params = lsf_fwhms_full
 
         return dict(output=output_model, fit_results=fit_results)
 
