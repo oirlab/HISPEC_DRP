@@ -8,6 +8,7 @@ from ..utils.spectral_utils import delta_pix_to_delta_wave
 import numpy as np
 import scipy.constants
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -61,9 +62,9 @@ class FitLFCLinesPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'fwhm_bounds' : (1.0, 7.0),
+        'fwhm_bounds' : (1.5, 7.0),
         'mu_bounds' : (-1.0, 1.0),
-        'max_fit_window' : 14,
+        'max_fit_window' : 20,
         'do_fibers' : None,
         'do_orders' : None,
         'lfc_nu0' : None,
@@ -92,10 +93,21 @@ class FitLFCLinesPrimitive(BasePrimitive):
         fit_results = {fiber : [] for fiber in do_fibers}
 
         for fiber in do_fibers:
-            wave = getattr(input_model, f'wave_fib{fiber}')
-            spec = getattr(input_model, f'spec_fib{fiber}')
-            spec_err = getattr(input_model, f'spec_err_fib{fiber}')
-            spec_dq = getattr(input_model, f'spec_dq_fib{fiber}')
+            
+            # Get extensions for this fiber
+            wave = input_model[fiber].wave
+            if input_model.has_extension(f'spec_{fiber}'):
+                spec = input_model[fiber].spec
+                spec_err = input_model[fiber].spec_err
+                spec_dq = input_model[fiber].spec_dq
+            else:
+                spec = input_model[fiber].spec_uncal
+                spec_err = input_model[fiber].spec_uncal_err
+                spec_dq = input_model[fiber].spec_uncal_dq
+
+            # Detector pixel array
+            pix_arr = np.arange(spec[1].size)
+
             for order in do_orders:
 
                 # Relative order index
@@ -107,15 +119,20 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     logger.warning(f"No good pixels found in order {order} for fiber {fiber}. Skipping.")
                     continue
 
-                # Pixel array
-                # TODO: Lift this out of the loop once model.shape is reliable?
-                pix_arr = np.arange(spec.size)
+                _wave = wave[oi, :]
+                _spec = spec[oi, :]
+                _spec_err = spec_err[oi, :]
+                _spec_dq = spec_dq[oi, :]
+
+                line_spacing_um = (1E-6 * np.mean(_wave[good]))**2 * lfc_delta_nu / scipy.constants.c * 1E6
+                line_spacing_pix = line_spacing_um / np.max(np.abs(np.gradient(_wave)))
+                min_line_spacing = line_spacing_pix * 0.8
 
                 # Find the initial lines
                 if self.line_source.lower() == 'peaks':
                     line_centers, _ = find_emission_lines(
-                        spec[oi, :], spec_dq[oi, :],
-                        min_line_spacing=self.min_line_spacing,
+                        _spec, _spec_dq,
+                        min_line_spacing=min_line_spacing,
                         background_filter_width=self.background_filter_width,
                         centroid_num_pixels=3,
                         drop_first_last=True,
@@ -125,17 +142,19 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
                     # Get the wavelength range for this order
                     # and the LFC lines that fall within it
-                    wi, wf = wave[oi, good[0]], wave[oi, good[-1]]
-                    line_centers, _, _ = gen_lfc_modes(
+                    wi, wf = np.min(wave[oi, good]), np.max(wave[oi, good])
+                    line_centers_um, _, _ = gen_lfc_modes(
                         lfc_nu0, lfc_delta_nu,
                         wave_min=wi, wave_max=wf
                     )
+                    line_centers = np.interp(line_centers_um, wave[oi, good], pix_arr[good])
+                    line_centers = line_centers[1:-1] # Drop first and last lines to avoid edge effects
                 else:
                     logger.error(f"Invalid line_source '{self.line_source}'. Must be 'peaks' or 'wavesol'.")
 
                 # Gaussian fit to lines
                 _fit_results = fit_lines_gauss(
-                    pix_arr, spec[oi, :], spec_err[oi, :], spec_dq[oi, :],
+                    pix_arr, _spec, _spec_err, _spec_dq,
                     line_centers=line_centers,
                     fwhm_bounds=self.fwhm_bounds,
                     mu_bounds=self.mu_bounds,
@@ -144,9 +163,11 @@ class FitLFCLinesPrimitive(BasePrimitive):
                 fit_results[fiber].append(_fit_results)
 
                 # Store results in the model
-                params_table = getattr(output_model, f'lfc_fitparams_fib{fiber}')
+                params_table = output_model[fiber].lfc_fitparams
                 if order in params_table['ORDER']:
-                    setattr(input_model, f'lfc_fitparams_fib{fiber}', params_table[params_table['ORDER'] != order])
+                    input_model[fiber].lfc_fitparams.remove_rows(
+                        np.where(input_model[fiber].lfc_fitparams['ORDER'] == order)[0]
+                    )
                 n_lines = len(_fit_results)
                 for i in range(n_lines):
                     r = {
@@ -482,7 +503,7 @@ def gen_lfc_modes(
     nu_end = (scipy.constants.c / wave_min) * 1E6
     nu_start = (scipy.constants.c / wave_max) * 1E6
     n1 = int(np.ceil((nu_start - nu0) / delta_nu))
-    n2 = int(np.ceil((nu_end - nu0) / delta_nu))
+    n2 = int(np.floor((nu_end - nu0) / delta_nu))
     integers = np.arange(min(n1, n2), max(n1, n2) + 1).astype(int)
     waves, nus = _gen_lfc_modes(nu0, delta_nu, integers)
     waves = waves[::-1]
