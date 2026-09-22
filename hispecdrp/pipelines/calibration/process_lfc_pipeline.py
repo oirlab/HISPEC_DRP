@@ -79,7 +79,7 @@ class ProcessLFCPipeline(CalibrationPipeline):
         lsfs = {}
         for fiber_group in lfc_groups:
             lsf_result = self.lsf.apply(
-                line_fit_models[fiber_group],
+                wavesols[fiber_group],
                 do_fibers=fiber_group
             )
             self.register_lsf_cal.apply(lsf_result)
@@ -94,35 +94,6 @@ class ProcessLFCPipeline(CalibrationPipeline):
 
         # Return output
         return dict(output=dict(wavesol=wavesols, lsf=lsfs))
-
-    # @staticmethod
-    # def group_lfc_spectra(models : list[datamodels.DataModel]):
-    #     """
-    #     Determine which fibers have an LFC spectrum and group accordingly.
-
-    #     Parameters
-    #     ----------
-    #     models : list[datamodels.DataModel]
-    #         List of input data models to group.
-
-    #     Returns
-    #     -------
-    #     lfc_groups : dict[int, list[datamodels.DataModel]]
-    #         Dictionary with fiber numbers as keys and lists of LFC data models as values.
-    #     """
-    #     lfc_groups = {}
-    #     valid_lfc_objects = ('lfc', 'lfc-b', 'lfc-r')
-    #     for m in models:
-    #         for fiber in range(m.num_fibers):
-    #             fiber_obj = m.meta.get(f"object_fiber{fiber}")
-    #             if fiber_obj is None:
-    #                 continue
-    #             fiber_obj = fiber_obj.lower()
-    #             if fiber_obj in valid_lfc_objects:
-    #                 if fiber not in lfc_groups:
-    #                     lfc_groups[fiber] = []
-    #                 lfc_groups[fiber].append(m)
-    #     return lfc_groups
 
     @staticmethod
     def group_lfc_spectra(models: list[datamodels.DataModel]):
