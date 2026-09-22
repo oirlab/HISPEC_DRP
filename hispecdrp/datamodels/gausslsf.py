@@ -5,8 +5,6 @@ from .base_model import CalibrationModel
 from .mixins import FiberAttributeProxyMixin
 from .extensions import IMAGE_HDU, create_dataspec_extensions, create_specdq_extensions, create_wave_extensions, create_chebyshev_extensions, create_lfcfitparam_extensions
 
-from ..primitives.lsf.lsf_convolve import convolve_numba_1d_chromatic
-
 __all__ = ['GaussianLSFModel']
 
 
@@ -72,12 +70,12 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
         from ..primitives.lsf.lsf_gauss_primitive import _build_lsf_poly2d_unstructured
         coeffs = self.cheb_coeffs[fiber]
         pixel_bounds = (
-            self.cheb_norm[fiber]['PIXEL_NORM_MIN'],
-            self.cheb_norm[fiber]['PIXEL_NORM_MAX']
+            self.cheb_norm[fiber]['PIXEL_NORM_MIN'][0],
+            self.cheb_norm[fiber]['PIXEL_NORM_MAX'][0]
         )
         order_bounds = (
-            self.cheb_norm[fiber]['ORDER_NORM_MIN'],
-            self.cheb_norm[fiber]['ORDER_NORM_MAX']
+            self.cheb_norm[fiber]['ORDER_NORM_MIN'][0],
+            self.cheb_norm[fiber]['ORDER_NORM_MAX'][0]
         )
         idx_ord = self.order_index(order)
         orders = np.full_like(wave, order, dtype=int)
@@ -103,6 +101,7 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
         fiber : int, order : int,
         kernel_size_sigma : float = 5.0,
     ) -> np.ndarray:
+        from ..primitives.lsf.lsf_convolve import convolve_numba_1d_chromatic
         _, kernels = self.make_kernels(
             wave=wave,
             fiber=fiber, order=order,
