@@ -253,7 +253,7 @@ def build_l2(
         )
 
     if apply_lsf:
-        from ..primitives.lsf.lsf_convolve import convolve_l2_with_hdf_lsf
+        from .lsf import convolve_l2_with_hdf_lsf
 
         spec = convolve_l2_with_hdf_lsf(
             ctx.wave_2d,

@@ -19,6 +19,11 @@ from .e2e_preview import (
     generate_e2e_preview_report,
     infer_exposure_base_name,
 )
+from .lfc_pipeline import (
+    plot_extracted_lfc_order,
+    plot_lfc_line_fwhm,
+    plot_lsf_resolving_power,
+)
 from .lfc_wavesol_refit import write_lfc_elliptical_wave_report
 from .rv_order_scan import write_per_order_rv_scan_report
 from .spectrum_fidelity import (
@@ -73,8 +78,11 @@ __all__ = [
     "order_extraction_residuals",
     "order_zoom_slice",
     "plot_extraction_pull_histogram",
+    "plot_extracted_lfc_order",
     "plot_ideal_spectrum_rv_recovery",
     "plot_injected_vs_recovered_rv",
+    "plot_lfc_line_fwhm",
+    "plot_lsf_resolving_power",
     "plot_order_extraction_zoom_triptych",
     "plot_spectrum_fidelity_overlay",
     "plot_stage0_rate_pull_histogram",
