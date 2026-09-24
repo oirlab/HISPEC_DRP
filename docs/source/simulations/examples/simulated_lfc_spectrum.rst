@@ -3,7 +3,9 @@ Simulated LFC Spectrum
 
 Paint a physical laser frequency comb (LFC) on BSPEC fiber 2, fit each spot with
 a 2D elliptical Gaussian, and compare WAVE at the fitted centroids to the known
-injected wavelengths.
+injected wavelengths. A later section extracts the same comb through Stage 1–2,
+attaches a mock HDF wavelength solution, fits 1D LFC lines, and plots FWHM and
+resolving power.
 
 .. raw:: html
 
@@ -22,8 +24,10 @@ Modes follow ``nu_n = nu_0 + n * delta_nu`` via
         download="simulated_lfc_example.ipynb">Download as notebook</a>
    </p>
 
-This calibration paint/fit example does **not** require KOA credentials or a
-calibration cache.
+Sections 1–4 (2D paint / elliptical fit / WAVE residuals) do **not** require
+KOA credentials. Sections 5–8 extract the comb and run
+``FitLFCLinesPrimitive``; those steps need a local KOA cache for traces and
+fiberflats.
 
 Imports and output directory
 ----------------------------
@@ -221,3 +225,188 @@ For each successful fit, compare ``WAVE(row_fit)`` to the injected wavelength.
            indent=2,
        )
    )
+
+5. Extract the comb (Stage 1–2)
+-------------------------------
+
+Paint the same mode list with the native simulator and extract it. Skip
+``set_wavesol`` — KOA has no ``lfc_wavesol`` in this example; the next section
+attaches a mock WAVE from ``SimulateRateMap.get_wavelength_solution``.
+
+.. warning::
+   **Setup for this section.** Set ``KOA_CALIBRATION_CACHE`` (the first cell
+   can create one under ``OUT``) and optionally ``KECK_OBSERVER_EMAIL`` /
+   ``KECK_OBSERVER_PASSWORD`` for a remote sync.
+
+.. code-block:: python
+
+   import os
+
+   from hispecdrp import datamodels
+   from hispecdrp.calibrations import verify_koa_calibrations
+   from hispecdrp.pipelines import Stage1Pipeline, Stage2Pipeline
+   from hispecdrp.simulations.e2e_pipeline import paint_injected_emission_comb
+
+   os.environ.setdefault(
+       "KOA_CALIBRATION_CACHE",
+       str(OUT / "cals" / "KOA_CALIBRATION_CACHE"),
+   )
+   verify_koa_calibrations(SPECTROGRAPH, ignore_missing_cal_types=["lfc_wavesol"])
+
+   rate_extract = paint_injected_emission_comb(
+       line_list,
+       spectrograph=SPECTROGRAPH,
+       fiber=FIBER,
+       photons_per_line=1.0e3,
+   )
+   l0 = datamodels.L0Model(
+       rate=np.asarray(rate_extract, dtype=np.float32),
+       meta={
+           "instrument_name": "HISPEC",
+           "spectrograph": SPECTROGRAPH,
+           "datetime_obs": "2027-01-01T00:00:00.000",
+           "exposure_type": "SPEC",
+       },
+   )
+   l0.rate_err = np.sqrt(np.maximum(l0.rate, 0.0)).astype(np.float32)
+   l0.rate_var_poisson = np.zeros_like(l0.rate, dtype=np.float32)
+   l0.rate_var_rnoise = np.zeros_like(l0.rate, dtype=np.float32)
+   l0.dq = np.zeros_like(l0.rate, dtype=np.uint32)
+
+   do_fibers = [str(FIBER)]
+   l1 = Stage1Pipeline(
+       output_dir=OUT,
+       primitives={
+           "spec_extract": {"do_fibers": do_fibers},
+           "set_wavesol": {"run": False},
+       },
+       dataset=l0,
+   ).apply()
+   l2 = Stage2Pipeline(
+       output_dir=OUT,
+       dataset=l1,
+       primitives={
+           "blaze_corr": {"do_fibers": do_fibers},
+           "stellar_rv": {"run": False},
+           "sky_sub": {"run": False},
+       },
+   ).apply()
+
+6. Mock wavelength solution
+---------------------------
+
+Copy the HDF instrument-grid WAVE onto the extracted L2. Rows follow
+``HISPECConfig.get_order_list``. This is the same stacking used by
+:func:`~hispecdrp.simulations.simulate_up_the_ramp.create_wavelength_solution_model_from_sim`.
+
+.. code-block:: python
+
+   from hispecdrp.datamodels.hispec_config import HISPECConfig
+   from hispecdrp.simulations.plotting import plot_extracted_lfc_order
+   from hispecdrp.simulations.simulate_up_the_ramp import (
+       apply_simulate_rate_map_wavelength_solution,
+   )
+
+   apply_simulate_rate_map_wavelength_solution(
+       l2, SPECTROGRAPH, fibers=[FIBER], srm=None
+   )
+   order_list = HISPECConfig.get_order_list(SPECTROGRAPH)
+   print(f"WAVE fiber {FIBER}: {getattr(l2, f'wave_fib{FIBER}').shape}")
+   plot_extracted_lfc_order(
+       l2,
+       fiber=FIBER,
+       order=order_list[0],
+       out_path=OUT / "lfc_extracted_order.png",
+   )
+
+7. Fit 1D LFC lines and plot FWHM
+---------------------------------
+
+``FitLFCLinesPrimitive`` uses the mock WAVE only to assign each peak to an LFC
+mode (``WAVE``, ``MODE_NUM``). Pass the same ``nu0`` / ``delta_nu`` as
+``build_lfc_line_list``.
+
+.. code-block:: python
+
+   from hispecdrp import FitLFCLinesPrimitive
+   from hispecdrp.simulations.plotting import plot_lfc_line_fwhm
+
+   line_fits_model = FitLFCLinesPrimitive.call(
+       l2,
+       do_orders=order_list,
+       do_fibers=do_fibers,
+       lfc_nu0=lfc_meta["nu0"],
+       lfc_delta_nu=lfc_meta["delta_nu"],
+       save_preview=False,
+       show_preview=False,
+       fwhm_bounds=(1.0, 10.0),
+   )
+   n_fit = len(getattr(line_fits_model, f"lfc_fitparams_fib{FIBER}"))
+   print(f"fitted modes={n_fit}")
+   plot_lfc_line_fwhm(
+       line_fits_model,
+       fiber=FIBER,
+       orders=order_list,
+       y="fwhm_pix",
+       out_path=OUT / "lfc_line_fwhm_pix.png",
+   )
+
+8. Chebyshev WAVE and Gaussian LSF
+----------------------------------
+
+Fit a 2D Chebyshev wavelength solution to the assigned modes, then a Gaussian
+LSF. Plot resolving power :math:`R = \lambda / \mathrm{FWHM}_\lambda` from the
+smoothed LSF. ``ProcessLFCPipeline`` runs the same three primitives and
+registers the cals.
+
+.. code-block:: python
+
+   from hispecdrp import (
+       CalculateChebyshev2DWLSPrimitive,
+       CalculateGaussianLSFPrimitive,
+   )
+   from hispecdrp.simulations.plotting import plot_lsf_resolving_power
+
+   wavesol_model = CalculateChebyshev2DWLSPrimitive.call(
+       line_fits_model,
+       deg_inter_order=6,
+       deg_intra_order=9,
+       fit_orders=order_list,
+       opt_weights=True,
+       do_fibers=do_fibers,
+   )
+   lsf_model = CalculateGaussianLSFPrimitive.call(
+       wavesol_model,
+       do_fibers=do_fibers,
+       deg_inter_order=3,
+       deg_intra_order=3,
+       fit_orders=order_list,
+   )
+   plot_lsf_resolving_power(
+       lsf_model,
+       fiber=FIBER,
+       orders=order_list,
+       out_path=OUT / "lfc_lsf_resolving_power.png",
+   )
+
+   # Apply the LFC Gaussian LSF on a uniform wavelength grid
+   from hispecdrp.primitives.lsf.lsf_convolve import convolve_numba_1d_chromatic
+
+   wave_um = np.asarray(getattr(l2, f"wave_fib{FIBER}")[0], dtype=float)
+   flux = np.asarray(getattr(l2, f"spec_fib{FIBER}")[0], dtype=float)
+   wmin, wmax = float(np.nanmin(wave_um)), float(np.nanmax(wave_um))
+   dw = float(np.median(np.abs(np.diff(np.sort(wave_um)))))
+   wave_uni = np.linspace(wmin, wmax, int(np.ceil((wmax - wmin) / dw)) + 1)
+   flux_uni = np.interp(
+       wave_uni,
+       wave_um if wave_um[0] < wave_um[-1] else wave_um[::-1],
+       flux if wave_um[0] < wave_um[-1] else flux[::-1],
+   )
+   kernel_grid, kernels = lsf_model.make_kernels(
+       wave=wave_uni,
+       fiber=FIBER,
+       order=order_list[0],
+       kernel_size_sigma=5.0,
+   )
+   fluxc = convolve_numba_1d_chromatic(flux_uni, kernels)
+   print(f"kernels {kernels.shape}  fluxc {fluxc.shape}")

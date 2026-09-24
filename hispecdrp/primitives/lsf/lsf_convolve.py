@@ -1,14 +1,18 @@
-"""LSF utilities: HDF PSF → 1-D kernels and spectrum convolution."""
+"""Generic LSF utilities: PSF stamps → 1-D kernels and spectrum convolution.
+
+This module has no dependency on ``hispecdrp.simulations``. HDF / pyechelle
+instrument-model loading lives in ``hispecdrp.simulations.lsf``.
+"""
 
 from __future__ import annotations
+
+from typing import Any, Mapping
 
 import numpy as np
 from scipy.interpolate import interp1d
 
-from ...datamodels import hispec_config
 
-
-def _psf_oversample(block: dict, pixelsize: float) -> float:
+def _psf_oversample(block: Mapping[str, Any], pixelsize: float) -> float:
     spacing = float(block.get("psf_data_spacing", pixelsize))
     if spacing <= 0.0:
         return 1.0
@@ -55,29 +59,26 @@ def lsf_1d_from_psf_stamp(
     return offs.astype(np.float64), ker.astype(np.float64)
 
 
-def hdf_psf_lsf_library(
-    spectrograph: str,
-    fiber: int = 2,
-) -> dict[int, dict[str, np.ndarray]]:
+def lsf_library_from_psf_fiber_block(
+    fiber_block: Mapping[Any, Any],
+    *,
+    pixelsize: float = 1.0,
+) -> dict[int, dict[str, Any]]:
     """
-    Per-order library of 1-D LSFs from HDF PSF stamps.
+    Build a per-order 1-D LSF library from one fiber's PSF stamp block.
 
-    Returns ``{order: {"wavelengths", "offsets_list", "kernels"}}`` where
-    ``offsets_list`` / ``kernels`` are length-``n_stamp`` lists of 1-D arrays.
+    ``fiber_block`` is ``{order: {psf_stamps, psf_wavelengths, ...}}`` (the
+    layout written by the pyechelle HDF reader). Returns
+    ``{order: {"wavelengths", "offsets_list", "kernels"}}``.
     """
-    from ...simulations.e2e_pipeline import _load_hdf_model_data
-
-    spectrograph = str(spectrograph).upper()
-    fiber = int(fiber)
-    _, model_data = _load_hdf_model_data(spectrograph)
-    pixelsize = float(model_data.get("pixelsize", 1.0))
-    fiber_block = model_data.get(f"fiber_{fiber}", {})
-    out: dict[int, dict[str, np.ndarray]] = {}
+    out: dict[int, dict[str, Any]] = {}
     for od_s, block in fiber_block.items():
+        if not isinstance(block, Mapping):
+            continue
         if "psf_stamps" not in block or "psf_wavelengths" not in block:
             continue
         od = int(od_s)
-        oversample = _psf_oversample(block, pixelsize)
+        oversample = _psf_oversample(block, float(pixelsize))
         waves = np.asarray(block["psf_wavelengths"], dtype=np.float64)
         stamps = block["psf_stamps"]
         offsets_list = []
@@ -94,24 +95,25 @@ def hdf_psf_lsf_library(
     return out
 
 
-def sigma_pix_from_hdf_lsf(
-    spectrograph: str,
-    fiber: int,
+def sigma_pix_from_lsf_library(
+    lib: Mapping[int, Mapping[str, Any]],
     order: int,
     wave: np.ndarray,
 ) -> np.ndarray:
     """
-    Effective Gaussian σ (detector pixels) vs spectral sample from HDF PSF LSF.
+    Effective Gaussian σ (detector pixels) vs spectral sample from an LSF library.
 
-    Uses second-moment of the collapsed 1-D kernel, interpolated in wavelength.
+    Uses the second moment of each collapsed 1-D kernel, interpolated in
+    wavelength. Missing orders return σ = 1 pixel.
     """
-    lib = hdf_psf_lsf_library(spectrograph, fiber)
     if int(order) not in lib:
         return np.full(np.asarray(wave).shape, 1.0, dtype=np.float64)
     block = lib[int(order)]
-    waves = block["wavelengths"]
+    waves = np.asarray(block["wavelengths"], dtype=np.float64)
     sigs = np.empty(waves.size, dtype=np.float64)
     for i, (offs, ker) in enumerate(zip(block["offsets_list"], block["kernels"])):
+        offs = np.asarray(offs, dtype=np.float64)
+        ker = np.asarray(ker, dtype=np.float64)
         mu = float(np.sum(offs * ker))
         var = float(np.sum(ker * (offs - mu) ** 2))
         sigs[i] = np.sqrt(max(var, 1.0e-8))
@@ -170,29 +172,86 @@ def convolve_order_spectrum_gaussian_lsf(
     return out
 
 
-def convolve_l2_with_hdf_lsf(
+def convolve_l2_with_gaussian_lsf(
     wave_2d: np.ndarray,
     flux_2d: np.ndarray,
+    sigma_pix_2d: np.ndarray,
     *,
-    spectrograph: str,
-    fiber: int,
-    order_start: int | None = None,
+    num_sigma: float = 5.0,
 ) -> np.ndarray:
     """
-    Apply per-order HDF-derived Gaussian LSF to a 2-D (order, pix) spectrum.
+    Apply a per-pixel Gaussian LSF to a 2-D ``(order, pix)`` spectrum.
+
+    ``sigma_pix_2d`` has the same shape as ``wave_2d`` / ``flux_2d`` and is in
+    detector spectral pixels.
     """
-    spectrograph = str(spectrograph).upper()
-    fiber = int(fiber)
     wave_2d = np.asarray(wave_2d, dtype=np.float64)
     flux_2d = np.asarray(flux_2d, dtype=np.float64)
-    n_ord = wave_2d.shape[0]
-    if order_start is None:
-        order_start = int(
-            hispec_config.HISPECConfig.echelle_orders[spectrograph]["order_start"]
+    sigma_pix_2d = np.asarray(sigma_pix_2d, dtype=np.float64)
+    if wave_2d.shape != flux_2d.shape or wave_2d.shape != sigma_pix_2d.shape:
+        raise ValueError(
+            "wave_2d, flux_2d, and sigma_pix_2d must have the same shape; "
+            f"got {wave_2d.shape}, {flux_2d.shape}, {sigma_pix_2d.shape}"
         )
     out = np.empty_like(flux_2d)
-    for i in range(n_ord):
-        od = int(order_start) + i
-        sig = sigma_pix_from_hdf_lsf(spectrograph, fiber, od, wave_2d[i])
-        out[i] = convolve_order_spectrum_gaussian_lsf(wave_2d[i], flux_2d[i], sig)
+    for i in range(wave_2d.shape[0]):
+        out[i] = convolve_order_spectrum_gaussian_lsf(
+            wave_2d[i], flux_2d[i], sigma_pix_2d[i], num_sigma=num_sigma
+        )
     return out
+
+
+try:
+    from numba import njit
+except ImportError:  # pragma: no cover
+    def njit(*_args, **_kwargs):
+        def _wrap(fn):
+            return fn
+        return _wrap
+
+
+@njit(nogil=True)
+def _convolve_numba_1d_chromatic(
+    spec_padded: np.ndarray,
+    kernels: np.ndarray,
+    spec_out: np.ndarray,
+) -> np.ndarray:
+    kernel_size = kernels.shape[1]
+    for i in range(len(spec_out)):
+        s = 0.0
+        for j in range(kernel_size):
+            s += spec_padded[i + j] * kernels[i, j]
+        spec_out[i] = s
+    return spec_out
+
+
+def convolve_numba_1d_chromatic(
+    spec: np.ndarray,
+    kernels: np.ndarray,
+    spec_out: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Convolve a 1-D spectrum with a wavelength-dependent LSF.
+
+    ``kernels`` is ``(n_wave, n_kernel)`` with an odd ``n_kernel``. Each row is
+    the normalized kernel at that sample. The wavelength grid must be uniform
+    (same assumption as :meth:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel.make_kernels`).
+    """
+    spec = np.asarray(spec)
+    kernels = np.asarray(kernels)
+    kernel_size = int(kernels.shape[1])
+    if kernel_size % 2 == 0:
+        raise ValueError(f"Kernel size must be odd; got {kernel_size}")
+    if kernels.shape[0] != spec.shape[0]:
+        raise ValueError(
+            f"Kernels shape {kernels.shape} does not match spectrum length {spec.shape[0]}"
+        )
+    n_pad = kernel_size // 2
+    spec_padded = np.pad(spec, n_pad, mode="edge")
+    if spec_out is None:
+        spec_out = np.full_like(spec, np.nan)
+    elif spec_out.shape != spec.shape:
+        raise ValueError(
+            f"Output array shape {spec_out.shape} does not match spectrum shape {spec.shape}"
+        )
+    return _convolve_numba_1d_chromatic(spec_padded, kernels, spec_out)

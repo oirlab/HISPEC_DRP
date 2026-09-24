@@ -1,4 +1,4 @@
-"""Ideal-spectrum injected-vs-recovered RV plots (lte040 validation notebook)."""
+"""Ideal-spectrum injected-vs-recovered RV residual plots."""
 
 from __future__ import annotations
 
@@ -20,23 +20,10 @@ def plot_ideal_spectrum_rv_recovery(
     display: bool = True,
 ) -> dict[str, Any]:
     """
-    Two-panel ideal-spectrum RV diagnostic: 1:1 recovery and zoomed residuals.
+    Residual diagnostic (recovered minus injected) in cm/s.
 
-    Parameters
-    ----------
-    injected_m_s, recovered_m_s, recovered_err_m_s
-        Per-bulk-shift arrays in m/s (same length).
-    title
-        Title for the top panel.
-    out_path
-        When set, write a PNG to this path.
-    display
-        If True, embed a PNG in the notebook via ``IPython.display``.
-
-    Returns
-    -------
-    summary
-        Bias statistics in m/s and mm/s.
+    The title is annotated with the mean and standard deviation of the
+    residuals.
     """
     inj_m_s = np.asarray(injected_m_s, dtype=float).ravel()
     rec_m_s = np.asarray(recovered_m_s, dtype=float).ravel()
@@ -45,8 +32,6 @@ def plot_ideal_spectrum_rv_recovery(
         raise ValueError("injected, recovered, and err arrays must have the same length")
 
     inj_km_s = inj_m_s / 1000.0
-    rec_km_s = rec_m_s / 1000.0
-    err_km_s = err_m_s / 1000.0
     residual_m_s = rec_m_s - inj_m_s
     bias_m_s = residual_m_s.copy()
     max_abs = float(np.max(np.abs(bias_m_s)))
@@ -54,56 +39,35 @@ def plot_ideal_spectrum_rv_recovery(
     d_bias = bias_m_s - bias_m_s[0]
     max_d = float(np.max(np.abs(d_bias[1:]))) if bias_m_s.size > 1 else 0.0
 
-    fig, (ax_top, ax_bot) = plt.subplots(
-        2,
-        1,
-        figsize=(6.5, 7.0),
-        sharex=True,
-        gridspec_kw={"height_ratios": [2.0, 1.0], "hspace": 0.05},
-    )
+    residual_cm_s = residual_m_s * 100.0
+    err_cm_s = err_m_s * 100.0
+    mean_cm_s = float(np.mean(residual_cm_s))
+    std_cm_s = float(np.std(residual_cm_s))
 
-    lo = float(min(inj_km_s.min(), rec_km_s.min()) - 2.0)
-    hi = float(max(inj_km_s.max(), rec_km_s.max()) + 2.0)
-    ax_top.plot([lo, hi], [lo, hi], "k--", lw=1, label="1:1")
-    ax_top.errorbar(
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    ax.axhline(0.0, color="k", ls="--", lw=1, label="zero residual")
+    ax.errorbar(
         inj_km_s,
-        rec_km_s,
-        yerr=err_km_s,
-        fmt="o",
-        ms=6,
-        capsize=3,
-        label="recovered (RV_ERR)",
-    )
-    ax_top.set_xlim(lo, hi)
-    ax_top.set_ylim(lo, hi)
-    ax_top.set_aspect("equal", adjustable="box")
-    ax_top.set_ylabel("Recovered RV (km/s)")
-    ax_top.set_title(title)
-    ax_top.legend(loc="upper left")
-    ax_top.grid(True, alpha=0.3)
-
-    ax_bot.axhline(0.0, color="k", ls="--", lw=1, label="zero residual")
-    ax_bot.errorbar(
-        inj_km_s,
-        residual_m_s,
-        yerr=err_m_s,
+        residual_cm_s,
+        yerr=err_cm_s,
         fmt="o",
         ms=6,
         capsize=3,
         color="C1",
         label="residual +/- RV_ERR",
     )
-    ax_bot.set_xlabel("Injected RV (km/s)")
-    ax_bot.set_ylabel("Residual (m/s)")
-    med = float(np.median(residual_m_s))
-    scatter_half = float(np.max(np.abs(residual_m_s - med))) * 1.5
-    err_half = float(np.max(err_m_s)) * 2.0
-    half = max(scatter_half, err_half, 0.05)
-    ax_bot.set_ylim(med - half, med + half)
-    ax_bot.legend(loc="best", fontsize=9)
-    ax_bot.grid(True, alpha=0.3)
+    ax.set_xlabel("Injected RV (km/s)")
+    ax.set_ylabel("Residual (cm/s)")
+    ax.set_title(f"{title}\nmean = {mean_cm_s:.3f} cm/s, std = {std_cm_s:.3f} cm/s")
+    med = float(np.median(residual_cm_s))
+    scatter_half = float(np.max(np.abs(residual_cm_s - med))) * 1.5
+    err_half = float(np.max(err_cm_s)) * 2.0
+    half = max(scatter_half, err_half, 5.0)
+    ax.set_ylim(med - half, med + half)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
 
-    fig.subplots_adjust(hspace=0.05)
     if out_path is not None:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,5 +91,7 @@ def plot_ideal_spectrum_rv_recovery(
         "rms_bias_mm_s": rms * 1e3,
         "max_differential_bias_m_s": max_d,
         "max_differential_bias_mm_s": max_d * 1e3,
+        "mean_bias_cm_s": mean_cm_s,
+        "std_bias_cm_s": std_cm_s,
         "out_path": str(out_path) if out_path is not None else None,
     }

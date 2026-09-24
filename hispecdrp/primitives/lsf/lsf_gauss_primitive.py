@@ -128,6 +128,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
                 order_vec,
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
+            setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
             setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
 
         return dict(output=output_model, fit_results=fit_results)
@@ -233,6 +234,8 @@ def fit_gausslsf_chebyshev2d(
 def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2
     s = hi - lo
+    if s == 0:
+        return np.zeros_like(np.asarray(x), dtype=float)
     return 2 * (x - mu) / s
 
 def _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds):

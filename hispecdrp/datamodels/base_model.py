@@ -1481,6 +1481,19 @@ class DataModel:
         step = 1 if order_end >= order_start else -1
         return np.arange(order_start, order_end + step, step).astype(np.int16)
 
+    @property
+    def orders(self) -> np.ndarray:
+        """Echelle order vector from ``meta.order_start`` / ``order_end``."""
+        return self.make_order_vec()
+
+    def order_index(self, order: int) -> int:
+        """Return the row index of ``order`` in :meth:`make_order_vec`."""
+        orders = self.orders
+        hits = np.where(np.asarray(orders) == int(order))[0]
+        if hits.size == 0:
+            raise ValueError(f"Order {order} is not in the order vector: {orders}")
+        return int(hits[0])
+
     # @property
     # def traces(self):
     #     """
