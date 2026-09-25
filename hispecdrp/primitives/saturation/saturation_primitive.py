@@ -52,7 +52,6 @@ class CheckSaturationPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'satcheck',
-        'max_cores' : 1,
     }
 
     CALIBRATIONS = {

@@ -44,7 +44,6 @@ class MakeBiasPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'output_model' : 'BiasModel',
-        'max_cores' : 1,
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad
         'bias_threshold' : 1000,  # DN,  Threshold bias above which pixels are bad
     }

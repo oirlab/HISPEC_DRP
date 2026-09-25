@@ -476,10 +476,6 @@ class BasePrimitive(ProcessingComponent):
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached,
-                # Pipelines use the local caldb; remote catalog sync belongs in
-                # verify_koa_calibrations / run_caldb, not every primitive lookup.
-                connect_remote=False,
-                sync_on_init=False,
             ) as store:
                 
                 local_filepath, cal_record = store.get_calibration(calibration=cal_id)
@@ -540,8 +536,6 @@ class BasePrimitive(ProcessingComponent):
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached,
-                connect_remote=False,
-                sync_on_init=False,
             ) as store:
                 local_filepath, cal_record = store.select_and_get_calibration(
                     input_model.meta,
@@ -566,8 +560,6 @@ class BasePrimitive(ProcessingComponent):
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached,
-                connect_remote=False,
-                sync_on_init=False,
             ) as store:
                 
                 local_filepath, cal_record = store.select_and_get_calibration(
@@ -601,8 +593,6 @@ class BasePrimitive(ProcessingComponent):
             with HISPECCalibrationStore(
                 instrument_name=input_model.meta.instrument_name,
                 use_cached=use_cached,
-                connect_remote=False,
-                sync_on_init=False,
             ) as store:
                 
                 local_filepath, cal_record = store.select_and_get_calibration(

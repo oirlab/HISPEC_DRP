@@ -115,13 +115,33 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             )
             fit_results.append(fit_result)
 
+            # breakpoint()
+            # idx = np.where(orders == 123)[0]
+            # pfit = np.polyfit(pixels[idx], waves[idx], 4)
+            # r = waves[idx] - np.polyval(pfit, pixels[idx])
+            # from scipy.constants import c
+            # r = r / waves[idx] * c
+            # plt.plot(waves[idx], r, lw=1)
+            # plt.show()
+            # fit_result = fit_wavesol_chebyshev2d(
+            #     pixels, orders, waves,
+            #     deg_intra_order=6, deg_inter_order=6,
+            #     max_iters=1, sigma_cut=np.inf, max_vel_cut=np.inf,
+            #     weights=None,
+            # )
+            # import matplotlib.pyplot as plt
+            # for i, order in enumerate(output_model.make_order_vec()):
+            #     idx = np.where(orders == order)[0]
+            #     plt.plot(waves[idx], fit_result['residuals_vel'][idx], marker='.', lw=0);
+            # plt.show()
+            
+
             # Set results in model
             setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
             nx = getattr(output_model, f'spec_fib{fiber}').shape[1]
             pixel_vec = np.arange(nx)
             order_vec = output_model.make_order_vec()
             chebnorm_table.add_row({
-                'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
                 'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
                 'ORDER_NORM_MIN': fit_result['order_bounds'][0],

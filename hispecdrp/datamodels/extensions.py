@@ -411,7 +411,6 @@ def create_wave_extensions(**kwargs) -> dict[str, dict]:
     }
 
 CHEBYSHEV_NORM_HDU = TABLE_HDU({
-    'FIBER': str,
     'PIXEL_NORM_MIN': np.float64,
     'PIXEL_NORM_MAX': np.float64,
     'ORDER_NORM_MIN': np.int16,

@@ -52,7 +52,7 @@ dependencies = [
   "astropy",
   "gitpython",
   "numba>=0.66.0",
-  "tqdm",
+  "progressbar2",
   "stcal==1.15.2",
   "gdown",
   "koa_middleware @ git+https://github.com/oirlab/KOA_Middleware",
@@ -73,13 +73,12 @@ dev = [
   "psutil",  # RSS sampling for pipeline performance benchmarks
 ]
 test = ["pytest", "pytest-cov", "requests"]
-docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme==6.0.0"]
+docs = ["sphinx==9.1.0", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme==6.0.0"]
 examples = ["emcee"]
 
 [project.urls]
 "Documentation" = "https://oirlab.github.io/HISPEC_DRP/"
 "Source" = "https://github.com/oirlab/HISPEC_DRP"
-"Maintainer: Charlie Kilpatrick" = "https://github.com/charliekilpatrick"
 
 [tool.setuptools]
 include-package-data = true

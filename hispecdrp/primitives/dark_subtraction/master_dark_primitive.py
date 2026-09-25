@@ -49,7 +49,6 @@ class MakeMasterDarkPrimitive(BasePrimitive):
         'mean_calc' : 'wmean',
         'err_calc' : 'wse',
         'hot_pixel_threshold' : 5,  # e-/s,  Threshold above which pixels are bad
-        'max_cores' : 1,
     }
 
 

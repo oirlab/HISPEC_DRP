@@ -2739,7 +2739,8 @@ def build_lfc_line_list(
     nu0: float | None = None,
     delta_nu: float | None = None,
     orders: list[int] | None = None,
-) -> tuple[dict[int, np.ndarray], dict[str, float]]:
+    flatten: bool = False,
+) -> tuple[dict[int, np.ndarray] | np.ndarray, dict[str, float]]:
     """
     Physical LFC mode wavelengths matching :func:`gen_lfc_modes` / ``FitLFCLinesPrimitive``.
 
@@ -2755,11 +2756,17 @@ def build_lfc_line_list(
     orders
         Restrict to these echelle orders. ``None`` uses the full spectrograph
         order list.
+    flatten
+        If True, ignore per-order/per-fiber wavelength clipping and instead
+        generate the comb once over the full span covered by the selected
+        orders, returning a single flat, sorted, de-duplicated array of
+        wavelengths (µm) rather than a ``{order: array}`` dict.
 
     Returns
     -------
     line_list
-        ``{order: λ_um array}`` of vacuum wavelengths to paint / measure.
+        ``{order: λ_um array}`` of vacuum wavelengths to paint / measure,
+        or (if ``flatten``) a single flat ``λ_um`` array across all orders.
     lfc_meta
         ``fiber_object``, ``nu0``, ``delta_nu`` used to generate the list.
     """
@@ -2780,12 +2787,16 @@ def build_lfc_line_list(
 
     grids = get_sim_hdf_trace_grids(spectrograph)
     pix = np.arange(4096, dtype=np.float64)
-    out: dict[int, np.ndarray] = {}
     order_iter = (
         [int(od) for od in orders]
         if orders is not None
         else list(_order_list(spectrograph))
     )
+
+    # First pass: compute each order's (trimmed) wavelength bounds. We need
+    # these regardless of `flatten` — either to clip per-order (normal path)
+    # or to take the union span (flatten path).
+    order_bounds: dict[int, tuple[float, float]] = {}
     for od in order_iter:
         if od not in grids.get(fiber, {}):
             continue
@@ -2793,21 +2804,13 @@ def build_lfc_line_list(
         ok = np.isfinite(w)
         if int(ok.sum()) < 10:
             continue
-        # Trim in spectral-row space (same convention as lfc_wavesol_refit),
-        # then convert edge rows → wavelength bounds for gen_lfc_modes.
         lo_pix, hi_pix = np.percentile(pix[ok], [100 * edge, 100 * (1 - edge)])
         w_lo = float(np.interp(lo_pix, pix, w))
         w_hi = float(np.interp(hi_pix, pix, w))
         w_min, w_max = (min(w_lo, w_hi), max(w_lo, w_hi))
         if not (np.isfinite(w_min) and np.isfinite(w_max) and w_max > w_min):
             continue
-        waves, _nus, _ints = gen_lfc_modes(nu0_hz, delta_nu_hz, w_min, w_max)
-        waves = np.asarray(waves, dtype=np.float64)
-        if waves.size == 0:
-            continue
-        if stride > 1:
-            waves = waves[::stride]
-        out[int(od)] = waves
+        order_bounds[int(od)] = (w_min, w_max)
 
     lfc_meta = {
         "fiber_object": fiber_object,
@@ -2816,6 +2819,29 @@ def build_lfc_line_list(
         "edge_margin_frac": edge,
         "mode_stride": float(stride),
     }
+
+    if flatten:
+        if not order_bounds:
+            return np.array([], dtype=np.float64), lfc_meta
+        w_min = min(lo for lo, _ in order_bounds.values())
+        w_max = max(hi for _, hi in order_bounds.values())
+        waves, _nus, _ints = gen_lfc_modes(nu0_hz, delta_nu_hz, w_min, w_max)
+        waves = np.asarray(waves, dtype=np.float64)
+        waves = np.unique(waves)  # sorted + de-duplicated
+        if stride > 1:
+            waves = waves[::stride]
+        return waves, lfc_meta
+
+    out: dict[int, np.ndarray] = {}
+    for od, (w_min, w_max) in order_bounds.items():
+        waves, _nus, _ints = gen_lfc_modes(nu0_hz, delta_nu_hz, w_min, w_max)
+        waves = np.asarray(waves, dtype=np.float64)
+        if waves.size == 0:
+            continue
+        if stride > 1:
+            waves = waves[::stride]
+        out[od] = waves
+
     return out, lfc_meta
 
 

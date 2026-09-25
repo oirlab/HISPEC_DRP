@@ -1,0 +1,5 @@
+class: ProcessLFCPipeline
+description: Standard process LFC pipeline configuration.
+context: {}
+parameters: {}
+primitives: {}

@@ -14,7 +14,7 @@ __all__ = ['ProcessFiberflatsPipeline']
 class ProcessFiberflatsPipeline(CalibrationPipeline):
 
     PARAMETERS = {
-        'use_pipeline_trace_cals' : True # True for boostrapping until we have good trace cals
+        'use_derived_trace_cals' : True # True for boostrapping until we have good trace cals
     }
 
     PRIMITIVES = {
@@ -64,7 +64,7 @@ class ProcessFiberflatsPipeline(CalibrationPipeline):
         
         # Set the trace pos and prof cals in the spectral extraction primitive
         # NOTE: Final behavior TBD - sometimes we want to use the these trace cals, sometimes we want older trace cals.
-        if self.use_pipeline_trace_cals:
+        if self.use_derived_trace_cals:
             if self.spec_extract.tracepos is not None:
                 logger.warning(f"Overriding spec_extract.tracepos with {trace_pos_reg}.")
             self.spec_extract.tracepos = trace_pos_reg

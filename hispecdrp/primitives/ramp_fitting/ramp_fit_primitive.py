@@ -339,7 +339,6 @@ class FitRampPrimitive(BasePrimitive):
         'suffix' : 'rampfit',
         'method' : 'cython_likely',
         'mcds_num_coadd' : None,
-        'max_cores' : 1,
         'output_model' : 'L0Model',
         'jwst_jump_detection': False,
         'jwst_jump_rejection_threshold': 4.0,

@@ -24,7 +24,6 @@ class BlazeCorrectionPrimitive(BasePrimitive):
     
     PARAMETERS = {
         'suffix' : 'blaze_correct',
-        'max_cores' : 1,
         'do_fibers' : None,
         'do_orders' : None,
         # Divide fiberflat by analytic lamp SED before blaze-correcting science.

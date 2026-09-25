@@ -21,6 +21,15 @@ Quickstart
    quickstart/quickstart
 
 
+Data Products
+=============
+
+.. toctree::
+   :maxdepth: 2
+
+   data_products/data_products
+
+
 Simulations
 ===========
 

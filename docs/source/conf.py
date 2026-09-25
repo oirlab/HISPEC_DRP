@@ -47,6 +47,16 @@ napoleon_custom_sections = [
     ('Returns', 'params_style')
 ]
 
+# Resolves :ref:/:doc: targets embedded in third-party (astropy/scipy/numpy)
+# docstrings pulled in via autodoc -- without these, those refs have no
+# inventory to resolve against and Sphinx reports them as undefined labels.
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numpy': ('https://numpy.org/doc/stable/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+    'astropy': ('https://docs.astropy.org/en/stable/', None),
+}
+
 autosummary_generate = True  # Generate autosummary stubs automatically
 autodoc_default_options = {
     'members': True,          # Include all class members
@@ -124,22 +134,26 @@ html_baseurl = 'https://oirlab.github.io/HISPEC_DRP/'
 
 #### Sphinx custom formatting ####
 
-# Module currently being imported by autodoc (set in Documenter.import_object).
-_AUTODOC_MODNAME: list[str | None] = [None]
-
-
 def autodoc_skip_member(app, what, name, obj, skip, options):
     """Skip ARGUMENTS/CALIBRATIONS, class attributes, and cross-module re-exports."""
     if skip:
         return True
-    if name in ("ARGUMENTS", "CALIBRATIONS", "_perform", "PRIMITIVES"):
+    if name in ("PARAMETERS", "CALIBRATIONS", "_perform", "PRIMITIVES"):
         return True
-    # Skip module-level re-exports / imports (document only in the defining module).
-    # Do not apply this to methods/properties — those may be inherited.
+    # Skip third-party/stdlib objects merely imported into a hispecdrp module
+    # (e.g. astropy.table.Table, typing.Any) -- they were never "at home"
+    # there, and documenting them under every module that imports them is
+    # what produces duplicate-object-description / ambiguous-cross-reference
+    # warnings. This check is stateless by design: an earlier version tried
+    # to also dedupe *internal* cross-module re-exports (e.g. ConfigFile
+    # imported into base_pipeline.py) with an id()-keyed "seen" registry, but
+    # autosummary's stub-generation pass fires this same event to decide what
+    # to *list* -- before the real rendering pass asks about the same
+    # object -- so the registry incorrectly marked real content as "already
+    # documented" and stripped it. Not worth the risk for that rarer case.
     if what in ("class", "function", "exception", "data", "module"):
         obj_mod = getattr(obj, "__module__", None)
-        doc_mod = _AUTODOC_MODNAME[0]
-        if obj_mod and doc_mod and obj_mod != doc_mod:
+        if obj_mod and not obj_mod.startswith("hispecdrp"):
             return True
     return False
 
@@ -200,16 +214,5 @@ def replace_literal_table_for_html(app, what, name, obj, options, lines):
 
 
 def setup(app):
-    from sphinx.ext.autodoc import Documenter
-
-    _orig_import_object = Documenter.import_object
-
-    def _import_object(self, *args, **kwargs):
-        result = _orig_import_object(self, *args, **kwargs)
-        _AUTODOC_MODNAME[0] = getattr(self, "modname", None)
-        return result
-
-    Documenter.import_object = _import_object  # type: ignore[method-assign]
-
     app.connect("autodoc-skip-member", autodoc_skip_member)
     app.connect("autodoc-process-docstring", replace_literal_table_for_html)

@@ -41,7 +41,6 @@ class MakeSaturationPrimitive(BasePrimitive):
     PARAMETERS = {
         'output_model' : 'SaturationModel',
         'offset' : 100, # subtract from last read to define saturation threshold in case read noise or other systematics are an issue.
-        'max_cores' : 1,
     }
 
     def _perform(self):

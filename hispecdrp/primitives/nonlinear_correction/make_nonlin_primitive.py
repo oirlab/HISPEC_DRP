@@ -15,7 +15,7 @@ import ctypes
 logger = logging.getLogger(__name__)
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
-from tqdm import tqdm
+from progressbar import progressbar
 
 
 __all__ = ['MakeNonLinPrimitive','fit_nonlin_coefs']
@@ -126,7 +126,6 @@ class MakeNonLinPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'output_model': 'NonlinearCorrectionModel',
-        'max_cores' : 1,
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.
         # 'per_pixel' compute gain for each pixel independently,
         # 'channel' (Not implemented yet) compute gain for each readout channel independently,
@@ -462,7 +461,7 @@ def _fit_nonlin_coefs_per_pixel(
                     for args_tuple in args_list
                 ]
 
-            for t in tqdm(tasks, desc="Processing blocks nonlin coefs fitting"):
+            for t in progressbar(tasks, desc="Fitting Nonlinear coefficients", fast=False):
                 t.wait()
         finally:
             tpool.close()

@@ -42,7 +42,6 @@ class DarkSubtractionPrimitive(BasePrimitive):
     """
     PARAMETERS = {
         'suffix' : 'darksub',
-        'max_cores' : 1,
     }
 
     CALIBRATIONS = {

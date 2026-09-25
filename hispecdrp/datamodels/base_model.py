@@ -1958,3 +1958,29 @@ class CalibrationModel(DataModel):
             self.meta.note = note
         record = self.meta.to_record()
         return record
+
+    @property
+    def orders(self) -> np.ndarray:
+        """
+        Return the order vector for the calibration model based on the order_start and order_end metadata.
+        """
+        return self.make_order_vec()
+
+    def order_index(self, order : int) -> int:
+        """
+        Return the index of the given order in the order vector.
+
+        Parameters
+        ----------
+        order : int
+            The order number to find the index for.
+
+        Returns
+        -------
+        int
+            The index of the order in the order vector.
+        """
+        orders = self.orders
+        if order not in orders:
+            raise ValueError(f"Order {order} is not in the order vector: {orders}")
+        return np.where(orders == order)[0][0]

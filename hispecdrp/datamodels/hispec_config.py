@@ -1,5 +1,7 @@
 import importlib.resources
 import logging
+
+from astropy.units import Hz
 from .base_model import DataModel
 from .meta_data import read_meta_schema
 
@@ -33,9 +35,12 @@ class HISPECConfig:
 
     # TODO: Update LFC params, eventually in calibration DB
     lfc_params : ClassVar[dict[str, float]] = {
+        # NOTE: From https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/docs/source/info/data_format.rst
+        # LFCFRREF	20000000000.0	LFC filtered Offset Freq RR Filter setpoint(Hz)
+        # LFCCEOFR	5220000000.0	LFC CEO Filtered Setpoint Freq (Hz)
         'LFC-B' : {
-            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
-            'delta_nu' : 10.000000174E9, # Hz
+            'nu0' : 5.22E9, # Hz
+            'delta_nu' : 20E9, # Hz
         },
         'LFC-R' : {
             'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
@@ -132,11 +137,12 @@ class HISPECConfig:
                 model.meta.order_end = cls.echelle_orders[model.meta.spectrograph]['order_end']
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
-        # TODO: Defaults need to know which LFC, ignore until we have a more robust way to determine this from the metadata
-        # if model.meta.lfc_nu0 is None:
-        #     model.meta.lfc_nu0 = cls.lfc_params[model.meta.spectrograph]['nu0']
-        # if model.meta.lfc_delta_nu is None:
-        #     model.meta.lfc_delta_nu = cls.lfc_params[model.meta.spectrograph]['delta_nu']
+        if model.meta.lfc_nu0 is None:
+            key = 'LFC-B' if model.meta.spectrograph == 'BSPEC' else 'LFC-R'
+            model.meta.lfc_nu0 = cls.lfc_params[key]['nu0']
+        if model.meta.lfc_delta_nu is None:
+            key = 'LFC-B' if model.meta.spectrograph == 'BSPEC' else 'LFC-R'
+            model.meta.lfc_delta_nu = cls.lfc_params[key]['delta_nu']
         
         return model
     

@@ -734,7 +734,7 @@ def delta_pix_to_delta_wave(
         np.ndarray | float: Change in wavelength in the same units as the wavelength solution.
     """
     if dispersion is None:
-        dispersion = np.gradient(wavesol)
+        dispersion = abs(np.gradient(wavesol))
     disp = np.interp(x, np.arange(len(dispersion)), dispersion)
     dw = disp * delta_pix
     return dw
