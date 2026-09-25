@@ -17,7 +17,7 @@ import multiprocessing as mp
 import ctypes
 from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from multiprocessing.sharedctypes import RawArray
-from tqdm import tqdm
+from progressbar import progressbar
 import numbers
 
 
@@ -119,7 +119,6 @@ class MakeGainPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'max_cores' : 1,
         'init_gain' : None, # None | int, Define the initial gain value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(0.1, 10, 101)).
         'init_RN' : None,  # None | in,  Define the initial readnoise value used for the maximum likelihood grid search.
@@ -510,7 +509,7 @@ def _fit_gain_and_readnoise_per_pixel(
                     for args_tuple in args_list
                 ]
 
-            for t in tqdm(tasks, desc="Processing blocks"):
+            for t in progressbar(tasks, desc="Fitting gain and read noise", fast=False):
                 t.wait()
         finally:
             tpool.close()

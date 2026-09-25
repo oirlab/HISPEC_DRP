@@ -47,7 +47,6 @@ class DetectorFlatCorrectionPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'detflatcorr',
-        'max_cores' : 1,
     }
 
     CALIBRATIONS = {

@@ -39,7 +39,6 @@ class MakeDarkPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'output_model' : 'DarkModel',
-        'max_cores' : 1,
         'hot_pixel_threshold' : 5,  # e-/s,  Threshold above which pixels are bad
     }
 

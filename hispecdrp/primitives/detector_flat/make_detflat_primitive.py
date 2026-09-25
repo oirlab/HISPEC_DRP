@@ -38,7 +38,6 @@ class MakeDetectorFlatPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'output_model' : 'DetectorFlatModel',
-        'max_cores' : 1,
         'cold_pixel_threshold' : 0.9,  # Threshold below which pixels are
     }
 

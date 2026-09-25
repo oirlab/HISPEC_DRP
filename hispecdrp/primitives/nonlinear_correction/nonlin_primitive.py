@@ -62,7 +62,6 @@ class NonlinearCorrectionPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'nonlincorr',
-        'max_cores' : 1,
     }
 
     CALIBRATIONS = {

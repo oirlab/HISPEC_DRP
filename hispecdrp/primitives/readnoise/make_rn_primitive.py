@@ -94,7 +94,6 @@ class MakeReadnoisePrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'max_cores' : 1,
         'init_RN' : None,  # None | in,  Define the initial readnoise value used for the maximum likelihood grid search.
         # If None, use calibration database, otherwise specify a np.array (eg, np.linspace(1, 20, 101)).
         'mode': 'per_pixel', # str, 'per_pixel' | 'channel' | 'full_detector', mode to fit the parameters.

@@ -333,8 +333,6 @@ class BasePipeline(ProcessingComponent):
                     # Forward max_cores to primitives
                     if prim_instance.max_cores is None:
                         prim_instance.max_cores = self.max_cores
-                    
-
 
                 #input_dir = self.get_input_dir()
                 #if self.save_result in (None, False) and self.output_dir is not None:

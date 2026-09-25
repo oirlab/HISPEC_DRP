@@ -43,7 +43,6 @@ class DQInitPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'dqinit',
-        'max_cores' : 1
     }
 
     CALIBRATIONS = {

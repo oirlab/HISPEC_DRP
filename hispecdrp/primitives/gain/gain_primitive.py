@@ -42,7 +42,6 @@ class GainCorrectionPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'gaincorr',
-        'max_cores' : 1,
     }
 
     CALIBRATIONS = {
