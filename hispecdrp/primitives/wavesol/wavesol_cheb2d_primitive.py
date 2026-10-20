@@ -10,6 +10,32 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['CalculateChebyshev2DWLSPrimitive']
 
+DEFAULT_DEG_INTRA_ORDER = 9
+
+
+def auto_deg_inter_order(
+    n_orders,
+    anchor_degree=6,
+    anchor_orders=10,
+    max_degree=10,
+):
+    """Choose a Chebyshev inter-order degree from the number of fit orders.
+
+    Cap with ``np.minimum``. ``np.min(value, max_degree)`` is parsed as
+    ``axis=max_degree`` and raises ``AxisError``.
+    """
+    n_orders = int(n_orders)
+    if n_orders <= 1:
+        return 0
+    if n_orders == 2:
+        return 1
+    return int(
+        np.minimum(
+            np.round(anchor_degree * np.log(n_orders) / np.log(anchor_orders)),
+            max_degree,
+        )
+    )
+
 
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
@@ -63,17 +89,15 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         # Get fibers and orders
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
 
-        # Default inter order deg
         if self.deg_intra_order == 'auto':
-            if len(fit_orders) == 1:
-                deg_inter_order = 0
-            elif len(fit_orders) == 2:
-                deg_inter_order = 1
-            else:
-                anchor_degree = 6
-                anchor_orders = 10
-                max_degree = 10
-                deg_inter_order = int(np.min(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
+            deg_intra_order = DEFAULT_DEG_INTRA_ORDER
+            logger.info(f"deg_intra_order='auto', using {deg_intra_order=}.")
+        else:
+            deg_intra_order = self.deg_intra_order
+
+        # Default intra='auto' also selected the inter-order degree.
+        if self.deg_inter_order == 'auto' or self.deg_intra_order == 'auto':
+            deg_inter_order = auto_deg_inter_order(len(fit_orders))
             logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order
@@ -109,7 +133,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             # 2D Fit
             fit_result = fit_wavesol_chebyshev2d(
                 pixels, orders, waves,
-                deg_intra_order=self.deg_intra_order, deg_inter_order=deg_inter_order,
+                deg_intra_order=deg_intra_order, deg_inter_order=deg_inter_order,
                 max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
                 weights=weights,
             )
