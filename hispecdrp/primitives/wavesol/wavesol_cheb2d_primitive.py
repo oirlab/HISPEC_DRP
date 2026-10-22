@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['CalculateChebyshev2DWLSPrimitive']
 
+WAVE_MODEL_CHEBYSHEV2D = "chebyshev2d"
+WAVE_MODEL_CUBIC_SPLINE_1D = "cubic_spline_1d"
+WAVE_MODELS = (WAVE_MODEL_CHEBYSHEV2D, WAVE_MODEL_CUBIC_SPLINE_1D)
 DEFAULT_DEG_INTRA_ORDER = 9
 
 
@@ -21,8 +24,8 @@ def auto_deg_inter_order(
 ):
     """Choose a Chebyshev inter-order degree from the number of fit orders.
 
-    Cap with ``np.minimum``. ``np.min(value, max_degree)`` is parsed as
-    ``axis=max_degree`` and raises ``AxisError``.
+    Uses ``np.minimum`` (element-wise cap), not ``np.min(..., max_degree)``.
+    The latter is parsed as ``axis=max_degree`` and raises ``AxisError``.
     """
     n_orders = int(n_orders)
     if n_orders <= 1:
@@ -40,14 +43,21 @@ def auto_deg_inter_order(
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
     """
-    Fit a 2D Chebyshev polynomial to a set of data points (pixel, order, wavelength) to derive the wavelength solution.
+    Fit a wavelength solution from LFC line centroids.
 
-    The unstructured set of points {pixel_i, order_i, wave_i} is fit with a 2D Chebyshev polynomial to obtain the wavelength solution. Specifically, the data fit is {pixel_i, order_i, wave_i} where the 2D polynomial represents an expansion of the grating equation.
+    The default ``wave_model='chebyshev2d'`` fits a 2D Chebyshev polynomial
+    to ``{pixel, order, m*λ}`` (a grating-equation expansion).
+    ``wave_model='cubic_spline_1d'`` instead interpolates each order with a
+    cubic spline through ``(MU_PIX, WAVE)``. The spline is optional and is
+    not the default.
 
     Parameters
     ----------
+    wave_model : {'chebyshev2d', 'cubic_spline_1d'}
+        Wavelength model used to fill ``wave_fib*``. Default ``chebyshev2d``.
     deg_intra_order : int or 'auto'
-        Degree of the polynomial within an order.
+        Degree of the polynomial within an order (Chebyshev model only).
+        ``'auto'`` uses :data:`DEFAULT_DEG_INTRA_ORDER`.
     deg_inter_order : int or 'auto'
         Degree of the polynomial between orders. If 'auto', it will be set based on the number of orders being fit.
     max_iters : int
@@ -71,8 +81,9 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'deg_intra_order' : 'auto',
-        'deg_inter_order' : 9,
+        'wave_model' : WAVE_MODEL_CHEBYSHEV2D,
+        'deg_intra_order' : DEFAULT_DEG_INTRA_ORDER,
+        'deg_inter_order' : 'auto',
         'max_iters' : 100,
         'sigma_cut' : 4,
         'max_vel_cut' : 1E3,
@@ -89,14 +100,20 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         # Get fibers and orders
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
 
+        wave_model = str(self.wave_model).lower()
+        if wave_model not in WAVE_MODELS:
+            raise ValueError(
+                f"wave_model={self.wave_model!r} is invalid; expected one of {WAVE_MODELS}"
+            )
+
         if self.deg_intra_order == 'auto':
             deg_intra_order = DEFAULT_DEG_INTRA_ORDER
             logger.info(f"deg_intra_order='auto', using {deg_intra_order=}.")
         else:
             deg_intra_order = self.deg_intra_order
 
-        # Default intra='auto' also selected the inter-order degree.
-        if self.deg_inter_order == 'auto' or self.deg_intra_order == 'auto':
+        # Default inter order deg (Chebyshev model only)
+        if wave_model == WAVE_MODEL_CHEBYSHEV2D and self.deg_inter_order == 'auto':
             deg_inter_order = auto_deg_inter_order(len(fit_orders))
             logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
@@ -108,6 +125,8 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         output_model = datamodels.LFCWavesolModel.from_datamodels(
             input_model, include_data=True, primitive=self
         )
+        if hasattr(output_model.meta, "wave_model"):
+            output_model.meta.wave_model = wave_model
 
         for fiber in do_fibers:
 
@@ -130,20 +149,32 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             else:
                 weights = None
 
-            # 2D Fit
-            fit_result = fit_wavesol_chebyshev2d(
-                pixels, orders, waves,
-                deg_intra_order=deg_intra_order, deg_inter_order=deg_inter_order,
-                max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
-                weights=weights,
-            )
-            fit_results.append(fit_result)
-
-            # Set results in model
-            setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
             nx = getattr(output_model, f'spec_fib{fiber}').shape[1]
             pixel_vec = np.arange(nx)
             order_vec = output_model.make_order_vec()
+
+            if wave_model == WAVE_MODEL_CUBIC_SPLINE_1D:
+                fit_result = fit_wavesol_spline_1d(
+                    pixels, orders, waves, pixel_vec, order_vec, weights=weights
+                )
+                wavesol_full = fit_result["wave_grid"]
+            else:
+                fit_result = fit_wavesol_chebyshev2d(
+                    pixels, orders, waves,
+                    deg_intra_order=deg_intra_order, deg_inter_order=deg_inter_order,
+                    max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
+                    weights=weights,
+                )
+                if fit_result["coeffs"] is not None:
+                    setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
+                wavesol_full = _build_wavesol_poly2d_structured(
+                    fit_result['coeffs'],
+                    pixel_vec,
+                    order_vec,
+                    fit_result['pixel_bounds'], fit_result['order_bounds']
+                )
+            fit_results.append(fit_result)
+
             chebnorm_table.add_row({
                 'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
@@ -151,17 +182,12 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                 'ORDER_NORM_MIN': fit_result['order_bounds'][0],
                 'ORDER_NORM_MAX': fit_result['order_bounds'][1],
             })
-            wavesol_full = _build_wavesol_poly2d_structured(
-                fit_result['coeffs'],
-                pixel_vec,
-                order_vec,
-                fit_result['pixel_bounds'], fit_result['order_bounds']
-            )
             setattr(output_model, f'wave_fib{fiber}', wavesol_full)
 
             # Set unreliable WLS in DQ
             bad_orders = np.setdiff1d(order_vec, fit_orders)
-            dq = getattr(output_model, f'spec_dq_fib{fiber}')
+            # Copy: flagging must not mutate the input model's DQ plane.
+            dq = np.array(getattr(output_model, f'spec_dq_fib{fiber}'), copy=True)
             flag_value = datamodels.DQ_FLAGS['UNRELIABLE_WS']
             for order in bad_orders:
                 oi = np.abs(order - output_model.meta.order_start)
@@ -179,7 +205,19 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                         dq[oi, :k1] |= flag_value
                     if k2 < nx - 1:
                         dq[oi, k2+1:] |= flag_value
-                        
+                    if wave_model == WAVE_MODEL_CUBIC_SPLINE_1D:
+                        # Spline WAVE in the first / last knot interval
+                        # rests on a boundary segment of the spline and
+                        # shows the largest interpolation error; flag it
+                        # as unreliable like the out-of-range pixels.
+                        centers = np.sort(np.asarray(line_centers_pix, dtype=float))
+                        if centers.size >= 2:
+                            b1 = int(np.floor(centers[1])) + 1
+                            dq[oi, k1:b1] |= flag_value
+                            b2 = int(np.ceil(centers[-2]))
+                            dq[oi, b2:k2 + 1] |= flag_value
+            setattr(output_model, f'spec_dq_fib{fiber}', dq)
+
         return dict(output=output_model, fit_results=fit_results)
 
 
@@ -187,6 +225,90 @@ def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2
     s = hi - lo
     return 2 * (x - mu) / s
+
+def fit_wavesol_spline_1d(
+    pixels: np.ndarray,
+    orders: np.ndarray,
+    waves: np.ndarray,
+    pixel_vec: np.ndarray,
+    order_vec: np.ndarray,
+    *,
+    weights: np.ndarray | None = None,
+) -> dict:
+    """Per-order cubic spline through LFC ``(MU_PIX, WAVE)``."""
+    from scipy.interpolate import CubicSpline
+
+    pixels = np.asarray(pixels, dtype=float)
+    orders = np.asarray(orders, dtype=int)
+    waves = np.asarray(waves, dtype=float)
+    pixel_vec = np.asarray(pixel_vec, dtype=float)
+    order_vec = np.asarray(order_vec, dtype=int)
+    if weights is None:
+        weights = np.ones(pixels.shape, dtype=float)
+    else:
+        weights = np.asarray(weights, dtype=float)
+
+    wave_grid = np.full((order_vec.size, pixel_vec.size), np.nan, dtype=float)
+    model_at_lines = np.full(pixels.shape, np.nan, dtype=float)
+    good_mask = np.zeros(pixels.size, dtype=bool)
+
+    for i, od in enumerate(order_vec):
+        sel = (
+            (orders == int(od))
+            & np.isfinite(pixels)
+            & np.isfinite(waves)
+            & np.isfinite(weights)
+            & (weights > 0)
+        )
+        n_sel = int(sel.sum())
+        if n_sel < 4:
+            logger.warning(
+                "Order %s has %s usable LFC lines; need 4 for a cubic spline.",
+                od,
+                n_sel,
+            )
+            continue
+        x = pixels[sel]
+        y = waves[sel]
+        order = np.argsort(x)
+        x, y = x[order], y[order]
+        _, uniq = np.unique(np.round(x, 6), return_index=True)
+        x, y = x[uniq], y[uniq]
+        if x.size < 4:
+            logger.warning(
+                "Order %s has %s unique LFC pixels; need 4 for a cubic spline.",
+                od,
+                x.size,
+            )
+            continue
+        fn = CubicSpline(x, y, extrapolate=False)
+        inside = (pixel_vec >= x[0]) & (pixel_vec <= x[-1])
+        wave_grid[i, inside] = fn(pixel_vec[inside])
+        at_x = fn(pixels[sel])
+        model_at_lines[sel] = at_x
+        good_mask[sel] = np.isfinite(at_x)
+
+    residuals = waves - model_at_lines
+    residuals_vel = delta_wave_to_delta_vel(residuals, waves)
+    if pixels.size == 0:
+        pixel_bounds = (0.0, 1.0)
+        order_bounds = (0.0, 1.0)
+    else:
+        pixel_bounds = (float(np.nanmin(pixels)) - 10.0, float(np.nanmax(pixels)) + 10.0)
+        order_bounds = (float(np.nanmin(orders)) - 10.0, float(np.nanmax(orders)) + 10.0)
+    return dict(
+        coeffs=None,
+        good=np.where(good_mask)[0],
+        iterations=1,
+        model=model_at_lines,
+        residuals=residuals,
+        residuals_vel=residuals_vel,
+        order_bounds=order_bounds,
+        pixel_bounds=pixel_bounds,
+        wave_grid=wave_grid,
+        wave_model=WAVE_MODEL_CUBIC_SPLINE_1D,
+    )
+
 
 def fit_wavesol_chebyshev2d(
     pixels : np.ndarray,

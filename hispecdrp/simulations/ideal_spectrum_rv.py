@@ -35,23 +35,36 @@ __all__ = [
 def build_template_rate_map(
     rv_km_s: float,
     *,
-    template: str,
+    template: str | None = None,
     fiber: int = 1,
     spectrograph: str = "BSPEC",
     output_dir: str | Path,
     mag_ab: float = 3.05,
     filter_band: str = "J",
     method: str = "prf_convolution",
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
 ) -> np.ndarray:
-    """Doppler-shift a BT-Settl template and paint a native rate map."""
-    template_path = get_spectrum_path(template, base_dir=templates_data_dir())
-    wl, flux = load_btsettl_spectrum(
-        template_path,
-        mag_ab=mag_ab,
-        filter_band=normalize_2mass_band(filter_band),
-    )
-    sort_idx = np.argsort(np.asarray(wl.value, dtype=np.float64))
-    wl, flux = wl[sort_idx], flux[sort_idx]
+    """Doppler-shift a BT-Settl template and paint a native rate map.
+
+    Pass an already Doppler-shifted ``spectrum_wavelengths`` / ``spectrum_flux``
+    pair to skip the template load and the extra ``apply_radial_velocity`` step.
+    """
+    if spectrum_wavelengths is None or spectrum_flux is None:
+        if template is None:
+            raise ValueError("template is required when no explicit spectrum is given")
+        template_path = get_spectrum_path(template, base_dir=templates_data_dir())
+        wl, flux = load_btsettl_spectrum(
+            template_path,
+            mag_ab=mag_ab,
+            filter_band=normalize_2mass_band(filter_band),
+        )
+        sort_idx = np.argsort(np.asarray(wl.value, dtype=np.float64))
+        wl, flux = wl[sort_idx], flux[sort_idx]
+        apply_rv = float(rv_km_s) != 0.0
+    else:
+        wl, flux = spectrum_wavelengths, spectrum_flux
+        apply_rv = False
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     srm = SimulateRateMap()
@@ -65,7 +78,7 @@ def build_template_rate_map(
         spectrum_flux=flux,
         continuous=False,
     )
-    if float(rv_km_s) != 0.0:
+    if apply_rv:
         srm.apply_radial_velocity(fiber_number=int(fiber), rv=float(rv_km_s) * u.km / u.s)
     return srm.create_native_rate_map(
         spectrograph=str(spectrograph).upper(),
@@ -120,8 +133,9 @@ def prepare_stage1_cals(
     spectrograph: str = "BSPEC",
     fiber: int = 1,
     extraction_aperture: float = 8.0,
+    wavesol=None,
 ) -> dict:
-    """Build or reuse sim-HDF traces and fiberflat; always attach geometric WAVE."""
+    """Build or reuse sim-HDF traces and fiberflat; attach geometric WAVE by default."""
     from .e2e_pipeline import prepare_pipeline_example_stage1
 
     spectrograph = str(spectrograph).upper()
@@ -134,7 +148,7 @@ def prepare_stage1_cals(
         reuse_existing=True,
     )
     # Cached masters may still hold the flipped packaged line-ZP WAVE.
-    bundle["wavesol"] = geometric_hdf_wavesol(
+    bundle["wavesol"] = wavesol if wavesol is not None else geometric_hdf_wavesol(
         spectrograph,
         meta={"mjd_start": resolve_e2e_mjd_start(None)},
     )
@@ -206,6 +220,9 @@ def recover_rv_from_rate_map(
     mag_ab: float = 3.05,
     filter_band: str = "J",
     extraction_aperture: float = 8.0,
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
+    **stellar_rv_overrides,
 ) -> tuple[float, float, float]:
     """Native rate map → Stage 1 → blaze → ``recover_stellar_rv``."""
     with quiet_pipeline_logging():
@@ -220,6 +237,8 @@ def recover_rv_from_rate_map(
             output_dir=run_dir,
             mag_ab=mag_ab,
             filter_band=filter_band,
+            spectrum_wavelengths=spectrum_wavelengths,
+            spectrum_flux=spectrum_flux,
         )
         stage1_cals = prepare_stage1_cals(
             parent,
@@ -251,6 +270,7 @@ def recover_rv_from_rate_map(
             mask_path=str(mask_path),
             spectrograph=spectrograph,
             fiber=fiber,
+            **stellar_rv_overrides,
         )
 
 
@@ -268,6 +288,9 @@ def recover_rv_from_ramp(
     n_reads: int = 10,
     seed: int = 0,
     cleanup: bool = True,
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
+    **stellar_rv_overrides,
 ) -> tuple[float, float, float]:
     """Rate map → UTR ramp → Stage 0 → Stage 1 → blaze → ``recover_stellar_rv``.
 
@@ -282,14 +305,21 @@ def recover_rv_from_ramp(
     run_dir = parent / f"ramp_{rv_km_s:+.1f}kms".replace("+", "p").replace("-", "m")
     try:
         with quiet_pipeline_logging():
+            if spectrum_wavelengths is not None and spectrum_flux is not None:
+                fiber_spectra = {int(fiber): (spectrum_wavelengths, spectrum_flux)}
+                paint_rv = 0.0
+            else:
+                fiber_spectra = None
+                paint_rv = float(rv_km_s)
             ramp, cals, rate = create_ramp_from_spectrum(
                 str(run_dir),
                 spectrograph=spectrograph,
                 fibers=[int(fiber)],
                 template_filename=template,
+                fiber_spectra=fiber_spectra,
                 mag_ab=mag_ab,
                 filter_band=filter_band,
-                radial_velocity_km_s=float(rv_km_s),
+                radial_velocity_km_s=paint_rv,
                 n_reads=int(n_reads),
                 seed=int(seed),
                 poisson_noise=False,
@@ -322,6 +352,7 @@ def recover_rv_from_ramp(
                 mask_path=str(mask_path),
                 spectrograph=spectrograph,
                 fiber=fiber,
+                **stellar_rv_overrides,
             )
     finally:
         if cleanup:

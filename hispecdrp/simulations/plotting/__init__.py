@@ -12,6 +12,7 @@ from .comb_wavesol_geometry import (
     write_comb_wavesol_per_order_summary_png,
 )
 from .ideal_spectrum_rv_recovery import plot_ideal_spectrum_rv_recovery
+from .rv_step_diagnostics import plot_rv_step_comparison
 from .e2e_preview import (
     PREVIEWS_SUBDIR,
     REPORT_HTML_NAME,
@@ -20,8 +21,12 @@ from .e2e_preview import (
     infer_exposure_base_name,
 )
 from .lfc_pipeline import (
+    lfc_vs_hdf_wavesol_shift,
     plot_extracted_lfc_order,
     plot_lfc_line_fwhm,
+    plot_lfc_rate_map_order_zooms,
+    plot_lfc_vs_hdf_wavesol_shift,
+    plot_lfc_vs_hdf_wavesol_vs_wavelength,
     plot_lsf_resolving_power,
 )
 from .lfc_wavesol_refit import write_lfc_elliptical_wave_report
@@ -80,8 +85,13 @@ __all__ = [
     "plot_extraction_pull_histogram",
     "plot_extracted_lfc_order",
     "plot_ideal_spectrum_rv_recovery",
+    "plot_rv_step_comparison",
     "plot_injected_vs_recovered_rv",
+    "lfc_vs_hdf_wavesol_shift",
     "plot_lfc_line_fwhm",
+    "plot_lfc_rate_map_order_zooms",
+    "plot_lfc_vs_hdf_wavesol_shift",
+    "plot_lfc_vs_hdf_wavesol_vs_wavelength",
     "plot_lsf_resolving_power",
     "plot_order_extraction_zoom_triptych",
     "plot_spectrum_fidelity_overlay",

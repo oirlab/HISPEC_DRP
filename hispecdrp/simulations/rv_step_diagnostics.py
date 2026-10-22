@@ -1,0 +1,570 @@
+"""Step-by-step ideal-spectrum RV recovery (truth 1D → L2 → rate map → UTR)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Callable
+
+import astropy.constants as const
+import astropy.units as u
+import numpy as np
+
+from ..primitives.utils.ccf import doppler_paint_lanczos
+from ..primitives.utils.spectral_utils import (
+    get_spectrum_path,
+    load_btsettl_spectrum,
+    normalize_2mass_band,
+)
+from .e2e_support import templates_data_dir
+from .ideal_spectrum_rv import (
+    extract_and_blaze_l2,
+    geometric_hdf_wavesol,
+    prepare_stage1_cals,
+    rate_map_to_l0,
+    recover_rv_from_ramp,
+    recover_rv_from_rate_map,
+)
+from .simulate_rate_map import _upsample_spectrum
+from .spectra import (
+    _instrument_wavelength_solution,
+    _resolve_order_bounds,
+    build_l2,
+    quiet_pipeline_logging,
+    recover_stellar_rv,
+)
+
+__all__ = [
+    "NO_LINE_REJECTION_SIGMA",
+    "STEP_BULK_RV_KM_S",
+    "STELLAR_RV_NO_REJECT_KW",
+    "load_densified_template",
+    "doppler_shift_spectrum",
+    "paint_spectrum_onto_l2",
+    "recover_rv_keep_all_lines",
+    "recover_rv_from_truth_l2",
+    "recover_rv_from_truth_rate_map",
+    "recover_rv_from_truth_ramp",
+    "run_step_grid",
+    "summarize_step_grid",
+    "compare_step_summaries",
+    "verify_zero_rv_recovery",
+    "saved_rate_map_path",
+    "wavesol_from_line_zeropoint",
+    "wavesol_from_extracted_comb",
+    "recover_rv_from_saved_rate_map",
+]
+
+# Finite stand-in for infinity: every finite line stays in the aggregate.
+# ``float("inf")`` is avoided because ``inf * 0`` becomes NaN in the MAD gate.
+NO_LINE_REJECTION_SIGMA = 1.0e30
+STEP_BULK_RV_KM_S = np.arange(0.0, 51.0, 10.0)
+STELLAR_RV_NO_REJECT_KW = {"outlier_sigma": NO_LINE_REJECTION_SIGMA}
+
+DENSIFY_RESOLUTION = 3.0e5
+
+
+def load_densified_template(
+    template: str,
+    *,
+    mag_ab: float = 3.05,
+    filter_band: str = "J",
+    resolution: float = DENSIFY_RESOLUTION,
+):
+    """Load a BT-Settl template, sort it, and densify to ``resolution``."""
+    template_path = get_spectrum_path(template, base_dir=templates_data_dir())
+    wl, flux = load_btsettl_spectrum(
+        template_path,
+        mag_ab=float(mag_ab),
+        filter_band=normalize_2mass_band(filter_band),
+    )
+    sort_idx = np.argsort(np.asarray(wl.value, dtype=np.float64))
+    wl, flux = wl[sort_idx], flux[sort_idx]
+    return _upsample_spectrum(wl, flux, desired_sampling_resolution=float(resolution))
+
+
+def doppler_shift_spectrum(wavelengths, flux, rv_km_s: float):
+    """Shift a 1D spectrum by ``λ' = λ (1 + RV/c)``. Flux is unchanged."""
+    factor = (1.0 + (float(rv_km_s) * u.km / u.s) / const.c).to(u.dimensionless_unscaled)
+    return wavelengths * factor, flux
+
+
+def paint_spectrum_onto_l2(
+    wavelengths,
+    flux,
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    rv_m_s: float = 0.0,
+    order_start: int | None = None,
+    order_end: int | None = None,
+    mask_ccf_pixel_interp_order: int = 3,
+    spec_err_floor: float = 1.0e-6,
+    spec_err_relative: float = 1.0e-6,
+):
+    """Resample an already-shifted 1D spectrum onto the native echelle WAVE grid."""
+    from .. import datamodels
+    from .e2e_gaia import resolve_e2e_mjd_start
+
+    ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
+    ws_all = _instrument_wavelength_solution(spectrograph)[int(fiber)]
+    orders = [o for o in sorted(int(o) for o in ws_all.keys()) if ost <= o <= oen]
+    if not orders:
+        raise ValueError(f"No echelle orders in [{ost}, {oen}]")
+    n_pix = int(np.asarray(ws_all[orders[0]]["wavelength"]).size)
+    wave_2d = np.zeros((len(orders), n_pix), dtype=np.float64)
+    spec = np.empty_like(wave_2d)
+    w_src = np.asarray(getattr(wavelengths, "value", wavelengths), dtype=np.float64).ravel()
+    f_src = np.asarray(getattr(flux, "value", flux), dtype=np.float64).ravel()
+    for i, od in enumerate(orders):
+        w_obs = np.asarray(ws_all[od]["wavelength"], dtype=np.float64)
+        wave_2d[i] = w_obs
+        spec[i] = doppler_paint_lanczos(
+            w_obs,
+            w_src,
+            f_src,
+            float(rv_m_s),
+            order=int(mask_ccf_pixel_interp_order),
+        )
+    model = datamodels.L2Model(
+        meta={
+            "order_start": ost,
+            "order_end": oen,
+            "spectrograph": str(spectrograph).upper(),
+            "instrument_name": "HISPEC",
+            "mjd_start": resolve_e2e_mjd_start(None),
+        }
+    )
+    model.meta.order_start = ost
+    model.meta.order_end = oen
+    fiber_s = str(int(fiber))
+    setattr(model, f"wave_fib{fiber_s}", wave_2d.copy())
+    setattr(model, f"spec_fib{fiber_s}", spec.astype(np.float32))
+    err = np.maximum(float(spec_err_relative) * np.abs(spec), float(spec_err_floor)).astype(
+        np.float32
+    )
+    setattr(model, f"spec_err_fib{fiber_s}", err)
+    setattr(model, f"spec_dq_fib{fiber_s}", np.zeros(wave_2d.shape, dtype=np.uint32))
+    return model
+
+
+def recover_rv_keep_all_lines(
+    l2,
+    bulk_rv_km_s: float,
+    *,
+    template: str,
+    mask_path: str,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    quiet: bool = True,
+    **stellar_rv_overrides,
+) -> tuple[float, float, float]:
+    """``recover_stellar_rv`` with every finite line kept in the aggregate."""
+    kw = dict(STELLAR_RV_NO_REJECT_KW)
+    kw.update(stellar_rv_overrides)
+    return recover_stellar_rv(
+        l2,
+        bulk_rv_km_s,
+        template=template,
+        mask_path=str(mask_path),
+        spectrograph=spectrograph,
+        fiber=fiber,
+        quiet=quiet,
+        **kw,
+    )
+
+
+def recover_rv_from_truth_l2(
+    rv_km_s: float,
+    *,
+    wavelengths,
+    flux,
+    template: str,
+    mask_path: str,
+    fiber: int = 1,
+    spectrograph: str = "BSPEC",
+) -> tuple[float, float, float]:
+    """Paint the Doppler-shifted truth 1D onto L2 and recover RV."""
+    l2 = paint_spectrum_onto_l2(
+        wavelengths,
+        flux,
+        spectrograph=spectrograph,
+        fiber=fiber,
+        rv_m_s=0.0,
+    )
+    return recover_rv_keep_all_lines(
+        l2,
+        rv_km_s,
+        template=template,
+        mask_path=mask_path,
+        spectrograph=spectrograph,
+        fiber=fiber,
+    )
+
+
+def recover_rv_from_truth_rate_map(
+    rv_km_s: float,
+    *,
+    wavelengths,
+    flux,
+    template: str,
+    mask_path: str,
+    output_dir: str | Path,
+    fiber: int = 1,
+    spectrograph: str = "BSPEC",
+) -> tuple[float, float, float]:
+    """ZEMAX/native rate map of the truth 1D → extract → blaze → RV."""
+    return recover_rv_from_rate_map(
+        rv_km_s,
+        template=template,
+        mask_path=str(mask_path),
+        output_dir=output_dir,
+        fiber=fiber,
+        spectrograph=spectrograph,
+        spectrum_wavelengths=wavelengths,
+        spectrum_flux=flux,
+        **STELLAR_RV_NO_REJECT_KW,
+    )
+
+
+def recover_rv_from_truth_ramp(
+    rv_km_s: float,
+    *,
+    wavelengths,
+    flux,
+    template: str,
+    mask_path: str,
+    output_dir: str | Path,
+    fiber: int = 1,
+    spectrograph: str = "BSPEC",
+) -> tuple[float, float, float]:
+    """Truth 1D → UTR + Stage-0 cals → Stage 1–2 → RV."""
+    return recover_rv_from_ramp(
+        rv_km_s,
+        template=template,
+        mask_path=str(mask_path),
+        output_dir=output_dir,
+        fiber=fiber,
+        spectrograph=spectrograph,
+        spectrum_wavelengths=wavelengths,
+        spectrum_flux=flux,
+        **STELLAR_RV_NO_REJECT_KW,
+    )
+
+
+def summarize_step_grid(
+    injected_m_s: np.ndarray,
+    recovered_m_s: np.ndarray,
+    recovered_err_m_s: np.ndarray,
+    *,
+    name: str,
+) -> dict[str, Any]:
+    """Bias / precision stats for one recovery step."""
+    inj = np.asarray(injected_m_s, dtype=float).ravel()
+    rec = np.asarray(recovered_m_s, dtype=float).ravel()
+    err = np.asarray(recovered_err_m_s, dtype=float).ravel()
+    bias = rec - inj
+    return {
+        "name": name,
+        "injected_m_s": inj,
+        "recovered_m_s": rec,
+        "recovered_err_m_s": err,
+        "bias_m_s": bias,
+        "mean_bias_m_s": float(np.mean(bias)),
+        "std_bias_m_s": float(np.std(bias)),
+        "rms_bias_m_s": float(np.sqrt(np.mean(bias**2))),
+        "mean_err_m_s": float(np.mean(err)),
+        "mean_bias_cm_s": float(np.mean(bias) * 100.0),
+        "std_bias_cm_s": float(np.std(bias) * 100.0),
+        "mean_err_cm_s": float(np.mean(err) * 100.0),
+    }
+
+
+def run_step_grid(
+    recover_one: Callable[[float], tuple[float, float, float]],
+    *,
+    name: str,
+    title: str,
+    out_path: str | Path,
+    bulk_rv_km_s: np.ndarray | None = None,
+    plot: bool = True,
+) -> dict[str, Any]:
+    """Sweep injected RVs, print the table, and optionally write the residual plot."""
+    from .plotting import plot_ideal_spectrum_rv_recovery
+
+    grid = np.asarray(
+        STEP_BULK_RV_KM_S if bulk_rv_km_s is None else bulk_rv_km_s,
+        dtype=float,
+    )
+    hdr = (
+        f"{'bulk_km/s':>10}  {'injected_m/s':>14}  {'recovered_m/s':>16}  "
+        f"{'rv_err_m/s':>12}  {'bias_m/s':>12}  {'bias_mm/s':>10}"
+    )
+    inj_m_s, rec_m_s, err_m_s = [], [], []
+    print(hdr)
+    print("-" * len(hdr))
+    for bulk in grid:
+        with quiet_pipeline_logging():
+            inj, rec, err = recover_one(float(bulk))
+        bias = rec - inj
+        inj_m_s.append(float(inj))
+        rec_m_s.append(float(rec))
+        err_m_s.append(float(err))
+        print(
+            f"{bulk:10.1f}  {inj:14.4f}  {rec:16.6f}  {err:12.6f}  "
+            f"{bias:12.6e}  {bias * 1e3:10.4f}"
+        )
+    summary = summarize_step_grid(inj_m_s, rec_m_s, err_m_s, name=name)
+    print()
+    print(
+        f"{name}: mean bias = {summary['mean_bias_cm_s']:.3f} cm/s  "
+        f"std = {summary['std_bias_cm_s']:.3f} cm/s  "
+        f"mean RV_ERR = {summary['mean_err_cm_s']:.3f} cm/s"
+    )
+    if plot:
+        plot_summary = plot_ideal_spectrum_rv_recovery(
+            summary["injected_m_s"],
+            summary["recovered_m_s"],
+            summary["recovered_err_m_s"],
+            title=title,
+            out_path=out_path,
+        )
+        summary["out_path"] = plot_summary.get("out_path")
+        if summary.get("out_path"):
+            print("wrote", summary["out_path"])
+    return summary
+
+
+def compare_step_summaries(summaries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Print mean bias / scatter / RV_ERR and the increment between consecutive steps."""
+    rows = [s for s in summaries.values() if s]
+    if not rows:
+        return []
+    hdr = (
+        f"{'step':<28}  {'mean_bias':>12}  {'std_bias':>12}  "
+        f"{'mean_RV_ERR':>12}  {'Δmean_bias':>12}  {'Δstd':>12}  {'ΔRV_ERR':>12}"
+    )
+    print(hdr)
+    print("-" * len(hdr))
+    print("                        (m/s)         (m/s)         (m/s)         (m/s)         (m/s)         (m/s)")
+    prev = None
+    increments: list[dict[str, Any]] = []
+    for row in rows:
+        d_mean = float("nan") if prev is None else row["mean_bias_m_s"] - prev["mean_bias_m_s"]
+        d_std = float("nan") if prev is None else row["std_bias_m_s"] - prev["std_bias_m_s"]
+        d_err = float("nan") if prev is None else row["mean_err_m_s"] - prev["mean_err_m_s"]
+        rec = {
+            "name": row["name"],
+            "mean_bias_m_s": row["mean_bias_m_s"],
+            "std_bias_m_s": row["std_bias_m_s"],
+            "mean_err_m_s": row["mean_err_m_s"],
+            "delta_mean_bias_m_s": d_mean,
+            "delta_std_bias_m_s": d_std,
+            "delta_mean_err_m_s": d_err,
+        }
+        increments.append(rec)
+        print(
+            f"{row['name']:<28}  {row['mean_bias_m_s']:12.6f}  "
+            f"{row['std_bias_m_s']:12.6f}  {row['mean_err_m_s']:12.6f}  "
+            f"{d_mean:12.6f}  {d_std:12.6f}  {d_err:12.6f}"
+        )
+        prev = row
+    if len(increments) >= 2:
+        worst = max(
+            increments[1:],
+            key=lambda r: max(
+                abs(r["delta_mean_bias_m_s"]),
+                abs(r["delta_std_bias_m_s"]),
+                abs(r["delta_mean_err_m_s"]),
+            ),
+        )
+        print()
+        print(
+            f"Largest increment: {worst['name']}  "
+            f"Δmean={worst['delta_mean_bias_m_s']:.4f} m/s  "
+            f"Δstd={worst['delta_std_bias_m_s']:.4f} m/s  "
+            f"ΔRV_ERR={worst['delta_mean_err_m_s']:.4f} m/s"
+        )
+    return increments
+
+
+def verify_zero_rv_recovery(
+    *,
+    template: str,
+    mask_path: str,
+    fiber: int = 1,
+    spectrograph: str = "BSPEC",
+    max_abs_bias_m_s: float = 1.0,
+) -> tuple[float, float, float]:
+    """Paint the rest-frame densified template onto L2 and recover RV at 0 km/s."""
+    with quiet_pipeline_logging():
+        l2 = build_l2(0.0, template=template, fiber=fiber, spectrograph=spectrograph)
+        inj, rec, err = recover_rv_keep_all_lines(
+            l2,
+            0.0,
+            template=template,
+            mask_path=mask_path,
+            spectrograph=spectrograph,
+            fiber=fiber,
+        )
+    bias = rec - inj
+    print(
+        f"RV=0 check: injected={inj:.6f} m/s  recovered={rec:.6f} m/s  "
+        f"RV_ERR={err:.6f} m/s  bias={bias:.6e} m/s"
+    )
+    if abs(bias) > float(max_abs_bias_m_s):
+        print(
+            f"WARNING: |bias| = {abs(bias):.4f} m/s exceeds "
+            f"{max_abs_bias_m_s:.4f} m/s at injected RV=0"
+        )
+    else:
+        print(f"|bias| = {abs(bias):.4e} m/s  (within {max_abs_bias_m_s:.4f} m/s)")
+    return inj, rec, err
+
+
+def saved_rate_map_path(output_dir: str | Path, rv_km_s: float) -> Path:
+    """Path written by :func:`recover_rv_from_rate_map` for one bulk RV."""
+    run_dir = Path(output_dir) / f"rate_map_{float(rv_km_s):+.1f}kms".replace(
+        "+", "p"
+    ).replace("-", "m")
+    return run_dir / "rate_map.fits"
+
+
+def wavesol_from_line_zeropoint(
+    rate_map: np.ndarray,
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    known_rv_m_s: float = 0.0,
+    poly_deg: int = 0,
+):
+    """Geometric WAVE plus absorption-line ZP measured on ``rate_map``.
+
+    ``poly_deg=0`` absorbs a constant PSF/deposit shift. Use a rate map whose
+    injected stellar RV is ``known_rv_m_s`` so that Doppler is not folded in.
+    """
+    from .e2e_pipeline import refine_sim_hdf_wavesol_line_zeropoint
+
+    wavesol = geometric_hdf_wavesol(spectrograph)
+    info = refine_sim_hdf_wavesol_line_zeropoint(
+        wavesol,
+        np.asarray(rate_map),
+        spectrograph=str(spectrograph).upper(),
+        fiber=int(fiber),
+        known_rv_m_s=float(known_rv_m_s),
+        poly_deg=int(poly_deg),
+    )
+    return wavesol, info
+
+
+def wavesol_from_extracted_comb(
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    extraction_aperture: float = 8.0,
+    n_lines_per_order: int = 60,
+    poly_deg: int = 3,
+):
+    """WAVE from a 1D box-extracted emission comb (same extract as science).
+
+    Geometric deposit-inverse WAVE is exact at paint centers. Box extraction
+    measures a PSF-weighted peak, so this fit is the simulated wavecal that
+    matches the science extract.
+    """
+    from .e2e_pipeline import _order_list, calibrate_wavesol_from_injected_comb
+
+    comb = calibrate_wavesol_from_injected_comb(
+        str(spectrograph).upper(),
+        fiber=int(fiber),
+        n_lines_per_order=int(n_lines_per_order),
+        poly_deg=int(poly_deg),
+        extraction_aperture=float(extraction_aperture),
+        centroid_mode="1d",
+        paint_mode="native",
+    )
+    wavesol = geometric_hdf_wavesol(spectrograph)
+    attr = f"wave_fib{int(fiber)}"
+    wave = np.asarray(getattr(wavesol, attr), dtype=float).copy()
+    pix_grid = np.arange(wave.shape[1], dtype=float)
+    order_list = _order_list(str(spectrograph).upper())
+    meas = comb.get("line_measurements") or []
+    per_order: dict[int, dict[str, Any]] = {}
+    for oi, od in enumerate(order_list):
+        if oi >= wave.shape[0]:
+            break
+        pix = np.array(
+            [
+                m["pix_meas"]
+                for m in meas
+                if int(m.get("order", -1)) == int(od) and np.isfinite(m.get("pix_meas", np.nan))
+            ],
+            dtype=float,
+        )
+        lam = np.array(
+            [
+                m["lam_true_um"]
+                for m in meas
+                if int(m.get("order", -1)) == int(od) and np.isfinite(m.get("pix_meas", np.nan))
+            ],
+            dtype=float,
+        )
+        ok = np.isfinite(pix) & np.isfinite(lam)
+        if int(ok.sum()) < int(poly_deg) + 3:
+            continue
+        coeffs = np.polyfit(pix[ok], lam[ok], int(poly_deg))
+        wave[oi] = np.polyval(coeffs, pix_grid)
+        per_order[int(od)] = {"n_lines": int(ok.sum()), "n_coeff": int(coeffs.size)}
+    setattr(wavesol, attr, wave)
+    cents = [
+        float(v.get("centroid_residual_mean_m_s", np.nan))
+        for v in (comb.get("per_order") or {}).values()
+    ]
+    return wavesol, {
+        "median_centroid_residual_m_s": float(np.nanmedian(cents)) if cents else float("nan"),
+        "n_orders_fit": len(per_order),
+        "per_order": per_order,
+        "comb_rv_budget": comb.get("rv_budget"),
+    }
+
+
+def recover_rv_from_saved_rate_map(
+    rv_km_s: float,
+    *,
+    rate_map: np.ndarray,
+    template: str,
+    mask_path: str,
+    output_dir: str | Path,
+    wavesol,
+    fiber: int = 1,
+    spectrograph: str = "BSPEC",
+    stage1_cals: dict | None = None,
+) -> tuple[float, float, float]:
+    """Re-extract a saved rate map with ``wavesol`` and recover RV."""
+    parent = Path(output_dir)
+    if stage1_cals is None:
+        stage1_cals = prepare_stage1_cals(
+            parent,
+            np.asarray(rate_map),
+            spectrograph=spectrograph,
+            fiber=fiber,
+            wavesol=wavesol,
+        )
+    else:
+        stage1_cals = dict(stage1_cals)
+        stage1_cals["wavesol"] = wavesol
+    run_dir = parent / f"reextract_{float(rv_km_s):+.1f}kms".replace("+", "p").replace("-", "m")
+    l0 = rate_map_to_l0(rate_map, spectrograph=spectrograph)
+    l2 = extract_and_blaze_l2(
+        l0,
+        output_dir=run_dir,
+        fiber=fiber,
+        stage1_cals=stage1_cals,
+        save_result=False,
+    )
+    return recover_rv_keep_all_lines(
+        l2,
+        rv_km_s,
+        template=template,
+        mask_path=str(mask_path),
+        spectrograph=spectrograph,
+        fiber=fiber,
+    )

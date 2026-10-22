@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from hispecdrp.primitives.lsf.lsf_convolve import (
     convolve_l2_with_gaussian_lsf,
@@ -113,10 +114,44 @@ def test_convolve_l2_with_gaussian_lsf_matches_1d():
     assert np.allclose(out[1], 2.0 * one, rtol=1e-6, atol=1e-6)
 
 
+def test_make_kernel_grid_accepts_negative_fwhm():
+    """HISPEC WAVE decreases along the detector, so signed FWHM_WAVE is < 0."""
+    from hispecdrp.datamodels.gausslsf import _make_gaussians_chromatic, _make_kernel_grid
+    from hispecdrp.primitives.lsf.lsf_convolve import convolve_numba_1d_chromatic
+
+    dw = 2.8e-6
+    fwhms = np.full(32, -8.2e-6)
+    kg = _make_kernel_grid(dw, fwhms, 5.0)
+    assert kg.size >= 1
+    assert kg.size % 2 == 1
+    kernels = _make_gaussians_chromatic(kg, fwhms)
+    assert kernels.shape == (32, kg.size)
+    spec = np.ones(32)
+    out = convolve_numba_1d_chromatic(spec, kernels)
+    assert out.shape == spec.shape
+    assert np.all(np.isfinite(out))
+
+
 def test_convolve_numba_1d_chromatic_identity_delta_kernel():
     spec = np.linspace(1.0, 2.0, 21)
     kernels = np.zeros((spec.size, 5), dtype=np.float32)
     kernels[:, 2] = 1.0
     out = convolve_numba_1d_chromatic(spec, kernels)
     assert np.allclose(out, spec)
+
+
+def test_fit_gausslsf_chebyshev2d_rejects_empty_table():
+    from hispecdrp.primitives.lsf.lsf_gauss_primitive import fit_gausslsf_chebyshev2d
+
+    empty = np.array([])
+    with pytest.raises(ValueError, match="No usable LFC FWHM"):
+        fit_gausslsf_chebyshev2d(
+            empty,
+            empty,
+            empty,
+            deg_intra_order=3,
+            deg_inter_order=3,
+            max_iters=2,
+            sigma_cut=4.0,
+        )
 

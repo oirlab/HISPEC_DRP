@@ -724,6 +724,10 @@ def delta_pix_to_delta_wave(
     """
     Convert a change in pixels to a change in wavelength.
 
+    The sign follows ``dλ/dpix``. On a decreasing WAVE row the result is
+    negative; callers that need a width (FWHM, uncertainty) should take
+    ``abs(...)``.
+
     Args:
         delta_pix (float): Change in pixels.
         x (float): Pixel position.

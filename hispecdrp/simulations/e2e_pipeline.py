@@ -3114,6 +3114,18 @@ def build_gaussian_lfc_sed(
                 profiles.append((float(lam0), float(sig), float(amplitude)))
     if not profiles:
         raise ValueError("No valid Gaussian profiles to build SED")
+    # Adjacent orders' wavelength spans overlap, so a comb mode in the
+    # overlap appears in two orders' line lists. The SED is a single
+    # spectrum: keep one profile per unique wavelength (averaging the
+    # per-order sigmas, which differ only via the local dlam/dpix),
+    # otherwise overlap modes are painted at twice the amplitude.
+    by_lam: dict[float, list[float]] = {}
+    for lam0, sig, _amp in profiles:
+        by_lam.setdefault(lam0, []).append(sig)
+    profiles = [
+        (lam0, float(np.mean(sigs)), float(amplitude))
+        for lam0, sigs in by_lam.items()
+    ]
 
     sig_max = max(s for _, s, _ in profiles)
     lo = min(l for l, _, _ in profiles) - float(n_sigma_pad) * sig_max

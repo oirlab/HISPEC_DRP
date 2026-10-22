@@ -157,9 +157,15 @@ def _make_kernel_grid(
     kernel_size_sigma: float = 5.0,
 ) -> np.ndarray:
     sigma_to_fwhm = 2.0 * np.sqrt(2.0 * np.log(2.0))
-    nx_lsf = int(2 * np.ceil(np.max(fwhms) / sigma_to_fwhm * kernel_size_sigma / dw))
-    if nx_lsf % 2 == 0:
-        nx_lsf += 1
+    fwhm_max = np.nanmax(np.abs(fwhms))
+    if (not np.isfinite(fwhm_max)) or fwhm_max <= 0.0 or dw <= 0.0:
+        nx_lsf = 1
+    else:
+        nx_lsf = int(2 * np.ceil(fwhm_max / sigma_to_fwhm * kernel_size_sigma / dw))
+        if nx_lsf < 1:
+            nx_lsf = 1
+        if nx_lsf % 2 == 0:
+            nx_lsf += 1
     return dw * (np.arange(nx_lsf) - nx_lsf // 2)
 
 
@@ -173,7 +179,10 @@ def _make_gaussians_chromatic(
     sigma_to_fwhm = 2.0 * np.sqrt(2.0 * np.log(2.0))
     kernels = np.zeros((n_lsfs, nx_lsf), dtype=np.float32)
     for i in range(n_lsfs):
-        sig = fwhms[i] / sigma_to_fwhm
+        sig = abs(fwhms[i]) / sigma_to_fwhm
+        if sig <= 0.0:
+            kernels[i, nx_lsf // 2] = 1.0
+            continue
         kernels[i, :] = np.exp(-0.5 * (kernel_grid / sig) ** 2)
         kernels[i, :] /= np.sum(kernels[i, :])
     return kernels

@@ -31,15 +31,23 @@ class HISPECConfig:
     # them from instance state (e.g. self.meta.instrument_mode).
     DETECTOR_SIZE : ClassVar[tuple[int, int]] = (4096, 4160)
 
-    # TODO: Update LFC params, eventually in calibration DB
+    # TODO: Move LFC params to the calibration DB.
+    # Mode spacings per HISPEC.DRP.DDD.001 (2024-12-05): the BSPEC
+    # Menlo/KPF comb is Fabry-Perot filtered to 20 GHz (Sec. 2.4.5.1) and
+    # the RSPEC electro-optic astrocomb runs at 16 GHz (Sec. 2.4.5.2).
+    # The DDD does not specify the absolute offset frequency, so ``nu0``
+    # is unchanged.
     lfc_params : ClassVar[dict[str, float]] = {
+        # NOTE: From https://github.com/Keck-DataReductionPipelines/KPF-Pipeline/blob/master/docs/source/info/data_format.rst
+        # LFCFRREF	20000000000.0	LFC filtered Offset Freq RR Filter setpoint(Hz)
+        # LFCCEOFR	5220000000.0	LFC CEO Filtered Setpoint Freq (Hz)
         'LFC-B' : {
-            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
-            'delta_nu' : 10.000000174E9, # Hz
+            'nu0' : 5.22E9, # Hz
+            'delta_nu' : 20E9, # Hz
         },
         'LFC-R' : {
             'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
-            'delta_nu' : 10.000000174E9, # Hz
+            'delta_nu' : 16E9, # Hz
         },
     }
 
