@@ -23,6 +23,8 @@ from .spectra import quiet_pipeline_logging, recover_stellar_rv
 
 __all__ = [
     "build_template_rate_map",
+    "build_identity_fiberflat",
+    "build_paint_matched_fiberflat",
     "geometric_hdf_wavesol",
     "prepare_stage1_cals",
     "rate_map_to_l0",
@@ -30,6 +32,11 @@ __all__ = [
     "recover_rv_from_rate_map",
     "recover_rv_from_ramp",
 ]
+
+# Fiberflat modes for ideal-spectrum Stage-1 recovery (see prepare_stage1_cals).
+FIBERFLAT_IDENTITY = "identity"
+FIBERFLAT_PAINT_MATCHED = "paint_matched"
+FIBERFLAT_SIM_HDF = "sim_hdf"
 
 
 def build_template_rate_map(
@@ -126,6 +133,171 @@ def geometric_hdf_wavesol(spectrograph: str = "BSPEC", *, meta: dict | None = No
     )
 
 
+def build_identity_fiberflat(
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    n_orders: int | None = None,
+    n_pix: int = 4096,
+    wavesol=None,
+):
+    """Ones fiberflat so blaze correction is a no-op (per-order nanmax of 1).
+
+    Ideal-spectrum CCF recovery on PRF-painted rate maps is sensitive to
+    continuum *shape*. Dividing out a blaze (even a paint-matched continuum
+    fiberflat) reweights CCF lines by ~15–20 m/s relative to leaving the
+    painted continuum intact. An identity fiberflat keeps Stage-2 blaze in the
+    pipeline while preserving the continuum the mask was effectively tuned to
+    for this diagnostic.
+
+    Shape is taken from ``wavesol.wave_fib{fiber}`` when provided; otherwise
+    ``n_orders`` × ``n_pix`` (default: all sim-HDF orders × 4096).
+    """
+    spectrograph = str(spectrograph).upper()
+    fiber = int(fiber)
+    if wavesol is not None:
+        wave = np.asarray(getattr(wavesol, f"wave_fib{fiber}"), dtype=np.float64)
+        n_orders, n_pix = int(wave.shape[0]), int(wave.shape[1])
+    elif n_orders is None:
+        from .e2e_pipeline import _order_list
+
+        n_orders = len(_order_list(spectrograph))
+    shape = (int(n_orders), int(n_pix))
+    ff = datamodels.FiberflatModel(
+        meta={
+            "instrument_name": "HISPEC",
+            "spectrograph": spectrograph,
+            "mjd_start": resolve_e2e_mjd_start(None),
+        }
+    )
+    ones = np.ones(shape, dtype=np.float32)
+    setattr(ff, f"spec_fib{fiber}", ones)
+    setattr(ff, f"spec_err_fib{fiber}", np.full(shape, 1.0e-2, dtype=np.float32))
+    setattr(ff, f"spec_var_poisson_fib{fiber}", np.zeros(shape, dtype=np.float32))
+    setattr(ff, f"spec_var_rnoise_fib{fiber}", np.zeros(shape, dtype=np.float32))
+    setattr(ff, f"spec_dq_fib{fiber}", np.zeros(shape, dtype=np.uint32))
+    if wavesol is not None:
+        setattr(ff, f"wave_fib{fiber}", wave.astype(np.float64))
+    setattr(ff.meta, f"object_fiber{fiber}", "WHITELIGHT")
+    for f in (1, 2, 3):
+        if f != fiber and getattr(ff.meta, f"object_fiber{f}", None) is None:
+            setattr(ff.meta, f"object_fiber{f}", "BLOCKED")
+    return ff
+
+
+def build_paint_matched_fiberflat(
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    extraction_aperture: float = 8.0,
+    tracepos=None,
+    flat_temperature_k: float = 1000.0,
+    flat_scale: float = 2e-14,
+):
+    """Fiberflat from a continuum rate map painted like science (PRF + blaze).
+
+    Paints a smooth blackbody with the same ``prf_convolution`` +
+    ``apply_blaze=True`` engine as :func:`build_template_rate_map`, then
+    box-extracts with the science traces / aperture.
+
+    **Does not** by itself bring ideal-spectrum CCF bias under ~1 m/s: removing
+    the painted continuum still reweights the CCF by ~15–20 m/s even when the
+    fiberflat matches the science blaze. Prefer
+    :func:`build_identity_fiberflat` for LFC-WAVE recovery diagnostics; keep
+    this builder for continuum / blaze experiments.
+    """
+    import astropy.units as u
+    from astropy.modeling.models import BlackBody
+
+    from .. import datamodels
+    from .e2e_pipeline import (
+        _extract_box_one_order,
+        _order_list,
+        create_tracepos_model_from_sim_hdf,
+        get_sim_hdf_trace_grids,
+    )
+
+    spectrograph = str(spectrograph).upper()
+    fiber = int(fiber)
+    if tracepos is None:
+        tracepos = create_tracepos_model_from_sim_hdf(spectrograph)
+
+    n_wl = 10_000
+    wl_flat = np.linspace(0.8, 3.0, n_wl) * u.micron
+    bb = BlackBody(
+        temperature=float(flat_temperature_k) * u.K,
+        scale=1.0 * u.erg / (u.cm**2 * u.s * u.AA * u.sr),
+    )
+    flux_flat = (
+        float(flat_scale) * np.asarray(bb(wl_flat.to(u.AA)).value) * 1e4
+    ) * (u.erg / u.s / u.cm**2 / u.micron)
+
+    srm = SimulateRateMap()
+    srm.set_fiber_spectrum(
+        fiber_number=fiber,
+        spectrum_wavelengths=wl_flat,
+        spectrum_flux=flux_flat,
+        continuous=True,
+    )
+    rate = np.asarray(
+        srm.create_native_rate_map(
+            spectrograph=spectrograph,
+            method="prf_convolution",
+            apply_blaze=True,
+            save=False,
+        ),
+        dtype=np.float64,
+    )
+    rate_err = np.zeros_like(rate)
+    rate_dq = np.zeros(rate.shape, dtype=np.uint32)
+
+    order_list = _order_list(spectrograph)
+    grids = get_sim_hdf_trace_grids(spectrograph)
+    pos = np.asarray(getattr(tracepos, f"pos_fib{fiber}"), dtype=np.float64)
+    n_pix = 4096
+    spec_rows: list[np.ndarray] = []
+    err_rows: list[np.ndarray] = []
+    wave_rows: list[np.ndarray] = []
+    for i, order in enumerate(order_list):
+        if i >= pos.shape[0]:
+            break
+        spec, err = _extract_box_one_order(
+            rate,
+            rate_err,
+            rate_dq,
+            pos[i],
+            extraction_aperture=float(extraction_aperture),
+        )
+        spec_rows.append(spec.astype(np.float32))
+        err_rows.append(err.astype(np.float32))
+        wave = grids.get(fiber, {}).get(order, {}).get("wavelength")
+        if wave is None:
+            wave = np.full(n_pix, np.nan, dtype=np.float64)
+        wave_rows.append(np.asarray(wave, dtype=np.float64))
+
+    spec_arr = np.stack(spec_rows, axis=0)
+    err_arr = np.stack(err_rows, axis=0)
+    wave_arr = np.stack(wave_rows, axis=0)
+    ff = datamodels.FiberflatModel(
+        meta={
+            "instrument_name": "HISPEC",
+            "spectrograph": spectrograph,
+            "mjd_start": resolve_e2e_mjd_start(None),
+        }
+    )
+    setattr(ff, f"spec_fib{fiber}", spec_arr)
+    setattr(ff, f"spec_err_fib{fiber}", err_arr)
+    setattr(ff, f"spec_var_poisson_fib{fiber}", np.zeros_like(spec_arr))
+    setattr(ff, f"spec_var_rnoise_fib{fiber}", np.zeros_like(spec_arr))
+    setattr(ff, f"spec_dq_fib{fiber}", np.zeros(spec_arr.shape, dtype=np.uint32))
+    setattr(ff, f"wave_fib{fiber}", wave_arr)
+    setattr(ff.meta, f"object_fiber{fiber}", "WHITELIGHT")
+    for f in (1, 2, 3):
+        if f != fiber and getattr(ff.meta, f"object_fiber{f}", None) is None:
+            setattr(ff.meta, f"object_fiber{f}", "BLOCKED")
+    return ff
+
+
 def prepare_stage1_cals(
     output_dir: str | Path,
     rate_map: np.ndarray,
@@ -134,9 +306,42 @@ def prepare_stage1_cals(
     fiber: int = 1,
     extraction_aperture: float = 8.0,
     wavesol=None,
+    fiberflat_mode: str = FIBERFLAT_IDENTITY,
+    paint_matched_fiberflat: bool | None = None,
 ) -> dict:
-    """Build or reuse sim-HDF traces and fiberflat; attach geometric WAVE by default."""
+    """Build or reuse sim-HDF traces; attach WAVE and a recovery fiberflat.
+
+    Parameters
+    ----------
+    fiberflat_mode : {"identity", "paint_matched", "sim_hdf"}, optional
+        Default ``"identity"`` attaches :func:`build_identity_fiberflat` so
+        blaze correction does not reshape the continuum (needed for ≪1 m/s
+        CCF bias with LFC WAVE on PRF-painted rate maps). ``"paint_matched"``
+        uses :func:`build_paint_matched_fiberflat` (continuum cancel, still
+        ~15–20 m/s CCF bias). ``"sim_hdf"`` keeps the UTR/Stage-0 fiberflat
+        from :func:`~hispecdrp.simulations.e2e_pipeline.prepare_pipeline_example_stage1`.
+    paint_matched_fiberflat : bool, optional
+        Deprecated alias: ``True`` → ``"paint_matched"``, ``False`` →
+        ``"sim_hdf"``. Ignored when ``fiberflat_mode`` is passed explicitly
+        and this is left as ``None``.
+    """
     from .e2e_pipeline import prepare_pipeline_example_stage1
+
+    if paint_matched_fiberflat is not None:
+        fiberflat_mode = (
+            FIBERFLAT_PAINT_MATCHED if paint_matched_fiberflat else FIBERFLAT_SIM_HDF
+        )
+    mode = str(fiberflat_mode).strip().lower()
+    if mode not in {
+        FIBERFLAT_IDENTITY,
+        FIBERFLAT_PAINT_MATCHED,
+        FIBERFLAT_SIM_HDF,
+    }:
+        raise ValueError(
+            f"fiberflat_mode must be one of "
+            f"{FIBERFLAT_IDENTITY!r}, {FIBERFLAT_PAINT_MATCHED!r}, "
+            f"{FIBERFLAT_SIM_HDF!r}; got {fiberflat_mode!r}"
+        )
 
     spectrograph = str(spectrograph).upper()
     bundle = prepare_pipeline_example_stage1(
@@ -152,6 +357,41 @@ def prepare_stage1_cals(
         spectrograph,
         meta={"mjd_start": resolve_e2e_mjd_start(None)},
     )
+    out = Path(output_dir)
+    cal_dir = out / "cals"
+    cal_dir.mkdir(parents=True, exist_ok=True)
+    if mode == FIBERFLAT_IDENTITY:
+        ff_path = cal_dir / (
+            f"{spectrograph.lower()}.identity_fiberflat_fib{int(fiber)}.fits"
+        )
+        if ff_path.is_file():
+            bundle["fiberflat"] = datamodels.open(str(ff_path))
+        else:
+            bundle["fiberflat"] = build_identity_fiberflat(
+                spectrograph=spectrograph,
+                fiber=int(fiber),
+                wavesol=bundle["wavesol"],
+            )
+            bundle["fiberflat"].save(filepath=str(ff_path))
+        bundle["fiberflat_source"] = "identity_ones"
+    elif mode == FIBERFLAT_PAINT_MATCHED:
+        ff_path = cal_dir / (
+            f"{spectrograph.lower()}.paint_matched_fiberflat_fib{int(fiber)}"
+            f"_ap{float(extraction_aperture):.1f}.fits"
+        )
+        if ff_path.is_file():
+            bundle["fiberflat"] = datamodels.open(str(ff_path))
+        else:
+            bundle["fiberflat"] = build_paint_matched_fiberflat(
+                spectrograph=spectrograph,
+                fiber=int(fiber),
+                extraction_aperture=float(extraction_aperture),
+                tracepos=bundle["trace_pos"],
+            )
+            bundle["fiberflat"].save(filepath=str(ff_path))
+        bundle["fiberflat_source"] = "paint_matched_prf_blaze"
+    else:
+        bundle["fiberflat_source"] = "sim_hdf_stage1"
     return bundle
 
 
@@ -222,9 +462,17 @@ def recover_rv_from_rate_map(
     extraction_aperture: float = 8.0,
     spectrum_wavelengths=None,
     spectrum_flux=None,
+    wavesol=None,
+    fiberflat_mode: str = FIBERFLAT_IDENTITY,
     **stellar_rv_overrides,
 ) -> tuple[float, float, float]:
-    """Native rate map → Stage 1 → blaze → ``recover_stellar_rv``."""
+    """Native rate map → Stage 1 → blaze → ``recover_stellar_rv``.
+
+    Pass ``wavesol`` to use an externally derived WAVE (e.g. from a simulated
+    LFC) instead of the geometric HDF deposit-inverse solution. Stage-1 cals
+    default to an identity fiberflat so blaze correction does not reshape the
+    continuum (see :func:`prepare_stage1_cals`).
+    """
     with quiet_pipeline_logging():
         parent = Path(output_dir)
         parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +494,8 @@ def recover_rv_from_rate_map(
             spectrograph=spectrograph,
             fiber=fiber,
             extraction_aperture=extraction_aperture,
+            wavesol=wavesol,
+            fiberflat_mode=fiberflat_mode,
         )
         wave = np.asarray(stage1_cals["wavesol"].wave_fib1, dtype=float)
         if np.isfinite(wave[0, 0]) and np.isfinite(wave[0, -1]) and wave[0, 0] < wave[0, -1]:
@@ -290,6 +540,8 @@ def recover_rv_from_ramp(
     cleanup: bool = True,
     spectrum_wavelengths=None,
     spectrum_flux=None,
+    wavesol=None,
+    fiberflat_mode: str = FIBERFLAT_IDENTITY,
     **stellar_rv_overrides,
 ) -> tuple[float, float, float]:
     """Rate map → UTR ramp → Stage 0 → Stage 1 → blaze → ``recover_stellar_rv``.
@@ -297,6 +549,10 @@ def recover_rv_from_ramp(
     When ``cleanup`` is True (default), the per-RV ramp / Stage 0 / Stage 1
     working directory is deleted after the recovered RV is in memory. Shared
     Stage-1 masters under ``output_dir`` are kept for reuse.
+
+    Pass ``wavesol`` to use an externally derived WAVE (e.g. from a simulated
+    LFC) instead of the geometric HDF deposit-inverse solution. Stage-1 cals
+    default to an identity fiberflat (see :func:`prepare_stage1_cals`).
     """
     from .simulate_up_the_ramp import create_ramp_from_spectrum, run_stage0_simulation
 
@@ -335,6 +591,8 @@ def recover_rv_from_ramp(
                 spectrograph=spectrograph,
                 fiber=fiber,
                 extraction_aperture=extraction_aperture,
+                wavesol=wavesol,
+                fiberflat_mode=fiberflat_mode,
             )
             l0 = run_stage0_simulation(ramp, cals, str(run_dir))
             l2 = extract_and_blaze_l2(

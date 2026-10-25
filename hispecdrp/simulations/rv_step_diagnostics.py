@@ -51,6 +51,7 @@ __all__ = [
     "saved_rate_map_path",
     "wavesol_from_line_zeropoint",
     "wavesol_from_extracted_comb",
+    "derive_lfc_wavesol",
     "recover_rv_from_saved_rate_map",
 ]
 
@@ -211,8 +212,15 @@ def recover_rv_from_truth_rate_map(
     output_dir: str | Path,
     fiber: int = 1,
     spectrograph: str = "BSPEC",
+    wavesol=None,
+    fiberflat_mode: str = "identity",
 ) -> tuple[float, float, float]:
-    """ZEMAX/native rate map of the truth 1D → extract → blaze → RV."""
+    """ZEMAX/native rate map of the truth 1D → extract → blaze → RV.
+
+    Defaults to an identity fiberflat (blaze no-op) so continuum flattening
+    does not reweight the CCF; pair with an LFC-derived ``wavesol`` for ≪1 m/s
+    bias on this diagnostic grid.
+    """
     return recover_rv_from_rate_map(
         rv_km_s,
         template=template,
@@ -222,6 +230,8 @@ def recover_rv_from_truth_rate_map(
         spectrograph=spectrograph,
         spectrum_wavelengths=wavelengths,
         spectrum_flux=flux,
+        wavesol=wavesol,
+        fiberflat_mode=fiberflat_mode,
         **STELLAR_RV_NO_REJECT_KW,
     )
 
@@ -236,8 +246,13 @@ def recover_rv_from_truth_ramp(
     output_dir: str | Path,
     fiber: int = 1,
     spectrograph: str = "BSPEC",
+    wavesol=None,
+    fiberflat_mode: str = "identity",
 ) -> tuple[float, float, float]:
-    """Truth 1D → UTR + Stage-0 cals → Stage 1–2 → RV."""
+    """Truth 1D → UTR + Stage-0 cals → Stage 1–2 → RV.
+
+    Same identity-fiberflat default as :func:`recover_rv_from_truth_rate_map`.
+    """
     return recover_rv_from_ramp(
         rv_km_s,
         template=template,
@@ -247,6 +262,8 @@ def recover_rv_from_truth_ramp(
         spectrograph=spectrograph,
         spectrum_wavelengths=wavelengths,
         spectrum_flux=flux,
+        wavesol=wavesol,
+        fiberflat_mode=fiberflat_mode,
         **STELLAR_RV_NO_REJECT_KW,
     )
 
@@ -427,6 +444,133 @@ def saved_rate_map_path(output_dir: str | Path, rv_km_s: float) -> Path:
         "+", "p"
     ).replace("-", "m")
     return run_dir / "rate_map.fits"
+
+
+def derive_lfc_wavesol(
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    output_dir: str | Path,
+    y_min: int = 200,
+    y_max: int = 3896,
+    photons_per_line: float = 1.0e7,
+):
+    """Paint a simulated LFC on ``fiber`` and run ``ProcessLFCPipeline``.
+
+    Returns the derived ``lfc_wavesol`` model for use as Stage-1 WAVE in the
+    rate-map and UTR recovery paths (instead of the geometric HDF solution).
+    """
+    import os
+
+    from astropy import units as u
+
+    from .. import BlazeCorrectionPrimitive, datamodels
+    from ..pipelines import ProcessLFCPipeline, Stage1Pipeline
+    from .e2e_pipeline import (
+        build_lfc_line_list,
+        create_tracepos_model_from_sim_hdf,
+        create_traceprof_model_from_sim_hdf,
+    )
+    from .ideal_spectrum_rv import geometric_hdf_wavesol
+    from .simulate_rate_map import SimulateRateMap
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    os.environ["KOA_CALIBRATION_CACHE"] = str(out / "cals" / "lfc_local_caldb")
+
+    line_list, lfc_meta = build_lfc_line_list(spectrograph, fiber=int(fiber))
+    lfc_wl = np.unique(
+        np.concatenate([np.asarray(v, dtype=float) for v in line_list.values()])
+    )
+    lfc_wl.sort()
+    srm = SimulateRateMap()
+    srm.set_fiber_spectrum(
+        int(fiber),
+        lfc_wl * u.micron,
+        np.full(lfc_wl.shape, float(photons_per_line)) * (u.ph / u.s),
+        continuous=False,
+    )
+    rate = srm.create_native_rate_map(
+        spectrograph=str(spectrograph).upper(),
+        method="prf_convolution",
+        apply_blaze=False,
+        save=False,
+    )
+    rate = np.asarray(rate, dtype=np.float32)
+    rate[: int(y_min)] = 0
+    rate[int(y_max) :] = 0
+
+    do_fibers = [str(int(fiber))]
+    l0 = datamodels.L0Model(
+        rate=rate,
+        meta={
+            "instrument_name": "HISPEC",
+            "spectrograph": str(spectrograph).upper(),
+            "datetime_obs": "2027-01-01T00:00:00.000",
+            "exposure_type": "SPEC",
+            "lfc_nu0": lfc_meta["nu0"],
+            "lfc_delta_nu": lfc_meta["delta_nu"],
+            "target_name": lfc_meta["fiber_object"],
+        },
+    )
+    l0.rate_err = np.sqrt(np.maximum(l0.rate, 0.0)).astype(np.float32)
+    l0.rate_var_poisson = np.zeros_like(l0.rate, dtype=np.float32)
+    l0.rate_var_rnoise = np.zeros_like(l0.rate, dtype=np.float32)
+    l0.dq = np.zeros_like(l0.rate, dtype=np.uint32)
+
+    with quiet_pipeline_logging():
+        l1 = Stage1Pipeline(
+            output_dir=out,
+            dataset=l0,
+            primitives={
+                "spec_extract": {
+                    "do_fibers": do_fibers,
+                    "method": "box",
+                    "tracepos": create_tracepos_model_from_sim_hdf(spectrograph),
+                    "traceprof": create_traceprof_model_from_sim_hdf(spectrograph),
+                },
+                "set_wavesol": {"wavesol": geometric_hdf_wavesol(spectrograph)},
+            },
+        ).apply()
+        n_orders, n_pix = getattr(l1, f"spec_uncal_fib{int(fiber)}").shape
+        fiberflat = datamodels.FiberflatModel(
+            meta={
+                "instrument_name": "HISPEC",
+                "spectrograph": str(spectrograph).upper(),
+            },
+        )
+        fiberflat[int(fiber)].spec = np.ones((n_orders, n_pix), dtype=np.float32)
+        fiberflat[int(fiber)].spec_err = np.full(
+            (n_orders, n_pix), 1.0e-2, dtype=np.float32
+        )
+        fiberflat[int(fiber)].spec_dq = np.zeros((n_orders, n_pix), dtype=np.uint32)
+        l2 = BlazeCorrectionPrimitive.call(
+            l1,
+            do_fibers=do_fibers,
+            fiberflat=fiberflat,
+            output_dir=out,
+            save_result=False,
+        )
+        l2.meta.lfc_nu0 = l0.meta.lfc_nu0
+        l2.meta.lfc_delta_nu = l0.meta.lfc_delta_nu
+        wavesol = ProcessLFCPipeline(
+            output_dir=out,
+            dataset=l2,
+            primitives={
+                "fit_lfc_lines": {"do_fibers": do_fibers, "fwhm_bounds": (1.0, 7.0)},
+                "lfc_wavesol": {"do_fibers": do_fibers},
+                "lsf": {"do_fibers": do_fibers, "run": False},
+                "register_lsf_cal": {"run": False},
+            },
+        ).apply()["wavesol"]
+    wavesol_path = out / "lfc_wavesol.fits"
+    wavesol.save(filepath=str(wavesol_path))
+    return wavesol, {
+        "n_modes": int(lfc_wl.size),
+        "lfc_meta": lfc_meta,
+        "wavesol_path": str(wavesol_path),
+        "rate_peak": float(np.nanmax(rate)),
+    }
 
 
 def wavesol_from_line_zeropoint(

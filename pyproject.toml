@@ -95,6 +95,7 @@ hispecdrp = [
   "configs/*.yaml",
   "primitives/stellar_rv/previews/ccf_spectrum_overlay_unified.html.in",
   "data/wavesol/*",
+  "data/filters/*",
 ]
 
 [tool.pytest.ini_options]

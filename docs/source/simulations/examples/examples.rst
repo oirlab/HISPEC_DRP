@@ -15,6 +15,7 @@ Examples that exercise simulated calibration sources and related validations
    :maxdepth: 1
 
    simulated_lfc_spectrum
+   simulated_lfc_2d_fit
    koa_lfc_wavesol
 
 Simulated Science Observations
@@ -34,4 +35,5 @@ on realistic UTRs.
    build_ccfopt_mask_ideal_spectrum
    ideal_spectrum_rv_recovery
    rv_recovery_step_diagnostics
+   rv_recovery_step_diagnostics_lfc_wavesol
    barnards_star_prv_example

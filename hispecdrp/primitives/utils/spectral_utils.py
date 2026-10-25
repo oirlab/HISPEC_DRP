@@ -20,7 +20,8 @@ Notes
 -----
 - **BT-Settl** model grids: cite Allard et al. / BT-Settl papers for the atmosphere
   data, not HISPEC DRP.
-- **2MASS filter curves** are downloaded at runtime from SVO (see ``SVO_FILTER_URL``).
+- **2MASS filter curves** prefer bundled Cohen/IPAC RSR files under
+  ``hispecdrp/data/filters/``; SVO (``SVO_FILTER_URL``) is only tried if those are missing.
 - **Air–vacuum** conversions use a dry-air refractivity polynomial in
   :func:`_edlen_refractivity_ppm_nm` (SPIROU / Morton-style Cauchy form); refractivity
   is evaluated at the **air** wavelength, so the inverse uses fixed-point iteration.
@@ -52,6 +53,11 @@ logger = logging.getLogger(__name__)
 
 # SVO Filter Profile Service (https://svo2.cab.inta-csic.es/theory/fps3/)
 SVO_FILTER_URL = "https://svo2.cab.inta-csic.es/theory/fps3/getdata.php?format=ascii&id=2MASS/2MASS.{band}"
+
+# Bundled Cohen/IPAC 2MASS RSR curves (same source SVO cites); used offline first.
+_DEFAULT_FILTER_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "filters"
+)
 
 # Default directory for bundled spectrum templates (BT-Settl .h5 under hispecdrp/data/templates)
 _DEFAULT_SPECTRUM_DATA_DIR = os.path.join(
@@ -355,9 +361,21 @@ def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
     return _coalesce_existing_spectrum_path(os.path.join(base_dir, path))
 
 
+def _load_2mass_filter_table(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load a 2-column wavelength_Angstrom, transmission table from ``path``."""
+    data = np.loadtxt(path, dtype=np.float64)
+    if data.ndim != 2 or data.shape[1] < 2:
+        raise ValueError(f"Unexpected 2MASS filter data shape in {path}")
+    return data[:, 0], data[:, 1]
+
+
 def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
     """
-    Download a 2MASS filter bandpass from the SVO Filter Profile Service.
+    Return a 2MASS filter bandpass (wavelength Å, transmission).
+
+    Prefers the bundled Cohen/IPAC RSR file under ``hispecdrp/data/filters/``.
+    If that file is missing, falls back to downloading from the SVO Filter
+    Profile Service (:data:`SVO_FILTER_URL`).
 
     Parameters
     ----------
@@ -374,28 +392,27 @@ def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
     Raises
     ------
     ValueError
-        If ``band`` is not one of J, H, K, or if the HTTP payload is not a 2-column table.
+        If ``band`` is not one of J, H, K, or if the table is not 2-column.
     urllib.error.URLError
-        On network failure or timeout (30 s).
-
-    Notes
-    -----
-    Requires network access at call time. URL template: :data:`SVO_FILTER_URL`.
+        On network failure or timeout (30 s) when the bundled file is absent.
 
     References
     ----------
-    Spanish Virtual Observatory Filter Profile Service (FPS3):
-    https://svo2.cab.inta-csic.es/theory/fps3/
+    * Cohen et al. 2003, AJ 126, 1090 (2MASS absolute calibration / RSR).
+    * Spanish Virtual Observatory Filter Profile Service (FPS3):
+      https://svo2.cab.inta-csic.es/theory/fps3/
     """
     band = normalize_2mass_band(band)
+    bundled = os.path.join(_DEFAULT_FILTER_DATA_DIR, f"2MASS.{band}.dat")
+    if os.path.isfile(bundled):
+        return _load_2mass_filter_table(bundled)
+
     url = SVO_FILTER_URL.format(band=band)
     with urllib.request.urlopen(url, timeout=30) as resp:
         data = np.loadtxt(resp, dtype=np.float64)
     if data.ndim != 2 or data.shape[1] < 2:
         raise ValueError(f"Unexpected SVO filter data shape for 2MASS.{band}")
-    wavelength_angstrom = data[:, 0]
-    transmission = data[:, 1]
-    return wavelength_angstrom, transmission
+    return data[:, 0], data[:, 1]
 
 
 def _ab_mag_through_filter(
