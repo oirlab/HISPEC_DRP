@@ -70,8 +70,8 @@ class FitUraniumLinesPrimitive(BasePrimitive):
 
         # read and parse line list
         linelist = Table.read(os.path.join(LINELIST_DIR,"UNe_lines_nir.txt"), format="ascii.cds")
-        lamp_line_wvl = linelist['WaveLen'] / 1e3 # was in nm now in um
-        lamp_line_rflux = linelist['RFlux']
+        lamp_line_wvl = np.array(linelist['WaveLen']) / 1e3 # was in nm now in um
+        lamp_line_rflux = np.array(linelist['RFlux'])
 
         # predict blended lines from line list
         blended = _flag_blended_lines(
@@ -81,8 +81,13 @@ class FitUraniumLinesPrimitive(BasePrimitive):
             min_flux_frac=0.05, # neighbor >= 5% of this line's flux
         )
 
+
         clean_lamp_wvl = lamp_line_wvl[~blended]
         clean_lamp_rflux = lamp_line_rflux[~blended]
+        line_nums = np.arange(len(lamp_line_wvl))
+        clean_line_nums = line_nums[~blended]
+        print('Total lines:', len(lamp_line_wvl))
+        print('Lines not blended:', len(clean_lamp_wvl))
 
         for fiber in do_fibers:
             # parse input data
@@ -98,8 +103,10 @@ class FitUraniumLinesPrimitive(BasePrimitive):
                 oi = np.abs(order - input_model.meta.order_start)
 
                 # find lines in order
-                lines_wvl = clean_lamp_wvl[(clean_lamp_wvl > np.nanmin(wave[oi,:])) & (clean_lamp_wvl < np.nanmax(wave[oi,:]))]
-                lines_pixel = np.interp(lines_wvl, wave, xarr)
+                order_lines_idx = (clean_lamp_wvl > np.nanmin(wave[oi,:])) & (clean_lamp_wvl < np.nanmax(wave[oi,:]))
+                lines_wvl = clean_lamp_wvl[order_lines_idx]
+                order_line_nums = clean_line_nums[order_lines_idx]
+                lines_pixel = np.interp(lines_wvl, wave[oi,:], xarr)
 
                 # Lorentzian fit to lines
                 _fit_results = fit_lines_gauss(

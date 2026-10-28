@@ -1,0 +1,4 @@
+class: FitUraniumLinesPrimitive
+description: Standard fit Uranium lines configuration.
+context: {}
+parameters: {}
