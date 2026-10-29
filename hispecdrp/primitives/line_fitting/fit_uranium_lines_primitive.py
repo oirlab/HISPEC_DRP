@@ -118,9 +118,9 @@ class FitUraniumLinesPrimitive(BasePrimitive):
                 fit_results[fiber].append(_fit_results)
 
                 # Store results in the model
-                params_table = getattr(output_model, f'lamp_fitparams_fib{fiber}')
+                params_table = getattr(output_model, f'uranium_fitparams_fib{fiber}')
                 if order in params_table['ORDER']:
-                    setattr(input_model, f'lamp_fitparams_fib{fiber}', params_table[params_table['ORDER'] != order])
+                    setattr(input_model, f'uranium_fitparams_fib{fiber}', params_table[params_table['ORDER'] != order])
                 n_lines = len(_fit_results)
                 for i in range(n_lines):
                     r = {

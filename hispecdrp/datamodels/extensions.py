@@ -494,6 +494,29 @@ LFCFITPARAMS_HDU = TABLE_HDU({
 def create_lfcfitparam_extensions() -> dict[str, dict]:
     return {'LFC_FITPARAMS': LFCFITPARAMS_HDU}
 
+#### Uranium Fit parameters
+
+URANIUMFITPARAMS_HDU = TABLE_HDU({
+    'AMPLITUDE': np.float64,
+    'AMPLITUDE_ERR': np.float64,
+    'MU_PIX': np.float64,
+    'MU_ERR_PIX': np.float64,
+    'MU_ERR_WAVE': np.float64,
+    'FWHM_PIX': np.float64,
+    'FWHM_ERR_PIX': np.float64,
+    'FWHM_WAVE': np.float64,
+    'FWHM_ERR_WAVE': np.float64,
+    'B': np.float64,
+    'B_ERR': np.float64,
+    'LINE_NUM': np.int16,
+    'WAVE': np.float64,
+    'ORDER': np.uint16,
+    'FIT_QUALITY': np.int8,
+}, enumerate='FIB', title='Fit parameters for each line in Uranium line list, order, and fiber.')
+
+def create_uraniumfitparam_extensions() -> dict[str, dict]:
+    return {'URANIUM_FITPARAMS': URANIUMFITPARAMS_HDU}
+
 
 #### RVs
 
