@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 
 SIGMA_TO_FWHM = 2 * np.sqrt(2 * np.log(2))
 
+LINE_DQ_FLAGS = {
+    'GOOD': np.uint8(0),
+    'DO_NOT_USE': np.uint8(2**0),
+    'FIT_FAILURE': np.uint8(2**1),
+    'POOR_FIT': np.uint8(2**2),
+}
 
 def fit_lines_gauss(
     x : np.ndarray,
@@ -42,10 +48,14 @@ def fit_lines_gauss(
         # Only pass data in the fitting window
         ki = max(0, int(np.round(line_centers[i] + fit_window[0])))
         kf = min(nx - 1, int(np.round(line_centers[i] + fit_window[1])))
+        if kf < ki: # swap if these have somehow gotten backwards
+            ki, kf = kf, ki
         x_fit = x[ki:kf+1].copy()
         y_fit = y[ki:kf+1].copy()
         y_err_fit = y_err[ki:kf+1].copy() if y_err is not None else None
         dq_fit = dq[ki:kf+1].copy() if dq is not None else None
+
+        print(x_fit, y_fit, y_err_fit, dq_fit)
 
         # Fit the line
         fit_result = fit_line_gauss(
@@ -172,7 +182,7 @@ def fit_line_gauss(
         )
 
     if len(good) < 3:
-        logger.warning("Not enough good data points to perform fit.")
+        logger.warning(f"Not enough good data points to perform fit. ({len(good)} good data points)")
         return _output_badfit()
 
     x_fit = x[good]
@@ -210,6 +220,10 @@ def fit_line_gauss(
         w_seed = np.clip(y_fit, 0, None)
     else:
         w_seed = np.clip(np.nanmax(y_fit) - y_fit, 0, None)
+
+    if np.sum(w_seed) == 0. or ~np.isfinite(np.sum(w_seed)):
+        logger.warning(f"Seed weights sum to zero or are not finite, cannot fit line.")
+        return _output_badfit()
 
     # Default mu guess
     if mu_guess is None:
