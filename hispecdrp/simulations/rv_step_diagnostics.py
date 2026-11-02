@@ -17,6 +17,8 @@ from ..primitives.utils.spectral_utils import (
 )
 from .e2e_support import templates_data_dir
 from .ideal_spectrum_rv import (
+    FIBERFLAT_IDENTITY,
+    build_template_rate_map,
     extract_and_blaze_l2,
     geometric_hdf_wavesol,
     prepare_stage1_cals,
@@ -28,6 +30,7 @@ from .simulate_rate_map import _upsample_spectrum
 from .spectra import (
     _instrument_wavelength_solution,
     _resolve_order_bounds,
+    build_ccfopt_mask,
     build_l2,
     quiet_pipeline_logging,
     recover_stellar_rv,
@@ -52,6 +55,8 @@ __all__ = [
     "wavesol_from_line_zeropoint",
     "wavesol_from_extracted_comb",
     "derive_lfc_wavesol",
+    "check_lsf_wavesol_fiber_alignment",
+    "build_extract_matched_ccfopt_mask",
     "recover_rv_from_saved_rate_map",
 ]
 
@@ -454,11 +459,17 @@ def derive_lfc_wavesol(
     y_min: int = 200,
     y_max: int = 3896,
     photons_per_line: float = 1.0e7,
+    derive_lsf: bool = True,
 ):
     """Paint a simulated LFC on ``fiber`` and run ``ProcessLFCPipeline``.
 
     Returns the derived ``lfc_wavesol`` model for use as Stage-1 WAVE in the
     rate-map and UTR recovery paths (instead of the geometric HDF solution).
+
+    When ``derive_lsf`` is True (default), also runs
+    :class:`~hispecdrp.primitives.lsf.lsf_gauss_primitive.CalculateGaussianLSFPrimitive`
+    with the same settings as ``simulated_lfc_example.ipynb``, saves
+    ``lfc_lsf.fits``, and stores the model under ``info["lsf"]``.
     """
     import os
 
@@ -553,24 +564,207 @@ def derive_lfc_wavesol(
         )
         l2.meta.lfc_nu0 = l0.meta.lfc_nu0
         l2.meta.lfc_delta_nu = l0.meta.lfc_delta_nu
-        wavesol = ProcessLFCPipeline(
+        lfc_prims = {
+            "fit_lfc_lines": {"do_fibers": do_fibers, "fwhm_bounds": (1.0, 7.0)},
+            "lfc_wavesol": {"do_fibers": do_fibers},
+            "register_lsf_cal": {"run": False},
+        }
+        if derive_lsf:
+            # Match simulated_lfc_example.ipynb (empirical LFC-spot LSF).
+            lfc_prims["lsf"] = {"do_fibers": do_fibers}
+        else:
+            lfc_prims["lsf"] = {"do_fibers": do_fibers, "run": False}
+        lfc_out = ProcessLFCPipeline(
             output_dir=out,
             dataset=l2,
-            primitives={
-                "fit_lfc_lines": {"do_fibers": do_fibers, "fwhm_bounds": (1.0, 7.0)},
-                "lfc_wavesol": {"do_fibers": do_fibers},
-                "lsf": {"do_fibers": do_fibers, "run": False},
-                "register_lsf_cal": {"run": False},
-            },
-        ).apply()["wavesol"]
+            primitives=lfc_prims,
+        ).apply()
+        wavesol = lfc_out["wavesol"]
+        lsf = lfc_out.get("lsf") if derive_lsf else None
     wavesol_path = out / "lfc_wavesol.fits"
     wavesol.save(filepath=str(wavesol_path))
-    return wavesol, {
+    info = {
         "n_modes": int(lfc_wl.size),
         "lfc_meta": lfc_meta,
         "wavesol_path": str(wavesol_path),
         "rate_peak": float(np.nanmax(rate)),
+        "lsf": None,
+        "lsf_path": None,
     }
+    if lsf is not None:
+        lsf_path = out / "lfc_lsf.fits"
+        lsf.save(filepath=str(lsf_path))
+        info["lsf"] = lsf
+        info["lsf_path"] = str(lsf_path)
+    return wavesol, info
+
+
+def check_lsf_wavesol_fiber_alignment(
+    *,
+    fiber: int,
+    wavesol,
+    lsf_model=None,
+) -> dict[str, Any]:
+    """Verify WAVE (and optional LSF) expose the science fiber with matching orders.
+
+    ProcessLFC WAVE/LSF are fiber-scoped (``wave_fibN``, ``lsf_params_fibN``).
+    Recovery and ccfopt must use the same ``fiber`` that produced those cals;
+    a mismatch silently falls back to empty / wrong-fiber arrays.
+    """
+    fiber = int(fiber)
+    messages: list[str] = []
+    ok = True
+    wave_attr = f"wave_fib{fiber}"
+    wave = getattr(wavesol, wave_attr, None)
+    if wave is None:
+        ok = False
+        messages.append(f"wavesol missing {wave_attr}")
+        wave_shape = None
+    else:
+        wave_arr = np.asarray(wave)
+        wave_shape = tuple(wave_arr.shape)
+        messages.append(f"wavesol.{wave_attr} shape={wave_shape}")
+        if wave_arr.size == 0 or not np.any(np.isfinite(wave_arr)):
+            ok = False
+            messages.append(f"wavesol.{wave_attr} has no finite samples")
+
+    lsf_shape = None
+    if lsf_model is not None:
+        lsf_attr = f"lsf_params_fib{fiber}"
+        lsf_params = getattr(lsf_model, lsf_attr, None)
+        if lsf_params is None:
+            ok = False
+            messages.append(f"lsf missing {lsf_attr}")
+        else:
+            lsf_arr = np.asarray(lsf_params)
+            lsf_shape = tuple(lsf_arr.shape)
+            messages.append(f"lsf.{lsf_attr} shape={lsf_shape}")
+            if wave_shape is not None and lsf_shape and wave_shape[0] != lsf_shape[0]:
+                ok = False
+                messages.append(
+                    f"order count mismatch: WAVE n_orders={wave_shape[0]} "
+                    f"vs LSF n_orders={lsf_shape[0]}"
+                )
+        meta_fiber = None
+        for key in ("FIBER", "fiber"):
+            if hasattr(lsf_model, "meta") and hasattr(lsf_model.meta, key):
+                try:
+                    meta_fiber = int(getattr(lsf_model.meta, key))
+                except (TypeError, ValueError):
+                    meta_fiber = None
+                if meta_fiber is not None:
+                    break
+        if meta_fiber is not None and meta_fiber > 0 and meta_fiber != fiber:
+            ok = False
+            messages.append(
+                f"lsf meta FIBER={meta_fiber} != science fiber={fiber}"
+            )
+
+    return {
+        "ok": bool(ok),
+        "fiber": fiber,
+        "wave_shape": wave_shape,
+        "lsf_shape": lsf_shape,
+        "messages": messages,
+    }
+
+
+def build_extract_matched_ccfopt_mask(
+    template: str,
+    output_dir: str | Path,
+    *,
+    wavesol,
+    spectrograph: str = "BSPEC",
+    fiber: int = 1,
+    fiberflat_mode: str = FIBERFLAT_IDENTITY,
+    extraction_aperture: float = 8.0,
+    lsf_model=None,
+    rebuild_seed: bool = True,
+    mag_ab: float = 3.05,
+    filter_band: str = "J",
+    spectrum_wavelengths=None,
+    spectrum_flux=None,
+    **ccfopt_overrides,
+) -> tuple[str, str, Any, dict[str, Any]]:
+    """Build ccfopt from an RV=0 rate map extracted under the science WAVE/FF.
+
+    Paints the template (or provided densified spectrum) with
+    ``prf_convolution``, box-extracts with the same Stage-1 traces / aperture
+    as recovery, attaches ``wavesol`` (typically LFC WAVE) and the recovery
+    fiberflat, then runs line-by-line ccfopt on that L2.
+
+    Prefer this over convolving an ideal geometric-WAVE L2 with ProcessLFC LSF
+    (``*.lfc_lsf.ccfopt.delta.mas``): line shapes then match the rate-map path.
+    LFC WAVE + identity fiberflat remain the main ≪1 m/s bias fix; this mask
+    only aligns ccfopt centroids with extract-matched line profiles.
+
+    Returns ``(seed_mask_path, ccfopt_mask_path, extracted_l2, info)`` where
+    ``info`` includes the LSF/WAVE fiber-alignment check.
+    """
+    fiber = int(fiber)
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    align = check_lsf_wavesol_fiber_alignment(
+        fiber=fiber,
+        wavesol=wavesol,
+        lsf_model=lsf_model,
+    )
+    if not align["ok"]:
+        raise ValueError(
+            "LSF/WAVE fiber alignment check failed: "
+            + "; ".join(align["messages"])
+        )
+
+    work = out / "extract_matched_l2_rv0"
+    with quiet_pipeline_logging():
+        rate = build_template_rate_map(
+            0.0,
+            template=template,
+            fiber=fiber,
+            spectrograph=spectrograph,
+            output_dir=work,
+            mag_ab=mag_ab,
+            filter_band=filter_band,
+            spectrum_wavelengths=spectrum_wavelengths,
+            spectrum_flux=spectrum_flux,
+        )
+        stage1_cals = prepare_stage1_cals(
+            out,
+            rate,
+            spectrograph=spectrograph,
+            fiber=fiber,
+            extraction_aperture=float(extraction_aperture),
+            wavesol=wavesol,
+            fiberflat_mode=fiberflat_mode,
+        )
+        l0 = rate_map_to_l0(rate, spectrograph=spectrograph)
+        l2 = extract_and_blaze_l2(
+            l0,
+            output_dir=work,
+            fiber=fiber,
+            extraction_aperture=float(extraction_aperture),
+            stage1_cals=stage1_cals,
+            save_result=True,
+        )
+
+    seed, ccfopt, l2_out = build_ccfopt_mask(
+        template,
+        out,
+        spectrograph=spectrograph,
+        fiber=fiber,
+        rebuild_seed=rebuild_seed,
+        l2=l2,
+        mask_suffix=".extract_matched.ccfopt.delta.mas",
+        **ccfopt_overrides,
+    )
+    info = {
+        "alignment": align,
+        "fiberflat_mode": str(fiberflat_mode),
+        "extraction_aperture": float(extraction_aperture),
+        "work_dir": str(work),
+        "l2_path": getattr(getattr(l2_out, "meta", None), "filename", None),
+    }
+    return seed, ccfopt, l2_out, info
 
 
 def wavesol_from_line_zeropoint(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import matplotlib
 
@@ -20,13 +21,14 @@ from hispecdrp.simulations.rv_step_diagnostics import (
     NO_LINE_REJECTION_SIGMA,
     STEP_BULK_RV_KM_S,
     STELLAR_RV_NO_REJECT_KW,
+    check_lsf_wavesol_fiber_alignment,
     compare_step_summaries,
     doppler_shift_spectrum,
     run_step_grid,
     saved_rate_map_path,
     summarize_step_grid,
 )
-from hispecdrp.simulations.spectra import stellar_rv_kwargs_for_ideal_spectrum
+from hispecdrp.simulations.spectra import build_ccfopt_mask, stellar_rv_kwargs_for_ideal_spectrum
 
 
 def test_step_grid_and_no_reject_defaults():
@@ -99,6 +101,28 @@ def test_saved_rate_map_path_matches_rate_map_run_dir():
     path = saved_rate_map_path("/tmp/out", 10.0)
     assert path.name == "rate_map.fits"
     assert path.parent.name == "rate_map_p10.0kms"
+
+
+def test_check_lsf_wavesol_fiber_alignment():
+    wavesol = SimpleNamespace(wave_fib1=np.ones((39, 4096)))
+    lsf = SimpleNamespace(
+        meta=SimpleNamespace(FIBER=1),
+        lsf_params_fib1=np.ones((39, 4096)),
+    )
+    ok = check_lsf_wavesol_fiber_alignment(
+        fiber=1, wavesol=wavesol, lsf_model=lsf
+    )
+    assert ok["ok"] is True
+    assert ok["wave_shape"] == (39, 4096)
+    bad = check_lsf_wavesol_fiber_alignment(
+        fiber=2, wavesol=wavesol, lsf_model=lsf
+    )
+    assert bad["ok"] is False
+
+
+def test_build_ccfopt_mask_accepts_prebuilt_l2():
+    sig = inspect.signature(build_ccfopt_mask)
+    assert "l2" in sig.parameters
 
 
 def test_plot_rv_step_comparison(tmp_path):

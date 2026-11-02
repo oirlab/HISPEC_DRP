@@ -2,7 +2,9 @@
 
 Generic convolution and PSF-stamp collapse live in
 :mod:`hispecdrp.primitives.lsf.lsf_convolve`. This module only loads the
-instrument HDF model and maps it onto those primitives.
+instrument HDF model and maps it onto those primitives. Empirical LFC LSFs
+(:class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel`) are applied via
+:func:`convolve_l2_with_gaussian_lsf_model`.
 """
 
 from __future__ import annotations
@@ -15,6 +17,70 @@ from ..primitives.lsf.lsf_convolve import (
     lsf_library_from_psf_fiber_block,
     sigma_pix_from_lsf_library,
 )
+
+_SIGMA_TO_FWHM = 2.0 * np.sqrt(2.0 * np.log(2.0))
+
+
+def _fwhm_wave_from_lsf_params(lsf_params) -> np.ndarray:
+    """Per-pixel FWHM in wavelength; accept 2-D FWHM or 3-D ``(..., 3)`` layout."""
+    arr = np.asarray(lsf_params, dtype=np.float64)
+    if arr.ndim == 3 and arr.shape[-1] == 3:
+        return arr[..., 1] * _SIGMA_TO_FWHM
+    return arr
+
+
+def sigma_pix_from_gaussian_lsf_model(
+    lsf_model,
+    wave_2d: np.ndarray,
+    *,
+    fiber: int,
+) -> np.ndarray:
+    """Map :class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel` FWHM→σ in pixels."""
+    fiber = int(fiber)
+    wave_2d = np.asarray(wave_2d, dtype=np.float64)
+    fwhm_wave = _fwhm_wave_from_lsf_params(
+        getattr(lsf_model, f"lsf_params_fib{fiber}")
+    )
+    if fwhm_wave.shape != wave_2d.shape:
+        raise ValueError(
+            f"lsf_params_fib{fiber} shape {fwhm_wave.shape} does not match "
+            f"wave_2d shape {wave_2d.shape}"
+        )
+    # Floor dispersion with a fraction of the per-order median |dλ/dpix| so
+    # flat / NaN WAVE edge pixels do not explode σ into terabyte kernels.
+    sigma_pix = np.empty_like(wave_2d)
+    for i in range(wave_2d.shape[0]):
+        dw = np.abs(np.gradient(wave_2d[i]))
+        med_dw = float(np.nanmedian(dw[np.isfinite(dw) & (dw > 0.0)]))
+        if not np.isfinite(med_dw) or med_dw <= 0.0:
+            med_dw = 1.0e-6
+        dw = np.where(np.isfinite(dw) & (dw > 0.05 * med_dw), dw, med_dw)
+        sigma_pix[i] = (fwhm_wave[i] / _SIGMA_TO_FWHM) / dw
+        bad = ~np.isfinite(sigma_pix[i]) | (sigma_pix[i] <= 0.0)
+        if np.any(bad):
+            fill = float(np.nanmedian(sigma_pix[i][~bad])) if np.any(~bad) else 1.0
+            sigma_pix[i] = np.where(bad, fill, sigma_pix[i])
+        # Detector-pixel LSF widths are O(1); clamp pathological outliers.
+        sigma_pix[i] = np.clip(sigma_pix[i], 0.25, 20.0)
+    return sigma_pix
+
+
+def convolve_l2_with_gaussian_lsf_model(
+    wave_2d: np.ndarray,
+    flux_2d: np.ndarray,
+    lsf_model,
+    *,
+    fiber: int,
+) -> np.ndarray:
+    """Convolve a 2-D spectrum with an empirical ProcessLFC ``GaussianLSFModel``."""
+    sigma_pix = sigma_pix_from_gaussian_lsf_model(
+        lsf_model, wave_2d, fiber=int(fiber)
+    )
+    return convolve_l2_with_gaussian_lsf(
+        np.asarray(wave_2d, dtype=np.float64),
+        np.asarray(flux_2d, dtype=np.float64),
+        sigma_pix,
+    )
 
 
 def hdf_psf_lsf_library(

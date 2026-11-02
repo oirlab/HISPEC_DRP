@@ -7,7 +7,8 @@ kernel as ``ccf_line_mask``, for noiseless injection / RV validation workflows.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+import os
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -56,9 +57,16 @@ QUIET_PIPELINE_LOG_CONFIG = {"level": "ERROR", "enable_stdout": False}
 
 @contextmanager
 def quiet_pipeline_logging():
-    """Context manager to silence pipeline logging on stdout."""
+    """Silence pipeline logging and stray progress prints.
+
+    Stage-0 JWST ramp fitting still uses ``print`` for per-row progress, which
+    floods notebook cells even when the logger is quiet. Redirect stdout/stderr
+    to ``os.devnull`` for the duration so recovery tables stay readable.
+    """
     with logging_context(QUIET_PIPELINE_LOG_CONFIG):
-        yield
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            with redirect_stdout(devnull), redirect_stderr(devnull):
+                yield
 
 
 @dataclass
@@ -182,6 +190,7 @@ def build_l2(
     spec_err_floor: float = 1.0e-6,
     spec_err_relative: float = 1.0e-6,
     apply_lsf: bool = False,
+    lsf_model=None,
     mjd_start: float | None = None,
 ) -> datamodels.L2Model:
     """
@@ -217,9 +226,14 @@ def build_l2(
         Near-noiseless error bars:
         ``max(spec_err_relative * |flux|, spec_err_floor)``.
     apply_lsf
-        If True, convolve each order with the HDF PSF→1-D LSF after paint so
-        the L2 matches instrument-apparent line shapes (for ccfopt masks and
-        fidelity vs extracted spectra).
+        If True (and ``lsf_model`` is None), convolve each order with the HDF
+        PSF→1-D LSF after paint so the L2 matches instrument-apparent line
+        shapes (for ccfopt masks and fidelity vs extracted spectra).
+    lsf_model
+        Optional :class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel` from
+        :class:`~hispecdrp.pipelines.calibration.process_lfc_pipeline.ProcessLFCPipeline`.
+        When provided, this empirical LFC LSF is used instead of the HDF PSF
+        library (``apply_lsf`` is implied).
     mjd_start
         Observation start MJD. Default is the E2E / UTR simulation epoch
         (:data:`~hispecdrp.simulations.e2e_gaia.DEFAULT_E2E_MJD_START`) so
@@ -252,7 +266,16 @@ def build_l2(
             order=int(mask_ccf_pixel_interp_order),
         )
 
-    if apply_lsf:
+    if lsf_model is not None:
+        from .lsf import convolve_l2_with_gaussian_lsf_model
+
+        spec = convolve_l2_with_gaussian_lsf_model(
+            ctx.wave_2d,
+            spec,
+            lsf_model,
+            fiber=int(fiber),
+        )
+    elif apply_lsf:
         from .lsf import convolve_l2_with_hdf_lsf
 
         spec = convolve_l2_with_hdf_lsf(
@@ -319,19 +342,26 @@ def build_ccfopt_mask(
     rebuild_seed: bool = True,
     templates_base_dir: str | None = None,
     apply_lsf: bool = False,
+    lsf_model=None,
     mask_suffix: str | None = None,
+    l2: datamodels.L2Model | None = None,
     **ccfopt_overrides,
 ) -> tuple[str, str, datamodels.L2Model]:
     """
     Build a CCF-opt delta mask from a template via seed detection, ideal L2, and line-by-line RV.
 
     Runs gradient seed detection on the 1D template, paints an injected-RV=0 L2 with
-    :func:`build_l2`, then calls
+    :func:`build_l2` (unless ``l2`` is provided), then calls
     :func:`~hispecdrp.utils.line_mask_utils.build_ccfopt_line_mask_from_l2_line_by_line_rv`
     with ccfopt line-by-line defaults.
 
-    When ``apply_lsf=True``, the L2 is LSF-matched and the default product name is
-    ``<stem>.lsf.ccfopt.delta.mas`` (override with ``mask_suffix``).
+    When ``lsf_model`` is provided (ProcessLFC ``GaussianLSFModel``), the L2 is
+    convolved with that empirical LSF and the default product name is
+    ``<stem>.lfc_lsf.ccfopt.delta.mas``. When ``apply_lsf=True`` without
+    ``lsf_model``, the HDF PSF→1-D LSF is used and the default name is
+    ``<stem>.lsf.ccfopt.delta.mas``. Pass a prebuilt ``l2`` (e.g. extract-matched
+    under LFC WAVE) with ``mask_suffix=".extract_matched.ccfopt.delta.mas"`` to
+    skip painting; ``apply_lsf`` / ``lsf_model`` are ignored in that case.
 
     Returns ``(seed_mask_path, ccfopt_mask_path, l2_at_zero_rv)``.
     """
@@ -343,7 +373,14 @@ def build_ccfopt_mask(
 
     seed_mask = out_dir / f"{stem}.delta.mas"
     if mask_suffix is None:
-        mask_suffix = ".lsf.ccfopt.delta.mas" if apply_lsf else ".ccfopt.delta.mas"
+        if l2 is not None:
+            mask_suffix = ".extract_matched.ccfopt.delta.mas"
+        elif lsf_model is not None:
+            mask_suffix = ".lfc_lsf.ccfopt.delta.mas"
+        elif apply_lsf:
+            mask_suffix = ".lsf.ccfopt.delta.mas"
+        else:
+            mask_suffix = ".ccfopt.delta.mas"
     if not str(mask_suffix).startswith("."):
         mask_suffix = "." + str(mask_suffix)
     ccfopt_mask = out_dir / f"{stem}{mask_suffix}"
@@ -364,16 +401,18 @@ def build_ccfopt_mask(
             **RELAXED_TEMPLATE_MASK_BUILD_KW,
         )
 
-    l2 = build_l2(
-        0.0,
-        spectrograph=spectrograph,
-        template=template,
-        fiber=fiber,
-        order_start=order_start,
-        order_end=order_end,
-        templates_base_dir=templates_base_dir,
-        apply_lsf=bool(apply_lsf),
-    )
+    if l2 is None:
+        l2 = build_l2(
+            0.0,
+            spectrograph=spectrograph,
+            template=template,
+            fiber=fiber,
+            order_start=order_start,
+            order_end=order_end,
+            templates_base_dir=templates_base_dir,
+            apply_lsf=bool(apply_lsf) and lsf_model is None,
+            lsf_model=lsf_model,
+        )
     ccfopt_path, _ = build_ccfopt_line_mask_from_l2_line_by_line_rv(
         str(seed_mask),
         l2,
@@ -426,15 +465,22 @@ def build_ccfopt_mask_lsf_matched(
     *,
     spectrograph: str = "BSPEC",
     fiber: int = 1,
+    lsf_model=None,
     **kwargs,
 ) -> tuple[str, str, datamodels.L2Model]:
-    """Build ``*.lsf.ccfopt.delta.mas`` from an LSF-matched ideal L2."""
+    """Build an LSF-matched ``*.ccfopt.delta.mas`` from an ideal L2.
+
+    Pass ``lsf_model`` (ProcessLFC ``GaussianLSFModel``) for an empirical LFC
+    LSF product (``*.lfc_lsf.ccfopt.delta.mas``). Otherwise uses the HDF PSF
+    library (``*.lsf.ccfopt.delta.mas``).
+    """
     return build_ccfopt_mask(
         template,
         output_dir,
         spectrograph=spectrograph,
         fiber=fiber,
-        apply_lsf=True,
+        apply_lsf=lsf_model is None,
+        lsf_model=lsf_model,
         **kwargs,
     )
 

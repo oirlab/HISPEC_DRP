@@ -1,14 +1,15 @@
-import numpy as np
-
-from stcal.ramp_fitting import ramp_fit
-from stcal.ramp_fitting.ramp_fit_class import RampData
-
+import logging
 import multiprocessing as mp
 import ctypes
 from contextlib import contextmanager
-from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
-from multiprocessing.sharedctypes import RawArray
 
+import numpy as np
+from stcal.ramp_fitting import ramp_fit
+from stcal.ramp_fitting.ramp_fit_class import RampData
+from multiprocessing.sharedctypes import RawArray
+from tqdm import tqdm
+
+from ...utils.parallelization_utils import _arraytonumpy, numba_thread_scope
 from ...datamodels.dqflags import DQ_FLAGS
 from .utils import get_mid_delta_times, SECONDS_PER_DAY
 from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
@@ -16,7 +17,7 @@ from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp_Brandt
 import hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt as fitramp_cython
 
-from tqdm import tqdm
+logger = logging.getLogger(__name__)
 
 __all__ = ['fit_ramps_jwst']
 
@@ -626,7 +627,7 @@ def fit_ramps_jwst(
         # If not parallelizing, ie max_cores=1, just run directly without shared memory
         results = []
         for row in np.arange(ny):
-            print(f"JWST Ramp Fitting: Processing row {row + 1} of {ny}.")
+            logger.info("JWST Ramp Fitting: Processing row %s of %s.", row + 1, ny)
 
             if jump_detection:
                 args_row = (

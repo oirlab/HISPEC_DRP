@@ -25,7 +25,9 @@ source_params = {
     "source_id_2mass" : "20004370+2242391",
 }
 
+@pytest.mark.slow
 def test_gaia_query_auto():
+    """Live VizieR/Gaia lookup (can stall for many minutes if mirrors fail)."""
     meta = {
         'target_gaia_id': source_params["source_id"]
     }
@@ -45,7 +47,9 @@ def test_gaia_query_auto():
     # Check 2mass cross match
     assert model.meta.target_2mass_id == source_params["source_id_2mass"]
 
+@pytest.mark.slow
 def test_gaia_query_by_coordinates():
+    """Live coordinate cone search against VizieR Gaia DR3."""
     _id, ra, dec = source_params["source_id"], source_params["ra"], source_params["dec"]
     epoch = source_params["epoch"]
     radial_velocity = source_params["radial_velocity"]
@@ -70,7 +74,9 @@ def test_gaia_query_by_coordinates():
     assert 0 < result["dec_error"] < 1.0
 
 
+@pytest.mark.slow
 def test_gaia_query_by_source_id():
+    """Live Gaia DR3 source_id query via VizieR."""
     _id, ra, dec = source_params["source_id"], source_params["ra"], source_params["dec"]
     result = get_stellar_data_gaia_from_source_id(_id)
 
@@ -86,7 +92,9 @@ def test_gaia_query_by_source_id():
     assert 0 < result["dec_error"] < 1.0
 
 
+@pytest.mark.slow
 def test_gaia_to_2mass_crossmatch():
+    """Live Gaia→2MASS crossmatch via VizieR."""
     _id = source_params["source_id"]
 
     result = get_2mass_from_gaia(_id)
@@ -98,7 +106,9 @@ def test_gaia_to_2mass_crossmatch():
     assert twomass_id == source_params["source_id_2mass"]
 
 
+@pytest.mark.slow
 def test_gaia_to_2mass_fallback_path():
+    """Live Gaia→2MASS with tiny radius to exercise fallback path."""
     # Use an artificially tiny radius to force fallback behavior to matter
     _id = source_params["source_id"]
 
