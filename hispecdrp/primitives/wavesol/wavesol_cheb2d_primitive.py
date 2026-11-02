@@ -176,7 +176,6 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             fit_results.append(fit_result)
 
             chebnorm_table.add_row({
-                'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
                 'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
                 'ORDER_NORM_MIN': fit_result['order_bounds'][0],
@@ -224,6 +223,8 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2
     s = hi - lo
+    if s == 0:
+        return np.zeros_like(np.asarray(x, dtype=float))
     return 2 * (x - mu) / s
 
 def fit_wavesol_spline_1d(

@@ -17,6 +17,8 @@ from ..jump_detection.jump_detection_jwst import _jump_detection_jwst_row
 import hispecdrp.primitives.ramp_fitting.fitramp_Brandt as fitramp_Brandt
 import hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt as fitramp_cython
 
+from progressbar import progressbar
+
 logger = logging.getLogger(__name__)
 
 __all__ = ['fit_ramps_jwst']
@@ -601,7 +603,7 @@ def fit_ramps_jwst(
                 for args_tuple in args_list
             ]
 
-            for t in tqdm(tasks, desc="Processing blocks"):
+            for t in progressbar(tasks, desc="Fitting Ramps", fast=False):
                 t.wait()
 
         args_list = []
@@ -618,7 +620,7 @@ def fit_ramps_jwst(
                     for args_tuple in args_list
                 ]
 
-            for t in tqdm(tasks, desc="Processing blocks"):
+            for t in progressbar(tasks, desc="Fitting Ramps", fast=False):
                 t.wait()
         finally:
             tpool.close()

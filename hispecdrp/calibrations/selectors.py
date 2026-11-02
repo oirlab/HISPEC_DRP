@@ -662,13 +662,19 @@ class WavelengthSolutionSelector(HISPECCalibrationSelector):
     ----------
     cal_type : str, optional
         The type of wavelength calibration to select. Default: lfc_wavesol
+    fallback_cal_type : str | None, optional
+        The type of wavelength calibration to select as a fallback. Default: None
     """
 
-    def __init__(self, cal_type : str = 'lfc_wavesol'):
+    def __init__(self, cal_type : str = 'lfc_wavesol', fallback_cal_types : str | None = None):
         super().__init__()
         self.cal_type = cal_type
+        if fallback_cal_types is not None:
+            self.fallback_cal_types = fallback_cal_types
+        else:
+            self.fallback_cal_types = ['arclamp_wavesol', 'gascell_wavesol', 'sim_wavesol']
 
-    def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
+    def _rows_for_cal_type(self, cal_type : str, meta : MetaModel, db : LocalCalibrationDB) -> list[dict]:
         rows = db.rows_where(
             """
             cal_type = :cal_type AND
@@ -676,15 +682,21 @@ class WavelengthSolutionSelector(HISPECCalibrationSelector):
             spectrograph = :spec
             """,
             {
-                "cal_type": self.cal_type,
+                "cal_type": cal_type,
                 "era": meta["instrument_era"],
                 "spec": meta["spectrograph"],
                 "mjd_start": meta["mjd_start"]
             },
             order_by="ABS(mjd_start - :mjd_start)"
         )
-
         return list(rows)
+
+    def get_candidates(self, meta : MetaModel, db : LocalCalibrationDB):
+        for cal_type in (self.cal_type, *self.fallback_cal_types):
+            rows = self._rows_for_cal_type(cal_type, meta, db)
+            if rows:
+                return rows
+        return []
 
     def select_best(self, input, candidates : list[dict] | dict, **kwargs) -> dict | None:
         """Prefer packaged sim-HDF line-ZP WAVE when it is among the candidates."""

@@ -1,0 +1,4 @@
+class: CoaddSpectraPrimitive
+description: Standard coadd spectra configuration.
+context: {}
+parameters: {}

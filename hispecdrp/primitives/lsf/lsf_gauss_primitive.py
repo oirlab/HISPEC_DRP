@@ -92,8 +92,8 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
-            fwhms = np.abs(np.asarray(params_table['FWHM_WAVE'], dtype=float))
-            fwhm_errs = np.abs(np.asarray(params_table['FWHM_ERR_WAVE'], dtype=float))
+            fwhms = params_table['FWHM_WAVE']
+            fwhm_errs = params_table['FWHM_ERR_WAVE']
             mask = np.nonzero(np.isin(orders, fit_orders))[0]
             pixels = pixels[mask].copy()
             orders = orders[mask].copy()
@@ -112,11 +112,12 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
             )
             fit_results.append(fit_result)
 
-            nx = getattr(input_model, f'spec_fib{fiber}').shape[1]
+            output_model[fiber].cheb_coeffs = fit_result['coeffs']
+
+            nx = input_model[fiber].spec.shape[1]
             pixel_vec = np.arange(nx)
             order_vec = input_model.make_order_vec()
             lsfnorm_table.add_row({
-                'FIBER': fiber,
                 'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
                 'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
                 'ORDER_NORM_MIN': fit_result['order_bounds'][0],
@@ -128,8 +129,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
                 order_vec,
                 fit_result['pixel_bounds'], fit_result['order_bounds']
             )
-            setattr(output_model, f'cheb_coeffs_fib{fiber}', fit_result['coeffs'])
-            setattr(output_model, f'lsf_params_fib{fiber}', lsf_fwhms_full)
+            output_model[fiber].lsf_params = lsf_fwhms_full
 
         return dict(output=output_model, fit_results=fit_results)
 
@@ -246,7 +246,7 @@ def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2
     s = hi - lo
     if s == 0:
-        return np.zeros_like(np.asarray(x), dtype=float)
+        return np.zeros_like(np.asarray(x, dtype=float))
     return 2 * (x - mu) / s
 
 def _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds):

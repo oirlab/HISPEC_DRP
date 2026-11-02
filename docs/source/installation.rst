@@ -146,6 +146,9 @@ Calibrations
 - **KOA_USE_CACHED_CALIBRATIONS** (Optional)
   Use cached files ('true' or 'false'). Default: 'true'.
 
+- **KOA_CALDB_SYNC_INTERVAL** (Optional)
+  Minimum number of seconds between automatic syncs of the local calibration database from the remote KOA database when a calibration store is opened. ``0`` syncs every time; a negative value disables automatic syncing. Default: ``3600``. Each successful sync is logged in the ``remote_syncs`` table of the local calibration database, so the interval is shared across processes.
+
 - **KOA_LOCAL_DATABASE_TABLE_NAME** (Optional)
   Local database table name. Default: ``<instrument_name>``
 

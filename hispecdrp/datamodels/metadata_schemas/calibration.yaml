@@ -6,6 +6,7 @@ properties:
     title: "Unique calibration identifier"
     fits_keyword: CALID
     cal_db: id
+    merge_rule: drop
     source: DRP
 
   cal_type:

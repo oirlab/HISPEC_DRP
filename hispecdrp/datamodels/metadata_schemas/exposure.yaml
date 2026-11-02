@@ -55,11 +55,17 @@ properties:
     unit: Hz
     source: ICS
 
+  exposure_block_id:
+    title: "Exposure block ID"
+    fits_keyword: EXPBLKID
+    type: string
+    merge_rule: first
+    source: ICS
+
   exposure_seq_id:
     title: "Exposure sequence ID"
     fits_keyword: EXPSQID
     type: string
-    cal_db: true
     merge_rule: first
     source: ICS
 
@@ -67,7 +73,6 @@ properties:
     title: "Exposure number in the sequence"
     fits_keyword: EXPSQNUM
     type: integer
-    cal_db: true
     merge_rule: first
     source: ICS
 
@@ -75,6 +80,5 @@ properties:
     title: "Total number of exposures in the sequence"
     fits_keyword: EXPSQTOT
     type: integer
-    cal_db: true
     merge_rule: first
     source: ICS

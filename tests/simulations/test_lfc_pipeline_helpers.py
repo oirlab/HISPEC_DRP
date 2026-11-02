@@ -205,6 +205,8 @@ def test_process_lfc_pipeline_apply_returns_wavesol_and_lsf(tmp_path, monkeypatc
     assert products["wavesol"] is wavesol
     assert products["lsf"] is lsf
     assert set(ProcessLFCPipeline.PRIMITIVES) == {
+        "coadd_spectra",
+        "blaze_corr",
         "fit_lfc_lines",
         "lfc_wavesol",
         "register_wave_cal",

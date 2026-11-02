@@ -47,7 +47,6 @@ class MakeMasterBiasPrimitive(BasePrimitive):
         'output_model' : 'BiasModel',
         'kTC_threshold' : 100,  # DN,  Threshold kTC above which pixels are bad
         'bias_threshold' : 1000,  # DN,  Threshold bias above which pixels are bad
-        'max_cores' : 1,
     }
 
     def _perform(self):

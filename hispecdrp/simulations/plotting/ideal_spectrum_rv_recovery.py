@@ -1,4 +1,4 @@
-"""Ideal-spectrum injected-vs-recovered RV residual plots."""
+"""Ideal-spectrum injected-vs-recovered RV plots (lte040 validation notebook)."""
 
 from __future__ import annotations
 
@@ -20,10 +20,24 @@ def plot_ideal_spectrum_rv_recovery(
     display: bool = True,
 ) -> dict[str, Any]:
     """
-    Residual diagnostic (recovered minus injected) in cm/s.
+    Ideal-spectrum RV residual diagnostic (recovered minus injected).
 
-    The title is annotated with the mean and standard deviation of the
-    residuals.
+    Parameters
+    ----------
+    injected_m_s, recovered_m_s, recovered_err_m_s
+        Per-bulk-shift arrays in m/s (same length).
+    title
+        Base title; the mean and standard deviation of the residuals (in
+        cm/s) are appended to it.
+    out_path
+        When set, write a PNG to this path.
+    display
+        If True, embed a PNG in the notebook via ``IPython.display``.
+
+    Returns
+    -------
+    summary
+        Bias statistics in m/s, mm/s, and cm/s.
     """
     inj_m_s = np.asarray(injected_m_s, dtype=float).ravel()
     rec_m_s = np.asarray(recovered_m_s, dtype=float).ravel()
@@ -45,6 +59,7 @@ def plot_ideal_spectrum_rv_recovery(
     std_cm_s = float(np.std(residual_cm_s))
 
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
+
     ax.axhline(0.0, color="k", ls="--", lw=1, label="zero residual")
     ax.errorbar(
         inj_km_s,
@@ -66,8 +81,8 @@ def plot_ideal_spectrum_rv_recovery(
     ax.set_ylim(med - half, med + half)
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
 
+    fig.tight_layout()
     if out_path is not None:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

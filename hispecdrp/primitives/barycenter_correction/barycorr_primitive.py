@@ -40,7 +40,6 @@ class BarycenterCorrectionPrimitive(BasePrimitive):
     """
     PARAMETERS = {
         'suffix' : 'barycorr',
-        'max_cores' : 1,
         'solar' : None,
     }
 

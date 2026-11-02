@@ -7,7 +7,7 @@ telescope,Telescope used to acquire the data,CORE,TELESCOP,string,,PRIMARY,,ICS,
 model_type,Type of data model,CORE,DATAMODL,string,,PRIMARY,,ICS,,,drop,False
 drp_version,DRP version used to create this file,CORE,DRPVER,string,,PRIMARY,drp_version,ICS,,,drop,False
 note,Custom note,CORE,NOTE,string,,PRIMARY,note,DRP,,,drop,False
-cal_id,Unique calibration identifier,CALIBRATION,CALID,string,,PRIMARY,id,DRP,,,first,False
+cal_id,Unique calibration identifier,CALIBRATION,CALID,string,,PRIMARY,id,DRP,,,drop,False
 cal_type,Type of calibration,CALIBRATION,CALTYPE,string,,PRIMARY,cal_type,DRP,,,first,False
 master_cal,Appropriate for calibrating data?,CALIBRATION,MASTCAL,boolean,,PRIMARY,master_cal,DRP,,,first,False
 cal_version,Calibration version,CALIBRATION,CALVER,string,,PRIMARY,cal_version,DRP,,,first,False
@@ -19,9 +19,10 @@ mbjd_mid,Exposure mid-point Modified Julian Date,EXPOSURE,MBJDMID,number,,PRIMAR
 read_mode,Readout mode,EXPOSURE,READMODE,string,,PRIMARY,read_mode,ICS,,DEFAULT,first,False
 exposure_time,Effective exposure time,EXPOSURE,EXPTIME,number,sec,PRIMARY,,ICS,,0,sum,True
 clock_rate,Clock rate of the readout of the detector,EXPOSURE,CLOCKRAT,number,Hz,PRIMARY,,ICS,,,first,False
-exposure_seq_id,Exposure sequence ID,EXPOSURE,EXPSQID,string,,PRIMARY,exposure_seq_id,ICS,,,first,False
-exposure_seq_num,Exposure number in the sequence,EXPOSURE,EXPSQNUM,integer,,PRIMARY,exposure_seq_num,ICS,,,first,False
-exposure_seq_total,Total number of exposures in the sequence,EXPOSURE,EXPSQTOT,integer,,PRIMARY,exposure_seq_total,ICS,,,first,False
+exposure_block_id,Exposure block ID,EXPOSURE,EXPBLKID,string,,PRIMARY,,ICS,,,first,False
+exposure_seq_id,Exposure sequence ID,EXPOSURE,EXPSQID,string,,PRIMARY,,ICS,,,first,False
+exposure_seq_num,Exposure number in the sequence,EXPOSURE,EXPSQNUM,integer,,PRIMARY,,ICS,,,first,False
+exposure_seq_total,Total number of exposures in the sequence,EXPOSURE,EXPSQTOT,integer,,PRIMARY,,ICS,,,first,False
 target_name,"Target or object name, internal or on-sky",TARGET,OBJECT,string,,PRIMARY,target_name,ICS,,,first,True
 target_ra,Target Right Ascension,TARGET,RA,number,degrees,PRIMARY,,ICS,,,mean,False
 target_dec,Target Declination,TARGET,DEC,number,degrees,PRIMARY,,ICS,,,mean,False

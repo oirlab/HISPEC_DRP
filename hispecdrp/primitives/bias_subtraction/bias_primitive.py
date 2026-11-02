@@ -49,7 +49,6 @@ class BiasSubtractionPrimitive(BasePrimitive):
 
     PARAMETERS = {
         'suffix' : 'biassub',
-        'max_cores' : 1
     }
 
     CALIBRATIONS = {

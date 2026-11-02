@@ -7,6 +7,8 @@ from ..utils.spectral_utils import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -60,9 +62,9 @@ class FitLFCLinesPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'fwhm_bounds' : (1.0, 3.0),
+        'fwhm_bounds' : (1.5, 7.0),
         'mu_bounds' : (-1.0, 1.0),
-        'max_fit_window' : 14,
+        'max_fit_window' : 20,
         'do_fibers' : None,
         'do_orders' : None,
         'lfc_nu0' : None,
@@ -71,6 +73,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
         'line_source' : 'peaks', # 'wavesol' (all lines) or 'peaks' (only lines found by find_peaks)
         'min_line_spacing' : 10, # Minimum number of pixels between lines
         'background_filter_width' : 31, # Pixels
+        'preview_n_lines_per_order' : 25, # Max lines shown per order in the preview slider. None = show all.
     }
 
     def _perform(self):
@@ -90,10 +93,18 @@ class FitLFCLinesPrimitive(BasePrimitive):
         fit_results = {fiber : [] for fiber in do_fibers}
 
         for fiber in do_fibers:
-            wave = getattr(input_model, f'wave_fib{fiber}')
-            spec = getattr(input_model, f'spec_fib{fiber}')
-            spec_err = getattr(input_model, f'spec_err_fib{fiber}')
-            spec_dq = getattr(input_model, f'spec_dq_fib{fiber}')
+            
+            # Get extensions for this fiber (blaze-corrected preferred when present)
+            wave = input_model[fiber].wave
+            if input_model.has_extension(f'spec_fib{fiber}'):
+                spec = input_model[fiber].spec
+                spec_err = input_model[fiber].spec_err
+                spec_dq = input_model[fiber].spec_dq
+            else:
+                spec = input_model[fiber].spec_uncal
+                spec_err = input_model[fiber].spec_uncal_err
+                spec_dq = input_model[fiber].spec_uncal_dq
+
             for order in do_orders:
 
                 # Relative order index
@@ -105,14 +116,31 @@ class FitLFCLinesPrimitive(BasePrimitive):
                     logger.warning(f"No good pixels found in order {order} for fiber {fiber}. Skipping.")
                     continue
 
+                _wave = wave[oi, :]
+                _spec = spec[oi, :]
+                _spec_err = spec_err[oi, :]
+                _spec_dq = spec_dq[oi, :]
+
+                line_spacing_um = (1E-6 * np.mean(_wave[good]))**2 * lfc_delta_nu / scipy.constants.c * 1E6
+                line_spacing_pix = line_spacing_um / np.max(np.abs(np.gradient(_wave)))
+                adaptive_spacing = float(line_spacing_pix) * 0.8
+                configured_spacing = float(self.min_line_spacing)
+                # Prefer the tighter of adaptive vs configured spacing so both
+                # LFC densification and explicit test/config floors work;
+                # find_peaks requires distance >= 1.
+                candidates = [
+                    s for s in (adaptive_spacing, configured_spacing)
+                    if np.isfinite(s) and s > 0.0
+                ]
+                min_line_spacing = max(1.0, min(candidates) if candidates else 1.0)
                 # Pixel array along the spectral axis (not spec.size, which is 2-D)
                 pix_arr = np.arange(spec.shape[-1])
 
                 # Find the initial lines
                 if self.line_source.lower() == 'peaks':
                     line_centers, _ = find_emission_lines(
-                        spec[oi, :], spec_dq[oi, :],
-                        min_line_spacing=self.min_line_spacing,
+                        _spec, _spec_dq,
+                        min_line_spacing=min_line_spacing,
                         background_filter_width=self.background_filter_width,
                         centroid_num_pixels=3,
                         drop_first_last=True,
@@ -122,17 +150,19 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
                     # Get the wavelength range for this order
                     # and the LFC lines that fall within it
-                    wi, wf = wave[oi, good[0]], wave[oi, good[-1]]
-                    line_centers, _, _ = gen_lfc_modes(
+                    wi, wf = np.min(wave[oi, good]), np.max(wave[oi, good])
+                    line_centers_um, _, _ = gen_lfc_modes(
                         lfc_nu0, lfc_delta_nu,
                         wave_min=wi, wave_max=wf
                     )
+                    line_centers = np.interp(line_centers_um, wave[oi, good], pix_arr[good])
+                    line_centers = line_centers[1:-1] # Drop first and last lines to avoid edge effects
                 else:
                     logger.error(f"Invalid line_source '{self.line_source}'. Must be 'peaks' or 'wavesol'.")
 
                 # Gaussian fit to lines
                 _fit_results = fit_lines_gauss(
-                    pix_arr, spec[oi, :], spec_err[oi, :], spec_dq[oi, :],
+                    pix_arr, _spec, _spec_err, _spec_dq,
                     line_centers=line_centers,
                     fwhm_bounds=self.fwhm_bounds,
                     mu_bounds=self.mu_bounds,
@@ -141,9 +171,11 @@ class FitLFCLinesPrimitive(BasePrimitive):
                 fit_results[fiber].append(_fit_results)
 
                 # Store results in the model
-                params_table = getattr(output_model, f'lfc_fitparams_fib{fiber}')
+                params_table = output_model[fiber].lfc_fitparams
                 if order in params_table['ORDER']:
-                    setattr(input_model, f'lfc_fitparams_fib{fiber}', params_table[params_table['ORDER'] != order])
+                    input_model[fiber].lfc_fitparams.remove_rows(
+                        np.where(input_model[fiber].lfc_fitparams['ORDER'] == order)[0]
+                    )
                 n_lines = len(_fit_results)
                 n_pix = spec.shape[-1]
                 for i in range(n_lines):
@@ -205,11 +237,286 @@ class FitLFCLinesPrimitive(BasePrimitive):
             # the same MODE_NUM). Two knots with one wavelength wreck any
             # downstream wavesol interpolant, so keep only the strongest
             # fit per (ORDER, MODE_NUM).
-            deduped = _drop_duplicate_lfc_modes(
-                getattr(output_model, f'lfc_fitparams_fib{fiber}')
+            output_model[fiber].lfc_fitparams = _drop_duplicate_lfc_modes(
+                output_model[fiber].lfc_fitparams
             )
-            setattr(output_model, f'lfc_fitparams_fib{fiber}', deduped)
         return dict(output=output_model, fit_results=fit_results)
+
+    def _create_preview(self):
+        """
+        Build an interactive preview comparing each fitted LFC line's Gaussian
+        model to the underlying spectral data.
+ 
+        Navigation is three-level: a *fiber* dropdown, an *order* dropdown
+        (options depend on the selected fiber), and a *line* slider (options
+        depend on the selected fiber+order).
+ 
+        For speed and file size, this keeps exactly two persistent traces in
+        the figure (the data points and the Gaussian fit curve) and swaps
+        their x/y data on each dropdown/slider interaction, rather than
+        pre-building a trace pair per line and toggling visibility across
+        thousands of traces (which scales quadratically with the number of
+        lines and is what made this slow). Additionally, at most
+        ``preview_n_lines_per_order`` lines (evenly sampled) are included per
+        order; set it to None to include every fitted line.
+        """
+        output_model = self._output['output']
+        fit_results = self._output['fit_results']
+ 
+        # Recompute the same fiber/order selection used in _perform so that
+        # fit_results[fiber][i] lines up with do_orders[i].
+        do_fibers, do_orders = self.get_do_traces(output_model, self.do_fibers, self.do_orders)
+ 
+        sigma_scale = 2 * np.sqrt(2 * np.log(2))  # FWHM -> sigma
+        half_win = self.max_fit_window / 2.0
+        n_preview = self.preview_n_lines_per_order
+ 
+        # --- Build a nested fiber -> order -> line structure (sampled per order) ---
+        fiber_meta = []
+        for fiber in do_fibers:
+            if fiber not in fit_results:
+                continue
+ 
+            wave     = getattr(output_model, f'wave_fib{fiber}')
+            spec     = getattr(output_model, f'spec_fib{fiber}')
+            spec_err = getattr(output_model, f'spec_err_fib{fiber}')
+            n_pix    = spec.shape[1]
+            pix_arr  = np.arange(n_pix)
+ 
+            order_entries = []
+            for oi_idx, order in enumerate(do_orders):
+                oi = int(np.abs(order - output_model.meta.order_start))
+                order_fits = fit_results[fiber][oi_idx] if oi_idx < len(fit_results[fiber]) else []
+ 
+                # Cheaply filter to fits with a finite centroid before doing any
+                # array slicing / curve reconstruction work.
+                valid_fits = [lf for lf in order_fits if np.isfinite(getattr(lf, 'mu', np.nan))]
+                if not valid_fits:
+                    continue
+ 
+                n_total = len(valid_fits)
+                if n_preview is not None and n_total > n_preview:
+                    sample_idx = np.unique(np.linspace(0, n_total - 1, n_preview).astype(int))
+                    sampled_fits = [valid_fits[i] for i in sample_idx]
+                else:
+                    sampled_fits = valid_fits
+ 
+                lines = []
+                for line_fit in sampled_fits:
+                    mu       = line_fit.mu
+                    amp      = getattr(line_fit, 'amplitude', np.nan)
+                    amp_err  = getattr(line_fit, 'amplitude_err', np.nan)
+                    mu_err   = getattr(line_fit, 'mu_err', np.nan)
+                    fwhm     = getattr(line_fit, 'fwhm', np.nan)
+                    fwhm_err = getattr(line_fit, 'fwhm_err', np.nan)
+ 
+                    # Data window around the line, padded a bit beyond the fit window for context
+                    lo = max(int(np.floor(mu - 1.5 * half_win)), 0)
+                    hi = min(int(np.ceil(mu + 1.5 * half_win)), n_pix - 1)
+                    if hi <= lo:
+                        continue
+                    x_data = pix_arr[lo:hi + 1]
+                    y_data = spec[oi, lo:hi + 1]
+                    yerr_data = spec_err[oi, lo:hi + 1]
+ 
+                    # Reconstructed Gaussian model curve, densely sampled
+                    x_model = np.linspace(x_data[0], x_data[-1], 200)
+                    sigma = fwhm / sigma_scale if np.isfinite(fwhm) and fwhm > 0 else np.nan
+                    if np.isfinite(sigma) and np.isfinite(amp):
+                        y_model = amp * np.exp(-0.5 * ((x_model - mu) / sigma) ** 2)
+                    else:
+                        y_model = np.full_like(x_model, np.nan)
+ 
+                    wave_val = np.interp(mu, pix_arr, wave[oi, :]) if wave is not None else np.nan
+ 
+                    lines.append(dict(
+                        mu=mu, mu_err=mu_err,
+                        amp=amp, amp_err=amp_err,
+                        fwhm=fwhm, fwhm_err=fwhm_err,
+                        wave=wave_val,
+                        x_data=x_data, y_data=y_data, yerr_data=yerr_data,
+                        x_model=x_model, y_model=y_model,
+                    ))
+ 
+                if lines:
+                    order_entries.append(dict(order=order, lines=lines, n_total=n_total))
+ 
+            if order_entries:
+                fiber_meta.append(dict(fiber=fiber, orders=order_entries))
+            else:
+                logger.warning(f"No valid line fits to preview for fiber {fiber}.")
+ 
+        fig = go.Figure()
+ 
+        if not fiber_meta:
+            logger.warning("No LFC line fits available to preview.")
+            fig.update_layout(title='No LFC line fits available to preview.')
+            self._output['preview'] = dict(html=None, png=None, fig=fig)
+            return
+ 
+        def _line_title(fiber, order, line, line_idx, n_shown, n_total):
+            wave_str = f", λ={line['wave']:.5f} µm" if np.isfinite(line['wave']) else ""
+            sample_note = f" (sampled {n_shown} of {n_total} fit)" if n_total > n_shown else ""
+            return (
+                f"LFC Line Fit — Fiber {fiber}, Order {order}, "
+                f"Line {line_idx + 1}/{n_shown}{sample_note}{wave_str}<br>"
+                f"µ = {line['mu']:.3f} ± {line['mu_err']:.3f} px  |  "
+                f"FWHM = {line['fwhm']:.3f} ± {line['fwhm_err']:.3f} px  |  "
+                f"Amp = {line['amp']:.4g} ± {line['amp_err']:.4g}"
+            )
+ 
+        def _line_data_update(line):
+            # Only 2 traces ever exist (data, fit), so these arrays map 1:1 to them.
+            return {
+                'x': [line['x_data'], line['x_model']],
+                'y': [line['y_data'], line['y_model']],
+                'error_y.array': [line['yerr_data'], line['yerr_data']],
+            }
+ 
+        # --- The only two traces in the figure; their data gets swapped on interaction ---
+        first_line = fiber_meta[0]['orders'][0]['lines'][0]
+        fig.add_trace(go.Scatter(
+            x           = first_line['x_data'],
+            y           = first_line['y_data'],
+            error_y     = dict(type='data', array=first_line['yerr_data'], visible=True),
+            mode        = 'markers',
+            name        = 'Data',
+            marker      = dict(color='steelblue', size=7),
+        ))
+        fig.add_trace(go.Scatter(
+            x           = first_line['x_model'],
+            y           = first_line['y_model'],
+            mode        = 'lines',
+            name        = 'Gaussian fit',
+            line        = dict(color='crimson', width=2),
+        ))
+ 
+        # --- Line slider steps (scrolls through the (sampled) lines within one fiber+order) ---
+        def build_line_slider_steps(f_idx, o_idx):
+            meta = fiber_meta[f_idx]
+            order_entry = meta['orders'][o_idx]
+            n_shown = len(order_entry['lines'])
+            steps = []
+            for l_idx, line in enumerate(order_entry['lines']):
+                steps.append(dict(
+                    method = 'update',
+                    label  = str(l_idx + 1),
+                    args   = [
+                        _line_data_update(line),
+                        {'title': _line_title(meta['fiber'], order_entry['order'], line, l_idx, n_shown, order_entry['n_total'])},
+                    ],
+                ))
+            return steps
+ 
+        # --- Order dropdown buttons (options depend on the selected fiber) ---
+        def build_order_dropdown_buttons(f_idx):
+            meta = fiber_meta[f_idx]
+            buttons = []
+            for o_idx, order_entry in enumerate(meta['orders']):
+                n_shown = len(order_entry['lines'])
+                label = f"Order {order_entry['order']}"
+                if order_entry['n_total'] > n_shown:
+                    label += f" ({n_shown}/{order_entry['n_total']})"
+                buttons.append(dict(
+                    label  = label,
+                    method = 'update',
+                    args   = [
+                        _line_data_update(order_entry['lines'][0]),
+                        {
+                            'title': _line_title(meta['fiber'], order_entry['order'], order_entry['lines'][0], 0, n_shown, order_entry['n_total']),
+                            # Update only the line slider (leave both dropdowns untouched)
+                            'sliders[0].steps':  build_line_slider_steps(f_idx, o_idx),
+                            'sliders[0].active': 0,
+                        },
+                    ],
+                ))
+            return buttons
+ 
+        # --- Fiber dropdown buttons (rewrite the order dropdown + line slider) ---
+        fiber_buttons = []
+        for f_idx, meta in enumerate(fiber_meta):
+            first_order_entry = meta['orders'][0]
+            n_shown = len(first_order_entry['lines'])
+            fiber_buttons.append(dict(
+                label  = f'Fiber {meta["fiber"]}',
+                method = 'update',
+                args   = [
+                    _line_data_update(first_order_entry['lines'][0]),
+                    {
+                        'title': _line_title(meta['fiber'], first_order_entry['order'], first_order_entry['lines'][0], 0, n_shown, first_order_entry['n_total']),
+                        # Rebuild the order dropdown's own buttons for this fiber...
+                        'updatemenus[1].buttons': build_order_dropdown_buttons(f_idx),
+                        'updatemenus[1].active':  0,
+                        # ...and reset the line slider to this fiber's first order
+                        'sliders[0].steps':  build_line_slider_steps(f_idx, 0),
+                        'sliders[0].active': 0,
+                    },
+                ],
+            ))
+ 
+        fig.update_layout(
+            title = _line_title(
+                fiber_meta[0]['fiber'], fiber_meta[0]['orders'][0]['order'],
+                fiber_meta[0]['orders'][0]['lines'][0], 0,
+                len(fiber_meta[0]['orders'][0]['lines']), fiber_meta[0]['orders'][0]['n_total'],
+            ),
+            updatemenus = [
+                dict(  # [0] fiber dropdown
+                    buttons     = fiber_buttons,
+                    direction   = 'down',
+                    showactive  = True,
+                    x           = 1.0,
+                    xanchor     = 'right',
+                    y           = 1.15,
+                    yanchor     = 'top',
+                    bgcolor     = '#f0f0f0',
+                    bordercolor = '#cccccc',
+                ),
+                dict(  # [1] order dropdown — options for the initial fiber
+                    buttons     = build_order_dropdown_buttons(0),
+                    direction   = 'down',
+                    showactive  = True,
+                    x           = 1.0,
+                    xanchor     = 'right',
+                    y           = 1.0,
+                    yanchor     = 'top',
+                    bgcolor     = '#f0f0f0',
+                    bordercolor = '#cccccc',
+                ),
+            ],
+            sliders = [dict(
+                active       = 0,
+                currentvalue = dict(prefix='Line: ', font=dict(size=14)),
+                pad          = dict(t=50),
+                steps        = build_line_slider_steps(0, 0),
+            )],
+            xaxis         = dict(title='Pixel', showgrid=True, gridcolor='rgba(200,200,200,0.3)'),
+            yaxis         = dict(title='Flux (e-/s)', showgrid=True, gridcolor='rgba(200,200,200,0.3)'),
+            plot_bgcolor  = '#ffffff',
+            paper_bgcolor = '#ffffff',
+            font          = dict(color='#000000'),
+            legend        = dict(bgcolor='#ffffff'),
+            height        = 550,
+            margin        = dict(t=140),
+        )
+ 
+        base_path        = output_model._generate_output_path(output_dir=self.output_dir, suffix=self.suffix)
+        output_path_html = base_path.replace('.fits', '_preview.html')
+        output_path_png  = base_path.replace('.fits', '_preview.png')
+ 
+        if self.save_preview:
+            fig.write_html(output_path_html, include_plotlyjs='cdn')
+            fig.write_image(output_path_png, scale=2)
+ 
+        if self.show_preview:
+            fig.show()
+ 
+        self._output['preview'] = {
+            'html': output_path_html,
+            'png':  output_path_png,
+            'fig':  fig,
+        }
+
 
 
 def _drop_duplicate_lfc_modes(params_table):
@@ -286,7 +593,7 @@ def gen_lfc_modes(
     nu_end = (scipy.constants.c / wave_min) * 1E6
     nu_start = (scipy.constants.c / wave_max) * 1E6
     n1 = int(np.ceil((nu_start - nu0) / delta_nu))
-    n2 = int(np.ceil((nu_end - nu0) / delta_nu))
+    n2 = int(np.floor((nu_end - nu0) / delta_nu))
     integers = np.arange(min(n1, n2), max(n1, n2) + 1).astype(int)
     waves, nus = _gen_lfc_modes(nu0, delta_nu, integers)
     waves = waves[::-1]
@@ -331,9 +638,9 @@ def _get_closest_lfc_mode(
     Parameters
     ----------
     nu0 : float
-        The central frequency (pump line) of the LFC in GHz.
+        The central frequency (pump line) of the LFC in Hz.
     delta_nu : float
-        The frequency spacing of the LFC modes in GHz.
+        The frequency spacing of the LFC modes in Hz.
     wave : float
         The wavelength value in microns.
 

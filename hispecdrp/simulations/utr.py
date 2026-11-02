@@ -1,7 +1,7 @@
 import numpy as np
 import multiprocessing as mp
 import ctypes
-from tqdm import tqdm
+from progressbar import progressbar
 
 from hispecdrp.utils.parallelization_utils import _arraytonumpy
 from multiprocessing.sharedctypes import RawArray
@@ -389,7 +389,7 @@ def create_ramp(
         tasks = [tpool.apply_async(_create_ramp_worker, args=(_args,))
                  for _args in args_list]
 
-        for t in tqdm(tasks, desc="Processing blocks"):
+        for t in progressbar(tasks, desc="Creating Ramp", fast=False):
             t.wait()
 
         print("Closing threadpool")

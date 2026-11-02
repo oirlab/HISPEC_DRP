@@ -72,7 +72,6 @@ class RefPixelCorrectionPrimitive(BasePrimitive):
         'run' : False,
         'suffix' : 'refpix',
         'method' : 'scales_drp',
-        'max_cores' : 1,
         'n_channels' : None,
         'n_ref_left' : None,
         'n_ref_right' : None,

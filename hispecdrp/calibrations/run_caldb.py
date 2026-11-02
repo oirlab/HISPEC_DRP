@@ -320,6 +320,8 @@ def run(
     with HISPECCalibrationStore(
         instrument_name=instrument_name,
         connect_remote=connect_remote,
+        # Synced explicitly below (skipped on dry runs).
+        sync_on_init=False,
     ) as store:
         if dry_run:
             logger.info("Dry run: no changes will be made.")

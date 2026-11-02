@@ -98,7 +98,29 @@ class MetaModel(MutableMapping):
         result._validators = {}
 
         return result
-    
+
+    def __getstate__(self) -> dict:
+        # _validators is a lazily-rebuilt cache (see validate()), not real
+        # state -- excluded here for the same reason __deepcopy__ excludes it.
+        return {
+            "_validate": self._validate,
+            "_schema": self._schema,
+            "_data": self._data,
+        }
+
+    def __setstate__(self, state: dict) -> None:
+        # Defining __setstate__ (even though this body matches the implicit
+        # default) is required, not cosmetic: without it, pickle's
+        # ``hasattr(obj, '__setstate__')`` check on the not-yet-initialized
+        # unpickled instance falls through to __getattr__, which reads
+        # self._schema before it exists -> infinite recursion. Assigning
+        # here goes through __setattr__, which routes "_"-prefixed names to
+        # object.__setattr__ directly, so this is safe pre-__init__.
+        self._validate = state["_validate"]
+        self._schema = state["_schema"]
+        self._data = state["_data"]
+        self._validators = {}
+
     def validate(
         self,
         prop_name : str,

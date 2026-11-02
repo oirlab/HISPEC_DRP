@@ -22,6 +22,10 @@ class LFCFitParamsModel(FiberAttributeProxyMixin, CalibrationModel):
     def on_init(self):
         super().on_init()
         self.meta.set_default('exposure_type', 'SPEC')
+        if self.meta.target_name is None:
+            spectrograph = self.meta.spectrograph
+            if spectrograph is not None:
+                self.meta.target_name = f'LFC-{spectrograph[0].upper()}'
 
     @property
     def primary_extension_name(self):
