@@ -61,7 +61,10 @@ class FitUraniumLinesPrimitive(BasePrimitive):
     def _perform(self):
 
         input_model = datamodels.open(self.dataset)
-        output_model = self.get_output_model(input_model)
+        output_model = datamodels.UraniumFitParamsModel.from_datamodels(
+            input_model, include_data=True,
+            primitive=self
+        )
 
         # Which traces to process
         do_fibers, do_orders = self.get_do_traces(input_model, self.do_fibers, self.do_orders)
@@ -80,7 +83,6 @@ class FitUraniumLinesPrimitive(BasePrimitive):
             tol=3e-5, # ~approximatelly twice the FWHM
             min_flux_frac=0.05, # neighbor >= 5% of this line's flux
         )
-
 
         clean_lamp_wvl = lamp_line_wvl[~blended]
         clean_lamp_rflux = lamp_line_rflux[~blended]

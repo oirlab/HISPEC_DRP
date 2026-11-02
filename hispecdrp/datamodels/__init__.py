@@ -37,6 +37,7 @@ from .tracepos import *
 from .traceprof import *
 from .fiberflat import *
 from .sim_wavesol import *
+from .uraniumfitparams import *
 
 # Instrument config
 from .parvi_config import *

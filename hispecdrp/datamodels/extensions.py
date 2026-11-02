@@ -511,7 +511,7 @@ URANIUMFITPARAMS_HDU = TABLE_HDU({
     'LINE_NUM': np.int16,
     'WAVE': np.float64,
     'ORDER': np.uint16,
-    'FIT_QUALITY': np.int8,
+    'LINE_DQ': np.int8,
 }, enumerate='FIB', title='Fit parameters for each line in Uranium line list, order, and fiber.')
 
 def create_uraniumfitparam_extensions() -> dict[str, dict]:
