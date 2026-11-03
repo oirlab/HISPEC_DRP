@@ -33,8 +33,9 @@ def airmass_scale_singlemodel(
     output_model : object
         Output data model to populate with the telluric-corrected spectrum,
         error, data quality, and convolved telluric transmission arrays.
-    lsf_model : object
-        Model containing per-order LSF parameters (mu, sigma, offset) for the fiber.
+    lsf_model : GaussianLSFModel
+        LFC-derived Gaussian LSF with Chebyshev FWHM coefficients. Kernels are
+        built with :meth:`GaussianLSFModel.make_kernels`.
     fiber_number : int or str
         Identifier of the fiber to process, used to build attribute names
         (e.g. `SPEC_FIB{fiber_number}`).
@@ -81,9 +82,6 @@ def airmass_scale_singlemodel(
     fiber_wave = output_model[fiber_number].wave
     fiber_dq = output_model[fiber_number].spec_dq
 
-    # get lsf data for fiber
-    fiber_lsf_params = getattr(lsf_model, f"LSF_PARAMS_FIB{fiber_number}")
-
     corrected_spec = np.empty_like(fiber_spec)
     corrected_spec_err = np.empty_like(fiber_spec_err)
     convolved_telluric_trans = np.empty_like(fiber_spec)
@@ -92,11 +90,13 @@ def airmass_scale_singlemodel(
         if order not in do_orders:
             continue
 
-        convolved_telluric_trans[o] = _convolve_and_resample_telluric(
+        convolved_telluric_trans[o] = _convolve_telluric_with_gaussian_lsf(
             telluric_wavelength,
             airmass_scaled_telluric_trans,
             fiber_wave[o],
-            fiber_lsf_params[o],
+            lsf_model,
+            fiber_number=int(fiber_number),
+            order=int(order),
         )
 
         # some cosntraint to add dq flag for low telluric transmission regions, e.g. < threshold
@@ -112,45 +112,52 @@ def airmass_scale_singlemodel(
 
     return output_model
 
-def _convolve_and_resample_telluric(telluric_wavelength, telluric_trans, fiber_wave, fiber_lsf_params):
+def _convolve_telluric_with_gaussian_lsf(
+    telluric_wavelength,
+    telluric_trans,
+    fiber_wave,
+    lsf_model,
+    *,
+    fiber_number,
+    order,
+    kernel_size_sigma=5.0,
+):
     """
-    Convolve a telluric transmission spectrum with a fiber's LSF and resample it.
+    Convolve telluric transmission with the LFC Gaussian LSF and sample at ``fiber_wave``.
 
-    Thin wrapper around `_convolve_and_resample` that unpacks per-order LSF
-    mean and sigma values from `fiber_lsf_params` before delegating to the
-    general convolution/resampling routine.
-
-    Parameters
-    ----------
-    telluric_wavelength : array
-        Wavelengths of the telluric model spectrum, in microns.
-    telluric_trans : array
-        Telluric transmission values corresponding to
-        `telluric_wavelength`.
-    fiber_wave : array
-        Observed wavelengths for this order to resample the telluric
-        transmission onto.
-    fiber_lsf_params : array, shape (n_channels, 2)
-        Per-channel LSF parameters, where column 0 is the LSF mean (mu) and
-        column 1 is the LSF sigma.
-
-    Returns
-    -------
-    convolved_telluric_trans : array
-        Telluric transmission convolved with the LSF and sampled at
-        `fiber_wave`.
+    Interpolates the telluric model onto a uniform wavelength grid, builds
+    chromatic kernels with :meth:`GaussianLSFModel.make_kernels`, and applies
+    :func:`~hispecdrp.primitives.lsf.lsf_convolve.convolve_numba_1d_chromatic`.
     """
-    lsf_mu = fiber_lsf_params[:,0]
-    lsf_sigma = fiber_lsf_params[:,1]
+    from ..lsf.lsf_convolve import convolve_numba_1d_chromatic
 
-    convolved_telluric_trans = _convolve_and_resample(
-        telluric_wavelength,
-        telluric_trans,
-        fiber_wave,
-        lsf_sigma,
-        mu_array=lsf_mu,
+    w_obs = np.asarray(fiber_wave, dtype=float)
+    w_tel = np.asarray(telluric_wavelength, dtype=float)
+    t_tel = np.asarray(telluric_trans, dtype=float)
+    finite = np.isfinite(w_obs)
+    if int(finite.sum()) < 2:
+        return np.full_like(w_obs, np.nan)
+    wmin = float(np.nanmin(w_obs))
+    wmax = float(np.nanmax(w_obs))
+    dw = float(np.median(np.abs(np.diff(np.sort(w_obs[finite])))))
+    if not np.isfinite(dw) or dw <= 0.0:
+        raise ValueError("fiber_wave must have nonzero spacing")
+    n = int(np.ceil((wmax - wmin) / dw)) + 1
+    w_uni = np.linspace(wmin, wmax, n)
+    if w_tel[0] > w_tel[-1]:
+        tel_uni = np.interp(w_uni, w_tel[::-1], t_tel[::-1])
+    else:
+        tel_uni = np.interp(w_uni, w_tel, t_tel)
+    _grid, kernels = lsf_model.make_kernels(
+        wave=w_uni,
+        fiber=int(fiber_number),
+        order=int(order),
+        kernel_size_sigma=float(kernel_size_sigma),
     )
-    return convolved_telluric_trans
+    tel_conv = convolve_numba_1d_chromatic(tel_uni, kernels)
+    if w_obs[0] > w_obs[-1]:
+        return np.interp(w_obs, w_uni[::-1], tel_conv[::-1])
+    return np.interp(w_obs, w_uni, tel_conv)
 
 def _convolve_and_resample(
     model_wavelength, model_fluxes, observed_wavelength, sigma_array, num_sigma=5, mu_array=None, offset_array=None,

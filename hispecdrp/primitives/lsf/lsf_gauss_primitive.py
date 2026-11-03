@@ -180,6 +180,12 @@ def fit_gausslsf_chebyshev2d(
     # Copy to not modify original data
     pixels = np.copy(pixels)
     orders = np.copy(orders)
+    fwhms = np.asarray(fwhms, dtype=float)
+    if pixels.size == 0:
+        raise ValueError(
+            "No usable LFC FWHM measurements for the Gaussian LSF fit "
+            "(empty lfc_fitparams table)."
+        )
     if weights is None:
         weights = np.ones(pixels.shape)
     else:
@@ -206,6 +212,11 @@ def fit_gausslsf_chebyshev2d(
         y = orders_norm[good]
         z = fwhms[good]
         w = weights[good]
+        if x.size == 0:
+            raise ValueError(
+                "No usable LFC FWHM measurements for the Gaussian LSF fit "
+                "(all weights invalid)."
+            )
         coeffs = solve_chebyshev2d_ols(x, y, z, deg_x=deg_intra_order, deg_y=deg_inter_order, weights=w)
 
         # Model and residuals
@@ -234,6 +245,8 @@ def fit_gausslsf_chebyshev2d(
 def _normalize_val(x, lo, hi):
     mu = (lo + hi) / 2
     s = hi - lo
+    if s == 0:
+        return np.zeros_like(np.asarray(x, dtype=float))
     return 2 * (x - mu) / s
 
 def _build_lsf_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds):

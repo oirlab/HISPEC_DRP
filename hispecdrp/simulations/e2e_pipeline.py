@@ -3140,6 +3140,18 @@ def build_gaussian_lfc_sed(
                 profiles.append((float(lam0), float(sig), float(amplitude)))
     if not profiles:
         raise ValueError("No valid Gaussian profiles to build SED")
+    # Adjacent orders' wavelength spans overlap, so a comb mode in the
+    # overlap appears in two orders' line lists. The SED is a single
+    # spectrum: keep one profile per unique wavelength (averaging the
+    # per-order sigmas, which differ only via the local dlam/dpix),
+    # otherwise overlap modes are painted at twice the amplitude.
+    by_lam: dict[float, list[float]] = {}
+    for lam0, sig, _amp in profiles:
+        by_lam.setdefault(lam0, []).append(sig)
+    profiles = [
+        (lam0, float(np.mean(sigs)), float(amplitude))
+        for lam0, sigs in by_lam.items()
+    ]
 
     sig_max = max(s for _, s, _ in profiles)
     lo = min(l for l, _, _ in profiles) - float(n_sigma_pad) * sig_max
@@ -3423,6 +3435,226 @@ def fit_elliptical_gaussian_2d(
         "residual_rms": rms,
         "n_pix": int(data.size),
     }
+
+
+def fit_lfc_spots_astropy_gaussian2d(
+    rate_map: np.ndarray,
+    line_list: dict[int, np.ndarray],
+    *,
+    spectrograph: str = "BSPEC",
+    fiber: int = 2,
+    half_win: int = 12,
+    y_min: float | None = None,
+    y_max: float | None = None,
+    x_stddev_seed: float = 1.5,
+    y_stddev_seed: float = 2.5,
+    theta_seed: float = 0.5,
+) -> list[dict[str, Any]]:
+    """
+    Fit every LFC spot in ``rate_map`` with :class:`astropy.modeling.models.Gaussian2D`.
+
+    Seeds each fit at the HDF deposit ``(row, col)`` for that mode. Returns one
+    dict per mode with fitted centroid ``(row_fit, col_fit)``, canonicalized
+    semimajor / semiminor axes ``(a_fit, b_fit)`` (1-σ), rotation ``pa_fit_rad``,
+    amplitude, and success flag. Spots whose expected row falls outside
+    ``[y_min, y_max]`` (when given) are skipped.
+    """
+    from astropy.modeling import fitting, models
+
+    spectrograph = spectrograph.upper()
+    img = np.asarray(rate_map, dtype=np.float64)
+    ny, nx = img.shape
+    hw = int(half_win)
+    fitter = fitting.LevMarLSQFitter(calc_uncertainties=True)
+    out: list[dict[str, Any]] = []
+    for od, lams in line_list.items():
+        lams = np.asarray(lams, dtype=np.float64)
+        if lams.size == 0:
+            continue
+        rows, cols = expected_feature_xy_oriented(
+            spectrograph, int(fiber), int(od), lams
+        )
+        for lam, r_exp, c_exp in zip(lams, rows, cols):
+            if not (np.isfinite(lam) and np.isfinite(r_exp) and np.isfinite(c_exp)):
+                continue
+            if y_min is not None and float(r_exp) < float(y_min):
+                continue
+            if y_max is not None and float(r_exp) > float(y_max):
+                continue
+            r0i = int(np.clip(np.rint(r_exp), 0, ny - 1))
+            c0i = int(np.clip(np.rint(c_exp), 0, nx - 1))
+            rlo, rhi = max(0, r0i - hw), min(ny, r0i + hw + 1)
+            clo, chi = max(0, c0i - hw), min(nx, c0i + hw + 1)
+            stamp = img[rlo:rhi, clo:chi]
+            nan_row = {
+                "order": int(od),
+                "lam_true_um": float(lam),
+                "row_expected": float(r_exp),
+                "col_expected": float(c_exp),
+                "row_fit": float("nan"),
+                "col_fit": float("nan"),
+                "a_fit": float("nan"),
+                "b_fit": float("nan"),
+                "pa_fit_rad": float("nan"),
+                "amp_fit": float("nan"),
+                "row_err": float("nan"),
+                "col_err": float("nan"),
+                "success": False,
+                "residual_rms": float("nan"),
+                "n_pix": int(stamp.size),
+            }
+            if stamp.size < 9 or not np.isfinite(stamp).any() or float(np.nanmax(stamp)) <= 0:
+                out.append(nan_row)
+                continue
+            yy, xx = np.mgrid[rlo:rhi, clo:chi]
+            amp0 = float(np.nanmax(stamp))
+            g_init = models.Gaussian2D(
+                amplitude=amp0,
+                x_mean=float(c_exp),
+                y_mean=float(r_exp),
+                x_stddev=float(x_stddev_seed),
+                y_stddev=float(y_stddev_seed),
+                theta=float(theta_seed),
+                bounds={
+                    "amplitude": (0.0, np.inf),
+                    "x_mean": (float(clo), float(chi - 1)),
+                    "y_mean": (float(rlo), float(rhi - 1)),
+                    "x_stddev": (0.2, float(hw)),
+                    "y_stddev": (0.2, float(hw)),
+                },
+            )
+            try:
+                g_fit = fitter(g_init, xx, yy, stamp, maxiter=200)
+            except Exception:
+                out.append(nan_row)
+                continue
+            col_f = float(g_fit.x_mean.value)
+            row_f = float(g_fit.y_mean.value)
+            sx = float(abs(g_fit.x_stddev.value))
+            sy = float(abs(g_fit.y_stddev.value))
+            pa = float(g_fit.theta.value)
+            a_f, b_f, pa_f = _canonicalize_ellipse_ab_pa(sx, sy, pa)
+            model = g_fit(xx, yy)
+            resid = stamp - model
+            m = np.isfinite(resid)
+            rms = float(np.sqrt(np.mean(resid[m] ** 2))) if int(m.sum()) else float("nan")
+            row_err = col_err = float("nan")
+            cov = getattr(fitter, "fit_info", {}).get("param_cov")
+            # Gaussian2D param order: amplitude, x_mean, y_mean, x_stddev, y_stddev, theta
+            if cov is not None and np.shape(cov) == (6, 6):
+                col_err = float(np.sqrt(max(cov[1, 1], 0.0)))
+                row_err = float(np.sqrt(max(cov[2, 2], 0.0)))
+            success = bool(
+                np.isfinite(row_f)
+                and np.isfinite(col_f)
+                and abs(row_f - float(r_exp)) < hw
+                and abs(col_f - float(c_exp)) < hw
+                and rms < 0.5 * amp0
+            )
+            out.append(
+                {
+                    "order": int(od),
+                    "lam_true_um": float(lam),
+                    "row_expected": float(r_exp),
+                    "col_expected": float(c_exp),
+                    "row_fit": row_f,
+                    "col_fit": col_f,
+                    "a_fit": a_f,
+                    "b_fit": b_f,
+                    "pa_fit_rad": pa_f,
+                    "amp_fit": float(g_fit.amplitude.value),
+                    "row_err": row_err,
+                    "col_err": col_err,
+                    "success": success,
+                    "residual_rms": rms,
+                    "n_pix": int(stamp.size),
+                }
+            )
+    return out
+
+
+def lfc_fitparams_from_2d_gaussian_fits(
+    fits: list[dict[str, Any]],
+    *,
+    nu0: float,
+    delta_nu: float,
+    wave_by_order: dict[int, np.ndarray] | None = None,
+):
+    """
+    Build an ``lfc_fitparams`` table from :func:`fit_lfc_spots_astropy_gaussian2d`.
+
+    ``MU_PIX`` is the spectral-row centroid (``row_fit``). ``WAVE`` / ``MODE_NUM``
+    come from the exact comb wavelength. ``FWHM_PIX`` is ``2.355 * a_fit``
+    (semimajor 1-σ → FWHM). Extra columns ``COL_PIX`` / ``A_PIX`` / ``B_PIX`` /
+    ``PA_RAD`` are kept for diagnostics; the wavesol primitive ignores them.
+    """
+    from astropy.table import Table
+
+    from ..primitives.line_fitting.fit_lfc_lines_primitive import _get_closest_lfc_mode
+    from ..primitives.utils.spectral_utils import delta_pix_to_delta_wave
+
+    rows: list[dict[str, Any]] = []
+    for f in fits:
+        if not f.get("success"):
+            continue
+        mu = float(f["row_fit"])
+        lam = float(f["lam_true_um"])
+        if not (np.isfinite(mu) and np.isfinite(lam)):
+            continue
+        line_wave, _, mode_num = _get_closest_lfc_mode(nu0, delta_nu, lam)
+        a = float(f["a_fit"])
+        fwhm = 2.354820045 * a if np.isfinite(a) else float("nan")
+        mu_err = float(f["row_err"]) if np.isfinite(f.get("row_err", np.nan)) else 0.01
+        amp = float(f["amp_fit"])
+        od = int(f["order"])
+        r = {
+            "ORDER": od,
+            "AMPLITUDE": amp,
+            "AMPLITUDE_ERR": 0.0,
+            "MU_PIX": mu,
+            "MU_ERR_PIX": mu_err,
+            "FWHM_PIX": fwhm,
+            "FWHM_ERR_PIX": 0.0,
+            "B": 0.0,
+            "B_ERR": 0.0,
+            "WAVE": float(line_wave),
+            "MODE_NUM": int(mode_num),
+            "FWHM_WAVE": float("nan"),
+            "FWHM_ERR_WAVE": 0.0,
+            "MU_ERR_WAVE": float("nan"),
+        }
+        if wave_by_order is not None and od in wave_by_order:
+            wave = np.asarray(wave_by_order[od], dtype=float)
+            if wave.size and np.isfinite(mu):
+                r["FWHM_WAVE"] = abs(delta_pix_to_delta_wave(fwhm, mu, wave))
+                r["MU_ERR_WAVE"] = abs(delta_pix_to_delta_wave(mu_err, mu, wave))
+        if not np.isfinite(r["MU_ERR_WAVE"]) or r["MU_ERR_WAVE"] <= 0:
+            r["MU_ERR_WAVE"] = 1.0e-7
+        if not np.isfinite(r["FWHM_WAVE"]):
+            r["FWHM_WAVE"] = 0.0
+        rows.append(r)
+    if not rows:
+        return Table(
+            names=[
+                "AMPLITUDE",
+                "AMPLITUDE_ERR",
+                "MU_PIX",
+                "MU_ERR_PIX",
+                "MU_ERR_WAVE",
+                "FWHM_PIX",
+                "FWHM_ERR_PIX",
+                "FWHM_WAVE",
+                "FWHM_ERR_WAVE",
+                "B",
+                "B_ERR",
+                "MODE_NUM",
+                "WAVE",
+                "ORDER",
+            ]
+        )
+    tbl = Table(rows)
+    tbl.sort(["ORDER", "MU_PIX"])
+    return tbl
 
 
 def measure_lfc_spots_elliptical(

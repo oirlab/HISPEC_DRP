@@ -107,9 +107,9 @@ class FitEtalonLinesPrimitive(BasePrimitive):
                         'FWHM_ERR_PIX' : _fit_results[i].fwhm_err,
                     }
                     r['WAVE'] = np.interp(r['MU_PIX'], xarr, wave[oi, :], left=np.nan, right=np.nan)
-                    r['FWHM_WAVE'] = delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :])
-                    r['FWHM_ERR_WAVE'] = delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :])
-                    r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
+                    r['FWHM_WAVE'] = abs(delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :]))
+                    r['FWHM_ERR_WAVE'] = abs(delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :]))
+                    r['MU_ERR_WAVE'] = abs(delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :]))
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
 

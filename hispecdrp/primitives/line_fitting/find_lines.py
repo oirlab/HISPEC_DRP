@@ -37,7 +37,8 @@ def find_emission_lines(
     background_filter_width : int | None = None, # Pixels
     centroid_num_pixels : int = 3,
     refine_with_centroid : bool = True,
-    drop_first_last : bool = True
+    drop_first_last : bool = True,
+    edge_margin_pix : int = 15
 ) -> tuple[np.ndarray, dict[str, np.ndarray] | None]:
     """
     Find the initial line positions using a peak finding algorithm followed by a centroid refinement (optional).
@@ -58,7 +59,16 @@ def find_emission_lines(
     refine_with_centroid : bool
         Whether to refine the line positions using centroid calculation.
     drop_first_last : bool
-        Whether to drop the first and last detected peaks (to avoid edge effects).
+        Whether to drop the first / last detected peaks when they lie
+        within ``edge_margin_pix`` of the array ends, where a line may be
+        truncated by the array boundary. Interior first / last peaks are
+        kept: dropping them by rank alone discards valid lines (e.g. the
+        first comb mode of an echelle order, typically hundreds of pixels
+        from the array edge) and needlessly shrinks the fitted range.
+    edge_margin_pix : int
+        Distance from the array ends within which a first / last peak is
+        considered possibly truncated. Default is 15 pixels (comparable
+        to typical Gaussian fit windows).
     """
 
     n_pix = len(spec)
@@ -90,10 +100,16 @@ def find_emission_lines(
         rel_height=0.5,
     )
 
-    # Optionally drop edges (might be noise)
-    # Safest for LFC/etalon spectra that might have a partial line at the edge.
-    if drop_first_last:
-        peaks = peaks[1:-1]  # Drop first and last peaks, possibly noise
+    # Optionally drop first / last peaks that may be truncated by the
+    # array boundary. Only their position justifies dropping them; a
+    # first / last peak well inside the array is a complete line.
+    if drop_first_last and peaks.size:
+        keep = np.ones(peaks.size, dtype=bool)
+        if peaks[0] < edge_margin_pix:
+            keep[0] = False
+        if peaks[-1] > n_pix - 1 - edge_margin_pix:
+            keep[-1] = False
+        peaks = peaks[keep]
     n_peaks = len(peaks)
 
     # NOTE: Keep plots here for debugging.
