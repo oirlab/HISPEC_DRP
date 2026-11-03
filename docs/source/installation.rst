@@ -182,5 +182,5 @@ VizieR (``II/246``) as fallback.
   query to a local or institutional mirror (for example an on-site Gaia DR3 server).
 
 - **HISPEC_DRP_VIZIER_TIMEOUT** (Optional)
-  Per-request timeout in seconds. Default: 60. Values that are not positive numbers are
-  ignored. Lower it to fail over to the next mirror faster on a slow connection.
+  Per-request timeout in seconds. Default: 3. Values that are not positive numbers are
+  ignored. Raise it if a slow but working mirror needs more time to respond.

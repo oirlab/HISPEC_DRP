@@ -45,7 +45,7 @@ VIZIER_MIRRORS = [
 # Per-request socket timeout (seconds). A finite timeout is what makes the mirror
 # fallback effective: astroquery's default can leave a stalled mirror blocking
 # indefinitely, so the remaining servers are never tried.
-VIZIER_TIMEOUT_DEFAULT = 60.0
+VIZIER_TIMEOUT_DEFAULT = 3.0
 
 # Number of full passes over the mirror list before giving up.
 VIZIER_MAX_ROUNDS_DEFAULT = 4
