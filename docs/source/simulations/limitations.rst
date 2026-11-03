@@ -27,7 +27,8 @@ Network dependencies
 
 Default E2E runs query:
 
-* **VizieR** — Gaia DR3 and 2MASS (via :mod:`hispecdrp.primitives.utils.gaia_query` and
+* **ESA Gaia Archive (TAP) / VizieR** — Gaia DR3 via TAP with VizieR fallback, and
+  2MASS via VizieR (via :mod:`hispecdrp.primitives.utils.gaia_query` and
   :mod:`hispecdrp.simulations.e2e_gaia`)
 * **KOA** — optional stage-0 calibrations when ``use_master_calibrations=True``
 * **Google Drive** — HDF instrument model auto-download on first use

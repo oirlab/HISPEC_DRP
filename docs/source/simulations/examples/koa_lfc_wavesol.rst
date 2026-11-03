@@ -18,9 +18,9 @@ Section 2 downloads the KOA ``lfc_wavesol``. Section 3 makes the same
 
    <p class="download-notebook">
      <a class="download-notebook-btn"
-        href="../../_static/notebooks/koa_lfc_wavesol_example.ipynb"
-        data-notebook-download="koa_lfc_wavesol_example.ipynb"
-        download="koa_lfc_wavesol_example.ipynb">Download as notebook</a>
+        href="../../_static/notebooks/lfc_wavesol_example.ipynb"
+        data-notebook-download="lfc_wavesol_example.ipynb"
+        download="lfc_wavesol_example.ipynb">Download as notebook</a>
    </p>
 
 .. warning::
@@ -56,7 +56,7 @@ Imports and output directory
 
    from hispecdrp.simulations.e2e_pipeline import resolve_lfc_fiber_object
 
-   OUT = Path("/path/to/hispec_koa_lfc_wavesol_example")
+   OUT = Path("/path/to/hispec_lfc_wavesol_example")
    OUT.mkdir(parents=True, exist_ok=True)
    os.environ.setdefault("KOA_CALIBRATION_CACHE", str(OUT / "cals" / "KOA_CALIBRATION_CACHE"))
 
