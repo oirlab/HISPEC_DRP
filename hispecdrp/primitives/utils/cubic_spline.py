@@ -8,6 +8,12 @@ __all__ = [
     "cubic_spline_eval",
     "cubic_spline_eval_scalar",
     "cubic_spline_eval_scalar_arrays",
+    "cubic_spline2d_build",
+    "cubic_spline2d_eval",
+    "cubic_spline2d_eval_cell",
+    "cubic_spline2d_eval_grid",
+    "cubic_spline2d_eval_scalar",
+    "cubic_spline2d_eval_scalar_arrays",
     "doppler_paint_cubic_spline",
 ]
 
@@ -251,6 +257,182 @@ def cubic_spline_eval(cache : tuple, xq : np.ndarray):
         # (no need to walk backwards: xq is sorted ascending)
         t = xx - xk[i]
         out[k] = a[i] + t * (b[i] + t * (c[i] + t * d[i]))
+    return out
+
+
+@njit(cache=True)
+def cubic_spline2d_build(x : np.ndarray, y : np.ndarray, z : np.ndarray):
+    """
+    Build & cache the tensor-product not-a-knot cubic spline of a 2D grid.
+
+    The knot slopes come from the 1D not-a-knot solver: along each row
+    (d/dx), along each column (d/dy), and along each column of the x-slopes
+    (d2/dxdy). Together with the values these define a bicubic patch on
+    every cell, which is exactly the tensor-product spline.
+
+    Returns a tuple (x, y, z, zx, zy, zxy) — pass this same tuple to the
+    2D eval funcs. Call once; reuse for many evaluations.
+
+    Requires at least 3 knots along each axis.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        1D array of strictly increasing knot locations along the columns (length Ncols).
+    y : np.ndarray
+        1D array of strictly increasing knot locations along the rows (length Nrows).
+    z : np.ndarray
+        2D array of knot values with shape (Nrows, Ncols), z[j, i] at (x[i], y[j]).
+    """
+    Nrows, Ncols = z.shape
+    zx = np.empty((Nrows, Ncols))
+    zy = np.empty((Nrows, Ncols))
+    zxy = np.empty((Nrows, Ncols))
+    for j in range(Nrows):
+        zx[j, :] = _solve_slopes_not_a_knot(x, z[j, :].copy())
+    for i in range(Ncols):
+        zy[:, i] = _solve_slopes_not_a_knot(y, z[:, i].copy())
+        zxy[:, i] = _solve_slopes_not_a_knot(y, zx[:, i].copy())
+    return x, y, z, zx, zy, zxy
+
+
+@njit(cache=True, nogil=True, inline="always")
+def _cubic_from_ends(f0 : float, s0 : float, f1 : float, s1 : float, h : float, t : float):
+    """
+    Cubic through (0, f0) and (h, f1) with end slopes s0 and s1, evaluated at offset t
+    from the left end. Same Horner coefficients as `_coeffs_from_slopes`, so extrapolation
+    far outside the segment does not lose precision.
+    """
+    dd = (f1 - f0) / h
+    c = (3.0 * dd - 2.0 * s0 - s1) / h
+    d = (s0 + s1 - 2.0 * dd) / (h * h)
+    return f0 + t * (s0 + t * (c + t * d))
+
+
+@njit(cache=True, nogil=True, inline="always")
+def cubic_spline2d_eval_scalar_arrays(
+    xk: np.ndarray,
+    yk: np.ndarray,
+    z: np.ndarray,
+    zx: np.ndarray,
+    zy: np.ndarray,
+    zxy: np.ndarray,
+    xq: float,
+    yq: float,
+) -> float:
+    """Evaluate a 2D spline from unpacked arrays (Numba-friendly)."""
+    i = _find_segment(xk, xq)
+    j = _find_segment(yk, yq)
+    return cubic_spline2d_eval_cell(
+        z, zx, zy, zxy, i, j, xk[i + 1] - xk[i], yk[j + 1] - yk[j], xq - xk[i], yq - yk[j]
+    )
+
+
+@njit(cache=True, nogil=True, inline="always")
+def cubic_spline2d_eval_cell(
+    z: np.ndarray,
+    zx: np.ndarray,
+    zy: np.ndarray,
+    zxy: np.ndarray,
+    i: int,
+    j: int,
+    hx: float,
+    hy: float,
+    tx: float,
+    ty: float,
+) -> float:
+    """
+    Evaluate a 2D spline (unpacked from `cubic_spline2d_build`) on a known cell (Numba-friendly).
+
+    The cell spans knots i, i+1 along x (width hx) and j, j+1 along y (width hy); tx and ty are the
+    offsets of the query point from knot (i, j). Use this when the cell is known without a search,
+    e.g. on a uniform grid; offsets outside [0, hx] x [0, hy] extrapolate that cell's bicubic.
+    """
+    # Interpolate values and y-slopes along x on rows j and j+1, then along y
+    v0 = _cubic_from_ends(z[j, i], zx[j, i], z[j, i + 1], zx[j, i + 1], hx, tx)
+    v1 = _cubic_from_ends(z[j + 1, i], zx[j + 1, i], z[j + 1, i + 1], zx[j + 1, i + 1], hx, tx)
+    s0 = _cubic_from_ends(zy[j, i], zxy[j, i], zy[j, i + 1], zxy[j, i + 1], hx, tx)
+    s1 = _cubic_from_ends(zy[j + 1, i], zxy[j + 1, i], zy[j + 1, i + 1], zxy[j + 1, i + 1], hx, tx)
+    return _cubic_from_ends(v0, s0, v1, s1, hy, ty)
+
+
+@njit(cache=True)
+def cubic_spline2d_eval_scalar(cache : tuple, xq : float, yq : float):
+    """
+    Evaluate the cached 2D spline at a single point.
+    Points outside the knot range are extrapolated with the end cubics.
+
+    Parameters
+    ----------
+    cache : tuple
+        The tuple returned by `cubic_spline2d_build`.
+    xq : float
+        The query x location.
+    yq : float
+        The query y location.
+
+    Returns
+    -------
+    float
+        The spline value at the query point.
+    """
+    xk, yk, z, zx, zy, zxy = cache
+    return cubic_spline2d_eval_scalar_arrays(xk, yk, z, zx, zy, zxy, xq, yq)
+
+
+@njit(cache=True)
+def cubic_spline2d_eval(cache : tuple, xq : np.ndarray, yq : np.ndarray):
+    """
+    Evaluate the cached 2D spline at an array of points (xq[k], yq[k]), in any order.
+    Points outside the knot range are extrapolated with the end cubics.
+
+    Parameters
+    ----------
+    cache : tuple
+        The tuple returned by `cubic_spline2d_build`.
+    xq : np.ndarray
+        1D array of query x locations.
+    yq : np.ndarray
+        1D array of query y locations, same length as xq.
+
+    Returns
+    -------
+    np.ndarray
+        The spline values at the query points.
+    """
+    xk, yk, z, zx, zy, zxy = cache
+    m = xq.shape[0]
+    out = np.empty(m)
+    for k in range(m):
+        out[k] = cubic_spline2d_eval_scalar_arrays(xk, yk, z, zx, zy, zxy, xq[k], yq[k])
+    return out
+
+
+@njit(cache=True)
+def cubic_spline2d_eval_grid(cache : tuple, xq : np.ndarray, yq : np.ndarray):
+    """
+    Evaluate the cached 2D spline on the grid of all (xq[i], yq[j]).
+    Points outside the knot range are extrapolated with the end cubics.
+
+    Parameters
+    ----------
+    cache : tuple
+        The tuple returned by `cubic_spline2d_build`.
+    xq : np.ndarray
+        1D array of query x locations (length Ncols).
+    yq : np.ndarray
+        1D array of query y locations (length Nrows).
+
+    Returns
+    -------
+    np.ndarray
+        The spline values with shape (Nrows, Ncols), out[j, i] at (xq[i], yq[j]).
+    """
+    xk, yk, z, zx, zy, zxy = cache
+    out = np.empty((yq.shape[0], xq.shape[0]))
+    for j in range(yq.shape[0]):
+        for i in range(xq.shape[0]):
+            out[j, i] = cubic_spline2d_eval_scalar_arrays(xk, yk, z, zx, zy, zxy, xq[i], yq[j])
     return out
 
 
