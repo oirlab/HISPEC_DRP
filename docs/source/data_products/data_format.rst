@@ -16,13 +16,27 @@ HISPEC Echellogram Layout
    :alt: HISPEC echellogram data format.
    :width: 100%
 
+- Spectra are dispersed in the vertical direction (along detector columns) and the red end of the spectrum is on the right side of the detector.
+
 - Fibers are named 1, 2, and 3 from left to right when viewing the echellogram with orders oriented vertically and the red end of the spectrum on the right.
 
 - Individual fibers are spectrally shifted with respect to each other for the same detector row. For BSPEC, fibers 2 and 3 are shifted by ~ -63 km/s and -126 km/s, respectively, relative to fiber 1. For RSPEC, fibers 2 and 3 are shifted by ~ -79 km/s and -158 km/s, respectively, relative to fiber 1.
 
+- Readout channels are 64 pixels wide and are orientated vertically, so echelle orders run parallel to the readout channels.
+
 - Level 0 data (rate maps) include the reference channel (65th channel) which has pixels insensitive to light and can be further used to characterize and diagnose detector systematics.
 
 - LFC modes are labeled according to the formula :math:`\nu_{n} = \nu_{0} + n \Delta\nu` where :math:`\nu_{0}` is the frequency of the LFC pump line, :math:`\Delta\nu` is the comb line spacing (constant in frequency), and :math:`n` is the mode number. Therefore, The LFC mode number :math:`n` is anti-correlated with wavelength.
+
+1D Spectra Format
++++++++++++++++++
+
+.. note::
+
+   **Orders are extracted from bottom-to-top in increasing pixel row number, which corresponds to decreasing wavelength. As a final step, the SpectralExtractionPrimitive flips the extracted spectra in wavelength so that the final extracted spectra are in increasing wavelength order.**
+
+- For 1D spectra, any quantities related to pixel locations are relative to the flipped axis (i.e., increasing pixel row number corresponds to increasing wavelength).
+
 
 
 

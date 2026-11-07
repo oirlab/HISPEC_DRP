@@ -15,14 +15,15 @@ Examples that exercise simulated calibration sources and related validations
    :maxdepth: 1
 
    simulated_lfc_spectrum
+   koa_lfc_wavesol
 
 Simulated Science Observations
 ------------------------------
 
 Examples that simulate science targets and reduce them through Stage 0–2
-(for example a Barnard's star PRV analog), ideal-spectrum line-mask RV
-validation on LSF-matched BSPEC WAVE, building CCF-opt delta masks from
-LSF-convolved ideal L2, plus Stage-0 rate/noise self-checks on realistic UTRs.
+(for example a Barnard's star PRV analog), ideal-spectrum and step-by-step RV
+recovery on native L2 / rate-map / UTR paths, building CCF-opt delta masks,
+plus Stage-0 rate/noise self-checks on realistic UTRs.
 
 .. toctree::
    :maxdepth: 1
@@ -30,4 +31,5 @@ LSF-convolved ideal L2, plus Stage-0 rate/noise self-checks on realistic UTRs.
    stage0_rate_noise_selfcheck
    build_ccfopt_mask_ideal_spectrum
    ideal_spectrum_rv_recovery
+   rv_recovery
    barnards_star_prv_example

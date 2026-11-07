@@ -223,6 +223,9 @@ __all__ = [
     "run_stage0_simulation",
     "run_fiberflat_pipeline",
     "create_wavelength_solution_model_from_sim",
+    "stack_wavelength_solution_rows",
+    "wavelength_arrays_from_simulate_rate_map",
+    "apply_simulate_rate_map_wavelength_solution",
     "register_sim_lfc_wavesol",
     "register_sim_matched_nonlin",
     "register_sim_stage1_calibrations",
@@ -230,6 +233,103 @@ __all__ = [
     "get_fiberflat_primitives",
     "get_fiberflat_prim_args",
 ]
+
+
+def stack_wavelength_solution_rows(
+    ws_fiber: dict,
+    order_list: list[int] | tuple[int, ...],
+    *,
+    n_pix: int | None = None,
+) -> np.ndarray:
+    """
+    Stack one fiber's ``get_wavelength_solution`` dict into ``(n_order, n_pix)``.
+
+    Rows follow ``order_list``. Missing orders are NaN so the array stays aligned
+    with ``HISPECConfig.get_order_list`` / ``make_order_vec``.
+    """
+    orders = [int(o) for o in order_list]
+    if n_pix is None:
+        n_pix = 4096
+        for od in orders:
+            block = ws_fiber.get(od) or ws_fiber.get(int(od))
+            if not isinstance(block, dict):
+                continue
+            w = block.get("wavelength")
+            if w is not None:
+                n_pix = int(np.asarray(w).size)
+                break
+    out = np.full((len(orders), int(n_pix)), np.nan, dtype=np.float64)
+    for i, od in enumerate(orders):
+        block = ws_fiber.get(od) or ws_fiber.get(int(od))
+        if not isinstance(block, dict):
+            continue
+        w = np.asarray(block.get("wavelength"), dtype=np.float64).ravel()
+        if w.size == 0:
+            continue
+        n = min(w.size, out.shape[1])
+        out[i, :n] = w[:n]
+    return out
+
+
+def wavelength_arrays_from_simulate_rate_map(
+    spectrograph: str,
+    *,
+    fibers: list[int] | tuple[int, ...] | None = None,
+    srm: SimulateRateMap | None = None,
+) -> dict[int, np.ndarray]:
+    """
+    HDF ``WAVE`` arrays from :meth:`SimulateRateMap.get_wavelength_solution`.
+
+    This is the mock wavelength solution used by the simulated LFC example:
+    per-fiber ``(n_order, n_pix)`` in micron, rows aligned with
+    :meth:`~hispecdrp.datamodels.hispec_config.HISPECConfig.get_order_list`.
+    """
+    from ..datamodels import hispec_config
+
+    spectrograph = spectrograph.upper()
+    if srm is None:
+        srm = SimulateRateMap()
+    ws_dict = srm.get_wavelength_solution(spectrograph=spectrograph)
+    order_list = hispec_config.HISPECConfig.get_order_list(spectrograph)
+    if fibers is None:
+        fibers = tuple(int(f) for f in ws_dict)
+    out: dict[int, np.ndarray] = {}
+    for fiber in fibers:
+        fib = int(fiber)
+        if fib not in ws_dict or not ws_dict[fib]:
+            continue
+        out[fib] = stack_wavelength_solution_rows(ws_dict[fib], order_list)
+    return out
+
+
+def apply_simulate_rate_map_wavelength_solution(
+    model,
+    spectrograph: str,
+    *,
+    fibers: list[int] | tuple[int, ...] | None = None,
+    srm: SimulateRateMap | None = None,
+    overwrite_spec_dq: bool = False,
+) -> dict[int, np.ndarray]:
+    """
+    Write the HDF mock ``WAVE`` onto ``model.wave_fib*``.
+
+    Used when Stage 1 ``set_wavesol`` is skipped (no KOA ``lfc_wavesol``) so
+    :class:`~hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.FitLFCLinesPrimitive`
+    can assign LFC mode numbers from a known instrument-grid wavelength.
+    """
+    from ..datamodels import hispec_config
+
+    spectrograph = spectrograph.upper()
+    arrays = wavelength_arrays_from_simulate_rate_map(
+        spectrograph, fibers=fibers, srm=srm
+    )
+    hispec_config.HISPECConfig.sync_echelle_orders_for_spectrograph(model, spectrograph)
+    for fiber, wave_arr in arrays.items():
+        setattr(model, f"wave_fib{fiber}", wave_arr)
+        dq_attr = f"spec_dq_fib{fiber}"
+        if overwrite_spec_dq or getattr(model, dq_attr, None) is None:
+            setattr(model, dq_attr, np.zeros(wave_arr.shape, dtype=np.uint32))
+    return arrays
 
 
 def create_wavelength_solution_model_from_sim(
@@ -257,12 +357,7 @@ def create_wavelength_solution_model_from_sim(
     from ..datamodels import hispec_config
     from ..datamodels.lfcwavesol import LFCWavesolModel
 
-    srm = SimulateRateMap()
-    ws_dict = srm.get_wavelength_solution(spectrograph=spectrograph)
     spectrograph = spectrograph.upper()
-    order_list = hispec_config.HISPECConfig.get_order_list(spectrograph)
-
-    # Use the real HISPEC instrument config (provides metadata schema, num_fibers, etc.)
     model_meta = {"spectrograph": spectrograph}
     if meta:
         model_meta.update(meta)
@@ -270,22 +365,11 @@ def create_wavelength_solution_model_from_sim(
         config=hispec_config.HISPECConfig,
         meta=model_meta,
     )
-    for fiber in (1, 2, 3):
-        if fiber not in ws_dict or not ws_dict[fiber]:
-            continue
-        wave_rows = []
-        for o in order_list:
-            if o not in ws_dict[fiber]:
-                break
-            wave_rows.append(ws_dict[fiber][o]["wavelength"])
-        if wave_rows:
-            wave_arr = np.stack(wave_rows, axis=0).astype(np.float64)
-            setattr(wavesol_model, f"wave_fib{fiber}", wave_arr)
-            setattr(
-                wavesol_model,
-                f"spec_dq_fib{fiber}",
-                np.zeros(wave_arr.shape, dtype=np.uint32),
-            )
+    apply_simulate_rate_map_wavelength_solution(
+        wavesol_model,
+        spectrograph,
+        overwrite_spec_dq=True,
+    )
     return wavesol_model
 
 

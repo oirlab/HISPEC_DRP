@@ -25,7 +25,9 @@ source_params = {
     "source_id_2mass" : "20004370+2242391",
 }
 
+@pytest.mark.slow
 def test_gaia_query_auto():
+    """Live Gaia TAP (VizieR fallback) lookup via RampModel meta population."""
     meta = {
         'target_gaia_id': source_params["source_id"]
     }
@@ -45,7 +47,9 @@ def test_gaia_query_auto():
     # Check 2mass cross match
     assert model.meta.target_2mass_id == source_params["source_id_2mass"]
 
+@pytest.mark.slow
 def test_gaia_query_by_coordinates():
+    """Live coordinate cone search (TAP default, VizieR fallback)."""
     _id, ra, dec = source_params["source_id"], source_params["ra"], source_params["dec"]
     epoch = source_params["epoch"]
     radial_velocity = source_params["radial_velocity"]
@@ -70,7 +74,9 @@ def test_gaia_query_by_coordinates():
     assert 0 < result["dec_error"] < 1.0
 
 
+@pytest.mark.slow
 def test_gaia_query_by_source_id():
+    """Live Gaia DR3 source_id query (TAP default, VizieR fallback)."""
     _id, ra, dec = source_params["source_id"], source_params["ra"], source_params["dec"]
     result = get_stellar_data_gaia_from_source_id(_id)
 
@@ -86,7 +92,9 @@ def test_gaia_query_by_source_id():
     assert 0 < result["dec_error"] < 1.0
 
 
+@pytest.mark.slow
 def test_gaia_to_2mass_crossmatch():
+    """Live Gaia→2MASS crossmatch (TAP neighbour + VizieR PSC)."""
     _id = source_params["source_id"]
 
     result = get_2mass_from_gaia(_id)
@@ -98,7 +106,9 @@ def test_gaia_to_2mass_crossmatch():
     assert twomass_id == source_params["source_id_2mass"]
 
 
+@pytest.mark.slow
 def test_gaia_to_2mass_fallback_path():
+    """Live Gaia→2MASS with tiny radius to exercise cone-search fallback."""
     # Use an artificially tiny radius to force fallback behavior to matter
     _id = source_params["source_id"]
 
@@ -109,6 +119,106 @@ def test_gaia_to_2mass_fallback_path():
 
     twomass_id = result["twomass_id"]
     assert twomass_id == source_params["source_id_2mass"]
+
+
+# --- Gaia backend selection + TAP→VizieR fallback (offline; no network) -----------
+
+def test_gaia_backend_env_override(monkeypatch):
+    monkeypatch.delenv("HISPEC_DRP_GAIA_BACKEND", raising=False)
+    assert gaia_query.gaia_backend() == "auto"
+
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "TAP")
+    assert gaia_query.gaia_backend() == "tap"
+
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "vizier")
+    assert gaia_query.gaia_backend() == "vizier"
+
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "not-a-backend")
+    assert gaia_query.gaia_backend() == "auto"
+
+
+def test_query_gaia_dr3_falls_back_to_vizier_when_tap_fails(monkeypatch):
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "auto")
+    monkeypatch.setattr(
+        gaia_query,
+        "_query_gaia_dr3_tap",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("TAP down")),
+    )
+    vizier_row = Table(
+        {
+            "Source": [1827242816201846144],
+            "RA_ICRS": [300.182],
+            "DE_ICRS": [22.711],
+            "Plx": [50.57],
+        }
+    )
+
+    def fake_vizier(**kwargs):
+        return vizier_row
+
+    monkeypatch.setattr(gaia_query, "_query_gaia_dr3_vizier", fake_vizier)
+
+    result = gaia_query._query_gaia_dr3(source_id="1827242816201846144", row_limit=1)
+    assert result is not None
+    assert result["source_id"] == "1827242816201846144"
+    assert result["parallax"] == pytest.approx(50.57)
+
+
+def test_query_gaia_dr3_uses_tap_when_available(monkeypatch):
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "auto")
+    tap_row = Table(
+        {
+            "source_id": [1827242816201846144],
+            "ra": [300.182],
+            "dec": [22.711],
+            "parallax": [50.57],
+            "ref_epoch": [2016.0],
+        }
+    )
+    called = {"vizier": False}
+
+    monkeypatch.setattr(
+        gaia_query, "_query_gaia_dr3_tap", lambda **kwargs: tap_row
+    )
+
+    def boom(**kwargs):
+        called["vizier"] = True
+        raise AssertionError("VizieR should not be called when TAP succeeds")
+
+    monkeypatch.setattr(gaia_query, "_query_gaia_dr3_vizier", boom)
+
+    result = gaia_query._query_gaia_dr3(source_id="1827242816201846144", row_limit=1)
+    assert result is not None
+    assert result["source_id"] == "1827242816201846144"
+    assert result["parallax"] == pytest.approx(50.57)
+    assert called["vizier"] is False
+
+
+def test_query_gaia_dr3_vizier_only_skips_tap(monkeypatch):
+    monkeypatch.setenv("HISPEC_DRP_GAIA_BACKEND", "vizier")
+    called = {"tap": False}
+    vizier_row = Table(
+        {
+            "Source": [1],
+            "RA_ICRS": [10.0],
+            "DE_ICRS": [20.0],
+            "Plx": [1.0],
+        }
+    )
+
+    def boom_tap(**kwargs):
+        called["tap"] = True
+        raise AssertionError("TAP should not be called for vizier backend")
+
+    monkeypatch.setattr(gaia_query, "_query_gaia_dr3_tap", boom_tap)
+    monkeypatch.setattr(
+        gaia_query, "_query_gaia_dr3_vizier", lambda **kwargs: vizier_row
+    )
+
+    result = gaia_query._query_gaia_dr3(source_id=1, row_limit=1)
+    assert result is not None
+    assert result["source_id"] == "1"
+    assert called["tap"] is False
 
 
 # --- VizieR mirror-fallback layer (offline; no network) ----------------------------
@@ -252,16 +362,19 @@ def test_query_vizier_rejects_ambiguous_arguments():
         gaia_query.query_vizier(catalog="II/246", center=object())
 
 
-def test_importing_hispecdrp_does_not_import_astroquery_vizier():
-    """``astroquery.vizier`` must stay lazy: importing it can hang (issue #201)."""
+def test_importing_hispecdrp_does_not_import_astroquery_catalogs():
+    """``astroquery.vizier`` / ``astroquery.gaia`` must stay lazy (issue #201)."""
     code = (
         "import sys, hispecdrp; "
-        "print('astroquery.vizier' in sys.modules)"
+        "print("
+        "'astroquery.vizier' in sys.modules, "
+        "'astroquery.gaia' in sys.modules"
+        ")"
     )
     out = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
-    assert out.stdout.strip().endswith("False")
+    assert out.stdout.strip().endswith("False False")
 
 def test_linear_pm_epoch_shift_offline():
     """First-order PM shift is pure arithmetic (no network / ERFA)."""

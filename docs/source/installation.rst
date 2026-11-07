@@ -163,12 +163,18 @@ Calibrations
   Skip generation of calibration versions when generating filenames even if KOA_CALIBRATION_CACHE is set. If this is not set, the behavior is determined by KOA_CALIBRATION_CACHE.
 
 
-Catalog queries (VizieR)
-++++++++++++++++++++++++
+Catalog queries (Gaia / VizieR)
+++++++++++++++++++++++++++++++
 
-Gaia DR3 and 2MASS lookups go through VizieR. Each query clears the ``astroquery``
-cache, then tries the mirror servers in order until one responds, repeating the whole
-list up to four times before giving up.
+Gaia DR3 lookups use the ESA Gaia Archive TAP service
+(``astroquery.gaia``) by default. If TAP fails or returns no rows, the DRP falls
+back to VizieR mirrors of Gaia DR3. 2MASS counterparts prefer the TAP
+``tmass_psc_xsc`` cross-match joined to ``gaiadr1.tmass_original_valid``, with
+VizieR (``II/246``) as fallback.
+
+- **HISPEC_DRP_GAIA_BACKEND** (Optional)
+  ``auto`` (default), ``tap``, or ``vizier``. ``auto`` tries ESA TAP then VizieR;
+  ``tap`` / ``vizier`` force a single backend.
 
 - **HISPEC_DRP_VIZIER_MIRRORS** (Optional)
   Comma-separated VizieR hostnames to try, in order. Default: the CDS, NAOJ, CfA,
@@ -176,5 +182,5 @@ list up to four times before giving up.
   query to a local or institutional mirror (for example an on-site Gaia DR3 server).
 
 - **HISPEC_DRP_VIZIER_TIMEOUT** (Optional)
-  Per-request timeout in seconds. Default: 60. Values that are not positive numbers are
-  ignored. Lower it to fail over to the next mirror faster on a slow connection.
+  Per-request timeout in seconds. Default: 3. Values that are not positive numbers are
+  ignored. Raise it if a slow but working mirror needs more time to respond.

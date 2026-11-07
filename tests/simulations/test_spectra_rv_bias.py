@@ -33,6 +33,7 @@ from hispecdrp.utils.line_mask_utils import (
 LTE040 = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5"
 SPECTROGRAPH = "BSPEC"
 FIBER = 1
+# Coarse subset of the documented -50..+50 km/s / 1 km/s notebook grid.
 NOTEBOOK_BULK_RV_KM_S = (0.0, 10.0, 20.0, 30.0, 40.0, 50.0)
 TARGET_MAX_BIAS_MM_S = 100.0
 
