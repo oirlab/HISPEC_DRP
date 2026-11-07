@@ -48,7 +48,7 @@ class HISPECConfig:
             'delta_nu' : 20E9, # Hz
         },
         'LFC-R' : {
-            'nu0' : scipy.constants.c / (1559.91370 * 1E-9), # Hz
+            'nu0' : scipy.constants.c / (1559.914 * 1E-9), # Hz
             'delta_nu' : 16E9, # Hz
         },
     }
