@@ -25,12 +25,18 @@ logger = logging.getLogger(__name__)
 DEFAULT_RATE_MAP_FILENAME = "rate_map.fits"
 DEFAULT_PYECHELLE_FILENAME = "pyechelle_out.fits"
 
-from numba import njit
+from numba import njit, prange
+
+from hispecdrp.primitives.utils.cubic_spline import (
+    cubic_spline_build,
+    cubic_spline_eval,
+    cubic_spline_eval_scalar_arrays,
+)
+from hispecdrp.primitives.utils.linear_interp import linear_interp2d_eval_cell
 
 from scipy.interpolate import interp1d
 from scipy.interpolate import PchipInterpolator
 from scipy.interpolate import RegularGridInterpolator
-from scipy.optimize import brentq
 from scipy.signal import fftconvolve
 
 import astropy.units as u
@@ -300,8 +306,11 @@ class SimulateRateMap:
                                 reverse_spectral_axis : bool = True
                                 ) -> dict[int, dict[str, np.ndarray]]:
         """Get wavelength solution from HDF model file as a nested dictionary of the form:
-        {order_number: {'wavelengths': np.ndarray, 'x': np.ndarray, 'y': np.ndarray}}
-        where the wavelength, x, and y arrays are all 1D and correspond to each other.
+        {fiber: {order_number: {'pixel': np.ndarray, 'wavelength': np.ndarray}}}
+        giving the wavelength at each detector x pixel.
+
+        The wavelength at each pixel comes from a not-a-knot cubic spline of wavelength vs. x through
+        the HDF trace samples. Pixels outside the trace samples are extrapolated with the end cubics.
         """
         spectrograph = spectrograph.upper()
 
@@ -334,46 +343,25 @@ class SimulateRateMap:
                 ow = model_data[fiber_key][od]['xy_wavelengths']
                 ox = model_data[fiber_key][od]["x"]
 
-                # Interpolate wavelength as function of detector x pixel.
-                # HDF traces may not be strictly sorted in x and may contain duplicate x values,
-                # which breaks PchipInterpolator's requirement that x be strictly increasing.
+                # Interpolate wavelength as function of detector x pixel with a cubic spline through
+                # the trace samples. HDF traces may not be sorted in x, and the spline needs x
+                # strictly increasing.
                 ox = np.asarray(ox, dtype=np.float64)
                 ow = np.asarray(ow, dtype=np.float64)
                 good = np.isfinite(ox) & np.isfinite(ow)
                 ox = ox[good]
                 ow = ow[good]
-                if ox.size < 2:
+                if ox.size < 3:
                     raise ValueError(f"Not enough valid samples for fiber {fiber} order {od} wavelength solution.")
-                if len(np.unique(ow)) != len(ow):
-                    logger.warning(f"Duplicate wavelength values found for fiber {fiber} order {od}. This order will be skipped.")
+                sort = np.argsort(ox)
+                ox = ox[sort]
+                ow = ow[sort]
+                if np.any(np.diff(ox) <= 0):
+                    logger.warning(f"Duplicate x values found for fiber {fiber} order {od}. This order will be skipped.")
                     continue
 
-                fx = PchipInterpolator(ow, ox, extrapolate=True)
-
-                # PchipInterpolator is not invertible, so we need to find the inverse mapping by root-finding.
-                wmin, wmax = np.nanmin(ow), np.nanmax(ow)
-                xmin = fx(wmin)
-                xmax = fx(wmax)
-
-                # Ensure increasing order
-                if xmin > xmax:
-                    xmin, xmax = xmax, xmin
-                    wmin, wmax = wmax, wmin
-
-                targets = np.arange(4096)
-                inv_w = np.full_like(targets, np.nan, dtype=float)
-
-                for i, x in enumerate(targets):
-                    if np.isclose(x, xmin):
-                        inv_w[i] = wmin
-                    elif np.isclose(x, xmax):
-                        inv_w[i] = wmax
-                    elif xmin < x < xmax:
-                        inv_w[i] = brentq(lambda w: fx(w) - x, wmin, wmax)
-                    elif x < xmin:
-                        inv_w[i] = wmin
-                    elif x > xmax:
-                        inv_w[i] = wmax
+                # Not-a-knot cubic spline; pixels outside the trace samples are extrapolated with the end cubics
+                inv_w = cubic_spline_eval(cubic_spline_build(ox, ow), np.arange(4096, dtype=np.float64))
 
                 self.wavelength_solution[fiber][int(od)] = {
                     "pixel": np.arange(4096),
@@ -498,7 +486,8 @@ class SimulateRateMap:
         spectrograph: str = "BSPEC",
         save: bool = True,
         method: str = "prf_convolution",
-        apply_blaze: bool = True
+        apply_blaze: bool = True,
+        sampling_factor: float | None = 4,
     ) -> np.ndarray[np.float64]:
         """Create rate map using native model interpolation/convolution.
 
@@ -509,9 +498,14 @@ class SimulateRateMap:
         save : bool
             If True, saves the resulting rate map to output_directory. Default is True.
         method : str
-            Method to use for rate map generation. Options are 'bilinear_weights' or 'prf_convolution'. 'prf_convolution' is recommended.
+            Method to use for rate map generation. Options are 'bilinear_weights', 'prf_convolution' or 'prf_convolution_old'.
+            'prf_convolution_old' is the previous, much slower 'prf_convolution' implementation (linear in wavelength between PSFs, PCHIP trace).
         apply_blaze : bool
             If True, applies a sinc^2 blaze efficiency to the fiber flux to each order before simulation. Default is True.
+        sampling_factor : float or None
+            'prf_convolution' only: number of input-spectrum samples per detector pixel along each order's trace.
+            A continuous input spectrum is resampled onto this grid with a cubic spline, whether it is over- or
+            undersampled. If None, the input samples are used as is. Ignored for line lists. Default is 4.
         Returns
         -------
         rate_map : ndarray[float64]
@@ -524,10 +518,10 @@ class SimulateRateMap:
         if spectrograph not in ("BSPEC", "RSPEC"):
             raise ValueError("Spectrograph must be BSPEC or RSPEC!")
 
-        if method not in ("bilinear_weights", "prf_convolution"):
+        if method not in ("bilinear_weights", "prf_convolution", "prf_convolution_old"):
             raise ValueError(
-                "Method must be bilinear_weights or "
-                "prf_convolution (psf convolved with prf)!"
+                "Method must be bilinear_weights, "
+                "prf_convolution (psf convolved with prf) or prf_convolution_old!"
             )
 
         model = self.bspec_hdf_model if spectrograph == "BSPEC" else self.rspec_hdf_model
@@ -596,6 +590,18 @@ class SimulateRateMap:
                     groove_spacing=groove_spacing,
                     continuous=continuous
                 )
+            elif method == "prf_convolution_old":
+                self.rate_map = psf_prf_convolution_rate_map_old(
+                    wavelength,
+                    flux,
+                    model_data[fiber_key],
+                    detector_shape=detector_shape,
+                    pixelsize=pixelsize,
+                    apply_blaze=apply_blaze,
+                    blaze_angle=blaze_angle,
+                    groove_spacing=groove_spacing,
+                    continuous=continuous
+                )
             else:
                 self.rate_map = psf_prf_convolution_rate_map(
                     wavelength,
@@ -606,7 +612,8 @@ class SimulateRateMap:
                     apply_blaze=apply_blaze,
                     blaze_angle=blaze_angle,
                     groove_spacing=groove_spacing,
-                    continuous=continuous
+                    continuous=continuous,
+                    sampling_factor=sampling_factor,
                 )
 
             rate_map_array[i, :, :] = self.rate_map
@@ -881,7 +888,7 @@ def _deposit_oversampled_psf_numba(
                 det[i0 + 1, j0 + 1] += val * dy * dx
 
 
-def psf_prf_convolution_rate_map(
+def psf_prf_convolution_rate_map_old(
     wave: Quantity,
     flux: Quantity,
     orders: dict[str, dict],
@@ -1056,6 +1063,347 @@ def psf_prf_convolution_rate_map(
                 det[ylo_idx:yhi_idx, xlo_idx:xhi_idx] += valid_stamp * photons_per_s[i].value
 
     return det
+
+
+def psf_prf_convolution_rate_map(
+    wave: Quantity,
+    flux: Quantity,
+    orders: dict[str, dict],
+    detector_shape: tuple[int, int] = (4096, 4160),
+    pixelsize: float = 10.0,
+    apply_blaze: bool = True,
+    blaze_angle: Quantity = None,
+    groove_spacing: Quantity = None,
+    continuous: bool = True,
+    sampling_factor: float | None = 4,
+) -> np.ndarray[np.float64]:
+    """
+    Generate a detector rate map by convolving oversampled PSFs with the pixel response function (PRF),
+    and interpolating them for many trace positions across each order.
+
+    Same inputs and flux bookkeeping as the previous implementation, `psf_prf_convolution_rate_map_old`.
+    Differences from it:
+
+    - Trace positions x(lambda), y(lambda) use a not-a-knot cubic spline instead of PCHIP.
+    - Stamps are built (in parallel) and deposited in Numba rather than one interpolator call per
+      wavelength sample. As before, each stamp is the effective PSF (PSF
+      convolved with the PRF) shifted to the sample's pixel phase by bilinear interpolation.
+    - Between PSF wavelengths the effective PSF follows a not-a-knot cubic spline through the PSFs
+      (at every grid point) instead of a linear blend of the two bracketing PSFs, so it varies
+      smoothly with wavelength. Beyond the end PSFs it follows the end cubics.
+    - For an even oversampling factor, the effective PSFs are bilinearly interpolated by half a PSF
+      sample and cropped to an odd size, so they are centred on the trace position. The previous
+      implementation leaves them half a PSF sample (0.05 px at 10x) off.
+    - By default a continuous spectrum is resampled with a cubic spline onto sampling_factor samples
+      per detector pixel along each order's trace (see sampling_factor).
+
+    Parameters
+    ----------
+    wave : Quantity
+        Input wavelength samples.
+    flux : Quantity
+        Flux samples. If continuous=True, expressed as a photon rate density
+        (photons/s/unit wavelength) and integrated over each wavelength bin.
+        If continuous=False, expressed as a photon count RATE (photons/s) per
+        discrete line and used directly, with no bin-width integration.
+    orders : dict
+        Nested dictionary containing trace coordinates and PSF stamps.
+        Top level keys are order numbers (str).
+    detector_shape : tuple of int, optional
+        Detector pixels (ny, nx). Default = (4096, 4160).
+    pixelsize : float, optional
+        Pixel size in microns, used to determine oversampling.
+    apply_blaze : bool, optional
+        If True, applies a sinc^2 blaze efficiency to the flux for each order.
+    blaze_angle : Quantity, optional
+        Blaze angle of the echelle grating. Required if apply_blaze is True.
+    groove_spacing : Quantity, optional
+        Groove spacing of the echelle grating. Required if apply_blaze is True.
+    continuous : bool, optional
+        If True (default), flux is treated as a wavelength density and multiplied
+        by the local wavelength bin width to get photons/s. If False, flux is
+        treated as an already-integrated photon rate (photons/s) per discrete line,
+        e.g. for injecting unresolved emission lines. Default is True.
+    sampling_factor : float or None, optional
+        Number of samples per detector pixel along each order's trace. If given and continuous=True,
+        the input spectrum is resampled with a not-a-knot cubic spline onto a grid uniform in
+        detector x along the trace (wavelengths from the trace's lambda(x) cubic spline), whether
+        the input is over- or undersampled. If None, the input samples are used as is. Default is 4.
+
+    Returns
+    -------
+    det : ndarray[float64]
+        Detector photon rate map in photons/s/pixel.
+    """
+    det = np.zeros(detector_shape, dtype=np.float64)
+
+    for od in orders:
+        logger.debug("Simulating order %s", od)
+
+        ow = np.asarray(orders[od]['xy_wavelengths'], dtype=np.float64)
+        ox = np.asarray(orders[od]["x"], dtype=np.float64)
+        oy = np.asarray(orders[od]["y"], dtype=np.float64)
+
+        oversample = pixelsize / orders[od]['psf_data_spacing']
+        if not float(oversample).is_integer():
+            raise ValueError("Oversample factor must be an integer")
+        oversample = int(oversample)
+
+        if continuous and sampling_factor is not None:
+            order_wave, order_flux = _resample_order_spectrum(wave, flux, ow, ox, sampling_factor)
+        else:
+            order_wave_min = ow.min() * u.micron
+            order_wave_max = ow.max() * u.micron
+            in_order = (wave >= order_wave_min) & (wave <= order_wave_max)
+            order_wave = wave[in_order]
+            order_flux = flux[in_order]
+
+        # continuous: last sample has no trailing bin to integrate over in this
+        # scheme, so it is skipped. line list: every discrete line is injected.
+        n_samples = len(order_wave) - 1 if continuous else len(order_wave)
+        if n_samples <= 0:
+            continue
+
+        # apply blaze efficiency if requested
+        if apply_blaze and blaze_angle is not None and groove_spacing is not None:
+            if blaze_angle.value < 0:
+                blaze_angle *= -1
+            blaze_eff = _blaze_efficiency_sinc(
+                blaze_angle,
+                int(od),
+                1.0 / groove_spacing,
+                order_wave
+            )
+            order_flux *= blaze_eff
+
+        if continuous:
+            # order_flux is a photon rate DENSITY (photons/s/micron); integrate
+            # over each local wavelength bin to get a photon rate (photons/s).
+            photons_per_s = (order_flux * np.gradient(order_wave)).to_value(u.ph / u.s)
+        else:
+            # order_flux is already a photon RATE (photons/s) per discrete line;
+            # use it directly, with no bin-width integration.
+            photons_per_s = order_flux.to_value(u.ph / u.s)
+
+        # Trace positions
+        lam = order_wave.to_value(u.micron)[:n_samples]
+        xc_arr = _cubic_spline_eval_numba(*cubic_spline_build(ow, ox), lam)
+        yc_arr = _cubic_spline_eval_numba(*cubic_spline_build(ow, oy), lam)
+        xc_floor_arr = np.floor(xc_arr).astype(np.int64)
+        yc_floor_arr = np.floor(yc_arr).astype(np.int64)
+
+        # Effective PSFs on increasing wavelength
+        psf_sort = np.argsort(orders[od]['psf_wavelengths'])
+        psfw = np.asarray(orders[od]['psf_wavelengths'], dtype=np.float64)[psf_sort]
+        prf_kernel = np.ones((oversample, oversample))
+        psf_eff_list = np.ascontiguousarray(fftconvolve(
+            np.asarray(orders[od]['psf_stamps'], dtype=np.float64)[psf_sort],
+            prf_kernel[None, ...],
+            mode='same',
+            axes=(1, 2)
+        ))
+        if oversample % 2 == 0:
+            # An even PRF box puts effective-PSF sample m at m - N//2 - 1/2 (N = stamp size). Bilinear
+            # interpolation at the half-sample phase moves the samples onto m - N//2; then crop to an odd
+            # stamp centred on 0.
+            Nrows, Ncols = psf_eff_list.shape[1:]
+            ry = min(Nrows // 2, Nrows - 2 - Nrows // 2)
+            rx = min(Ncols // 2, Ncols - 2 - Ncols // 2)
+            psf_eff_list = np.ascontiguousarray(_half_sample_shift_numba(psf_eff_list)[
+                :, Nrows // 2 - ry:Nrows // 2 + ry + 1, Ncols // 2 - rx:Ncols // 2 + rx + 1
+            ])
+        psf_height, psf_width = psf_eff_list[0].shape
+        x_psf_eff = np.arange(psf_width, dtype=np.float64) - psf_width // 2
+        y_psf_eff = np.arange(psf_height, dtype=np.float64) - psf_height // 2
+
+        # Cubic spline in wavelength through the PSFs, at every effective-PSF grid point
+        psf_a, psf_b, psf_c, psf_d = _build_psf_wavelength_splines_numba(psfw, psf_eff_list)
+
+        # Detector-pixel sample offsets within a stamp, in PSF samples
+        max_pixels_x = psf_width // oversample
+        max_pixels_y = psf_height // oversample
+        pixel_xs = (np.arange(max_pixels_x) - max_pixels_x // 2) * float(oversample)
+        pixel_ys = (np.arange(max_pixels_y) - max_pixels_y // 2) * float(oversample)
+
+        stamps = np.empty((n_samples, max_pixels_y, max_pixels_x))
+        _interp_prf_stamps_numba(
+            x_psf_eff, y_psf_eff, psf_a, psf_b, psf_c, psf_d, psfw, lam,
+            (xc_arr - xc_floor_arr) * oversample, (yc_arr - yc_floor_arr) * oversample,
+            pixel_xs, pixel_ys, stamps,
+        )
+        _deposit_stamps_numba(det, stamps, xc_floor_arr, yc_floor_arr, photons_per_s[:n_samples])
+
+    return det
+
+
+def _resample_order_spectrum(
+    wave: Quantity, flux: Quantity, ow: np.ndarray, ox: np.ndarray, sampling_factor: float
+) -> tuple[Quantity, Quantity]:
+    """
+    Resample a continuous spectrum onto sampling_factor samples per detector pixel along one order.
+
+    The grid is uniform in detector x over the trace samples (ow, ox), converted to wavelength with
+    the trace's not-a-knot cubic spline lambda(x), and kept within the input wavelength range. The
+    flux is a not-a-knot cubic spline through the input samples covering the order (plus one on
+    each side). wave must be strictly increasing. Returns empty arrays if the input does not
+    overlap the order.
+    """
+    w = np.ascontiguousarray(wave.to_value(u.micron), dtype=np.float64)
+    f = np.ascontiguousarray(flux.value, dtype=np.float64)
+    s = np.argsort(ox)
+    x = np.arange(ox.min(), ox.max(), 1.0 / sampling_factor)
+    lam = np.sort(cubic_spline_eval(cubic_spline_build(ox[s], ow[s]), x))
+    lam = lam[(lam >= max(ow.min(), w[0])) & (lam <= min(ow.max(), w[-1]))]
+    i0 = max(int(np.searchsorted(w, lam[0])) - 1, 0) if lam.size else 0
+    i1 = min(int(np.searchsorted(w, lam[-1])) + 2, w.size) if lam.size else 0
+    if i1 - i0 < 3:
+        return lam[:0] * u.micron, f[:0] * flux.unit
+    fl = cubic_spline_eval(cubic_spline_build(w[i0:i1], f[i0:i1]), lam)
+    return lam * u.micron, fl * flux.unit
+
+
+@njit(cache=True)
+def _cubic_spline_eval_numba(
+    xk: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray, xq: np.ndarray
+) -> np.ndarray:
+    """Evaluate a 1D cubic spline (unpacked from `cubic_spline_build`) at unsorted query points."""
+    out = np.empty(xq.shape[0])
+    for i in range(xq.shape[0]):
+        out[i] = cubic_spline_eval_scalar_arrays(xk, a, b, c, d, xq[i])
+    return out
+
+
+@njit(parallel=True, cache=True)
+def _half_sample_shift_numba(z: np.ndarray) -> np.ndarray:
+    """Bilinear interpolation of each z[k] (Npsf, Nrows, Ncols) at the half-sample midpoints; returns (Npsf, Nrows - 1, Ncols - 1)."""
+    Npsf, Nrows, Ncols = z.shape
+    out = np.empty((Npsf, Nrows - 1, Ncols - 1))
+    for k in prange(Npsf):
+        for j in range(Nrows - 1):
+            for i in range(Ncols - 1):
+                out[k, j, i] = linear_interp2d_eval_cell(z[k], i, j, 0.5, 0.5)
+    return out
+
+
+@njit(parallel=True, cache=True)
+def _build_psf_wavelength_splines_numba(
+    psfw: np.ndarray, z: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Not-a-knot cubic spline in wavelength through the PSFs z (Npsf, Nrows, Ncols) at every grid point.
+
+    Returns the per-segment Horner coefficients (a, b, c, d) of `cubic_spline_build`, each
+    (Npsf - 1, Nrows, Ncols): on segment k, z(lam) = a + t*(b + t*(c + t*d)) with t = lam - psfw[k].
+    """
+    Npsf, Nrows, Ncols = z.shape
+    a = np.empty((Npsf - 1, Nrows, Ncols))
+    b = np.empty((Npsf - 1, Nrows, Ncols))
+    c = np.empty((Npsf - 1, Nrows, Ncols))
+    d = np.empty((Npsf - 1, Nrows, Ncols))
+    for j in prange(Nrows):
+        for i in range(Ncols):
+            _, a[:, j, i], b[:, j, i], c[:, j, i], d[:, j, i] = cubic_spline_build(psfw, z[:, j, i].copy())
+    return a, b, c, d
+
+
+@njit(parallel=True, cache=True)
+def _interp_prf_stamps_numba(
+    xk: np.ndarray,
+    yk: np.ndarray,
+    za: np.ndarray,
+    zb: np.ndarray,
+    zc: np.ndarray,
+    zd: np.ndarray,
+    psfw: np.ndarray,
+    lam: np.ndarray,
+    shift_x: np.ndarray,
+    shift_y: np.ndarray,
+    pixel_xs: np.ndarray,
+    pixel_ys: np.ndarray,
+    stamps: np.ndarray,
+) -> None:
+    """
+    Fill stamps (Nsamples, Nys, Nxs) in place with unit-sum effective PSF stamps.
+
+    Stamp n is built in two steps:
+
+    1. The chromatic effective PSF at wavelength lam[n], from the cubic spline in wavelength through
+       the PSFs (za, zb, zc, zd from `_build_psf_wavelength_splines_numba`; the end segments
+       extrapolate), clamped at zero. It is evaluated only on the grid points that bracket each
+       stamp pixel, a (2 Nys, 2 Nxs) block, not the whole PSF grid.
+    2. The pixel-phase shift, by bilinear interpolation of that block (`linear_interp2d_eval_cell`)
+       at x = pixel_xs - shift_x[n], y = pixel_ys - shift_y[n] in PSF samples.
+
+    The PSF grid xk, yk must be unit spaced, so the cell of each point is found directly (clamped to
+    the edge cells, which then extrapolate linearly) instead of by a search.
+    """
+    Nseg, Nrows, Ncols = za.shape
+    Nys = pixel_ys.shape[0]
+    Nxs = pixel_xs.shape[0]
+    for n in prange(lam.shape[0]):
+        # Bracketing grid cell and fractional offset of every stamp row and column
+        jj = np.empty(Nys, dtype=np.int64)
+        tys = np.empty(Nys)
+        for a in range(Nys):
+            y = pixel_ys[a] - shift_y[n] - yk[0]
+            jj[a] = min(max(int(np.floor(y)), 0), Nrows - 2)
+            tys[a] = y - jj[a]
+        ii = np.empty(Nxs, dtype=np.int64)
+        txs = np.empty(Nxs)
+        for b in range(Nxs):
+            x = pixel_xs[b] - shift_x[n] - xk[0]
+            ii[b] = min(max(int(np.floor(x)), 0), Ncols - 2)
+            txs[b] = x - ii[b]
+
+        # 1. Chromatic PSF at lam[n] on those grid points: psf[2a + r, 2b + c] is grid point (jj[a] + r, ii[b] + c)
+        k = min(max(np.searchsorted(psfw, lam[n]) - 1, 0), Nseg - 1)
+        t = lam[n] - psfw[k]
+        a0, b0, c0, d0 = za[k], zb[k], zc[k], zd[k]
+        psf = np.empty((2 * Nys, 2 * Nxs))
+        for a in range(Nys):
+            for r in range(2):
+                j = jj[a] + r
+                for b in range(Nxs):
+                    for c in range(2):
+                        i = ii[b] + c
+                        # Clamp at zero in case the spline in wavelength undershoots
+                        psf[2 * a + r, 2 * b + c] = max(a0[j, i] + t * (b0[j, i] + t * (c0[j, i] + t * d0[j, i])), 0.0)
+
+        # 2. Pixel-phase shift by bilinear interpolation
+        total = 0.0
+        for a in range(Nys):
+            for b in range(Nxs):
+                v = linear_interp2d_eval_cell(psf, 2 * b, 2 * a, txs[b], tys[a])
+                stamps[n, a, b] = v
+                total += v
+        for a in range(Nys):
+            for b in range(Nxs):
+                stamps[n, a, b] /= total
+
+
+@njit(cache=True)
+def _deposit_stamps_numba(
+    det: np.ndarray,
+    stamps: np.ndarray,
+    x_floor: np.ndarray,
+    y_floor: np.ndarray,
+    photons_per_s: np.ndarray,
+) -> None:
+    """Add stamps[n] * photons_per_s[n] to det, centred on pixel (y_floor[n], x_floor[n]); off-chip pixels are dropped."""
+    Nrows, Ncols = det.shape
+    Nys, Nxs = stamps.shape[1], stamps.shape[2]
+    for n in range(stamps.shape[0]):
+        y0 = y_floor[n] - Nys // 2
+        x0 = x_floor[n] - Nxs // 2
+        w = photons_per_s[n]
+        for a in range(Nys):
+            yy = y0 + a
+            if yy < 0 or yy >= Nrows:
+                continue
+            for b in range(Nxs):
+                xx = x0 + b
+                if 0 <= xx < Ncols:
+                    det[yy, xx] += stamps[n, a, b] * w
 
 
 def _line_flux_to_photon_rate(flux: Quantity, wavelength: Quantity) -> Quantity:
