@@ -33,11 +33,13 @@ from .lfcfitparams import *
 from .lfcwavesol import *
 from .gausslsf import *
 from .ref_etalon import *
+from .etalonwavesol import *
 from .tracepos import *
 from .traceprof import *
 from .fiberflat import *
 from .sim_wavesol import *
 from .uraniumfitparams import *
+from .uraniumwavesol import *
 
 # Instrument config
 from .parvi_config import *

@@ -7,7 +7,6 @@ from ..utils.spectral_utils import delta_pix_to_delta_wave
 
 import numpy as np
 import scipy.constants
-from scipy.stats import median_abs_deviation
 import os
 from astropy.table import Table
 
