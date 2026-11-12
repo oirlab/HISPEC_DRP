@@ -16,6 +16,7 @@ LINE_DQ_FLAGS = {
     'DO_NOT_USE': np.uint8(2**0),
     'FIT_FAILURE': np.uint8(2**1),
     'POOR_FIT': np.uint8(2**2),
+    'LOW_SNR': np.uint8(2**3),
 }
 
 def fit_lines_gauss(
@@ -54,8 +55,6 @@ def fit_lines_gauss(
         y_fit = y[ki:kf+1].copy()
         y_err_fit = y_err[ki:kf+1].copy() if y_err is not None else None
         dq_fit = dq[ki:kf+1].copy() if dq is not None else None
-
-        print(x_fit, y_fit, y_err_fit, dq_fit)
 
         # Fit the line
         fit_result = fit_line_gauss(
