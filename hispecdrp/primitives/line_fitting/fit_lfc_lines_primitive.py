@@ -94,9 +94,9 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
         for fiber in do_fibers:
             
-            # Get extensions for this fiber
+            # Get extensions for this fiber (blaze-corrected preferred when present)
             wave = input_model[fiber].wave
-            if input_model.has_extension(f'spec_{fiber}'):
+            if input_model.has_extension(f'spec_fib{fiber}'):
                 spec = input_model[fiber].spec
                 spec_err = input_model[fiber].spec_err
                 spec_dq = input_model[fiber].spec_dq
@@ -104,9 +104,6 @@ class FitLFCLinesPrimitive(BasePrimitive):
                 spec = input_model[fiber].spec_uncal
                 spec_err = input_model[fiber].spec_uncal_err
                 spec_dq = input_model[fiber].spec_uncal_dq
-
-            # Detector pixel array
-            pix_arr = np.arange(spec[1].size)
 
             for order in do_orders:
 
@@ -126,7 +123,18 @@ class FitLFCLinesPrimitive(BasePrimitive):
 
                 line_spacing_um = (1E-6 * np.mean(_wave[good]))**2 * lfc_delta_nu / scipy.constants.c * 1E6
                 line_spacing_pix = line_spacing_um / np.max(np.abs(np.gradient(_wave)))
-                min_line_spacing = line_spacing_pix * 0.8
+                adaptive_spacing = float(line_spacing_pix) * 0.8
+                configured_spacing = float(self.min_line_spacing)
+                # Prefer the tighter of adaptive vs configured spacing so both
+                # LFC densification and explicit test/config floors work;
+                # find_peaks requires distance >= 1.
+                candidates = [
+                    s for s in (adaptive_spacing, configured_spacing)
+                    if np.isfinite(s) and s > 0.0
+                ]
+                min_line_spacing = max(1.0, min(candidates) if candidates else 1.0)
+                # Pixel array along the spectral axis (not spec.size, which is 2-D)
+                pix_arr = np.arange(spec.shape[-1])
 
                 # Find the initial lines
                 if self.line_source.lower() == 'peaks':
@@ -169,31 +177,69 @@ class FitLFCLinesPrimitive(BasePrimitive):
                         np.where(input_model[fiber].lfc_fitparams['ORDER'] == order)[0]
                     )
                 n_lines = len(_fit_results)
+                n_pix = spec.shape[-1]
                 for i in range(n_lines):
+                    mu_pix = _fit_results[i].mu
+                    skip_reason = _unusable_lfc_line_fit_reason(
+                        _fit_results[i], fwhm_bounds=self.fwhm_bounds
+                    )
+                    if skip_reason is not None:
+                        logger.warning(
+                            "Skipping failed LFC line fit in order %s fiber %s (%s).",
+                            order,
+                            fiber,
+                            skip_reason,
+                        )
+                        continue
+                    pix_idx = int(np.round(mu_pix))
+                    if pix_idx < 0 or pix_idx >= n_pix:
+                        logger.warning(
+                            "Skipping LFC line fit in order %s fiber %s "
+                            "(MU_PIX=%s outside 0..%s).",
+                            order,
+                            fiber,
+                            mu_pix,
+                            n_pix - 1,
+                        )
+                        continue
                     r = {
                         'ORDER' : order,
                         'AMPLITUDE' : _fit_results[i].amplitude,
                         'AMPLITUDE_ERR' : _fit_results[i].amplitude_err,
-                        'MU_PIX' : _fit_results[i].mu,
+                        'MU_PIX' : mu_pix,
                         'MU_ERR_PIX' : _fit_results[i].mu_err,
                         'FWHM_PIX' : _fit_results[i].fwhm,
                         'FWHM_ERR_PIX' : _fit_results[i].fwhm_err,
                     }
-                    try:
-                        wave_closest = wave[oi, int(r['MU_PIX'])]
-                    except ValueError:
-                        logger.warning(f'Failed to fit comb line {i} in order {order}.')
+                    wave_closest = wave[oi, pix_idx]
+                    if not np.isfinite(wave_closest):
+                        logger.warning(
+                            "Skipping LFC line fit in order %s fiber %s "
+                            "(WAVE at MU_PIX=%s is not finite).",
+                            order,
+                            fiber,
+                            mu_pix,
+                        )
                         continue
                     line_wave, _, line_num = _get_closest_lfc_mode(
                         lfc_nu0, lfc_delta_nu, wave_closest
                     )
                     r['WAVE'] = line_wave
                     r['MODE_NUM'] = line_num
-                    r['FWHM_WAVE'] = delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :])
-                    r['FWHM_ERR_WAVE'] = delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :])
-                    r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
+                    # WAVE can decrease along the detector; FWHM / errors are widths.
+                    r['FWHM_WAVE'] = abs(delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :]))
+                    r['FWHM_ERR_WAVE'] = abs(delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :]))
+                    r['MU_ERR_WAVE'] = abs(delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :]))
                     params_table.add_row(r)
                 params_table.sort(['ORDER', 'MU_PIX'])
+            # A single comb mode can be fit twice (e.g. a structured ZEMAX
+            # PSF split into two peaks a few pixels apart, both assigned
+            # the same MODE_NUM). Two knots with one wavelength wreck any
+            # downstream wavesol interpolant, so keep only the strongest
+            # fit per (ORDER, MODE_NUM).
+            output_model[fiber].lfc_fitparams = _drop_duplicate_lfc_modes(
+                output_model[fiber].lfc_fitparams
+            )
         return dict(output=output_model, fit_results=fit_results)
 
     def _create_preview(self):
@@ -471,6 +517,50 @@ class FitLFCLinesPrimitive(BasePrimitive):
             'fig':  fig,
         }
 
+
+
+def _drop_duplicate_lfc_modes(params_table):
+    """Keep the highest-AMPLITUDE row per (ORDER, MODE_NUM) pair."""
+    if len(params_table) == 0:
+        return params_table
+    order_col = np.asarray(params_table['ORDER'])
+    mode_col = np.asarray(params_table['MODE_NUM'])
+    amp_col = np.asarray(params_table['AMPLITUDE'], dtype=float)
+    keys = order_col.astype(np.int64) * 1_000_000_000 + mode_col.astype(np.int64)
+    by_amp = np.argsort(-amp_col, kind='stable')
+    seen: set[int] = set()
+    keep: list[int] = []
+    for idx in by_amp:
+        key = int(keys[idx])
+        if key not in seen:
+            seen.add(key)
+            keep.append(int(idx))
+    out = params_table[np.sort(keep)]
+    out.sort(['ORDER', 'MU_PIX'])
+    return out
+
+
+def _unusable_lfc_line_fit_reason(fit, *, fwhm_bounds) -> str | None:
+    """Return a skip reason for a collapsed / bound-hitting Gaussian, else None."""
+    mu = fit.mu
+    amp = fit.amplitude
+    fwhm = fit.fwhm
+    fwhm_err = fit.fwhm_err
+    if not np.isfinite(mu):
+        return "MU_PIX is not finite"
+    if (not np.isfinite(amp)) or amp <= 0.0:
+        return f"AMPLITUDE={amp} is not a positive line"
+    if not np.isfinite(fwhm):
+        return "FWHM_PIX is not finite"
+    if fwhm_bounds is not None:
+        lo, hi = float(fwhm_bounds[0]), float(fwhm_bounds[1])
+        span = hi - lo
+        tol = 1.0e-3 * span if span > 0.0 else 1.0e-3
+        if fwhm <= lo + tol or fwhm >= hi - tol:
+            return f"FWHM_PIX={fwhm} is at the fit bound {fwhm_bounds}"
+    if (not np.isfinite(fwhm_err)) or fwhm_err > 1.0:
+        return f"FWHM_ERR_PIX={fwhm_err} is unusable"
+    return None
 
 
 def gen_lfc_modes(

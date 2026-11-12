@@ -21,6 +21,7 @@ __all__ = [
     "query_vizier",
     "vizier_mirrors",
     "vizier_timeout",
+    "gaia_backend",
 ]
 
 _GAIA_EPOCHS = {
@@ -44,10 +45,19 @@ VIZIER_MIRRORS = [
 # Per-request socket timeout (seconds). A finite timeout is what makes the mirror
 # fallback effective: astroquery's default can leave a stalled mirror blocking
 # indefinitely, so the remaining servers are never tried.
-VIZIER_TIMEOUT_DEFAULT = 60.0
+VIZIER_TIMEOUT_DEFAULT = 3.0
 
 # Number of full passes over the mirror list before giving up.
 VIZIER_MAX_ROUNDS_DEFAULT = 4
+
+# Gaia DR3 catalog backend: ESA TAP first (``astroquery.gaia``), then VizieR.
+# Override with ``HISPEC_DRP_GAIA_BACKEND`` = ``tap`` | ``vizier`` | ``auto``.
+GAIA_BACKEND_DEFAULT = "auto"
+GAIA_TAP_TABLE = "gaiadr3.gaia_source"
+# DR3 renamed the 2MASS cross-match (EDR3+); the old ``tmass_best_neighbour`` is gone.
+GAIA_TAP_TMASS_NEIGHBOUR = "gaiadr3.tmass_psc_xsc_best_neighbour"
+GAIA_TAP_TMASS_JOIN = "gaiadr3.tmass_psc_xsc_join"
+GAIA_TAP_TMASS_CATALOG = "gaiadr1.tmass_original_valid"
 
 # VizieR mirror of the Gaia DR3 main source catalog.
 GAIA_DR3_VIZIER_ID = "I/355/gaiadr3"
@@ -86,6 +96,24 @@ def vizier_timeout() -> float:
     return VIZIER_TIMEOUT_DEFAULT
 
 
+def gaia_backend() -> str:
+    """Return the Gaia catalog backend: ``tap``, ``vizier``, or ``auto``.
+
+    ``HISPEC_DRP_GAIA_BACKEND`` overrides the default (``auto`` = ESA TAP, then
+    VizieR on failure). Unknown values fall back to ``auto``.
+    """
+    raw = os.environ.get("HISPEC_DRP_GAIA_BACKEND", "").strip().lower()
+    if raw in {"tap", "vizier", "auto"}:
+        return raw
+    if raw:
+        logger.warning(
+            "Ignoring invalid HISPEC_DRP_GAIA_BACKEND=%r; using %r",
+            raw,
+            GAIA_BACKEND_DEFAULT,
+        )
+    return GAIA_BACKEND_DEFAULT
+
+
 def _vizier_class():
     """Import :class:`astroquery.vizier.Vizier` lazily.
 
@@ -97,6 +125,13 @@ def _vizier_class():
     from astroquery.vizier import Vizier
 
     return Vizier
+
+
+def _gaia_class():
+    """Import :class:`astroquery.gaia.Gaia` lazily (same hang rationale as VizieR)."""
+    from astroquery.gaia import Gaia
+
+    return Gaia
 
 
 def query_vizier(
@@ -312,6 +347,117 @@ def _vizier_row_to_gaia_dict(row, colnames, release: str = "DR3") -> dict:
     return out
 
 
+# Shared column list for TAP SELECT and for the public result dict keys.
+_GAIA_COLUMNS = [
+    # Astrometry
+    "source_id",
+    "ra", "ra_error",
+    "dec", "dec_error",
+    "pmra", "pmra_error",
+    "pmdec", "pmdec_error",
+    "parallax", "parallax_error",
+    "ref_epoch",
+    "ruwe",
+
+    # Radial velocity
+    "radial_velocity", "radial_velocity_error",
+    "rv_nb_transits",
+
+    # Broadening / v sin i proxy
+    "vbroad", "vbroad_error",
+
+    # Astrophysical parameters — GSP-Phot (BP/RP spectra, ~470M stars)
+    "teff_gspphot", "teff_gspphot_lower", "teff_gspphot_upper",
+    "logg_gspphot", "logg_gspphot_lower", "logg_gspphot_upper",
+    "mh_gspphot",   "mh_gspphot_lower",   "mh_gspphot_upper",
+    "distance_gspphot",
+    "ebpminrp_gspphot",
+
+    # Photometry
+    "phot_g_mean_mag",
+    "phot_bp_mean_mag",
+    "phot_rp_mean_mag",
+    "bp_rp",
+    "phot_g_mean_flux_over_error",
+]
+
+
+def _row_to_dict(row, colnames: list[str] | None = None) -> dict:
+    """Convert an astropy table row to a plain Python dict (masked/NaN → ``None``)."""
+    cols = list(colnames) if colnames is not None else list(getattr(row, "colnames", []))
+    if not cols:
+        cols = list(_GAIA_COLUMNS)
+    return {col: _cell(row, col) for col in cols if col in getattr(row, "colnames", cols)}
+
+
+def _tap_row_to_gaia_dict(row) -> dict:
+    """Normalize a Gaia TAP ``gaia_source`` row to the public result dict."""
+    out = {col: _cell(row, col) for col in _GAIA_COLUMNS}
+    if out.get("source_id") is not None:
+        out["source_id"] = str(out["source_id"])
+    return out
+
+
+def _query_gaia_dr3_tap(
+    *,
+    source_id: int | str | None = None,
+    center: SkyCoord | None = None,
+    radius_deg: float | None = None,
+    row_limit: int = 1,
+):
+    """Query ESA Gaia Archive TAP via :mod:`astroquery.gaia`.
+
+    Exactly one of ``source_id`` or ``center`` (with ``radius_deg``) must be provided.
+
+    Returns
+    -------
+    astropy.table.Table or None
+        Result rows (cone searches ordered by angular separation), or ``None`` on
+        empty results. Raises on TAP/network failures so callers can fall back.
+    """
+    if (source_id is None) == (center is None):
+        raise ValueError("Provide exactly one of source_id or center.")
+    if center is not None and radius_deg is None:
+        raise ValueError("radius_deg is required with center.")
+
+    Gaia = _gaia_class()
+    cols = ", ".join(_GAIA_COLUMNS)
+    if source_id is not None:
+        sid = int(source_id)
+        adql = (
+            f"SELECT TOP {int(row_limit)} {cols} "
+            f"FROM {GAIA_TAP_TABLE} "
+            f"WHERE source_id = {sid}"
+        )
+        label = f"Gaia DR3 TAP source_id={sid}"
+    else:
+        ra = float(center.ra.deg)
+        dec = float(center.dec.deg)
+        rad = float(radius_deg)
+        # DISTANCE + CONTAINS cone, nearest first (same role as VizieR ``+_r``).
+        adql = (
+            f"SELECT TOP {int(row_limit)} {cols}, "
+            f"DISTANCE(POINT('ICRS', {ra}, {dec}), POINT('ICRS', ra, dec)) AS ang_sep "
+            f"FROM {GAIA_TAP_TABLE} "
+            f"WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra}, {dec}, {rad})) "
+            f"ORDER BY ang_sep ASC"
+        )
+        label = "Gaia DR3 TAP cone search"
+
+    try:
+        Gaia.clear_cache()
+    except Exception:  # noqa: BLE001 - cache clearing is best-effort
+        logger.debug("Gaia TAP cache clear failed (continuing).", exc_info=True)
+
+    job = Gaia.launch_job(adql)
+    table = job.get_results()
+    if table is None or len(table) == 0:
+        logger.info("%s returned no rows", label)
+        return None
+    logger.info("%s succeeded (%d row(s))", label, len(table))
+    return table
+
+
 def _query_gaia_dr3_vizier(
     *,
     source_id: int | str | None = None,
@@ -352,47 +498,81 @@ def _query_gaia_dr3_vizier(
         description="Gaia DR3 cone search",
     )
 
-# Shared column list for both query functions
-_GAIA_COLUMNS = [
-    # Astrometry
-    "source_id",
-    "ra", "ra_error",
-    "dec", "dec_error",
-    "pmra", "pmra_error",
-    "pmdec", "pmdec_error",
-    "parallax", "parallax_error",
-    "ref_epoch",
-    "ruwe",
 
-    # Radial velocity
-    "radial_velocity", "radial_velocity_error",
-    "rv_nb_transits",
+def _query_gaia_dr3(
+    *,
+    source_id: int | str | None = None,
+    center: SkyCoord | None = None,
+    radius_deg: float | None = None,
+    row_limit: int = 1,
+    max_rounds: int | None = None,
+    release: str = "DR3",
+) -> dict | None:
+    """Query Gaia DR3: ESA TAP by default, with VizieR fallback.
 
-    # Broadening / v sin i proxy
-    "vbroad", "vbroad_error",
+    Backend selection is controlled by :func:`gaia_backend` /
+    ``HISPEC_DRP_GAIA_BACKEND``:
 
-    # Astrophysical parameters — GSP-Phot (BP/RP spectra, ~470M stars)
-    "teff_gspphot", "teff_gspphot_lower", "teff_gspphot_upper",
-    "logg_gspphot", "logg_gspphot_lower", "logg_gspphot_upper",
-    "mh_gspphot",   "mh_gspphot_lower",   "mh_gspphot_upper",
-    "distance_gspphot",
-    "ebpminrp_gspphot",
+    * ``auto`` (default) — try TAP, then VizieR on TAP failure or empty result
+      when the failure looks like a service/network problem (not "no match").
+    * ``tap`` — ESA Archive only.
+    * ``vizier`` — VizieR mirrors only.
 
-    # Photometry
-    "phot_g_mean_mag",
-    "phot_bp_mean_mag",
-    "phot_rp_mean_mag",
-    "bp_rp",
-    "phot_g_mean_flux_over_error",
-]
+    Returns a normalized Gaia property dict, or ``None`` if no source matched.
+    """
+    if release.upper() != "DR3":
+        raise ValueError(f"Only Gaia DR3 is supported (got release={release!r}).")
 
+    backend = gaia_backend()
+    try_tap = backend in {"auto", "tap"}
+    try_vizier = backend in {"auto", "vizier"}
 
-def _row_to_dict(row, colnames: list[str]) -> dict:
-    """Convert an astropy table row to a plain Python dict."""
-    return {
-        col: (row[col].item() if hasattr(row[col], "item") else row[col])
-        for col in colnames
-    }
+    tap_error: Exception | None = None
+    if try_tap:
+        try:
+            table = _query_gaia_dr3_tap(
+                source_id=source_id,
+                center=center,
+                radius_deg=radius_deg,
+                row_limit=row_limit,
+            )
+            if table is not None and len(table) > 0:
+                return _tap_row_to_gaia_dict(table[0])
+            # Empty TAP result: for source_id look-ups that usually means "not found";
+            # still try VizieR in auto mode in case TAP truncated or filtered oddly.
+            if backend == "tap":
+                return None
+            logger.info("Gaia TAP returned no rows; falling back to VizieR.")
+        except Exception as e:  # noqa: BLE001 - intentional fallback to VizieR
+            tap_error = e
+            if backend == "tap":
+                raise
+            logger.warning(
+                "Gaia TAP query failed (%s); falling back to VizieR.", e
+            )
+
+    if try_vizier:
+        table = _query_gaia_dr3_vizier(
+            source_id=source_id,
+            center=center,
+            radius_deg=radius_deg,
+            row_limit=row_limit,
+            max_rounds=max_rounds,
+        )
+        if table is not None and len(table) > 0:
+            results = _vizier_row_to_gaia_dict(
+                table[0], table.colnames, release=release
+            )
+            if results.get("source_id") is not None:
+                results["source_id"] = str(results["source_id"])
+            return results
+        if tap_error is not None:
+            logger.error(
+                "Gaia TAP and VizieR both failed; last TAP error: %s", tap_error
+            )
+        return None
+
+    return None
 
 
 def get_stellar_data_gaia_by_coordinates(
@@ -408,6 +588,9 @@ def get_stellar_data_gaia_by_coordinates(
 ) -> dict | None:
     """
     Query Gaia DR3 for basic stellar properties nearest to the given coordinates.
+
+    Uses ESA Gaia Archive TAP (:mod:`astroquery.gaia`) by default, with VizieR
+    mirror fallback when TAP is unavailable (see :func:`gaia_backend`).
 
     Parameters
     ----------
@@ -452,17 +635,13 @@ def get_stellar_data_gaia_by_coordinates(
     radius_deg = (radius_arcsec * u.arcsec).to(u.degree).value
 
     center = SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame="icrs")
-    table = _query_gaia_dr3_vizier(center=center, radius_deg=radius_deg, row_limit=50)
+    results = _query_gaia_dr3(
+        center=center, radius_deg=radius_deg, row_limit=50, release=release
+    )
 
-    if table is None or len(table) == 0:
+    if results is None:
         print(f"No Gaia {release.upper()} sources found within {radius_arcsec}\" of ({ra}, {dec})")
         return None
-
-    # Cone search is sorted by angular separation (``+_r``); take the nearest source.
-    results = _vizier_row_to_gaia_dict(table[0], table.colnames, release=release)
-
-    # Convert ID to string
-    results["source_id"] = str(results["source_id"])
 
     return results
 
@@ -470,6 +649,9 @@ def get_stellar_data_gaia_by_coordinates(
 def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
     """
     Query Gaia DR3 for basic stellar properties using a specific Gaia source_id.
+
+    Uses ESA Gaia Archive TAP (:mod:`astroquery.gaia`) by default, with VizieR
+    mirror fallback when TAP is unavailable (see :func:`gaia_backend`).
 
     Parameters
     ----------
@@ -481,16 +663,11 @@ def get_stellar_data_gaia_from_source_id(source_id: int | str) -> dict | None:
     dict or None
         Gaia DR3 properties for the specified source, or None if not found.
     """
-    table = _query_gaia_dr3_vizier(source_id=source_id, row_limit=1)
+    results = _query_gaia_dr3(source_id=source_id, row_limit=1, release="DR3")
 
-    if table is None or len(table) == 0:
+    if results is None:
         print(f"No Gaia DR3 source found with source_id = {source_id}")
         return None
-
-    results = _vizier_row_to_gaia_dict(table[0], table.colnames, release="DR3")
-
-    # Convert ID to string
-    results["source_id"] = str(results["source_id"])
 
     return results
 
@@ -609,41 +786,105 @@ def _convert_epoch_gaia(
     return c2.ra.deg, c2.dec.deg
 
 
-def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
-    """Return the 2MASS counterpart for a Gaia DR3 source, entirely via VizieR.
+def _tmass_from_tap(source_id: int | str) -> dict | None:
+    """Return 2MASS PSC photometry via Gaia TAP cross-match tables, or ``None``.
 
-    Primary match: the 2MASS designation carried in the VizieR Gaia DR3 table
-    (``I/355/gaiadr3``) is looked up directly in the 2MASS PSC (``II/246``), so it does
-    not depend on a search radius. Fallback: a cone search around the Gaia position
-    propagated back to the 2MASS epoch (J2000) to handle proper motion.
-
-    The returned dict matches the previous Gaia-TAP implementation
-    (``twomass_id``, ``tm_ra``, ``tm_dec``, ``j_m``, ``j_msigcom``, ``h_m``,
-    ``h_msigcom``, ``ks_m``, ``ks_msigcom``); JHKs are in the Vega system.
+    Joins ``tmass_psc_xsc_best_neighbour`` → ``tmass_psc_xsc_join`` →
+    ``gaiadr1.tmass_original_valid`` so the JHKs come from the Archive itself
+    (no VizieR required when TAP is healthy).
     """
+    Gaia = _gaia_class()
+    sid = int(source_id)
+    adql = (
+        f"SELECT TOP 1 "
+        f"tmass.designation, tmass.ra, tmass.dec, "
+        f"tmass.j_m, tmass.j_msigcom, tmass.h_m, tmass.h_msigcom, "
+        f"tmass.ks_m, tmass.ks_msigcom "
+        f"FROM {GAIA_TAP_TMASS_NEIGHBOUR} AS xmatch "
+        f"JOIN {GAIA_TAP_TMASS_JOIN} AS xjoin USING (clean_tmass_psc_xsc_oid) "
+        f"JOIN {GAIA_TAP_TMASS_CATALOG} AS tmass "
+        f"ON xjoin.original_psc_source_id = tmass.designation "
+        f"WHERE xmatch.source_id = {sid}"
+    )
+    try:
+        Gaia.clear_cache()
+    except Exception:  # noqa: BLE001 - cache clearing is best-effort
+        logger.debug("Gaia TAP cache clear failed (continuing).", exc_info=True)
+    job = Gaia.launch_job(adql)
+    table = job.get_results()
+    if table is None or len(table) == 0:
+        return None
+    row = table[0]
+    designation = _cell(row, "designation")
+    return {
+        "twomass_id": str(designation) if designation is not None else None,
+        "tm_ra": _cell(row, "ra"),
+        "tm_dec": _cell(row, "dec"),
+        "j_m": _cell(row, "j_m"),
+        "j_msigcom": _cell(row, "j_msigcom"),
+        "h_m": _cell(row, "h_m"),
+        "h_msigcom": _cell(row, "h_msigcom"),
+        "ks_m": _cell(row, "ks_m"),
+        "ks_msigcom": _cell(row, "ks_msigcom"),
+    }
+
+
+def _tmass_designation_from_vizier(source_id: int | str) -> str | None:
+    """Return the ``2MASS`` column from the VizieR Gaia DR3 row, or ``None``."""
     table = _query_gaia_dr3_vizier(source_id=source_id, row_limit=1)
     if table is None or len(table) == 0:
         return None
-
     row = table[0]
     norm_map: dict[str, str] = {}
     for c in table.colnames:
         norm_map.setdefault(_norm(c), c)
+    actual = norm_map.get(_norm("2MASS"))
+    if actual is None:
+        return None
+    val = _cell(row, actual)
+    return str(val) if val is not None else None
 
-    def _g(vizier_name: str):
-        actual = norm_map.get(_norm(vizier_name))
-        return _cell(row, actual) if actual is not None else None
 
-    # --- primary: 2MASS designation from the Gaia catalog (radius-independent) ---
-    designation = _g("2MASS")
-    if designation:
-        res = _query_2mass_by_designation(str(designation))
-        if res is not None:
-            return res
+def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
+    """Return the 2MASS counterpart for a Gaia DR3 source.
+
+    Prefer ESA TAP: Gaia DR3 ``tmass_psc_xsc_*`` cross-match joined to
+    ``gaiadr1.tmass_original_valid``. If TAP is unavailable, fall back to the
+    VizieR Gaia DR3 ``2MASS`` designation looked up in the 2MASS PSC (``II/246``),
+    then a cone search around the Gaia position propagated to J2000.
+
+    The returned dict keys are ``twomass_id``, ``tm_ra``, ``tm_dec``, ``j_m``,
+    ``j_msigcom``, ``h_m``, ``h_msigcom``, ``ks_m``, ``ks_msigcom``; JHKs are Vega.
+    """
+    gaia = get_stellar_data_gaia_from_source_id(source_id)
+    if gaia is None:
+        return None
+
+    backend = gaia_backend()
+
+    if backend in {"auto", "tap"}:
+        try:
+            res = _tmass_from_tap(source_id)
+            if res is not None and res.get("twomass_id"):
+                return res
+        except Exception as e:  # noqa: BLE001 - fall through to VizieR
+            if backend == "tap":
+                logger.warning("Gaia TAP 2MASS query failed: %s", e)
+            else:
+                logger.warning(
+                    "Gaia TAP 2MASS query failed (%s); trying VizieR.", e
+                )
+
+    if backend in {"auto", "vizier"}:
+        designation = _tmass_designation_from_vizier(source_id)
+        if designation:
+            res = _query_2mass_by_designation(designation)
+            if res is not None:
+                return res
 
     # --- fallback: cone search at the proper-motion-propagated 2MASS-epoch position ---
-    ra = _g("RA_ICRS")
-    dec = _g("DE_ICRS")
+    ra = gaia.get("ra")
+    dec = gaia.get("dec")
     if ra is None or dec is None:
         return None
     try:
@@ -651,10 +892,10 @@ def get_2mass_from_gaia(source_id, radius_arcsec=1.0):
             ra=float(ra),
             dec=float(dec),
             epoch=2000.0,
-            pmra=_g("pmRA"),
-            pmdec=_g("pmDE"),
-            px=_g("Plx"),
-            rvsys=_g("RV"),
+            pmra=gaia.get("pmra"),
+            pmdec=gaia.get("pmdec"),
+            px=gaia.get("parallax"),
+            rvsys=gaia.get("radial_velocity"),
             to_gaia=False,
             release="DR3",
         )

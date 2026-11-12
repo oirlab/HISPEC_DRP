@@ -1,5 +1,7 @@
 """Tests for barycenter correction helpers and BERV plumbing.
 """
+import pytest
+
 from hispecdrp import datamodels
 from hispecdrp.primitives import BarycenterCorrectionPrimitive
 import numpy as np
@@ -18,8 +20,9 @@ source_params = {
     "epoch": 2000.0,
 }
 
+@pytest.mark.slow
 def test_calc_barycorr(tmp_path, datadir):
-
+    """Live Gaia lookup + barycorrpy (can stall when VizieR mirrors fail)."""
     mjd_utc = 49254.5
     star_data = get_stellar_data_gaia_from_source_id(source_id=source_params["source_id"])
     meta = {
@@ -131,7 +134,9 @@ def test_stage2_prefills_stellar_rv_ccf_zb_from_barycorr():
     assert pipe.stellar_rv.ccf_zb == berv_m_s_to_ccf_zb(berv_m_s)
 
 
+@pytest.mark.slow
 def test_stellar_rv_uses_ccf_zb_parameter_only():
+    """Live Gaia + barycorrpy path for CCF zb plumbing."""
     from hispecdrp.primitives import BarycenterCorrectionPrimitive, StellarRVPrimitive
 
     mjd_utc = 49254.5
@@ -175,7 +180,9 @@ def test_stellar_rv_uses_ccf_zb_parameter_only():
     assert abs(zb * C_M_S - berv_m_s) < 1e-9
 
 
+@pytest.mark.slow
 def test_calc_solar_barycenter_corrections(tmp_path, datadir):
+    """Live Gaia lookup for SOLAR target barycorr."""
     mjd_utc = 49254.5
     star_data = get_stellar_data_gaia_from_source_id(source_id=source_params["source_id"])
     meta = {
@@ -212,8 +219,9 @@ def test_calc_solar_barycenter_corrections(tmp_path, datadir):
     assert -1000 < berv_out < 1000
 
 
+@pytest.mark.slow
 def test_calc_barycorr_with_simulated_spec_dq(tmp_path, datadir):
-    """Regression: spec_dq==0 marks good pixels (see dqflags.GOOD)."""
+    """Regression: spec_dq==0 marks good pixels (see dqflags.GOOD). Live Gaia."""
     mjd_utc = 61211.5
     star_data = get_stellar_data_gaia_from_source_id(source_id=source_params["source_id"])
     meta = {

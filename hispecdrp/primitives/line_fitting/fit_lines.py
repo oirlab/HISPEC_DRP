@@ -34,7 +34,13 @@ def fit_lines_gauss(
 
     nx = len(y)
     n_lines = len(line_centers)
-    line_spacing = np.gradient(line_centers)
+    if n_lines == 0:
+        return []
+    if n_lines == 1:
+        default_spacing = float(max_fit_window) if max_fit_window is not None else 14.0
+        line_spacing = np.array([default_spacing], dtype=float)
+    else:
+        line_spacing = np.gradient(line_centers)
 
     fit_results = []
     for i in range(n_lines):
@@ -164,8 +170,16 @@ def fit_line_gauss(
         residuals_func = _gauss_absorption_residuals
         jac_func = _gauss_absorption_jac
 
+    y = np.asarray(y)
+    usable = np.isfinite(y)
+    if y_err is not None:
+        y_err = np.asarray(y_err)
+        usable &= np.isfinite(y_err) & (y_err > 0)
     if dq is None:
-        dq = (np.isfinite(y) & np.isfinite(y_err)) == 0
+        dq = (~usable).astype(np.uint32)
+    else:
+        dq = np.asarray(dq).copy()
+        dq[~usable] = np.maximum(dq[~usable], 1)
     good = np.where(dq == 0)[0]
 
     def _output_badfit():
