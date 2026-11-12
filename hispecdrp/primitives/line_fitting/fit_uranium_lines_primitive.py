@@ -1,7 +1,7 @@
 from ..base_primitive import BasePrimitive
 from ... import datamodels
 
-from .fit_lines import fit_lines_gauss, LINE_DQ_FLAGS
+from .fit_lines import fit_lines_gauss, LINE_DQ_FLAGS, flag_low_amplitude_lines, flag_fwhm_outliers, flag_redchi2_outliers
 from .find_lines import find_emission_lines
 from ..utils.spectral_utils import delta_pix_to_delta_wave
 
@@ -155,7 +155,7 @@ class FitUraniumLinesPrimitive(BasePrimitive):
             params_table['LINE_DQ'][nan_mask] = LINE_DQ_FLAGS['FIT_FAILURE']
 
             # flag low S/N lines
-            low_amp_mask = _flag_low_amplitude_lines(
+            low_amp_mask = flag_low_amplitude_lines(
                 params_table['ORDER'], params_table['MU_PIX'],
                 params_table['AMPLITUDE'], params_table['FWHM_PIX'],
                 spec, spec_dq, input_model.meta.order_start,
@@ -169,13 +169,13 @@ class FitUraniumLinesPrimitive(BasePrimitive):
             sub = params_table[good_idx]
 
             redchi2_outlier_mask = np.zeros(len(params_table), dtype=bool)
-            redchi2_outlier_mask[good_idx] = _flag_redchi2_outliers(
+            redchi2_outlier_mask[good_idx] = flag_redchi2_outliers(
                 sub['REDCHI2'], sub['AMPLITUDE']
             )
             params_table['LINE_DQ'][redchi2_outlier_mask] |= LINE_DQ_FLAGS['POOR_FIT']
 
             fwhm_outlier_mask = np.zeros(len(params_table), dtype=bool)
-            fwhm_outlier_mask[good_idx] = _flag_fwhm_outliers(
+            fwhm_outlier_mask[good_idx] = flag_fwhm_outliers(
                 sub['FWHM_PIX'], lamp_line_wvl[sub['LINE_NUM']]
             )
             params_table['LINE_DQ'][fwhm_outlier_mask] |= LINE_DQ_FLAGS['POOR_FIT']
@@ -438,130 +438,3 @@ def _flag_blended_lines(wvl, flux, tol=3e-5, min_flux_frac=0.05):
     # Undo the sort
     blended[order] = flagged_sorted
     return blended
-
-import matplotlib.pyplot as plt
-
-def _flag_low_amplitude_lines(
-    orders, mu_pix, amplitude, fwhm_pix, spec, spec_dq, order_start,
-    snr_threshold=3.0, window_fwhm=15.0, min_window_pix=20,
-    exclude_fwhm=3.0, min_pixels=10,
-):
-    """
-    Flag fitted lines whose amplitude is low relative to the local noise.
-
-    The noise for each line is estimated as the robust scatter (1.4826 * MAD)
-    of good pixels in a window around the line, excluding the line core. Using
-    MAD makes the estimate insensitive to neighboring lines in the window.
-
-    Parameters
-    ----------
-    orders, mu_pix, amplitude, fwhm_pix : array-like
-        Columns from the fit-params table (ORDER, MU_PIX, AMPLITUDE, FWHM_PIX).
-    spec : ndarray (n_orders, n_pix)
-        Extracted spectrum for this fiber.
-    spec_dq : ndarray (n_orders, n_pix)
-        DQ array for this fiber. Pixels with nonzero DQ are ignored.
-    order_start : int
-        ``input_model.meta.order_start``, used to map order number -> row index.
-    snr_threshold : float
-        Lines with amplitude / local noise below this are flagged.
-    window_fwhm : float
-        Half-width of the noise window, in units of the line FWHM.
-    min_window_pix : int
-        Minimum half-width of the noise window in pixels.
-    exclude_fwhm : float
-        Half-width, in FWHM, of the region around the line excluded from the
-        noise estimate.
-    min_pixels : int
-        Minimum number of good pixels required to estimate the noise. Lines
-        with fewer are left unflagged (noise can't be assessed).
-
-    Returns
-    -------
-    mask : ndarray of bool
-        True where the line has low amplitude relative to the surrounding noise.
-    """
-    orders = np.asarray(orders)
-    mu_pix = np.asarray(mu_pix, dtype=float)
-    amplitude = np.asarray(amplitude, dtype=float)
-    fwhm_pix = np.asarray(fwhm_pix, dtype=float)
-
-    mask = np.zeros(len(orders), dtype=bool)
-    xarr = np.arange(spec.shape[1])
-
-    for k in range(len(orders)):
-        mu, amp, fwhm = mu_pix[k], amplitude[k], fwhm_pix[k]
-
-        # failed fits are handled by the FIT_FAILURE flag
-        if not (np.isfinite(mu) and np.isfinite(amp) and np.isfinite(fwhm)):
-            continue
-
-        oi = np.abs(int(orders[k]) - order_start)
-        dist = np.abs(xarr - mu)
-        half_window = max(window_fwhm * fwhm, min_window_pix)
-
-        sel = (
-            (dist > exclude_fwhm * fwhm)
-            & (dist < half_window)
-            & (spec_dq[oi, :] == 0)
-            & np.isfinite(spec[oi, :])
-        )
-        if sel.sum() < min_pixels:
-            continue
-
-        vals = spec[oi, sel]
-        noise = 1.4826 * np.median(np.abs(vals - np.median(vals)))
-        if not np.isfinite(noise) or noise <= 0:
-            continue
-
-        mask[k] = (amp / noise) < snr_threshold
-
-    return mask
-
-
-def _flag_redchi2_outliers(redchi2, amplitude, nsigma=3.0, deg=1, max_iter=5):
-    """Flag lines whose redchi2 is high relative to the redchi2-amplitude trend."""
-    redchi2 = np.asarray(redchi2, dtype=float)
-    amp = np.asarray(amplitude, dtype=float)
-    outlier = np.zeros(len(redchi2), dtype=bool)
-
-    ok = np.isfinite(redchi2) & np.isfinite(amp) & (redchi2 > 0) & (amp > 0)
-    if ok.sum() < deg + 5:
-        return outlier
-
-    x, y = np.log10(amp[ok]), np.log10(redchi2[ok])
-    keep = np.ones(len(x), dtype=bool)
-    for _ in range(max_iter):
-        coeffs = np.polyfit(x[keep], y[keep], deg)
-        resid = y - np.polyval(coeffs, x)
-        sigma = median_abs_deviation(resid[keep], scale='normal')
-        new_keep = np.abs(resid) < nsigma * sigma
-        if np.array_equal(new_keep, keep):
-            break
-        keep = new_keep
-
-    outlier[ok] = resid > nsigma * sigma   # one-sided: only worse-than-trend fits
-    return outlier
-
-def _flag_fwhm_outliers(fwhm, line_wavelength, nsigma=3.0, deg=1, max_iter=5):
-    """Flag lines whose fwhm is an outlier relative to the fwhm-wavelength trend."""
-    fwhm = np.asarray(fwhm, dtype=float)
-    outlier = np.zeros(len(fwhm), dtype=bool)
-
-    ok = np.isfinite(fwhm) & np.isfinite(line_wavelength) & (fwhm > 0) & (line_wavelength > 0)
-    if ok.sum() < deg + 5:
-        return outlier
-
-    x, y = line_wavelength[ok], fwhm[ok]
-    keep = np.ones(len(x), dtype=bool)
-    for _ in range(max_iter):
-        coeffs = np.polyfit(x[keep], y[keep], deg)
-        resid = y - np.polyval(coeffs, x)
-        sigma = median_abs_deviation(resid[keep], scale='normal')
-        new_keep = np.abs(resid) < nsigma * sigma
-        if np.array_equal(new_keep, keep):
-            break
-        keep = new_keep
-
-    outlier[ok] = resid > nsigma * sigma   # one-sided: only worse-than-trend fits
-    return outlier
