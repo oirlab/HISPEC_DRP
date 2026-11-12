@@ -29,7 +29,7 @@ class FitUraniumLinesPrimitive(BasePrimitive):
   
     ----------
     input : str or L2Model
-        Input level 2 model or path to a level 2 file.
+        Input level 2 model or path to a level 2 file. Must have some initial wavelength solution included.
     fwhm_bounds : tuple, optional
         Bounds on the full width at half maximum (FWHM) of the lamp lines in pixels, given as a tuple (min, max).
     suffix : str, optional
@@ -42,8 +42,8 @@ class FitUraniumLinesPrimitive(BasePrimitive):
         List of fiber numbers to process. If None, all fibers will be processed.
     do_orders : list of int, optional
         List of echelle orders to process. If None, all orders will be processed.
-    profile_type : str, optional
-        The profile type to use for fitting lines. Options are 'gaussian' or 'lorentzian'. Default is 'lorentzian'.
+    min_snr : int or float, optional
+        The minimum individual line signal-to-noise ratio that a line must have to not be flagged as low SNR in returned fitparams
     
     Returns
     -------
@@ -91,8 +91,8 @@ class FitUraniumLinesPrimitive(BasePrimitive):
         clean_lamp_rflux = lamp_line_rflux[~blended]
         line_nums = np.arange(len(lamp_line_wvl))
         clean_line_nums = line_nums[~blended]
-        print('Total lines:', len(lamp_line_wvl))
-        print('Lines not blended:', len(clean_lamp_wvl))
+        logger.info(f'Total lines in lamp linelist: {len(lamp_line_wvl)}')
+        logger.info(f'Lines not known to be blended in lamp linelist: {len(clean_lamp_wvl)}')
 
         for fiber in do_fibers:
             # parse input data
@@ -113,8 +113,8 @@ class FitUraniumLinesPrimitive(BasePrimitive):
                 order_line_nums = clean_line_nums[order_lines_idx]
                 lines_pixel = np.interp(lines_wvl, wave[oi,:], xarr)
 
-                print(f'order {order}, total lines {len(order_line_nums)}')
-                # Lorentzian fit to lines
+                logger.info(f'fiber {fiber}, order {order}, attempting to fit {len(order_line_nums)} lines')
+                # Gaussian fit to lines
                 _fit_results = fit_lines_gauss(
                     xarr, spec[oi, :], spec_err[oi, :], spec_dq[oi, :], lines_pixel,
                     fwhm_bounds=self.fwhm_bounds, mu_bounds=self.mu_bounds,
