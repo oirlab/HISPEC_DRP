@@ -34,5 +34,7 @@ Jean-Baptiste Ruffio,
 Ben Sappey,
 Jason Wang
 
+This project is licensed under GPL v3.0.
+
 [![GitHub Actions](https://github.com/oirlab/HISPEC_DRP/actions/workflows/build-test.yml/badge.svg)](https://github.com/oirlab/HISPEC_DRP/actions/workflows/build-test.yml)
 [![Docs](https://img.shields.io/badge/docs-latest-blue)](https://oirlab.github.io/HISPEC_DRP/)
