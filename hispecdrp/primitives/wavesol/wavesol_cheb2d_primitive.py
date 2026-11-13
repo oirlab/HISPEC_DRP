@@ -16,6 +16,43 @@ WAVE_MODELS = (WAVE_MODEL_CHEBYSHEV2D, WAVE_MODEL_CUBIC_SPLINE_1D)
 DEFAULT_DEG_INTRA_ORDER = 9
 
 
+# ---------------------------------------------------------------------------
+# Per-source configuration: the only place source-specific names/defaults live.
+# ---------------------------------------------------------------------------
+# input_model_class : name of the input datamodel class in `datamodels` (used for source detection)
+# table_prefix      : input table attribute is f'{table_prefix}_fitparams_fib{fiber}'
+# model_class       : name of the output datamodel class in `datamodels`
+# defaults          : fit settings used when the user leaves a parameter as None.
+#                     LFC values match the previous primitive defaults. Etalon and
+#                     uranium values are PLACEHOLDERS: tune on real data.
+SOURCE_CONFIG = {
+    'lfc': dict(
+        input_model_class='LFCFitParamsModel',  
+        table_prefix='lfc',
+        model_class='LFCWavesolModel',
+        defaults=dict(wave_model=WAVE_MODEL_CHEBYSHEV2D, deg_intra_order=DEFAULT_DEG_INTRA_ORDER,
+                      deg_inter_order='auto', max_iters=100, sigma_cut=4, max_vel_cut=1E3,
+                      opt_weights=True),
+    ),
+    'etalon': dict(
+        input_model_class='EtalonRefModel',  
+        table_prefix='etalon',
+        model_class='EtalonWavesolModel',
+        defaults=dict(wave_model=WAVE_MODEL_CHEBYSHEV2D, deg_intra_order=DEFAULT_DEG_INTRA_ORDER,
+                      deg_inter_order='auto', max_iters=100, sigma_cut=4, max_vel_cut=1E3,
+                      opt_weights=True),
+    ),
+    'uranium': dict(
+        input_model_class='UraniumFitParamsModel', 
+        table_prefix='uranium',
+        model_class='UraniumWavesolModel',
+        defaults=dict(wave_model=WAVE_MODEL_CHEBYSHEV2D, deg_intra_order=4,  # far fewer lines per order
+                      deg_inter_order='auto', max_iters=100, sigma_cut=3, max_vel_cut=300,
+                      opt_weights=True),
+    ),
+}
+
+
 def auto_deg_inter_order(
     n_orders,
     anchor_degree=6,
@@ -43,7 +80,9 @@ def auto_deg_inter_order(
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
     """
-    Fit a wavelength solution from LFC line centroids.
+    Fit a wavelength solution from fitted line centroids (LFC, etalon, or uranium lamp).
+
+    The calibration source is autodetected from the class of the input datamodel. The source sets the input table, the output datamodel, and the default fit settings.
 
     The default ``wave_model='chebyshev2d'`` fits a 2D Chebyshev polynomial
     to ``{pixel, order, m*λ}`` (a grating-equation expansion).
@@ -51,23 +90,27 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
     cubic spline through ``(MU_PIX, WAVE)``. The spline is optional and is
     not the default.
 
+    Any parameter left as None uses the default for the detected source (see SOURCE_CONFIG).
+
     Parameters
     ----------
-    wave_model : {'chebyshev2d', 'cubic_spline_1d'}
-        Wavelength model used to fill ``wave_fib*``. Default ``chebyshev2d``.
-    deg_intra_order : int or 'auto'
+    source : {'lfc', 'etalon', 'uranium'} or None
+        Calibration source. If None, autodetected from the input model class. Set explicitly to override.
+    wave_model : {'chebyshev2d', 'cubic_spline_1d'} or None
+        Wavelength model used to fill ``wave_fib*``.
+    deg_intra_order : int, 'auto' or None
         Degree of the polynomial within an order (Chebyshev model only).
         ``'auto'`` uses :data:`DEFAULT_DEG_INTRA_ORDER`.
-    deg_inter_order : int or 'auto'
+    deg_inter_order : int, 'auto' or None
         Degree of the polynomial between orders. If 'auto', it will be set based on the number of orders being fit.
-    max_iters : int
+    max_iters : int or None
         Maximum number of iterations for the 2D fitting process.
-    sigma_cut : float
-        Sigma clipping cutoff in units of standard deviation of the residuals.
-    max_vel_cut : float
-        Maximum velocity cutoff for the residuals. Points with velocity residuals larger than this cutoff will be excluded from the fit in the next iteration. Units = m/s.
-    opt_weights : bool
-        Whether to use optimized weights based on the input model's wavelength errors. If False, uniform weights will be used. Default is True.
+    sigma_cut : float or None
+        Sigma clipping cutoff in units of standard deviation of the residuals. Use float('inf') to disable.
+    max_vel_cut : float or None
+        Maximum velocity cutoff for the residuals. Points with velocity residuals larger than this cutoff will be excluded from the fit in the next iteration. Units = m/s. Use float('inf') to disable.
+    opt_weights : bool or None
+        Whether to use optimized weights based on the input model's wavelength errors. If False, uniform weights will be used.
     fit_orders : list of int or None
         List of orders to fit. If None, all orders will be fit.
     do_fibers : list of int or None
@@ -75,22 +118,47 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
     Returns
     -------
-    output : LFCWavesolModel
+    output : datamodel (type depends on source)
         The wavelength solution model.
-    
+
     """
 
+    # None means "use the per-source default from SOURCE_CONFIG"
     PARAMETERS = {
-        'wave_model' : WAVE_MODEL_CHEBYSHEV2D,
-        'deg_intra_order' : DEFAULT_DEG_INTRA_ORDER,
-        'deg_inter_order' : 'auto',
-        'max_iters' : 100,
-        'sigma_cut' : 4,
-        'max_vel_cut' : 1E3,
-        'opt_weights' : True,
+        'source' : None,
+        'wave_model' : None,
+        'deg_intra_order' : None,
+        'deg_inter_order' : None,
+        'max_iters' : None,
+        'sigma_cut' : None,
+        'max_vel_cut' : None,
+        'opt_weights' : None,
         'fit_orders' : None,
         'do_fibers' : None,
     }
+
+    def _detect_source(self, input_model):
+        """Return the source name, from the user override or the input model's class."""
+        if self.source is not None:
+            if self.source not in SOURCE_CONFIG:
+                raise ValueError(f"Unknown source {self.source!r}; options: {list(SOURCE_CONFIG)}")
+            return self.source
+
+        found = []
+        for name, cfg in SOURCE_CONFIG.items():
+            cls = getattr(datamodels, cfg['input_model_class'], None)
+            if cls is not None and isinstance(input_model, cls):
+                found.append(name)
+
+        if len(found) == 1:
+            return found[0]
+        if not found:
+            raise ValueError(
+                f"Could not detect a calibration source from input model type "
+                f"{type(input_model).__name__}. Expected one of "
+                f"{[c['input_model_class'] for c in SOURCE_CONFIG.values()]}, or set the 'source' parameter."
+            )
+        raise ValueError(f"Input model matches several sources {found}. Set the 'source' parameter.")
 
     def _perform(self):
 
@@ -100,29 +168,46 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         # Get fibers and orders
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
 
-        wave_model = str(self.wave_model).lower()
+        # Detect source and resolve settings (user value wins, else source default)
+        source = self._detect_source(input_model)
+        cfg = SOURCE_CONFIG[source]
+        s = {k: (getattr(self, k) if getattr(self, k) is not None else v) for k, v in cfg['defaults'].items()}
+
+        wave_model = str(s['wave_model']).lower()
         if wave_model not in WAVE_MODELS:
             raise ValueError(
-                f"wave_model={self.wave_model!r} is invalid; expected one of {WAVE_MODELS}"
+                f"wave_model={s['wave_model']!r} is invalid; expected one of {WAVE_MODELS}"
             )
 
-        if self.deg_intra_order == 'auto':
+        if s['deg_intra_order'] == 'auto':
             deg_intra_order = DEFAULT_DEG_INTRA_ORDER
             logger.info(f"deg_intra_order='auto', using {deg_intra_order=}.")
         else:
-            deg_intra_order = self.deg_intra_order
+            deg_intra_order = int(s['deg_intra_order'])
 
-        # Default inter order deg (Chebyshev model only)
-        if wave_model == WAVE_MODEL_CHEBYSHEV2D and self.deg_inter_order == 'auto':
-            deg_inter_order = auto_deg_inter_order(len(fit_orders))
-            logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
-        else:
-            deg_inter_order = self.deg_inter_order
+        # Inter order deg (Chebyshev model only)
+        deg_inter_order = s['deg_inter_order']
+        if wave_model == WAVE_MODEL_CHEBYSHEV2D:
+            if deg_inter_order == 'auto':
+                deg_inter_order = auto_deg_inter_order(len(fit_orders))
+                logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
+            deg_inter_order = int(deg_inter_order)
+            max_allowed = max(len(fit_orders) - 1, 0)
+            if deg_inter_order > max_allowed:
+                logger.warning(
+                    f"deg_inter_order={deg_inter_order} exceeds what {len(fit_orders)} order(s) "
+                    f"can constrain; using {max_allowed}."
+                )
+                deg_inter_order = max_allowed
+
+        logger.info(f"Detected source '{source}', {wave_model=}, {deg_intra_order=}, {deg_inter_order=}, "
+                    f"max_iters={s['max_iters']}, sigma_cut={s['sigma_cut']}, max_vel_cut={s['max_vel_cut']}.")
 
         fit_results = []
 
-        # Get the output model type
-        output_model = datamodels.LFCWavesolModel.from_datamodels(
+        # Output model type depends on the source
+        model_cls = getattr(datamodels, cfg['model_class'])
+        output_model = model_cls.from_datamodels(
             input_model, include_data=True, primitive=self
         )
         if hasattr(output_model.meta, "wave_model"):
@@ -131,7 +216,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         for fiber in do_fibers:
 
             # Get the table for the fiber
-            params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
+            params_table = getattr(input_model, f"{cfg['table_prefix']}_fitparams_fib{fiber}")
 
             # Get the wavesol norm table for the fiber
             chebnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
@@ -144,7 +229,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             pixels = pixels[mask]
             orders = orders[mask]
             waves = waves[mask]
-            if self.opt_weights:
+            if s['opt_weights']:
                 weights = 1 / params_table['MU_ERR_WAVE'][mask]**2
             else:
                 weights = None
@@ -162,7 +247,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                 fit_result = fit_wavesol_chebyshev2d(
                     pixels, orders, waves,
                     deg_intra_order=deg_intra_order, deg_inter_order=deg_inter_order,
-                    max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
+                    max_iters=s['max_iters'], sigma_cut=s['sigma_cut'], max_vel_cut=s['max_vel_cut'],
                     weights=weights,
                 )
                 if fit_result["coeffs"] is not None:
@@ -191,8 +276,9 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             for order in bad_orders:
                 oi = np.abs(order - output_model.meta.order_start)
                 dq[oi, :] |= flag_value
-            
-            params_table_good = params_table[fit_result['good']]
+
+            # fit_result['good'] indexes the masked (fit_orders only) arrays, so apply the same mask first
+            params_table_good = params_table[mask][fit_result['good']]
             for order in fit_orders:
                 order_mask = params_table_good['ORDER'] == order
                 if np.sum(order_mask) > 0:
@@ -217,7 +303,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                             dq[oi, b2:k2 + 1] |= flag_value
             setattr(output_model, f'spec_dq_fib{fiber}', dq)
 
-        return dict(output=output_model, fit_results=fit_results)
+        return dict(output=output_model, fit_results=fit_results, source=source)
 
 
 def _normalize_val(x, lo, hi):
@@ -236,7 +322,7 @@ def fit_wavesol_spline_1d(
     *,
     weights: np.ndarray | None = None,
 ) -> dict:
-    """Per-order cubic spline through LFC ``(MU_PIX, WAVE)``."""
+    """Per-order cubic spline through fitted line ``(MU_PIX, WAVE)``."""
     from scipy.interpolate import CubicSpline
 
     pixels = np.asarray(pixels, dtype=float)
@@ -264,7 +350,7 @@ def fit_wavesol_spline_1d(
         n_sel = int(sel.sum())
         if n_sel < 4:
             logger.warning(
-                "Order %s has %s usable LFC lines; need 4 for a cubic spline.",
+                "Order %s has %s usable lines; need 4 for a cubic spline.",
                 od,
                 n_sel,
             )
@@ -277,7 +363,7 @@ def fit_wavesol_spline_1d(
         x, y = x[uniq], y[uniq]
         if x.size < 4:
             logger.warning(
-                "Order %s has %s unique LFC pixels; need 4 for a cubic spline.",
+                "Order %s has %s unique line pixels; need 4 for a cubic spline.",
                 od,
                 x.size,
             )
@@ -319,7 +405,7 @@ def fit_wavesol_chebyshev2d(
     deg_inter_order : int,
     pixel_bounds : tuple[float] | None = None,
     order_bounds : tuple[float] | None = None,
-    max_iters : float | None = None,
+    max_iters : int | None = None,
     sigma_cut : float | None = None,
     max_vel_cut : float | None = None,
     weights : np.ndarray | None = None,
@@ -335,7 +421,7 @@ def fit_wavesol_chebyshev2d(
         deg_inter_order (int): Degree of the polynomial between orders.
         pixel_bounds (tuple[float] | None): Bounds for pixel values for normalization of the data.
         order_bounds (tuple[float] | None): Bounds for order values for normalization of the data.
-        max_iters (int | None): Maximum number of iterations for the fitting process.
+        max_iters (int | None): Maximum number of iterations (None means a single fit).
         sigma_cut (float | None): Cutoff for the residuals in terms of standard deviation.
         max_vel_cut (float | None): Maximum velocity cutoff for the residuals.
         weights (np.ndarray | None): Fit weights. Defaults to uniform weights.
@@ -352,6 +438,8 @@ def fit_wavesol_chebyshev2d(
         weights = np.ones(pixels.shape)
     else:
         weights = np.copy(weights)
+    if max_iters is None:
+        max_iters = 1
 
     if pixel_bounds is None:
         pixel_bounds = (np.nanmin(pixels) - 10, np.nanmax(pixels) + 10)
@@ -368,9 +456,16 @@ def fit_wavesol_chebyshev2d(
     # Good vals
     good = np.where(np.isfinite(weights) & (weights > 0))[0]
     coeffs = None
+    n_coeffs = (deg_intra_order + 1) * (deg_inter_order + 1)
 
     # Iteratively fit
     for i in range(max_iters):
+
+        if len(good) < n_coeffs:
+            raise RuntimeError(
+                f"Only {len(good)} usable lines for {n_coeffs} coefficients "
+                f"({deg_intra_order=}, {deg_inter_order=}). Lower the degrees or loosen the clipping."
+            )
 
         # Fit
         x = pixels_norm[good]
@@ -382,19 +477,18 @@ def fit_wavesol_chebyshev2d(
         # Model and residuals
         model_flat = _build_wavesol_poly2d_unstructured(coeffs, pixels, orders, pixel_bounds, order_bounds)
         residuals = waves - model_flat
+        residuals_vel = delta_wave_to_delta_vel(residuals, waves)
         if sigma_cut is not None or max_vel_cut is not None:
             sigma = np.nanstd(residuals)
-            residuals_vel = delta_wave_to_delta_vel(residuals, waves)
-            good_new = np.where(
-                (weights > 0)
-                & np.isfinite(weights)
-                & (np.abs(residuals_vel) < max_vel_cut)
-                & (np.abs(residuals) < sigma_cut * sigma)
-            )[0]
+            keep = (weights > 0) & np.isfinite(weights)
+            if max_vel_cut is not None:
+                keep &= np.abs(residuals_vel) < max_vel_cut
+            if sigma_cut is not None:
+                keep &= np.abs(residuals) < sigma_cut * sigma
+            good_new = np.where(keep)[0]
             if len(good) == len(good_new):
                 break
-            else:
-                good = good_new
+            good = good_new
         else:
             break
 
