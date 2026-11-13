@@ -1,0 +1,12 @@
+hispecdrp.datamodels.dark
+=========================
+
+.. automodule:: hispecdrp.datamodels.dark
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      DarkModel
+   

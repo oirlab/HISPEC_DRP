@@ -1,0 +1,12 @@
+hispecdrp.datamodels.dq
+=======================
+
+.. automodule:: hispecdrp.datamodels.dq
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      DQModel
+   

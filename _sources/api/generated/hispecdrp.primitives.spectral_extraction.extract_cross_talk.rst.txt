@@ -1,0 +1,15 @@
+hispecdrp.primitives.spectral\_extraction.extract\_cross\_talk
+==============================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_cross_talk
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _extract_cross_talk_numba
+      extract_spectra_cross_talk
+      get_design_matrix
+      solve_cross_talk
+   

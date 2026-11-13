@@ -1,0 +1,12 @@
+hispecdrp.primitives.readnoise.make\_rn\_primitive
+==================================================
+
+.. automodule:: hispecdrp.primitives.readnoise.make_rn_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeReadnoisePrimitive
+   

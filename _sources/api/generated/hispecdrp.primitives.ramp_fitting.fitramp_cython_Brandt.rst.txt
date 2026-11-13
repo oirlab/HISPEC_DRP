@@ -1,0 +1,14 @@
+hispecdrp.primitives.ramp\_fitting.fitramp\_cython\_Brandt
+==========================================================
+
+.. automodule:: hispecdrp.primitives.ramp_fitting.fitramp_cython_Brandt
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      fit_ramps
+      fit_ramps_row
+      logsum
+   

@@ -1,0 +1,14 @@
+hispecdrp.primitives.dq\_init
+=============================
+
+.. automodule:: hispecdrp.primitives.dq_init
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   dqinit_primitive

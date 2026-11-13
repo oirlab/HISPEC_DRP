@@ -1,0 +1,19 @@
+hispecdrp.primitives.utils.stats
+================================
+
+.. automodule:: hispecdrp.primitives.utils.stats
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      biweight_location
+      biweight_midvariance
+      get_err_from_posterior
+      mad
+      robust_stats
+      weighted_mean
+      weighted_quantile
+      weighted_stddev
+   

@@ -1,0 +1,12 @@
+hispecdrp.datamodels.fiberflat
+==============================
+
+.. automodule:: hispecdrp.datamodels.fiberflat
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      FiberflatModel
+   

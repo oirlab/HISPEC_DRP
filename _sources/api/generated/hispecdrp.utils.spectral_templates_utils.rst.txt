@@ -1,0 +1,24 @@
+hispecdrp.utils.spectral\_templates\_utils
+==========================================
+
+.. automodule:: hispecdrp.utils.spectral_templates_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _ab_mag_through_filter
+      _coalesce_existing_spectrum_path
+      _edlen_refractivity_ppm_nm
+      air_wavelength_nm_to_vacuum_nm
+      etalon_line_list
+      fetch_svo_2mass_filter
+      get_skybackground_path
+      get_spectrum_path
+      load_btsettl_spectrum
+      load_sky_spectrum
+      load_template_from_path
+      resolve_stellar_template_to_log_micron
+      vacuum_wavelength_nm_to_air_nm
+   

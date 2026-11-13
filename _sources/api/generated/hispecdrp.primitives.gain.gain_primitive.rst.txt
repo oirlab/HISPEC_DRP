@@ -1,0 +1,19 @@
+hispecdrp.primitives.gain.gain\_primitive
+=========================================
+
+.. automodule:: hispecdrp.primitives.gain.gain_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _gain_correction_numba
+      gain_correction
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      GainCorrectionPrimitive
+   

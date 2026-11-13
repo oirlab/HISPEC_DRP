@@ -1,0 +1,14 @@
+hispecdrp.utils.notebook\_display
+=================================
+
+.. automodule:: hispecdrp.utils.notebook_display
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _ensure_directory_server
+      _pick_free_port
+      display_html_file
+   

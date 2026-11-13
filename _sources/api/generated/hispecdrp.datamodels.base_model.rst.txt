@@ -1,0 +1,27 @@
+hispecdrp.datamodels.base\_model
+================================
+
+.. automodule:: hispecdrp.datamodels.base_model
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _build_empty_table_with_cols
+      _canonical_dtype
+      _correct_image_dtype
+      _doc_table_render_axis
+      _doc_table_render_dtype
+      _doc_table_render_dtype_name
+      _doc_table_render_shape
+      _dtype_family
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CalibrationModel
+      DataModel
+      _classproperty
+   

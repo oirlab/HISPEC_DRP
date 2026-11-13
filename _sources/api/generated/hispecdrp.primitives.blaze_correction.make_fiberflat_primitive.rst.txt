@@ -1,0 +1,12 @@
+hispecdrp.primitives.blaze\_correction.make\_fiberflat\_primitive
+=================================================================
+
+.. automodule:: hispecdrp.primitives.blaze_correction.make_fiberflat_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeFiberflatPrimitive
+   

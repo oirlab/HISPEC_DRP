@@ -1,0 +1,15 @@
+hispecdrp.primitives.gain.fit\_gain\_Brandt
+===========================================
+
+.. automodule:: hispecdrp.primitives.gain.fit_gain_Brandt
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      fit_gain_linearity
+      fitquad
+      gen_likelihood_map
+      get_best_nonlinearity
+   

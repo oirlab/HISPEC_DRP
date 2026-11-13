@@ -1,0 +1,17 @@
+hispecdrp.primitives.line\_fitting
+==================================
+
+.. automodule:: hispecdrp.primitives.line_fitting
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   find_lines
+   fit_etalon_lines_primitive
+   fit_lfc_lines_primitive
+   fit_lines

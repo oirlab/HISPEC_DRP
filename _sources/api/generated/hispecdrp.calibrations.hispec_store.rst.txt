@@ -1,0 +1,19 @@
+hispecdrp.calibrations.hispec\_store
+====================================
+
+.. automodule:: hispecdrp.calibrations.hispec_store
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _default_connect_remote
+      _is_recoverable_remote_init_error
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      HISPECCalibrationStore
+   

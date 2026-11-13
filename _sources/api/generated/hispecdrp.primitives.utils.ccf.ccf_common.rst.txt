@@ -1,0 +1,22 @@
+hispecdrp.primitives.utils.ccf.ccf\_common
+==========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_common
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _ccf_background_sigma_clipped_median
+      _ccf_background_sigma_clipped_median_dv_weighted
+      _ccf_rv_err_numeric_floor
+      _ccf_trapezoid_dv_weights_m_s
+      _ccf_weighted_median
+      _make_velocity_grid
+      _velocity_grid_from_window
+      ccf_oversample_nsp
+      effective_ccf_v_step_for_fit
+      resolve_ccf_broad_grid_m_s
+      science_centroid_spec_err
+   

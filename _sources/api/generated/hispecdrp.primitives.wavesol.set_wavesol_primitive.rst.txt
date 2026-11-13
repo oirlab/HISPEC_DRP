@@ -1,0 +1,12 @@
+hispecdrp.primitives.wavesol.set\_wavesol\_primitive
+====================================================
+
+.. automodule:: hispecdrp.primitives.wavesol.set_wavesol_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SetInitialWLSPrimitive
+   

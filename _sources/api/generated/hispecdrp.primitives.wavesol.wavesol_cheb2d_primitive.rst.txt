@@ -1,0 +1,23 @@
+hispecdrp.primitives.wavesol.wavesol\_cheb2d\_primitive
+=======================================================
+
+.. automodule:: hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _build_wavesol_poly2d_structured
+      _build_wavesol_poly2d_unstructured
+      _normalize_val
+      auto_deg_inter_order
+      fit_wavesol_chebyshev2d
+      fit_wavesol_spline_1d
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CalculateChebyshev2DWLSPrimitive
+   

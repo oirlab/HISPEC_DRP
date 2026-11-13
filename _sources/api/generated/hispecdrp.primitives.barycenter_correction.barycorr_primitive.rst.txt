@@ -1,0 +1,12 @@
+hispecdrp.primitives.barycenter\_correction.barycorr\_primitive
+===============================================================
+
+.. automodule:: hispecdrp.primitives.barycenter_correction.barycorr_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      BarycenterCorrectionPrimitive
+   

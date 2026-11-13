@@ -1,0 +1,25 @@
+hispecdrp.primitives.coadd.coadd\_frames\_primitive
+===================================================
+
+.. automodule:: hispecdrp.primitives.coadd.coadd_frames_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _coadd_frames
+      _coadd_frames_numba
+      _get_data_attrs
+      _make_frame_batch
+      _mask_outliers
+      coadd_frames
+      sigma_clip
+      sigma_clip_frames
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CoaddFramesPrimitive
+   

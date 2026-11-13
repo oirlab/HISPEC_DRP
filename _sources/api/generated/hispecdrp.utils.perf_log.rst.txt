@@ -1,0 +1,14 @@
+hispecdrp.utils.perf\_log
+=========================
+
+.. automodule:: hispecdrp.utils.perf_log
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      log_wall_s
+      perf_clock
+      wall_seconds
+   

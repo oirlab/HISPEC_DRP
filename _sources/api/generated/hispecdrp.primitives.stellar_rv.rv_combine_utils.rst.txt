@@ -1,0 +1,15 @@
+hispecdrp.primitives.stellar\_rv.rv\_combine\_utils
+===================================================
+
+.. automodule:: hispecdrp.primitives.stellar_rv.rv_combine_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      combine_rv_estimates_median_mad_weighted
+      combine_rvs_median_mad
+      combine_stellar_rv_chunk_estimates
+      weighted_mean_rv
+   

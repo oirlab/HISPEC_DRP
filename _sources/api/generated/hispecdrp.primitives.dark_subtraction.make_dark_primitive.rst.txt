@@ -1,0 +1,18 @@
+hispecdrp.primitives.dark\_subtraction.make\_dark\_primitive
+============================================================
+
+.. automodule:: hispecdrp.primitives.dark_subtraction.make_dark_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _detect_hot_pixels
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeDarkPrimitive
+   

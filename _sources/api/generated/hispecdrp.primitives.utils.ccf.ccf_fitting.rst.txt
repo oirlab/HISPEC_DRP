@@ -1,0 +1,19 @@
+hispecdrp.primitives.utils.ccf.ccf\_fitting
+===========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_fitting
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _calc_rverr_from_ccf
+      calc_ccf_metrics
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CCFMetrics
+   

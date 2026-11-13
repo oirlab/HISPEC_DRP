@@ -1,0 +1,14 @@
+hispecdrp.primitives.sky\_subtraction
+=====================================
+
+.. automodule:: hispecdrp.primitives.sky_subtraction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   sky_primitive

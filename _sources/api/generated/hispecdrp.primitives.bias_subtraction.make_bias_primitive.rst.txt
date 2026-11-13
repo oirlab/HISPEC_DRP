@@ -1,0 +1,19 @@
+hispecdrp.primitives.bias\_subtraction.make\_bias\_primitive
+============================================================
+
+.. automodule:: hispecdrp.primitives.bias_subtraction.make_bias_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _find_bad_pixels_bias
+      std_axis0_3d_sigclip
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeBiasPrimitive
+   

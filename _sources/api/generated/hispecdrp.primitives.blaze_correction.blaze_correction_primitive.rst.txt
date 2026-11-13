@@ -1,0 +1,25 @@
+hispecdrp.primitives.blaze\_correction.blaze\_correction\_primitive
+===================================================================
+
+.. automodule:: hispecdrp.primitives.blaze_correction.blaze_correction_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _longest_contiguous_true_segment
+      apply_blaze
+      apply_blaze_array
+      divide_out_lamp_spectrum
+      estimate_blaze_spline
+      get_smooth_blaze
+      lamp_spectrum_shape
+      normalize_blaze_array
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      BlazeCorrectionPrimitive
+   

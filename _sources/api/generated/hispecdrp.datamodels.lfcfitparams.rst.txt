@@ -1,0 +1,12 @@
+hispecdrp.datamodels.lfcfitparams
+=================================
+
+.. automodule:: hispecdrp.datamodels.lfcfitparams
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      LFCFitParamsModel
+   

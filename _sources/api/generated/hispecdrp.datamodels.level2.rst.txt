@@ -1,0 +1,12 @@
+hispecdrp.datamodels.level2
+===========================
+
+.. automodule:: hispecdrp.datamodels.level2
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      L2Model
+   

@@ -1,0 +1,27 @@
+hispecdrp.primitives.gain.make\_gain\_primitive
+===============================================
+
+.. automodule:: hispecdrp.primitives.gain.make_gain_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _fit_gain_and_readnoise_per_pixel
+      _fit_gain_and_readnoise_row
+      _fit_gain_and_readnoise_worker
+      _fit_single_gain_readnoise
+      _fit_single_gain_readnoise_quad_approx
+      _fitquad_gain_rn
+      _quad_1d_through_3pts
+      _tpool_init_fit_gain_readnoise
+      fit_gain_and_readnoise
+      plot_2d_posterior
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeGainPrimitive
+   

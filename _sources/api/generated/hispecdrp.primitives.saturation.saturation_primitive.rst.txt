@@ -1,0 +1,19 @@
+hispecdrp.primitives.saturation.saturation\_primitive
+=====================================================
+
+.. automodule:: hispecdrp.primitives.saturation.saturation_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _check_saturation_numba
+      check_saturation
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CheckSaturationPrimitive
+   

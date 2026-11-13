@@ -1,0 +1,13 @@
+hispecdrp.utils.gdrive
+======================
+
+.. automodule:: hispecdrp.utils.gdrive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      download_gdrive_file
+      get_id_from_path
+   

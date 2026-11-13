@@ -1,0 +1,15 @@
+hispecdrp.primitives.utils.ccf.ccf\_tophat
+==========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_tophat
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _bin_tophat
+      _compute_ccf_tophat
+      _pixel_edges_from_wavelength_numba
+      compute_ccf_tophat
+   

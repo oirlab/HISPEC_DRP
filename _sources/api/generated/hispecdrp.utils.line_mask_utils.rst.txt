@@ -1,0 +1,63 @@
+hispecdrp.utils.line\_mask\_utils
+=================================
+
+.. automodule:: hispecdrp.utils.line_mask_utils
+
+   
+   .. rubric:: Module Attributes
+
+   .. autosummary::
+   
+      IDEAL_SPECTRUM_STELLAR_RV_KW
+      E2ERV_MASK_BUILD_KW
+      DEFAULT_PACKAGED_LINE_MASK_BASENAME
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _absorption_centers_from_flux_gradients_um
+      _assert_mas_mask_style_matches_columns
+      _ccfopt_search_line_center_um
+      _ccfopt_single_line_gaussian_contrast
+      _cluster_max_depth
+      _continuum_envelope
+      _continuum_normalized_d2_flux_dlam2_at_um
+      _infer_wavelength_disk_to_um
+      _local_min_continuum_normalized_flux_um
+      _local_minima_indices
+      _merge_sorted_centers_um
+      _normalize_mask_style
+      _parabolic_minimum_wavelength_um
+      _segment_mean_continuum_normalized_depth_um
+      apply_ccfopt_defaults_for_line_by_line
+      build_ccfopt_line_mask_from_l2_line_by_line_rv
+      build_ccfopt_line_mask_from_l2_single_line_ccf
+      build_ccfopt_line_mask_from_rvccf_table
+      build_ccfopt_line_mask_from_template_and_seed
+      build_e2erv_line_mask_from_template
+      build_line_mask_from_template
+      compare_line_center_lists_um
+      detect_template_line_centers_gradient_um
+      detect_template_line_centers_parabolic_um
+      fit_half_width_linear_from_mas
+      load_atmospheric_transmission_um
+      masklines_wavelength_unit_meta
+      mean_transmission_over_velocity_interval_um
+      package_data_masks_dir
+      packaged_default_line_mask_path
+      paired_line_mask_path_for_template
+      parse_mask_generation_meta_line
+      pixel_edges_from_wavelength
+      read_mask_generation_meta
+      resolve_mask_path
+      restrict_mask_to_chunk
+      stellar_rv_ccf_mask_lines
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      LineMaskEntry
+      MaskLines
+   

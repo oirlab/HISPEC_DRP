@@ -1,0 +1,12 @@
+hispecdrp.datamodels.gain
+=========================
+
+.. automodule:: hispecdrp.datamodels.gain
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      GainModel
+   

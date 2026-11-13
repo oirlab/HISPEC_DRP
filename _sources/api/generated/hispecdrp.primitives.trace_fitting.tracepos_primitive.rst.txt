@@ -1,0 +1,22 @@
+hispecdrp.primitives.trace\_fitting.tracepos\_primitive
+=======================================================
+
+.. automodule:: hispecdrp.primitives.trace_fitting.tracepos_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _compute_centroid_and_width
+      _compute_centroid_and_width_2pass
+      _walk_trace_up_down
+      find_trace_positions
+      walk_trace_up_down
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      TracePositionPrimitive
+   

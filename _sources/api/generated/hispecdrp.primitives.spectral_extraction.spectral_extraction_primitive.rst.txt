@@ -1,0 +1,12 @@
+hispecdrp.primitives.spectral\_extraction.spectral\_extraction\_primitive
+=========================================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.spectral_extraction_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SpectralExtractionPrimitive
+   

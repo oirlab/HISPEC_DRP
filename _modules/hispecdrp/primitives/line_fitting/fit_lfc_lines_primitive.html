@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en" data-content_root="../../../../"
+  x-data="{ darkMode: $persist(window.matchMedia('(prefers-color-scheme: dark)').matches), activeSection: ''}"
+  :class="{ 'dark' : darkMode === true }">
+
+<head>
+  <script>
+    (function () {
+      // Set initial color scheme
+      if ((localStorage.getItem("_x_darkMode") === "true") || (window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Watch for media preference changes
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+        localStorage.setItem("_x_darkMode", event.matches);
+        document.documentElement.classList.toggle("dark", event.matches);
+      });
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#030711" />
+  
+  <title>hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive | HISPEC DRP  documentation</title>
+  <meta property="og:title" content="hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive | HISPEC DRP  documentation" />
+  <meta name="twitter:title" content="hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive | HISPEC DRP  documentation" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=d862e8e8" />
+  <link id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css" href="../../../../_static/pygments_dark.css" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/theme.css?v=73505e79" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=228efd53" />
+  <link rel="canonical" href="https://oirlab.github.io/HISPEC_DRP/_modules/hispecdrp/primitives/line_fitting/fit_lfc_lines_primitive.html" />
+  <link rel="search" title="Search" href="../../../../search.html" />
+  <link rel="index" title="Index" href="../../../../genindex.html" />
+</head>
+
+<body x-data="{ showSidebar: false, showScrollTop: false }"
+  class="min-h-screen font-sans antialiased bg-background text-foreground" :class="{ 'overflow-hidden': showSidebar }">
+  <div x-cloak x-show="showSidebar"
+    class="fixed inset-0 z-50 overflow-hidden bg-background/80 backdrop-blur-sm md:hidden"
+    @click.self="showSidebar = false"></div><div id="page" class="relative flex flex-col min-h-screen"><a href="#content"
+      class="absolute top-0 left-0 z-[100] block bg-background p-4 text-xl transition -translate-x-full opacity-0 focus:translate-x-0 focus:opacity-100">
+      Skip to content
+    </a><header class="sticky top-0 z-40 w-full border-b shadow-xs border-border bg-background/90 backdrop-blur"><div class="container flex items-center h-14">
+    <div class="hidden mr-4 md:flex">
+      <a href="../../../../index.html" class="flex items-center mr-6"><span class="hidden font-bold sm:inline-block text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+      </a></div><button
+      class="inline-flex items-center justify-center h-10 px-0 py-2 mr-2 text-base font-medium transition-colors rounded-md hover:text-accent-foreground hover:bg-transparent md:hidden"
+      type="button" @click="showSidebar = true">
+      <svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 96 960 960" aria-hidden="true"
+        fill="currentColor">
+        <path
+          d="M152.587 825.087q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440Zm0-203.587q-19.152 0-32.326-13.174T107.087 576q0-19.152 13.174-32.326t32.326-13.174h320q19.152 0 32.326 13.174T518.087 576q0 19.152-13.174 32.326T472.587 621.5h-320Zm0-203.587q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440ZM708.913 576l112.174 112.174q12.674 12.674 12.674 31.826t-12.674 31.826Q808.413 764.5 789.261 764.5t-31.826-12.674l-144-144Q600 594.391 600 576t13.435-31.826l144-144q12.674-12.674 31.826-12.674t31.826 12.674q12.674 12.674 12.674 31.826t-12.674 31.826L708.913 576Z" />
+      </svg>
+      <span class="sr-only">Toggle navigation menu</span>
+    </button>
+    <div class="flex items-center justify-between flex-1 gap-2 sm:gap-4 md:justify-end">
+      <div class="flex-1 w-full md:w-auto md:flex-none"><form id="searchbox"
+      action="../../../../search.html"
+      method="get"
+      class="relative flex items-center group"
+      @keydown.k.window.meta="$refs.search.focus()">
+  <input x-ref="search"
+          name="q"
+          id="search-input"
+          type="search"
+          aria-label="Search the docs"
+          placeholder="Search ..."
+          class="inline-flex items-center font-medium transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-input hover:bg-accent focus:bg-accent hover:text-accent-foreground focus:text-accent-foreground hover:placeholder-accent-foreground py-2 px-4 relative h-9 w-full justify-start rounded-[0.5rem] text-sm text-muted-foreground sm:pr-12 md:w-40 lg:w-64" />
+  <kbd class="pointer-events-none absolute right-1.5 top-2 hidden h-5 select-none text-muted-foreground items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex group-hover:bg-accent group-hover:text-accent-foreground">
+    <span class="text-xs">⌘</span>
+    K
+  </kbd>
+</form>
+      </div>
+      <nav class="flex items-center gap-1">
+        <button @click="darkMode = !darkMode"
+          class="relative inline-flex items-center justify-center px-0 text-sm font-medium transition-colors rounded-md hover:bg-accent hover:text-accent-foreground h-9 w-9"
+          type="button"
+          title="Toggle color scheme">
+          <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 96 960 960" fill="currentColor"
+            class="absolute transition-all scale-100 rotate-0 dark:-rotate-90 dark:scale-0">
+            <path
+              d="M480 685q45.456 0 77.228-31.772Q589 621.456 589 576q0-45.456-31.772-77.228Q525.456 467 480 467q-45.456 0-77.228 31.772Q371 530.544 371 576q0 45.456 31.772 77.228Q434.544 685 480 685Zm0 91q-83 0-141.5-58.5T280 576q0-83 58.5-141.5T480 376q83 0 141.5 58.5T680 576q0 83-58.5 141.5T480 776ZM80 621.5q-19.152 0-32.326-13.174T34.5 576q0-19.152 13.174-32.326T80 530.5h80q19.152 0 32.326 13.174T205.5 576q0 19.152-13.174 32.326T160 621.5H80Zm720 0q-19.152 0-32.326-13.174T754.5 576q0-19.152 13.174-32.326T800 530.5h80q19.152 0 32.326 13.174T925.5 576q0 19.152-13.174 32.326T880 621.5h-80Zm-320-320q-19.152 0-32.326-13.174T434.5 256v-80q0-19.152 13.174-32.326T480 130.5q19.152 0 32.326 13.174T525.5 176v80q0 19.152-13.174 32.326T480 301.5Zm0 720q-19.152 0-32.326-13.17Q434.5 995.152 434.5 976v-80q0-19.152 13.174-32.326T480 850.5q19.152 0 32.326 13.174T525.5 896v80q0 19.152-13.174 32.33-13.174 13.17-32.326 13.17ZM222.174 382.065l-43-42Q165.5 327.391 166 308.239t13.174-33.065q13.435-13.674 32.587-13.674t32.065 13.674l42.239 43q12.674 13.435 12.555 31.706-.12 18.272-12.555 31.946-12.674 13.674-31.445 13.413-18.772-.261-32.446-13.174Zm494 494.761-42.239-43q-12.674-13.435-12.674-32.087t12.674-31.565Q686.609 756.5 705.38 757q18.772.5 32.446 13.174l43 41.761Q794.5 824.609 794 843.761t-13.174 33.065Q767.391 890.5 748.239 890.5t-32.065-13.674Zm-42-494.761Q660.5 369.391 661 350.62q.5-18.772 13.174-32.446l41.761-43Q728.609 261.5 747.761 262t33.065 13.174q13.674 13.435 13.674 32.587t-13.674 32.065l-43 42.239q-13.435 12.674-31.706 12.555-18.272-.12-31.946-12.555Zm-495 494.761Q165.5 863.391 165.5 844.239t13.674-32.065l43-42.239q13.435-12.674 32.087-12.674t31.565 12.674Q299.5 782.609 299 801.38q-.5 18.772-13.174 32.446l-41.761 43Q231.391 890.5 212.239 890t-33.065-13.174ZM480 576Z" />
+          </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 96 960 960" fill="currentColor"
+            class="absolute transition-all scale-0 rotate-90 dark:rotate-0 dark:scale-100">
+            <path
+              d="M480 936q-151 0-255.5-104.5T120 576q0-138 90-239.5T440 218q25-3 39 18t-1 44q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q21-14 43-1.5t19 39.5q-14 138-117.5 229T480 936Zm0-80q88 0 158-48.5T740 681q-20 5-40 8t-40 3q-123 0-209.5-86.5T364 396q0-20 3-40t8-40q-78 32-126.5 102T200 576q0 116 82 198t198 82Zm-10-270Z" />
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </div>
+</header>
+
+    <div class="flex-1"><div
+        class="container md:grid md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10"><aside id="left-sidebar"
+  class="fixed inset-y-0 left-0 md:top-14 z-50 md:z-30 bg-background md:bg-transparent transition-all duration-100 -translate-x-full md:translate-x-0 ml-0 p-6 md:p-0 md:-ml-2 md:h-[calc(100vh-3.5rem)] w-5/6 md:w-full overflow-y-auto border-r border-border md:sticky"
+  :aria-hidden="!showSidebar" :class="{ 'translate-x-0': showSidebar }">
+
+    <a href="../../../../index.html" class="justify-start text-sm md:!hidden bg-background"><span class="font-bold text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+    </a>
+
+    <div class="relative overflow-hidden md:overflow-auto my-4 md:my-0">
+      <div class="overflow-y-auto h-full w-full relative pr-6"><nav class="table w-full min-w-full my-6 lg:my-8">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart/quickstart.html">Quickstart</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/pipelines_and_primitives.html">Run Pipelines and Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/data_handling.html">Data Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/calibration_examples.html">Working with Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/create_simulations.html">Create Simulated HISPEC Data</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data_products/data_products.html">Data Products</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../data_products/data_format.html">HISPEC Data Format</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../simulations/simulations.html">Simulations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/basic_usage.html">Basic Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/examples/examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/limitations.html">Limitations and Known Issues</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../pipelines/pipelines.html">Pipelines</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../calibrations/calibrations.html">Calibrations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../calibrations/configure.html">Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../calibrations/calibration_database.html">Calibration Database</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../algorithms/algorithms.html">Algorithms</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/stellar_rv.html">Stellar RV primitive (L2)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/ccf.html">Cross-correlation (CCF)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/line_mask.html">Line masks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/spectral_extraction.html">Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/ramp_fitting.html">Ramp Fitting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/trace_fitting.html">Trace Fitting</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../development/development.html">Development</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/datamodels.html">Data Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/pipelines.html">Pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/primitives.html">Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/selectors.html">Calibration Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/configuration.html">Configuration</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api/api.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.processing_component.html">hispecdrp.processing_component</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.primitives.html">hispecdrp.primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.pipelines.html">hispecdrp.pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.datamodels.html">hispecdrp.datamodels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.calibrations.html">hispecdrp.calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.driver.html">hispecdrp.driver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.utils.html">hispecdrp.utils</a></li>
+</ul>
+</li>
+</ul>
+
+</nav>
+      </div>
+    </div>
+    <button type="button" @click="showSidebar = false"
+      class="absolute md:hidden right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100">
+      <svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 96 960 960" fill="currentColor"
+        stroke="none" class="h-4 w-4">
+        <path
+          d="M480 632 284 828q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536 576l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480 632Z" />
+      </svg>
+    </button>
+  </aside>
+          <main class="relative py-6 lg:gap-10 lg:py-8 xl:grid xl:grid-cols-[1fr_300px]">
+<div class="w-full min-w-0 mx-auto">
+<nav aria-label="breadcrumbs"
+     class="flex items-center mb-4 space-x-1 text-sm text-muted-foreground">
+  <a class="overflow-hidden text-ellipsis whitespace-nowrap hover:text-foreground"
+     href="../../../../index.html">
+    <span class="hidden md:inline">HISPEC DRP  documentation</span>
+    <svg xmlns="http://www.w3.org/2000/svg"
+         height="18"
+         width="18"
+         viewBox="0 96 960 960"
+         aria-label="Home"
+         fill="currentColor"
+         stroke="none"
+         class="md:hidden">
+      <path d="M240 856h120V616h240v240h120V496L480 316 240 496v360Zm-80 80V456l320-240 320 240v480H520V696h-80v240H160Zm320-350Z" />
+    </svg>
+  </a>
+  
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap"
+       href="../../../index.html">Module code</a>
+    
+<div class="mr-1">/</div><span aria-current="page"
+        class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive</span>
+</nav>
+
+    <div id="content" role="main">
+      <h1>Source code for hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive</h1><div class="highlight"><pre>
+<span></span><code><span id="line-1"><span class="kn">from</span><span class="w"> </span><span class="nn">..base_primitive</span><span class="w"> </span><span class="kn">import</span> <span class="n">BasePrimitive</span>
+</span><span id="line-2"><span class="kn">from</span><span class="w"> </span><span class="nn">...</span><span class="w"> </span><span class="kn">import</span> <span class="n">datamodels</span>
+</span><span id="line-3">
+</span><span id="line-4"><span class="kn">from</span><span class="w"> </span><span class="nn">.fit_lines</span><span class="w"> </span><span class="kn">import</span> <span class="n">fit_lines_gauss</span>
+</span><span id="line-5"><span class="kn">from</span><span class="w"> </span><span class="nn">.find_lines</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_emission_lines</span>
+</span><span id="line-6"><span class="kn">from</span><span class="w"> </span><span class="nn">..utils.spectral_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">delta_pix_to_delta_wave</span>
+</span><span id="line-7">
+</span><span id="line-8"><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="line-9"><span class="kn">import</span><span class="w"> </span><span class="nn">scipy.constants</span>
+</span><span id="line-10"><span class="kn">import</span><span class="w"> </span><span class="nn">plotly.graph_objects</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">go</span>
+</span><span id="line-11"><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+</span><span id="line-12">
+</span><span id="line-13"><span class="kn">from</span><span class="w"> </span><span class="nn">logging</span><span class="w"> </span><span class="kn">import</span> <span class="n">getLogger</span>
+</span><span id="line-14"><span class="n">logger</span> <span class="o">=</span> <span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+</span><span id="line-15">
+</span><span id="line-16"><span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">'FitLFCLinesPrimitive'</span><span class="p">]</span>
+</span><span id="line-17">
+</span><span id="line-18">
+<div class="viewcode-block" id="FitLFCLinesPrimitive">
+<a class="viewcode-back" href="../../../../api/generated/hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.html#hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.FitLFCLinesPrimitive">[docs]</a>
+</span><span id="line-19"><span class="k">class</span><span class="w"> </span><span class="nc">FitLFCLinesPrimitive</span><span class="p">(</span><span class="n">BasePrimitive</span><span class="p">):</span>
+</span><span id="line-20">
+</span><span id="line-21"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-22"><span class="sd">    NOTE: *Under development*</span>
+</span><span id="line-23"><span class="sd">    </span>
+</span><span id="line-24"><span class="sd">    Fit each laser frequency comb (LFC) line with a Gaussian profile. This is useful for calculating the wavelength solution and the the line spread function (LSF).</span>
+</span><span id="line-25">
+</span><span id="line-26"><span class="sd">    Each LFC line is first identified with `scipy.signal.find_peaks &lt;https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.find_peaks.html&gt;`_ then refined with a centroid. Then each line is fit with a Gaussian profile using `scipy.optimize.least_squares &lt;https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html&gt;`_. The fit parameters are stored in a table in the output data model's attribute ``lfc_fitparams_fib#``.</span>
+</span><span id="line-27">
+</span><span id="line-28"><span class="sd">    Parameters</span>
+</span><span id="line-29"><span class="sd">    ----------</span>
+</span><span id="line-30"><span class="sd">    input</span>
+</span><span id="line-31"><span class="sd">        A level 1 or 2 data product.</span>
+</span><span id="line-32"><span class="sd">    fwhm_bounds : Sequence[float, float]</span>
+</span><span id="line-33"><span class="sd">        The bounds for the FWHM of the fit. Default is (0.2, 8) pixels.</span>
+</span><span id="line-34"><span class="sd">    mu_bounds : Sequence[float, float]</span>
+</span><span id="line-35"><span class="sd">        The bounds for the mean of the fit (in pixels) relative the centroid.</span>
+</span><span id="line-36"><span class="sd">        Default is (-1, 1) pixels.</span>
+</span><span id="line-37"><span class="sd">    max_fit_window : float</span>
+</span><span id="line-38"><span class="sd">        The maximum number of pixels to fit for a mode.</span>
+</span><span id="line-39"><span class="sd">        Default is 14 pixels.</span>
+</span><span id="line-40"><span class="sd">    do_orders : Sequence[int] | None</span>
+</span><span id="line-41"><span class="sd">        Which order(s) to fit. If None, fit all available orders.</span>
+</span><span id="line-42"><span class="sd">    do_fibers : Sequence[int] | None</span>
+</span><span id="line-43"><span class="sd">        Which fiber(s) to fit. If None, fit all available fibers.</span>
+</span><span id="line-44"><span class="sd">    lfc_nu0 : float</span>
+</span><span id="line-45"><span class="sd">        The central frequency (pump line) of the LFC in GHz.</span>
+</span><span id="line-46"><span class="sd">    lfc_delta_nu : float</span>
+</span><span id="line-47"><span class="sd">        The frequency spacing of the LFC modes in GHz.</span>
+</span><span id="line-48"><span class="sd">    line_source : str</span>
+</span><span id="line-49"><span class="sd">        The source of the lines to fit. Options:</span>
+</span><span id="line-50"><span class="sd">        - 'peaks' : Use only the lines found by `find_emission_lines`.</span>
+</span><span id="line-51"><span class="sd">        - 'wavesol' : Use all lines that fall within the valid wavelength range.</span>
+</span><span id="line-52"><span class="sd">    min_line_spacing : int</span>
+</span><span id="line-53"><span class="sd">        Minimum spacing between lines in pixels. Default is 10 pixels.</span>
+</span><span id="line-54"><span class="sd">    background_filter_width : int | None</span>
+</span><span id="line-55"><span class="sd">        Number of pixels to use for background estimation. If None, no background subtraction is performed.</span>
+</span><span id="line-56">
+</span><span id="line-57"><span class="sd">    Returns</span>
+</span><span id="line-58"><span class="sd">    -------</span>
+</span><span id="line-59"><span class="sd">    output : LFCFitParamsModel</span>
+</span><span id="line-60"><span class="sd">        A data model containing the fit parameters for each LFC line.</span>
+</span><span id="line-61">
+</span><span id="line-62"><span class="sd">    """</span>
+</span><span id="line-63">
+</span><span id="line-64">    <span class="n">PARAMETERS</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="line-65">        <span class="s1">'fwhm_bounds'</span> <span class="p">:</span> <span class="p">(</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">),</span>
+</span><span id="line-66">        <span class="s1">'mu_bounds'</span> <span class="p">:</span> <span class="p">(</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>
+</span><span id="line-67">        <span class="s1">'max_fit_window'</span> <span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+</span><span id="line-68">        <span class="s1">'do_fibers'</span> <span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="line-69">        <span class="s1">'do_orders'</span> <span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="line-70">        <span class="s1">'lfc_nu0'</span> <span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="line-71">        <span class="s1">'lfc_delta_nu'</span> <span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="line-72">        <span class="s1">'background_poly_deg'</span> <span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-73">        <span class="s1">'line_source'</span> <span class="p">:</span> <span class="s1">'peaks'</span><span class="p">,</span> <span class="c1"># 'wavesol' (all lines) or 'peaks' (only lines found by find_peaks)</span>
+</span><span id="line-74">        <span class="s1">'min_line_spacing'</span> <span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="c1"># Minimum number of pixels between lines</span>
+</span><span id="line-75">        <span class="s1">'background_filter_width'</span> <span class="p">:</span> <span class="mi">31</span><span class="p">,</span> <span class="c1"># Pixels</span>
+</span><span id="line-76">        <span class="s1">'preview_n_lines_per_order'</span> <span class="p">:</span> <span class="mi">25</span><span class="p">,</span> <span class="c1"># Max lines shown per order in the preview slider. None = show all.</span>
+</span><span id="line-77">    <span class="p">}</span>
+</span><span id="line-78">
+</span><span id="line-79">    <span class="k">def</span><span class="w"> </span><span class="nf">_perform</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="line-80">        <span class="n">input_model</span> <span class="o">=</span> <span class="n">datamodels</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="p">)</span>
+</span><span id="line-81">        <span class="n">output_model</span> <span class="o">=</span> <span class="n">datamodels</span><span class="o">.</span><span class="n">LFCFitParamsModel</span><span class="o">.</span><span class="n">from_datamodels</span><span class="p">(</span>
+</span><span id="line-82">            <span class="n">input_model</span><span class="p">,</span> <span class="n">include_data</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="line-83">            <span class="n">primitive</span><span class="o">=</span><span class="bp">self</span>
+</span><span id="line-84">        <span class="p">)</span>
+</span><span id="line-85">
+</span><span id="line-86">        <span class="c1"># Which traces to process</span>
+</span><span id="line-87">        <span class="n">do_fibers</span><span class="p">,</span> <span class="n">do_orders</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_do_traces</span><span class="p">(</span><span class="n">input_model</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">do_fibers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">do_orders</span><span class="p">)</span>
+</span><span id="line-88">
+</span><span id="line-89">        <span class="c1"># LFC parameters</span>
+</span><span id="line-90">        <span class="n">lfc_nu0</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lfc_nu0</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">lfc_nu0</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">input_model</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">lfc_nu0</span>
+</span><span id="line-91">        <span class="n">lfc_delta_nu</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lfc_delta_nu</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">lfc_delta_nu</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">input_model</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">lfc_delta_nu</span>
+</span><span id="line-92">
+</span><span id="line-93">        <span class="n">fit_results</span> <span class="o">=</span> <span class="p">{</span><span class="n">fiber</span> <span class="p">:</span> <span class="p">[]</span> <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="n">do_fibers</span><span class="p">}</span>
+</span><span id="line-94">
+</span><span id="line-95">        <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="n">do_fibers</span><span class="p">:</span>
+</span><span id="line-96">            
+</span><span id="line-97">            <span class="c1"># Get extensions for this fiber (blaze-corrected preferred when present)</span>
+</span><span id="line-98">            <span class="n">wave</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">wave</span>
+</span><span id="line-99">            <span class="k">if</span> <span class="n">input_model</span><span class="o">.</span><span class="n">has_extension</span><span class="p">(</span><span class="sa">f</span><span class="s1">'spec_fib</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">'</span><span class="p">):</span>
+</span><span id="line-100">                <span class="n">spec</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec</span>
+</span><span id="line-101">                <span class="n">spec_err</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec_err</span>
+</span><span id="line-102">                <span class="n">spec_dq</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec_dq</span>
+</span><span id="line-103">            <span class="k">else</span><span class="p">:</span>
+</span><span id="line-104">                <span class="n">spec</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec_uncal</span>
+</span><span id="line-105">                <span class="n">spec_err</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec_uncal_err</span>
+</span><span id="line-106">                <span class="n">spec_dq</span> <span class="o">=</span> <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">spec_uncal_dq</span>
+</span><span id="line-107">
+</span><span id="line-108">            <span class="k">for</span> <span class="n">order</span> <span class="ow">in</span> <span class="n">do_orders</span><span class="p">:</span>
+</span><span id="line-109">
+</span><span id="line-110">                <span class="c1"># Relative order index</span>
+</span><span id="line-111">                <span class="n">oi</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">order</span> <span class="o">-</span> <span class="n">input_model</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">order_start</span><span class="p">)</span>
+</span><span id="line-112">
+</span><span id="line-113">                <span class="c1"># Good pixels for this order</span>
+</span><span id="line-114">                <span class="n">good</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">spec_dq</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="line-115">                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">good</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="line-116">                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">"No good pixels found in order </span><span class="si">{</span><span class="n">order</span><span class="si">}</span><span class="s2"> for fiber </span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s2">. Skipping."</span><span class="p">)</span>
+</span><span id="line-117">                    <span class="k">continue</span>
+</span><span id="line-118">
+</span><span id="line-119">                <span class="n">_wave</span> <span class="o">=</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]</span>
+</span><span id="line-120">                <span class="n">_spec</span> <span class="o">=</span> <span class="n">spec</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]</span>
+</span><span id="line-121">                <span class="n">_spec_err</span> <span class="o">=</span> <span class="n">spec_err</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]</span>
+</span><span id="line-122">                <span class="n">_spec_dq</span> <span class="o">=</span> <span class="n">spec_dq</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]</span>
+</span><span id="line-123">
+</span><span id="line-124">                <span class="n">line_spacing_um</span> <span class="o">=</span> <span class="p">(</span><span class="mf">1E-6</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">_wave</span><span class="p">[</span><span class="n">good</span><span class="p">]))</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="n">lfc_delta_nu</span> <span class="o">/</span> <span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-125">                <span class="n">line_spacing_pix</span> <span class="o">=</span> <span class="n">line_spacing_um</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">_wave</span><span class="p">)))</span>
+</span><span id="line-126">                <span class="n">adaptive_spacing</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">line_spacing_pix</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.8</span>
+</span><span id="line-127">                <span class="n">configured_spacing</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">min_line_spacing</span><span class="p">)</span>
+</span><span id="line-128">                <span class="c1"># Prefer the tighter of adaptive vs configured spacing so both</span>
+</span><span id="line-129">                <span class="c1"># LFC densification and explicit test/config floors work;</span>
+</span><span id="line-130">                <span class="c1"># find_peaks requires distance &gt;= 1.</span>
+</span><span id="line-131">                <span class="n">candidates</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-132">                    <span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">(</span><span class="n">adaptive_spacing</span><span class="p">,</span> <span class="n">configured_spacing</span><span class="p">)</span>
+</span><span id="line-133">                    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="ow">and</span> <span class="n">s</span> <span class="o">&gt;</span> <span class="mf">0.0</span>
+</span><span id="line-134">                <span class="p">]</span>
+</span><span id="line-135">                <span class="n">min_line_spacing</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">candidates</span><span class="p">)</span> <span class="k">if</span> <span class="n">candidates</span> <span class="k">else</span> <span class="mf">1.0</span><span class="p">)</span>
+</span><span id="line-136">                <span class="c1"># Pixel array along the spectral axis (not spec.size, which is 2-D)</span>
+</span><span id="line-137">                <span class="n">pix_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">spec</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+</span><span id="line-138">
+</span><span id="line-139">                <span class="c1"># Find the initial lines</span>
+</span><span id="line-140">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">line_source</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">'peaks'</span><span class="p">:</span>
+</span><span id="line-141">                    <span class="n">line_centers</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">find_emission_lines</span><span class="p">(</span>
+</span><span id="line-142">                        <span class="n">_spec</span><span class="p">,</span> <span class="n">_spec_dq</span><span class="p">,</span>
+</span><span id="line-143">                        <span class="n">min_line_spacing</span><span class="o">=</span><span class="n">min_line_spacing</span><span class="p">,</span>
+</span><span id="line-144">                        <span class="n">background_filter_width</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">background_filter_width</span><span class="p">,</span>
+</span><span id="line-145">                        <span class="n">centroid_num_pixels</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+</span><span id="line-146">                        <span class="n">drop_first_last</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="line-147">                        <span class="n">refine_with_centroid</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="line-148">                    <span class="p">)</span>
+</span><span id="line-149">                <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">line_source</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">'wavesol'</span><span class="p">:</span>
+</span><span id="line-150">
+</span><span id="line-151">                    <span class="c1"># Get the wavelength range for this order</span>
+</span><span id="line-152">                    <span class="c1"># and the LFC lines that fall within it</span>
+</span><span id="line-153">                    <span class="n">wi</span><span class="p">,</span> <span class="n">wf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">good</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">good</span><span class="p">])</span>
+</span><span id="line-154">                    <span class="n">line_centers_um</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">gen_lfc_modes</span><span class="p">(</span>
+</span><span id="line-155">                        <span class="n">lfc_nu0</span><span class="p">,</span> <span class="n">lfc_delta_nu</span><span class="p">,</span>
+</span><span id="line-156">                        <span class="n">wave_min</span><span class="o">=</span><span class="n">wi</span><span class="p">,</span> <span class="n">wave_max</span><span class="o">=</span><span class="n">wf</span>
+</span><span id="line-157">                    <span class="p">)</span>
+</span><span id="line-158">                    <span class="n">line_centers</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="n">line_centers_um</span><span class="p">,</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">good</span><span class="p">],</span> <span class="n">pix_arr</span><span class="p">[</span><span class="n">good</span><span class="p">])</span>
+</span><span id="line-159">                    <span class="n">line_centers</span> <span class="o">=</span> <span class="n">line_centers</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="c1"># Drop first and last lines to avoid edge effects</span>
+</span><span id="line-160">                <span class="k">else</span><span class="p">:</span>
+</span><span id="line-161">                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Invalid line_source '</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">line_source</span><span class="si">}</span><span class="s2">'. Must be 'peaks' or 'wavesol'."</span><span class="p">)</span>
+</span><span id="line-162">
+</span><span id="line-163">                <span class="c1"># Gaussian fit to lines</span>
+</span><span id="line-164">                <span class="n">_fit_results</span> <span class="o">=</span> <span class="n">fit_lines_gauss</span><span class="p">(</span>
+</span><span id="line-165">                    <span class="n">pix_arr</span><span class="p">,</span> <span class="n">_spec</span><span class="p">,</span> <span class="n">_spec_err</span><span class="p">,</span> <span class="n">_spec_dq</span><span class="p">,</span>
+</span><span id="line-166">                    <span class="n">line_centers</span><span class="o">=</span><span class="n">line_centers</span><span class="p">,</span>
+</span><span id="line-167">                    <span class="n">fwhm_bounds</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fwhm_bounds</span><span class="p">,</span>
+</span><span id="line-168">                    <span class="n">mu_bounds</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mu_bounds</span><span class="p">,</span>
+</span><span id="line-169">                    <span class="n">max_fit_window</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">max_fit_window</span><span class="p">,</span>
+</span><span id="line-170">                <span class="p">)</span>
+</span><span id="line-171">                <span class="n">fit_results</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_fit_results</span><span class="p">)</span>
+</span><span id="line-172">
+</span><span id="line-173">                <span class="c1"># Store results in the model</span>
+</span><span id="line-174">                <span class="n">params_table</span> <span class="o">=</span> <span class="n">output_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">lfc_fitparams</span>
+</span><span id="line-175">                <span class="k">if</span> <span class="n">order</span> <span class="ow">in</span> <span class="n">params_table</span><span class="p">[</span><span class="s1">'ORDER'</span><span class="p">]:</span>
+</span><span id="line-176">                    <span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">lfc_fitparams</span><span class="o">.</span><span class="n">remove_rows</span><span class="p">(</span>
+</span><span id="line-177">                        <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">input_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">lfc_fitparams</span><span class="p">[</span><span class="s1">'ORDER'</span><span class="p">]</span> <span class="o">==</span> <span class="n">order</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="line-178">                    <span class="p">)</span>
+</span><span id="line-179">                <span class="n">n_lines</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">_fit_results</span><span class="p">)</span>
+</span><span id="line-180">                <span class="n">n_pix</span> <span class="o">=</span> <span class="n">spec</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</span><span id="line-181">                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_lines</span><span class="p">):</span>
+</span><span id="line-182">                    <span class="n">mu_pix</span> <span class="o">=</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">mu</span>
+</span><span id="line-183">                    <span class="n">skip_reason</span> <span class="o">=</span> <span class="n">_unusable_lfc_line_fit_reason</span><span class="p">(</span>
+</span><span id="line-184">                        <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">fwhm_bounds</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fwhm_bounds</span>
+</span><span id="line-185">                    <span class="p">)</span>
+</span><span id="line-186">                    <span class="k">if</span> <span class="n">skip_reason</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-187">                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="line-188">                            <span class="s2">"Skipping failed LFC line fit in order </span><span class="si">%s</span><span class="s2"> fiber </span><span class="si">%s</span><span class="s2"> (</span><span class="si">%s</span><span class="s2">)."</span><span class="p">,</span>
+</span><span id="line-189">                            <span class="n">order</span><span class="p">,</span>
+</span><span id="line-190">                            <span class="n">fiber</span><span class="p">,</span>
+</span><span id="line-191">                            <span class="n">skip_reason</span><span class="p">,</span>
+</span><span id="line-192">                        <span class="p">)</span>
+</span><span id="line-193">                        <span class="k">continue</span>
+</span><span id="line-194">                    <span class="n">pix_idx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">mu_pix</span><span class="p">))</span>
+</span><span id="line-195">                    <span class="k">if</span> <span class="n">pix_idx</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">pix_idx</span> <span class="o">&gt;=</span> <span class="n">n_pix</span><span class="p">:</span>
+</span><span id="line-196">                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="line-197">                            <span class="s2">"Skipping LFC line fit in order </span><span class="si">%s</span><span class="s2"> fiber </span><span class="si">%s</span><span class="s2"> "</span>
+</span><span id="line-198">                            <span class="s2">"(MU_PIX=</span><span class="si">%s</span><span class="s2"> outside 0..</span><span class="si">%s</span><span class="s2">)."</span><span class="p">,</span>
+</span><span id="line-199">                            <span class="n">order</span><span class="p">,</span>
+</span><span id="line-200">                            <span class="n">fiber</span><span class="p">,</span>
+</span><span id="line-201">                            <span class="n">mu_pix</span><span class="p">,</span>
+</span><span id="line-202">                            <span class="n">n_pix</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span>
+</span><span id="line-203">                        <span class="p">)</span>
+</span><span id="line-204">                        <span class="k">continue</span>
+</span><span id="line-205">                    <span class="n">r</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="line-206">                        <span class="s1">'ORDER'</span> <span class="p">:</span> <span class="n">order</span><span class="p">,</span>
+</span><span id="line-207">                        <span class="s1">'AMPLITUDE'</span> <span class="p">:</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">amplitude</span><span class="p">,</span>
+</span><span id="line-208">                        <span class="s1">'AMPLITUDE_ERR'</span> <span class="p">:</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">amplitude_err</span><span class="p">,</span>
+</span><span id="line-209">                        <span class="s1">'MU_PIX'</span> <span class="p">:</span> <span class="n">mu_pix</span><span class="p">,</span>
+</span><span id="line-210">                        <span class="s1">'MU_ERR_PIX'</span> <span class="p">:</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">mu_err</span><span class="p">,</span>
+</span><span id="line-211">                        <span class="s1">'FWHM_PIX'</span> <span class="p">:</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">fwhm</span><span class="p">,</span>
+</span><span id="line-212">                        <span class="s1">'FWHM_ERR_PIX'</span> <span class="p">:</span> <span class="n">_fit_results</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">fwhm_err</span><span class="p">,</span>
+</span><span id="line-213">                    <span class="p">}</span>
+</span><span id="line-214">                    <span class="n">wave_closest</span> <span class="o">=</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">pix_idx</span><span class="p">]</span>
+</span><span id="line-215">                    <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">wave_closest</span><span class="p">):</span>
+</span><span id="line-216">                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="line-217">                            <span class="s2">"Skipping LFC line fit in order </span><span class="si">%s</span><span class="s2"> fiber </span><span class="si">%s</span><span class="s2"> "</span>
+</span><span id="line-218">                            <span class="s2">"(WAVE at MU_PIX=</span><span class="si">%s</span><span class="s2"> is not finite)."</span><span class="p">,</span>
+</span><span id="line-219">                            <span class="n">order</span><span class="p">,</span>
+</span><span id="line-220">                            <span class="n">fiber</span><span class="p">,</span>
+</span><span id="line-221">                            <span class="n">mu_pix</span><span class="p">,</span>
+</span><span id="line-222">                        <span class="p">)</span>
+</span><span id="line-223">                        <span class="k">continue</span>
+</span><span id="line-224">                    <span class="n">line_wave</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">line_num</span> <span class="o">=</span> <span class="n">_get_closest_lfc_mode</span><span class="p">(</span>
+</span><span id="line-225">                        <span class="n">lfc_nu0</span><span class="p">,</span> <span class="n">lfc_delta_nu</span><span class="p">,</span> <span class="n">wave_closest</span>
+</span><span id="line-226">                    <span class="p">)</span>
+</span><span id="line-227">                    <span class="n">r</span><span class="p">[</span><span class="s1">'WAVE'</span><span class="p">]</span> <span class="o">=</span> <span class="n">line_wave</span>
+</span><span id="line-228">                    <span class="n">r</span><span class="p">[</span><span class="s1">'MODE_NUM'</span><span class="p">]</span> <span class="o">=</span> <span class="n">line_num</span>
+</span><span id="line-229">                    <span class="c1"># WAVE can decrease along the detector; FWHM / errors are widths.</span>
+</span><span id="line-230">                    <span class="n">r</span><span class="p">[</span><span class="s1">'FWHM_WAVE'</span><span class="p">]</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">delta_pix_to_delta_wave</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">'FWHM_PIX'</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s1">'MU_PIX'</span><span class="p">],</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]))</span>
+</span><span id="line-231">                    <span class="n">r</span><span class="p">[</span><span class="s1">'FWHM_ERR_WAVE'</span><span class="p">]</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">delta_pix_to_delta_wave</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">'FWHM_ERR_PIX'</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s1">'MU_PIX'</span><span class="p">],</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]))</span>
+</span><span id="line-232">                    <span class="n">r</span><span class="p">[</span><span class="s1">'MU_ERR_WAVE'</span><span class="p">]</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">delta_pix_to_delta_wave</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">'MU_ERR_PIX'</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s1">'MU_PIX'</span><span class="p">],</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:]))</span>
+</span><span id="line-233">                    <span class="n">params_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+</span><span id="line-234">                <span class="n">params_table</span><span class="o">.</span><span class="n">sort</span><span class="p">([</span><span class="s1">'ORDER'</span><span class="p">,</span> <span class="s1">'MU_PIX'</span><span class="p">])</span>
+</span><span id="line-235">            <span class="c1"># A single comb mode can be fit twice (e.g. a structured ZEMAX</span>
+</span><span id="line-236">            <span class="c1"># PSF split into two peaks a few pixels apart, both assigned</span>
+</span><span id="line-237">            <span class="c1"># the same MODE_NUM). Two knots with one wavelength wreck any</span>
+</span><span id="line-238">            <span class="c1"># downstream wavesol interpolant, so keep only the strongest</span>
+</span><span id="line-239">            <span class="c1"># fit per (ORDER, MODE_NUM).</span>
+</span><span id="line-240">            <span class="n">output_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">lfc_fitparams</span> <span class="o">=</span> <span class="n">_drop_duplicate_lfc_modes</span><span class="p">(</span>
+</span><span id="line-241">                <span class="n">output_model</span><span class="p">[</span><span class="n">fiber</span><span class="p">]</span><span class="o">.</span><span class="n">lfc_fitparams</span>
+</span><span id="line-242">            <span class="p">)</span>
+</span><span id="line-243">        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">output</span><span class="o">=</span><span class="n">output_model</span><span class="p">,</span> <span class="n">fit_results</span><span class="o">=</span><span class="n">fit_results</span><span class="p">)</span>
+</span><span id="line-244">
+<div class="viewcode-block" id="FitLFCLinesPrimitive._create_preview">
+<a class="viewcode-back" href="../../../../api/generated/hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.html#hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive.FitLFCLinesPrimitive._create_preview">[docs]</a>
+</span><span id="line-245">    <span class="k">def</span><span class="w"> </span><span class="nf">_create_preview</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="line-246"><span class="w">        </span><span class="sd">"""</span>
+</span><span id="line-247"><span class="sd">        Build an interactive preview comparing each fitted LFC line's Gaussian</span>
+</span><span id="line-248"><span class="sd">        model to the underlying spectral data.</span>
+</span><span id="line-249"><span class="sd"> </span>
+</span><span id="line-250"><span class="sd">        Navigation is three-level: a *fiber* dropdown, an *order* dropdown</span>
+</span><span id="line-251"><span class="sd">        (options depend on the selected fiber), and a *line* slider (options</span>
+</span><span id="line-252"><span class="sd">        depend on the selected fiber+order).</span>
+</span><span id="line-253"><span class="sd"> </span>
+</span><span id="line-254"><span class="sd">        For speed and file size, this keeps exactly two persistent traces in</span>
+</span><span id="line-255"><span class="sd">        the figure (the data points and the Gaussian fit curve) and swaps</span>
+</span><span id="line-256"><span class="sd">        their x/y data on each dropdown/slider interaction, rather than</span>
+</span><span id="line-257"><span class="sd">        pre-building a trace pair per line and toggling visibility across</span>
+</span><span id="line-258"><span class="sd">        thousands of traces (which scales quadratically with the number of</span>
+</span><span id="line-259"><span class="sd">        lines and is what made this slow). Additionally, at most</span>
+</span><span id="line-260"><span class="sd">        ``preview_n_lines_per_order`` lines (evenly sampled) are included per</span>
+</span><span id="line-261"><span class="sd">        order; set it to None to include every fitted line.</span>
+</span><span id="line-262"><span class="sd">        """</span>
+</span><span id="line-263">        <span class="n">output_model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_output</span><span class="p">[</span><span class="s1">'output'</span><span class="p">]</span>
+</span><span id="line-264">        <span class="n">fit_results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_output</span><span class="p">[</span><span class="s1">'fit_results'</span><span class="p">]</span>
+</span><span id="line-265"> 
+</span><span id="line-266">        <span class="c1"># Recompute the same fiber/order selection used in _perform so that</span>
+</span><span id="line-267">        <span class="c1"># fit_results[fiber][i] lines up with do_orders[i].</span>
+</span><span id="line-268">        <span class="n">do_fibers</span><span class="p">,</span> <span class="n">do_orders</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_do_traces</span><span class="p">(</span><span class="n">output_model</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">do_fibers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">do_orders</span><span class="p">)</span>
+</span><span id="line-269"> 
+</span><span id="line-270">        <span class="n">sigma_scale</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span>  <span class="c1"># FWHM -&gt; sigma</span>
+</span><span id="line-271">        <span class="n">half_win</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_fit_window</span> <span class="o">/</span> <span class="mf">2.0</span>
+</span><span id="line-272">        <span class="n">n_preview</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">preview_n_lines_per_order</span>
+</span><span id="line-273"> 
+</span><span id="line-274">        <span class="c1"># --- Build a nested fiber -&gt; order -&gt; line structure (sampled per order) ---</span>
+</span><span id="line-275">        <span class="n">fiber_meta</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-276">        <span class="k">for</span> <span class="n">fiber</span> <span class="ow">in</span> <span class="n">do_fibers</span><span class="p">:</span>
+</span><span id="line-277">            <span class="k">if</span> <span class="n">fiber</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">fit_results</span><span class="p">:</span>
+</span><span id="line-278">                <span class="k">continue</span>
+</span><span id="line-279"> 
+</span><span id="line-280">            <span class="n">wave</span>     <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output_model</span><span class="p">,</span> <span class="sa">f</span><span class="s1">'wave_fib</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+</span><span id="line-281">            <span class="n">spec</span>     <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output_model</span><span class="p">,</span> <span class="sa">f</span><span class="s1">'spec_fib</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+</span><span id="line-282">            <span class="n">spec_err</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output_model</span><span class="p">,</span> <span class="sa">f</span><span class="s1">'spec_err_fib</span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+</span><span id="line-283">            <span class="n">n_pix</span>    <span class="o">=</span> <span class="n">spec</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</span><span id="line-284">            <span class="n">pix_arr</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_pix</span><span class="p">)</span>
+</span><span id="line-285"> 
+</span><span id="line-286">            <span class="n">order_entries</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-287">            <span class="k">for</span> <span class="n">oi_idx</span><span class="p">,</span> <span class="n">order</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">do_orders</span><span class="p">):</span>
+</span><span id="line-288">                <span class="n">oi</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">order</span> <span class="o">-</span> <span class="n">output_model</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">order_start</span><span class="p">))</span>
+</span><span id="line-289">                <span class="n">order_fits</span> <span class="o">=</span> <span class="n">fit_results</span><span class="p">[</span><span class="n">fiber</span><span class="p">][</span><span class="n">oi_idx</span><span class="p">]</span> <span class="k">if</span> <span class="n">oi_idx</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">fit_results</span><span class="p">[</span><span class="n">fiber</span><span class="p">])</span> <span class="k">else</span> <span class="p">[]</span>
+</span><span id="line-290"> 
+</span><span id="line-291">                <span class="c1"># Cheaply filter to fits with a finite centroid before doing any</span>
+</span><span id="line-292">                <span class="c1"># array slicing / curve reconstruction work.</span>
+</span><span id="line-293">                <span class="n">valid_fits</span> <span class="o">=</span> <span class="p">[</span><span class="n">lf</span> <span class="k">for</span> <span class="n">lf</span> <span class="ow">in</span> <span class="n">order_fits</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="s1">'mu'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">))]</span>
+</span><span id="line-294">                <span class="k">if</span> <span class="ow">not</span> <span class="n">valid_fits</span><span class="p">:</span>
+</span><span id="line-295">                    <span class="k">continue</span>
+</span><span id="line-296"> 
+</span><span id="line-297">                <span class="n">n_total</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid_fits</span><span class="p">)</span>
+</span><span id="line-298">                <span class="k">if</span> <span class="n">n_preview</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">n_total</span> <span class="o">&gt;</span> <span class="n">n_preview</span><span class="p">:</span>
+</span><span id="line-299">                    <span class="n">sample_idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_total</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n_preview</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+</span><span id="line-300">                    <span class="n">sampled_fits</span> <span class="o">=</span> <span class="p">[</span><span class="n">valid_fits</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">sample_idx</span><span class="p">]</span>
+</span><span id="line-301">                <span class="k">else</span><span class="p">:</span>
+</span><span id="line-302">                    <span class="n">sampled_fits</span> <span class="o">=</span> <span class="n">valid_fits</span>
+</span><span id="line-303"> 
+</span><span id="line-304">                <span class="n">lines</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-305">                <span class="k">for</span> <span class="n">line_fit</span> <span class="ow">in</span> <span class="n">sampled_fits</span><span class="p">:</span>
+</span><span id="line-306">                    <span class="n">mu</span>       <span class="o">=</span> <span class="n">line_fit</span><span class="o">.</span><span class="n">mu</span>
+</span><span id="line-307">                    <span class="n">amp</span>      <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">line_fit</span><span class="p">,</span> <span class="s1">'amplitude'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-308">                    <span class="n">amp_err</span>  <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">line_fit</span><span class="p">,</span> <span class="s1">'amplitude_err'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-309">                    <span class="n">mu_err</span>   <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">line_fit</span><span class="p">,</span> <span class="s1">'mu_err'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-310">                    <span class="n">fwhm</span>     <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">line_fit</span><span class="p">,</span> <span class="s1">'fwhm'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-311">                    <span class="n">fwhm_err</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">line_fit</span><span class="p">,</span> <span class="s1">'fwhm_err'</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-312"> 
+</span><span id="line-313">                    <span class="c1"># Data window around the line, padded a bit beyond the fit window for context</span>
+</span><span id="line-314">                    <span class="n">lo</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">mu</span> <span class="o">-</span> <span class="mf">1.5</span> <span class="o">*</span> <span class="n">half_win</span><span class="p">)),</span> <span class="mi">0</span><span class="p">)</span>
+</span><span id="line-315">                    <span class="n">hi</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">mu</span> <span class="o">+</span> <span class="mf">1.5</span> <span class="o">*</span> <span class="n">half_win</span><span class="p">)),</span> <span class="n">n_pix</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+</span><span id="line-316">                    <span class="k">if</span> <span class="n">hi</span> <span class="o">&lt;=</span> <span class="n">lo</span><span class="p">:</span>
+</span><span id="line-317">                        <span class="k">continue</span>
+</span><span id="line-318">                    <span class="n">x_data</span> <span class="o">=</span> <span class="n">pix_arr</span><span class="p">[</span><span class="n">lo</span><span class="p">:</span><span class="n">hi</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+</span><span id="line-319">                    <span class="n">y_data</span> <span class="o">=</span> <span class="n">spec</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">lo</span><span class="p">:</span><span class="n">hi</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+</span><span id="line-320">                    <span class="n">yerr_data</span> <span class="o">=</span> <span class="n">spec_err</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="n">lo</span><span class="p">:</span><span class="n">hi</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+</span><span id="line-321"> 
+</span><span id="line-322">                    <span class="c1"># Reconstructed Gaussian model curve, densely sampled</span>
+</span><span id="line-323">                    <span class="n">x_model</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">x_data</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">x_data</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="mi">200</span><span class="p">)</span>
+</span><span id="line-324">                    <span class="n">sigma</span> <span class="o">=</span> <span class="n">fwhm</span> <span class="o">/</span> <span class="n">sigma_scale</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">fwhm</span><span class="p">)</span> <span class="ow">and</span> <span class="n">fwhm</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+</span><span id="line-325">                    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">amp</span><span class="p">):</span>
+</span><span id="line-326">                        <span class="n">y_model</span> <span class="o">=</span> <span class="n">amp</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">((</span><span class="n">x_model</span> <span class="o">-</span> <span class="n">mu</span><span class="p">)</span> <span class="o">/</span> <span class="n">sigma</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+</span><span id="line-327">                    <span class="k">else</span><span class="p">:</span>
+</span><span id="line-328">                        <span class="n">y_model</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">x_model</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-329"> 
+</span><span id="line-330">                    <span class="n">wave_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="n">mu</span><span class="p">,</span> <span class="n">pix_arr</span><span class="p">,</span> <span class="n">wave</span><span class="p">[</span><span class="n">oi</span><span class="p">,</span> <span class="p">:])</span> <span class="k">if</span> <span class="n">wave</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+</span><span id="line-331"> 
+</span><span id="line-332">                    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="line-333">                        <span class="n">mu</span><span class="o">=</span><span class="n">mu</span><span class="p">,</span> <span class="n">mu_err</span><span class="o">=</span><span class="n">mu_err</span><span class="p">,</span>
+</span><span id="line-334">                        <span class="n">amp</span><span class="o">=</span><span class="n">amp</span><span class="p">,</span> <span class="n">amp_err</span><span class="o">=</span><span class="n">amp_err</span><span class="p">,</span>
+</span><span id="line-335">                        <span class="n">fwhm</span><span class="o">=</span><span class="n">fwhm</span><span class="p">,</span> <span class="n">fwhm_err</span><span class="o">=</span><span class="n">fwhm_err</span><span class="p">,</span>
+</span><span id="line-336">                        <span class="n">wave</span><span class="o">=</span><span class="n">wave_val</span><span class="p">,</span>
+</span><span id="line-337">                        <span class="n">x_data</span><span class="o">=</span><span class="n">x_data</span><span class="p">,</span> <span class="n">y_data</span><span class="o">=</span><span class="n">y_data</span><span class="p">,</span> <span class="n">yerr_data</span><span class="o">=</span><span class="n">yerr_data</span><span class="p">,</span>
+</span><span id="line-338">                        <span class="n">x_model</span><span class="o">=</span><span class="n">x_model</span><span class="p">,</span> <span class="n">y_model</span><span class="o">=</span><span class="n">y_model</span><span class="p">,</span>
+</span><span id="line-339">                    <span class="p">))</span>
+</span><span id="line-340"> 
+</span><span id="line-341">                <span class="k">if</span> <span class="n">lines</span><span class="p">:</span>
+</span><span id="line-342">                    <span class="n">order_entries</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">lines</span><span class="o">=</span><span class="n">lines</span><span class="p">,</span> <span class="n">n_total</span><span class="o">=</span><span class="n">n_total</span><span class="p">))</span>
+</span><span id="line-343"> 
+</span><span id="line-344">            <span class="k">if</span> <span class="n">order_entries</span><span class="p">:</span>
+</span><span id="line-345">                <span class="n">fiber_meta</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">fiber</span><span class="o">=</span><span class="n">fiber</span><span class="p">,</span> <span class="n">orders</span><span class="o">=</span><span class="n">order_entries</span><span class="p">))</span>
+</span><span id="line-346">            <span class="k">else</span><span class="p">:</span>
+</span><span id="line-347">                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">"No valid line fits to preview for fiber </span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s2">."</span><span class="p">)</span>
+</span><span id="line-348"> 
+</span><span id="line-349">        <span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
+</span><span id="line-350"> 
+</span><span id="line-351">        <span class="k">if</span> <span class="ow">not</span> <span class="n">fiber_meta</span><span class="p">:</span>
+</span><span id="line-352">            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"No LFC line fits available to preview."</span><span class="p">)</span>
+</span><span id="line-353">            <span class="n">fig</span><span class="o">.</span><span class="n">update_layout</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">'No LFC line fits available to preview.'</span><span class="p">)</span>
+</span><span id="line-354">            <span class="bp">self</span><span class="o">.</span><span class="n">_output</span><span class="p">[</span><span class="s1">'preview'</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">html</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">png</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fig</span><span class="o">=</span><span class="n">fig</span><span class="p">)</span>
+</span><span id="line-355">            <span class="k">return</span>
+</span><span id="line-356"> 
+</span><span id="line-357">        <span class="k">def</span><span class="w"> </span><span class="nf">_line_title</span><span class="p">(</span><span class="n">fiber</span><span class="p">,</span> <span class="n">order</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">line_idx</span><span class="p">,</span> <span class="n">n_shown</span><span class="p">,</span> <span class="n">n_total</span><span class="p">):</span>
+</span><span id="line-358">            <span class="n">wave_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">", λ=</span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'wave'</span><span class="p">]</span><span class="si">:</span><span class="s2">.5f</span><span class="si">}</span><span class="s2"> µm"</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">line</span><span class="p">[</span><span class="s1">'wave'</span><span class="p">])</span> <span class="k">else</span> <span class="s2">""</span>
+</span><span id="line-359">            <span class="n">sample_note</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">" (sampled </span><span class="si">{</span><span class="n">n_shown</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n_total</span><span class="si">}</span><span class="s2"> fit)"</span> <span class="k">if</span> <span class="n">n_total</span> <span class="o">&gt;</span> <span class="n">n_shown</span> <span class="k">else</span> <span class="s2">""</span>
+</span><span id="line-360">            <span class="k">return</span> <span class="p">(</span>
+</span><span id="line-361">                <span class="sa">f</span><span class="s2">"LFC Line Fit — Fiber </span><span class="si">{</span><span class="n">fiber</span><span class="si">}</span><span class="s2">, Order </span><span class="si">{</span><span class="n">order</span><span class="si">}</span><span class="s2">, "</span>
+</span><span id="line-362">                <span class="sa">f</span><span class="s2">"Line </span><span class="si">{</span><span class="n">line_idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_shown</span><span class="si">}{</span><span class="n">sample_note</span><span class="si">}{</span><span class="n">wave_str</span><span class="si">}</span><span class="s2">&lt;br&gt;"</span>
+</span><span id="line-363">                <span class="sa">f</span><span class="s2">"µ = </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'mu'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'mu_err'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> px  |  "</span>
+</span><span id="line-364">                <span class="sa">f</span><span class="s2">"FWHM = </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'fwhm'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'fwhm_err'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> px  |  "</span>
+</span><span id="line-365">                <span class="sa">f</span><span class="s2">"Amp = </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'amp'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4g</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">line</span><span class="p">[</span><span class="s1">'amp_err'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4g</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="line-366">            <span class="p">)</span>
+</span><span id="line-367"> 
+</span><span id="line-368">        <span class="k">def</span><span class="w"> </span><span class="nf">_line_data_update</span><span class="p">(</span><span class="n">line</span><span class="p">):</span>
+</span><span id="line-369">            <span class="c1"># Only 2 traces ever exist (data, fit), so these arrays map 1:1 to them.</span>
+</span><span id="line-370">            <span class="k">return</span> <span class="p">{</span>
+</span><span id="line-371">                <span class="s1">'x'</span><span class="p">:</span> <span class="p">[</span><span class="n">line</span><span class="p">[</span><span class="s1">'x_data'</span><span class="p">],</span> <span class="n">line</span><span class="p">[</span><span class="s1">'x_model'</span><span class="p">]],</span>
+</span><span id="line-372">                <span class="s1">'y'</span><span class="p">:</span> <span class="p">[</span><span class="n">line</span><span class="p">[</span><span class="s1">'y_data'</span><span class="p">],</span> <span class="n">line</span><span class="p">[</span><span class="s1">'y_model'</span><span class="p">]],</span>
+</span><span id="line-373">                <span class="s1">'error_y.array'</span><span class="p">:</span> <span class="p">[</span><span class="n">line</span><span class="p">[</span><span class="s1">'yerr_data'</span><span class="p">],</span> <span class="n">line</span><span class="p">[</span><span class="s1">'yerr_data'</span><span class="p">]],</span>
+</span><span id="line-374">            <span class="p">}</span>
+</span><span id="line-375"> 
+</span><span id="line-376">        <span class="c1"># --- The only two traces in the figure; their data gets swapped on interaction ---</span>
+</span><span id="line-377">        <span class="n">first_line</span> <span class="o">=</span> <span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="line-378">        <span class="n">fig</span><span class="o">.</span><span class="n">add_trace</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Scatter</span><span class="p">(</span>
+</span><span id="line-379">            <span class="n">x</span>           <span class="o">=</span> <span class="n">first_line</span><span class="p">[</span><span class="s1">'x_data'</span><span class="p">],</span>
+</span><span id="line-380">            <span class="n">y</span>           <span class="o">=</span> <span class="n">first_line</span><span class="p">[</span><span class="s1">'y_data'</span><span class="p">],</span>
+</span><span id="line-381">            <span class="n">error_y</span>     <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">'data'</span><span class="p">,</span> <span class="n">array</span><span class="o">=</span><span class="n">first_line</span><span class="p">[</span><span class="s1">'yerr_data'</span><span class="p">],</span> <span class="n">visible</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+</span><span id="line-382">            <span class="n">mode</span>        <span class="o">=</span> <span class="s1">'markers'</span><span class="p">,</span>
+</span><span id="line-383">            <span class="n">name</span>        <span class="o">=</span> <span class="s1">'Data'</span><span class="p">,</span>
+</span><span id="line-384">            <span class="n">marker</span>      <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">'steelblue'</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">7</span><span class="p">),</span>
+</span><span id="line-385">        <span class="p">))</span>
+</span><span id="line-386">        <span class="n">fig</span><span class="o">.</span><span class="n">add_trace</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Scatter</span><span class="p">(</span>
+</span><span id="line-387">            <span class="n">x</span>           <span class="o">=</span> <span class="n">first_line</span><span class="p">[</span><span class="s1">'x_model'</span><span class="p">],</span>
+</span><span id="line-388">            <span class="n">y</span>           <span class="o">=</span> <span class="n">first_line</span><span class="p">[</span><span class="s1">'y_model'</span><span class="p">],</span>
+</span><span id="line-389">            <span class="n">mode</span>        <span class="o">=</span> <span class="s1">'lines'</span><span class="p">,</span>
+</span><span id="line-390">            <span class="n">name</span>        <span class="o">=</span> <span class="s1">'Gaussian fit'</span><span class="p">,</span>
+</span><span id="line-391">            <span class="n">line</span>        <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">'crimson'</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+</span><span id="line-392">        <span class="p">))</span>
+</span><span id="line-393"> 
+</span><span id="line-394">        <span class="c1"># --- Line slider steps (scrolls through the (sampled) lines within one fiber+order) ---</span>
+</span><span id="line-395">        <span class="k">def</span><span class="w"> </span><span class="nf">build_line_slider_steps</span><span class="p">(</span><span class="n">f_idx</span><span class="p">,</span> <span class="n">o_idx</span><span class="p">):</span>
+</span><span id="line-396">            <span class="n">meta</span> <span class="o">=</span> <span class="n">fiber_meta</span><span class="p">[</span><span class="n">f_idx</span><span class="p">]</span>
+</span><span id="line-397">            <span class="n">order_entry</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s1">'orders'</span><span class="p">][</span><span class="n">o_idx</span><span class="p">]</span>
+</span><span id="line-398">            <span class="n">n_shown</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">])</span>
+</span><span id="line-399">            <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-400">            <span class="k">for</span> <span class="n">l_idx</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">]):</span>
+</span><span id="line-401">                <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="line-402">                    <span class="n">method</span> <span class="o">=</span> <span class="s1">'update'</span><span class="p">,</span>
+</span><span id="line-403">                    <span class="n">label</span>  <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">l_idx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span>
+</span><span id="line-404">                    <span class="n">args</span>   <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-405">                        <span class="n">_line_data_update</span><span class="p">(</span><span class="n">line</span><span class="p">),</span>
+</span><span id="line-406">                        <span class="p">{</span><span class="s1">'title'</span><span class="p">:</span> <span class="n">_line_title</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s1">'fiber'</span><span class="p">],</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'order'</span><span class="p">],</span> <span class="n">line</span><span class="p">,</span> <span class="n">l_idx</span><span class="p">,</span> <span class="n">n_shown</span><span class="p">,</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'n_total'</span><span class="p">])},</span>
+</span><span id="line-407">                    <span class="p">],</span>
+</span><span id="line-408">                <span class="p">))</span>
+</span><span id="line-409">            <span class="k">return</span> <span class="n">steps</span>
+</span><span id="line-410"> 
+</span><span id="line-411">        <span class="c1"># --- Order dropdown buttons (options depend on the selected fiber) ---</span>
+</span><span id="line-412">        <span class="k">def</span><span class="w"> </span><span class="nf">build_order_dropdown_buttons</span><span class="p">(</span><span class="n">f_idx</span><span class="p">):</span>
+</span><span id="line-413">            <span class="n">meta</span> <span class="o">=</span> <span class="n">fiber_meta</span><span class="p">[</span><span class="n">f_idx</span><span class="p">]</span>
+</span><span id="line-414">            <span class="n">buttons</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-415">            <span class="k">for</span> <span class="n">o_idx</span><span class="p">,</span> <span class="n">order_entry</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s1">'orders'</span><span class="p">]):</span>
+</span><span id="line-416">                <span class="n">n_shown</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">])</span>
+</span><span id="line-417">                <span class="n">label</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"Order </span><span class="si">{</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'order'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="line-418">                <span class="k">if</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'n_total'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">n_shown</span><span class="p">:</span>
+</span><span id="line-419">                    <span class="n">label</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">" (</span><span class="si">{</span><span class="n">n_shown</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'n_total'</span><span class="p">]</span><span class="si">}</span><span class="s2">)"</span>
+</span><span id="line-420">                <span class="n">buttons</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="line-421">                    <span class="n">label</span>  <span class="o">=</span> <span class="n">label</span><span class="p">,</span>
+</span><span id="line-422">                    <span class="n">method</span> <span class="o">=</span> <span class="s1">'update'</span><span class="p">,</span>
+</span><span id="line-423">                    <span class="n">args</span>   <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-424">                        <span class="n">_line_data_update</span><span class="p">(</span><span class="n">order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">]),</span>
+</span><span id="line-425">                        <span class="p">{</span>
+</span><span id="line-426">                            <span class="s1">'title'</span><span class="p">:</span> <span class="n">_line_title</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s1">'fiber'</span><span class="p">],</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'order'</span><span class="p">],</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">n_shown</span><span class="p">,</span> <span class="n">order_entry</span><span class="p">[</span><span class="s1">'n_total'</span><span class="p">]),</span>
+</span><span id="line-427">                            <span class="c1"># Update only the line slider (leave both dropdowns untouched)</span>
+</span><span id="line-428">                            <span class="s1">'sliders[0].steps'</span><span class="p">:</span>  <span class="n">build_line_slider_steps</span><span class="p">(</span><span class="n">f_idx</span><span class="p">,</span> <span class="n">o_idx</span><span class="p">),</span>
+</span><span id="line-429">                            <span class="s1">'sliders[0].active'</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-430">                        <span class="p">},</span>
+</span><span id="line-431">                    <span class="p">],</span>
+</span><span id="line-432">                <span class="p">))</span>
+</span><span id="line-433">            <span class="k">return</span> <span class="n">buttons</span>
+</span><span id="line-434"> 
+</span><span id="line-435">        <span class="c1"># --- Fiber dropdown buttons (rewrite the order dropdown + line slider) ---</span>
+</span><span id="line-436">        <span class="n">fiber_buttons</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-437">        <span class="k">for</span> <span class="n">f_idx</span><span class="p">,</span> <span class="n">meta</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">fiber_meta</span><span class="p">):</span>
+</span><span id="line-438">            <span class="n">first_order_entry</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="line-439">            <span class="n">n_shown</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">first_order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">])</span>
+</span><span id="line-440">            <span class="n">fiber_buttons</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="line-441">                <span class="n">label</span>  <span class="o">=</span> <span class="sa">f</span><span class="s1">'Fiber </span><span class="si">{</span><span class="n">meta</span><span class="p">[</span><span class="s2">"fiber"</span><span class="p">]</span><span class="si">}</span><span class="s1">'</span><span class="p">,</span>
+</span><span id="line-442">                <span class="n">method</span> <span class="o">=</span> <span class="s1">'update'</span><span class="p">,</span>
+</span><span id="line-443">                <span class="n">args</span>   <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-444">                    <span class="n">_line_data_update</span><span class="p">(</span><span class="n">first_order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">]),</span>
+</span><span id="line-445">                    <span class="p">{</span>
+</span><span id="line-446">                        <span class="s1">'title'</span><span class="p">:</span> <span class="n">_line_title</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s1">'fiber'</span><span class="p">],</span> <span class="n">first_order_entry</span><span class="p">[</span><span class="s1">'order'</span><span class="p">],</span> <span class="n">first_order_entry</span><span class="p">[</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">n_shown</span><span class="p">,</span> <span class="n">first_order_entry</span><span class="p">[</span><span class="s1">'n_total'</span><span class="p">]),</span>
+</span><span id="line-447">                        <span class="c1"># Rebuild the order dropdown's own buttons for this fiber...</span>
+</span><span id="line-448">                        <span class="s1">'updatemenus[1].buttons'</span><span class="p">:</span> <span class="n">build_order_dropdown_buttons</span><span class="p">(</span><span class="n">f_idx</span><span class="p">),</span>
+</span><span id="line-449">                        <span class="s1">'updatemenus[1].active'</span><span class="p">:</span>  <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-450">                        <span class="c1"># ...and reset the line slider to this fiber's first order</span>
+</span><span id="line-451">                        <span class="s1">'sliders[0].steps'</span><span class="p">:</span>  <span class="n">build_line_slider_steps</span><span class="p">(</span><span class="n">f_idx</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+</span><span id="line-452">                        <span class="s1">'sliders[0].active'</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-453">                    <span class="p">},</span>
+</span><span id="line-454">                <span class="p">],</span>
+</span><span id="line-455">            <span class="p">))</span>
+</span><span id="line-456"> 
+</span><span id="line-457">        <span class="n">fig</span><span class="o">.</span><span class="n">update_layout</span><span class="p">(</span>
+</span><span id="line-458">            <span class="n">title</span> <span class="o">=</span> <span class="n">_line_title</span><span class="p">(</span>
+</span><span id="line-459">                <span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'fiber'</span><span class="p">],</span> <span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">'order'</span><span class="p">],</span>
+</span><span id="line-460">                <span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">'lines'</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-461">                <span class="nb">len</span><span class="p">(</span><span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">'lines'</span><span class="p">]),</span> <span class="n">fiber_meta</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'orders'</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">'n_total'</span><span class="p">],</span>
+</span><span id="line-462">            <span class="p">),</span>
+</span><span id="line-463">            <span class="n">updatemenus</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-464">                <span class="nb">dict</span><span class="p">(</span>  <span class="c1"># [0] fiber dropdown</span>
+</span><span id="line-465">                    <span class="n">buttons</span>     <span class="o">=</span> <span class="n">fiber_buttons</span><span class="p">,</span>
+</span><span id="line-466">                    <span class="n">direction</span>   <span class="o">=</span> <span class="s1">'down'</span><span class="p">,</span>
+</span><span id="line-467">                    <span class="n">showactive</span>  <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="line-468">                    <span class="n">x</span>           <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+</span><span id="line-469">                    <span class="n">xanchor</span>     <span class="o">=</span> <span class="s1">'right'</span><span class="p">,</span>
+</span><span id="line-470">                    <span class="n">y</span>           <span class="o">=</span> <span class="mf">1.15</span><span class="p">,</span>
+</span><span id="line-471">                    <span class="n">yanchor</span>     <span class="o">=</span> <span class="s1">'top'</span><span class="p">,</span>
+</span><span id="line-472">                    <span class="n">bgcolor</span>     <span class="o">=</span> <span class="s1">'#f0f0f0'</span><span class="p">,</span>
+</span><span id="line-473">                    <span class="n">bordercolor</span> <span class="o">=</span> <span class="s1">'#cccccc'</span><span class="p">,</span>
+</span><span id="line-474">                <span class="p">),</span>
+</span><span id="line-475">                <span class="nb">dict</span><span class="p">(</span>  <span class="c1"># [1] order dropdown — options for the initial fiber</span>
+</span><span id="line-476">                    <span class="n">buttons</span>     <span class="o">=</span> <span class="n">build_order_dropdown_buttons</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
+</span><span id="line-477">                    <span class="n">direction</span>   <span class="o">=</span> <span class="s1">'down'</span><span class="p">,</span>
+</span><span id="line-478">                    <span class="n">showactive</span>  <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="line-479">                    <span class="n">x</span>           <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+</span><span id="line-480">                    <span class="n">xanchor</span>     <span class="o">=</span> <span class="s1">'right'</span><span class="p">,</span>
+</span><span id="line-481">                    <span class="n">y</span>           <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+</span><span id="line-482">                    <span class="n">yanchor</span>     <span class="o">=</span> <span class="s1">'top'</span><span class="p">,</span>
+</span><span id="line-483">                    <span class="n">bgcolor</span>     <span class="o">=</span> <span class="s1">'#f0f0f0'</span><span class="p">,</span>
+</span><span id="line-484">                    <span class="n">bordercolor</span> <span class="o">=</span> <span class="s1">'#cccccc'</span><span class="p">,</span>
+</span><span id="line-485">                <span class="p">),</span>
+</span><span id="line-486">            <span class="p">],</span>
+</span><span id="line-487">            <span class="n">sliders</span> <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="line-488">                <span class="n">active</span>       <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="line-489">                <span class="n">currentvalue</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s1">'Line: '</span><span class="p">,</span> <span class="n">font</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="mi">14</span><span class="p">)),</span>
+</span><span id="line-490">                <span class="n">pad</span>          <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">t</span><span class="o">=</span><span class="mi">50</span><span class="p">),</span>
+</span><span id="line-491">                <span class="n">steps</span>        <span class="o">=</span> <span class="n">build_line_slider_steps</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+</span><span id="line-492">            <span class="p">)],</span>
+</span><span id="line-493">            <span class="n">xaxis</span>         <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">'Pixel'</span><span class="p">,</span> <span class="n">showgrid</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">gridcolor</span><span class="o">=</span><span class="s1">'rgba(200,200,200,0.3)'</span><span class="p">),</span>
+</span><span id="line-494">            <span class="n">yaxis</span>         <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">'Flux (e-/s)'</span><span class="p">,</span> <span class="n">showgrid</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">gridcolor</span><span class="o">=</span><span class="s1">'rgba(200,200,200,0.3)'</span><span class="p">),</span>
+</span><span id="line-495">            <span class="n">plot_bgcolor</span>  <span class="o">=</span> <span class="s1">'#ffffff'</span><span class="p">,</span>
+</span><span id="line-496">            <span class="n">paper_bgcolor</span> <span class="o">=</span> <span class="s1">'#ffffff'</span><span class="p">,</span>
+</span><span id="line-497">            <span class="n">font</span>          <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">'#000000'</span><span class="p">),</span>
+</span><span id="line-498">            <span class="n">legend</span>        <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">bgcolor</span><span class="o">=</span><span class="s1">'#ffffff'</span><span class="p">),</span>
+</span><span id="line-499">            <span class="n">height</span>        <span class="o">=</span> <span class="mi">550</span><span class="p">,</span>
+</span><span id="line-500">            <span class="n">margin</span>        <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">t</span><span class="o">=</span><span class="mi">140</span><span class="p">),</span>
+</span><span id="line-501">        <span class="p">)</span>
+</span><span id="line-502"> 
+</span><span id="line-503">        <span class="n">base_path</span>        <span class="o">=</span> <span class="n">output_model</span><span class="o">.</span><span class="n">_generate_output_path</span><span class="p">(</span><span class="n">output_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dir</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">suffix</span><span class="p">)</span>
+</span><span id="line-504">        <span class="n">output_path_html</span> <span class="o">=</span> <span class="n">base_path</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'.fits'</span><span class="p">,</span> <span class="s1">'_preview.html'</span><span class="p">)</span>
+</span><span id="line-505">        <span class="n">output_path_png</span>  <span class="o">=</span> <span class="n">base_path</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'.fits'</span><span class="p">,</span> <span class="s1">'_preview.png'</span><span class="p">)</span>
+</span><span id="line-506"> 
+</span><span id="line-507">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">save_preview</span><span class="p">:</span>
+</span><span id="line-508">            <span class="n">fig</span><span class="o">.</span><span class="n">write_html</span><span class="p">(</span><span class="n">output_path_html</span><span class="p">,</span> <span class="n">include_plotlyjs</span><span class="o">=</span><span class="s1">'cdn'</span><span class="p">)</span>
+</span><span id="line-509">            <span class="n">fig</span><span class="o">.</span><span class="n">write_image</span><span class="p">(</span><span class="n">output_path_png</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+</span><span id="line-510"> 
+</span><span id="line-511">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_preview</span><span class="p">:</span>
+</span><span id="line-512">            <span class="n">fig</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</span><span id="line-513"> 
+</span><span id="line-514">        <span class="bp">self</span><span class="o">.</span><span class="n">_output</span><span class="p">[</span><span class="s1">'preview'</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="line-515">            <span class="s1">'html'</span><span class="p">:</span> <span class="n">output_path_html</span><span class="p">,</span>
+</span><span id="line-516">            <span class="s1">'png'</span><span class="p">:</span>  <span class="n">output_path_png</span><span class="p">,</span>
+</span><span id="line-517">            <span class="s1">'fig'</span><span class="p">:</span>  <span class="n">fig</span><span class="p">,</span>
+</span><span id="line-518">        <span class="p">}</span></div>
+</div>
+
+</span><span id="line-519">
+</span><span id="line-520">
+</span><span id="line-521">
+</span><span id="line-522"><span class="k">def</span><span class="w"> </span><span class="nf">_drop_duplicate_lfc_modes</span><span class="p">(</span><span class="n">params_table</span><span class="p">):</span>
+</span><span id="line-523"><span class="w">    </span><span class="sd">"""Keep the highest-AMPLITUDE row per (ORDER, MODE_NUM) pair."""</span>
+</span><span id="line-524">    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">params_table</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="line-525">        <span class="k">return</span> <span class="n">params_table</span>
+</span><span id="line-526">    <span class="n">order_col</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">params_table</span><span class="p">[</span><span class="s1">'ORDER'</span><span class="p">])</span>
+</span><span id="line-527">    <span class="n">mode_col</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">params_table</span><span class="p">[</span><span class="s1">'MODE_NUM'</span><span class="p">])</span>
+</span><span id="line-528">    <span class="n">amp_col</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">params_table</span><span class="p">[</span><span class="s1">'AMPLITUDE'</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+</span><span id="line-529">    <span class="n">keys</span> <span class="o">=</span> <span class="n">order_col</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1_000_000_000</span> <span class="o">+</span> <span class="n">mode_col</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+</span><span id="line-530">    <span class="n">by_amp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="o">-</span><span class="n">amp_col</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s1">'stable'</span><span class="p">)</span>
+</span><span id="line-531">    <span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+</span><span id="line-532">    <span class="n">keep</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="line-533">    <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="n">by_amp</span><span class="p">:</span>
+</span><span id="line-534">        <span class="n">key</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">keys</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+</span><span id="line-535">        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+</span><span id="line-536">            <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+</span><span id="line-537">            <span class="n">keep</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">idx</span><span class="p">))</span>
+</span><span id="line-538">    <span class="n">out</span> <span class="o">=</span> <span class="n">params_table</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">keep</span><span class="p">)]</span>
+</span><span id="line-539">    <span class="n">out</span><span class="o">.</span><span class="n">sort</span><span class="p">([</span><span class="s1">'ORDER'</span><span class="p">,</span> <span class="s1">'MU_PIX'</span><span class="p">])</span>
+</span><span id="line-540">    <span class="k">return</span> <span class="n">out</span>
+</span><span id="line-541">
+</span><span id="line-542">
+</span><span id="line-543"><span class="k">def</span><span class="w"> </span><span class="nf">_unusable_lfc_line_fit_reason</span><span class="p">(</span><span class="n">fit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">fwhm_bounds</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-544"><span class="w">    </span><span class="sd">"""Return a skip reason for a collapsed / bound-hitting Gaussian, else None."""</span>
+</span><span id="line-545">    <span class="n">mu</span> <span class="o">=</span> <span class="n">fit</span><span class="o">.</span><span class="n">mu</span>
+</span><span id="line-546">    <span class="n">amp</span> <span class="o">=</span> <span class="n">fit</span><span class="o">.</span><span class="n">amplitude</span>
+</span><span id="line-547">    <span class="n">fwhm</span> <span class="o">=</span> <span class="n">fit</span><span class="o">.</span><span class="n">fwhm</span>
+</span><span id="line-548">    <span class="n">fwhm_err</span> <span class="o">=</span> <span class="n">fit</span><span class="o">.</span><span class="n">fwhm_err</span>
+</span><span id="line-549">    <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">mu</span><span class="p">):</span>
+</span><span id="line-550">        <span class="k">return</span> <span class="s2">"MU_PIX is not finite"</span>
+</span><span id="line-551">    <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">amp</span><span class="p">))</span> <span class="ow">or</span> <span class="n">amp</span> <span class="o">&lt;=</span> <span class="mf">0.0</span><span class="p">:</span>
+</span><span id="line-552">        <span class="k">return</span> <span class="sa">f</span><span class="s2">"AMPLITUDE=</span><span class="si">{</span><span class="n">amp</span><span class="si">}</span><span class="s2"> is not a positive line"</span>
+</span><span id="line-553">    <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">fwhm</span><span class="p">):</span>
+</span><span id="line-554">        <span class="k">return</span> <span class="s2">"FWHM_PIX is not finite"</span>
+</span><span id="line-555">    <span class="k">if</span> <span class="n">fwhm_bounds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-556">        <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">fwhm_bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">fwhm_bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+</span><span id="line-557">        <span class="n">span</span> <span class="o">=</span> <span class="n">hi</span> <span class="o">-</span> <span class="n">lo</span>
+</span><span id="line-558">        <span class="n">tol</span> <span class="o">=</span> <span class="mf">1.0e-3</span> <span class="o">*</span> <span class="n">span</span> <span class="k">if</span> <span class="n">span</span> <span class="o">&gt;</span> <span class="mf">0.0</span> <span class="k">else</span> <span class="mf">1.0e-3</span>
+</span><span id="line-559">        <span class="k">if</span> <span class="n">fwhm</span> <span class="o">&lt;=</span> <span class="n">lo</span> <span class="o">+</span> <span class="n">tol</span> <span class="ow">or</span> <span class="n">fwhm</span> <span class="o">&gt;=</span> <span class="n">hi</span> <span class="o">-</span> <span class="n">tol</span><span class="p">:</span>
+</span><span id="line-560">            <span class="k">return</span> <span class="sa">f</span><span class="s2">"FWHM_PIX=</span><span class="si">{</span><span class="n">fwhm</span><span class="si">}</span><span class="s2"> is at the fit bound </span><span class="si">{</span><span class="n">fwhm_bounds</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="line-561">    <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">fwhm_err</span><span class="p">))</span> <span class="ow">or</span> <span class="n">fwhm_err</span> <span class="o">&gt;</span> <span class="mf">1.0</span><span class="p">:</span>
+</span><span id="line-562">        <span class="k">return</span> <span class="sa">f</span><span class="s2">"FWHM_ERR_PIX=</span><span class="si">{</span><span class="n">fwhm_err</span><span class="si">}</span><span class="s2"> is unusable"</span>
+</span><span id="line-563">    <span class="k">return</span> <span class="kc">None</span>
+</span><span id="line-564">
+</span><span id="line-565">
+</span><span id="line-566"><span class="k">def</span><span class="w"> </span><span class="nf">gen_lfc_modes</span><span class="p">(</span>
+</span><span id="line-567">    <span class="n">nu0</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">delta_nu</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+</span><span id="line-568">    <span class="n">wave_min</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">wave_max</span> <span class="p">:</span> <span class="nb">float</span>
+</span><span id="line-569"><span class="p">):</span>
+</span><span id="line-570"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-571"><span class="sd">    Generate LFC modes based on central frequency, frequency spacing, and wavelength bounds.</span>
+</span><span id="line-572">
+</span><span id="line-573"><span class="sd">    Parameters</span>
+</span><span id="line-574"><span class="sd">    ----------</span>
+</span><span id="line-575"><span class="sd">    nu0 : float</span>
+</span><span id="line-576"><span class="sd">        The central frequency (pump line) of the LFC in GHz.</span>
+</span><span id="line-577"><span class="sd">    delta_nu : float</span>
+</span><span id="line-578"><span class="sd">        The frequency spacing of the LFC modes in GHz.</span>
+</span><span id="line-579"><span class="sd">    wave_min : float</span>
+</span><span id="line-580"><span class="sd">        The minimum wavelength of the LFC modes in microns.</span>
+</span><span id="line-581"><span class="sd">    wave_max : float</span>
+</span><span id="line-582"><span class="sd">        The maximum wavelength of the LFC modes in microns.</span>
+</span><span id="line-583">
+</span><span id="line-584"><span class="sd">    Returns</span>
+</span><span id="line-585"><span class="sd">    -------</span>
+</span><span id="line-586"><span class="sd">    waves : np.ndarray</span>
+</span><span id="line-587"><span class="sd">        The wavelengths of the LFC modes in microns.</span>
+</span><span id="line-588"><span class="sd">    nus : np.ndarray</span>
+</span><span id="line-589"><span class="sd">        The frequencies of the LFC modes in GHz.</span>
+</span><span id="line-590"><span class="sd">    integers : np.ndarray</span>
+</span><span id="line-591"><span class="sd">        The integer indices of the LFC modes.</span>
+</span><span id="line-592"><span class="sd">    """</span>
+</span><span id="line-593">    <span class="n">nu_end</span> <span class="o">=</span> <span class="p">(</span><span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">/</span> <span class="n">wave_min</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-594">    <span class="n">nu_start</span> <span class="o">=</span> <span class="p">(</span><span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">/</span> <span class="n">wave_max</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-595">    <span class="n">n1</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">((</span><span class="n">nu_start</span> <span class="o">-</span> <span class="n">nu0</span><span class="p">)</span> <span class="o">/</span> <span class="n">delta_nu</span><span class="p">))</span>
+</span><span id="line-596">    <span class="n">n2</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">((</span><span class="n">nu_end</span> <span class="o">-</span> <span class="n">nu0</span><span class="p">)</span> <span class="o">/</span> <span class="n">delta_nu</span><span class="p">))</span>
+</span><span id="line-597">    <span class="n">integers</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">n1</span><span class="p">,</span> <span class="n">n2</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="n">n1</span><span class="p">,</span> <span class="n">n2</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+</span><span id="line-598">    <span class="n">waves</span><span class="p">,</span> <span class="n">nus</span> <span class="o">=</span> <span class="n">_gen_lfc_modes</span><span class="p">(</span><span class="n">nu0</span><span class="p">,</span> <span class="n">delta_nu</span><span class="p">,</span> <span class="n">integers</span><span class="p">)</span>
+</span><span id="line-599">    <span class="n">waves</span> <span class="o">=</span> <span class="n">waves</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</span><span id="line-600">    <span class="n">nus</span> <span class="o">=</span> <span class="n">nus</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</span><span id="line-601">    <span class="n">integers</span> <span class="o">=</span> <span class="n">integers</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</span><span id="line-602">    <span class="k">return</span> <span class="n">waves</span><span class="p">,</span> <span class="n">nus</span><span class="p">,</span> <span class="n">integers</span>
+</span><span id="line-603">
+</span><span id="line-604"><span class="k">def</span><span class="w"> </span><span class="nf">_gen_lfc_modes</span><span class="p">(</span>
+</span><span id="line-605">    <span class="n">nu0</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">delta_nu</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+</span><span id="line-606">    <span class="n">integers</span> <span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</span><span id="line-607"><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+</span><span id="line-608"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-609"><span class="sd">    Generate LFC modes based on central frequency, frequency spacing, and integer indices.</span>
+</span><span id="line-610">
+</span><span id="line-611"><span class="sd">    Parameters</span>
+</span><span id="line-612"><span class="sd">    ----------</span>
+</span><span id="line-613"><span class="sd">    nu0 : float</span>
+</span><span id="line-614"><span class="sd">        The central frequency (pump line) of the LFC in GHz.</span>
+</span><span id="line-615"><span class="sd">    delta_nu : float</span>
+</span><span id="line-616"><span class="sd">        The frequency spacing of the LFC modes in GHz.</span>
+</span><span id="line-617"><span class="sd">    integers : np.ndarray</span>
+</span><span id="line-618"><span class="sd">        An array of integer indices representing the mode numbers.</span>
+</span><span id="line-619">
+</span><span id="line-620"><span class="sd">    Returns</span>
+</span><span id="line-621"><span class="sd">    -------</span>
+</span><span id="line-622"><span class="sd">    waves : np.ndarray</span>
+</span><span id="line-623"><span class="sd">        The wavelengths of the LFC modes in microns.</span>
+</span><span id="line-624"><span class="sd">    nus : np.ndarray</span>
+</span><span id="line-625"><span class="sd">        The frequencies of the LFC modes in GHz.</span>
+</span><span id="line-626"><span class="sd">    """</span>
+</span><span id="line-627">    <span class="n">nus</span> <span class="o">=</span> <span class="n">integers</span> <span class="o">*</span> <span class="n">delta_nu</span> <span class="o">+</span> <span class="n">nu0</span>
+</span><span id="line-628">    <span class="n">waves</span> <span class="o">=</span> <span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">/</span> <span class="n">nus</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-629">    <span class="k">return</span> <span class="n">waves</span><span class="p">,</span> <span class="n">nus</span>
+</span><span id="line-630">
+</span><span id="line-631"><span class="k">def</span><span class="w"> </span><span class="nf">_get_closest_lfc_mode</span><span class="p">(</span>
+</span><span id="line-632">    <span class="n">nu0</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">delta_nu</span> <span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+</span><span id="line-633">    <span class="n">wave</span> <span class="p">:</span> <span class="nb">float</span>
+</span><span id="line-634"><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+</span><span id="line-635"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-636"><span class="sd">    Get the closest LFC mode to a given wavelength value.</span>
+</span><span id="line-637">
+</span><span id="line-638"><span class="sd">    Parameters</span>
+</span><span id="line-639"><span class="sd">    ----------</span>
+</span><span id="line-640"><span class="sd">    nu0 : float</span>
+</span><span id="line-641"><span class="sd">        The central frequency (pump line) of the LFC in Hz.</span>
+</span><span id="line-642"><span class="sd">    delta_nu : float</span>
+</span><span id="line-643"><span class="sd">        The frequency spacing of the LFC modes in Hz.</span>
+</span><span id="line-644"><span class="sd">    wave : float</span>
+</span><span id="line-645"><span class="sd">        The wavelength value in microns.</span>
+</span><span id="line-646">
+</span><span id="line-647"><span class="sd">    Returns</span>
+</span><span id="line-648"><span class="sd">    -------</span>
+</span><span id="line-649"><span class="sd">    np.ndarray</span>
+</span><span id="line-650"><span class="sd">        The closest wavelength of the LFC mode in microns.</span>
+</span><span id="line-651"><span class="sd">    np.ndarray</span>
+</span><span id="line-652"><span class="sd">        The corresponding frequency of the LFC mode in GHz.</span>
+</span><span id="line-653"><span class="sd">    int</span>
+</span><span id="line-654"><span class="sd">        The integer index of the closest LFC mode.</span>
+</span><span id="line-655"><span class="sd">    """</span>
+</span><span id="line-656">    <span class="n">nu</span> <span class="o">=</span> <span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">/</span> <span class="n">wave</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-657">    <span class="n">n</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">rint</span><span class="p">((</span><span class="n">nu</span> <span class="o">-</span> <span class="n">nu0</span><span class="p">)</span> <span class="o">/</span> <span class="n">delta_nu</span><span class="p">))</span>
+</span><span id="line-658">    <span class="n">nu_mode</span> <span class="o">=</span> <span class="n">nu0</span> <span class="o">+</span> <span class="n">n</span> <span class="o">*</span> <span class="n">delta_nu</span>
+</span><span id="line-659">    <span class="n">wave_mode</span> <span class="o">=</span> <span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">/</span> <span class="n">nu_mode</span> <span class="o">*</span> <span class="mf">1E6</span>
+</span><span id="line-660">    <span class="k">return</span> <span class="n">wave_mode</span><span class="p">,</span> <span class="n">nu_mode</span><span class="p">,</span> <span class="n">n</span>
+</span></code></pre></div>
+    </div></div>
+          </main>
+        </div>
+      </div><footer class="py-6 border-t border-border md:py-0">
+    <div class="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+      <div class="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+        <p class="text-sm leading-loose text-center text-muted-foreground md:text-left">© 2025, HISPEC DRP Team&nbsp;Built with <a class="font-medium underline underline-offset-4"
+    href="https://www.sphinx-doc.org"
+    rel="noreferrer">Sphinx 9.1.0</a></p>
+</div>
+</div>
+</footer>
+    </div>
+    
+    <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script defer="defer" src="../../../../_static/theme.js?v=582b20c5"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script src="../../../../_static/notebook_embeds.90d683dfd339.js?v=8d1fbc6d"></script>
+    <script src="../../../../_static/download_notebook.js?v=df93580d"></script>
+    
+</body>
+
+</html>

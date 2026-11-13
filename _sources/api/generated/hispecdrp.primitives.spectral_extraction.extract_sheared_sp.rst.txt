@@ -1,0 +1,15 @@
+hispecdrp.primitives.spectral\_extraction.extract\_sheared\_sp
+==============================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_sheared_sp
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _profile_on_cut
+      extract_sheared_banded_ls
+      forward_sheared_separable
+      iter_sheared_scatter_weights
+   

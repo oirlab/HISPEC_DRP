@@ -1,0 +1,12 @@
+hispecdrp.datamodels.sim\_wavesol
+=================================
+
+.. automodule:: hispecdrp.datamodels.sim_wavesol
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SimulatedWavesolModel
+   

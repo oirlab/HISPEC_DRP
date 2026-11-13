@@ -1,0 +1,14 @@
+hispecdrp.datamodels.mixins
+===========================
+
+.. automodule:: hispecdrp.datamodels.mixins
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      FiberAttributeProxyMixin
+      _FiberProxy
+      _FiberView
+   

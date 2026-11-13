@@ -1,0 +1,12 @@
+hispecdrp.datamodels.instrument\_params
+=======================================
+
+.. automodule:: hispecdrp.datamodels.instrument_params
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      InstrumentParametersModel
+   

@@ -1,0 +1,22 @@
+hispecdrp.primitives.line\_fitting.fit\_lfc\_lines\_primitive
+=============================================================
+
+.. automodule:: hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _drop_duplicate_lfc_modes
+      _gen_lfc_modes
+      _get_closest_lfc_mode
+      _unusable_lfc_line_fit_reason
+      gen_lfc_modes
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      FitLFCLinesPrimitive
+   

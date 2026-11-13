@@ -1,0 +1,12 @@
+hispecdrp.primitives.trace\_fitting.traceprof\_primitive
+========================================================
+
+.. automodule:: hispecdrp.primitives.trace_fitting.traceprof_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      TraceProfilePrimitive
+   

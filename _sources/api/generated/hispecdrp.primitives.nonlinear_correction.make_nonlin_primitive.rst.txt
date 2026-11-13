@@ -1,0 +1,23 @@
+hispecdrp.primitives.nonlinear\_correction.make\_nonlin\_primitive
+==================================================================
+
+.. automodule:: hispecdrp.primitives.nonlinear_correction.make_nonlin_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _find_first_valid_root_batch
+      _fit_nonlin_coefs_per_pixel
+      _fit_nonlin_coefs_row
+      _fit_nonlin_coefs_worker
+      _tpool_init_fit_nonlin_coefs
+      fit_nonlin_coefs
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeNonLinPrimitive
+   

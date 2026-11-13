@@ -1,0 +1,90 @@
+hispecdrp.primitives.utils.ccf.ccf\_utils
+=========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _bootstrap_gaussian_rv_std_m_s
+      _calc_mask_ccf_chunks_numba
+      _ccf_chunk_ccf_numba
+      _ccf_chunk_ccf_numba_vgrid
+      _ccf_fit_debug_jsonable
+      _ccf_gaussian_amp_floor_free_baseline_scaled
+      _ccf_preview_finalize_n_workers
+      _ccf_rv_from_ccf
+      _ccf_rv_numba_err_floor
+      _ccf_weighted_covariance_scan
+      _fit_ccf_preview_slot_worker
+      _fit_ccf_preview_slots_line_mask_numba
+      _fit_ccf_rv_line_mask_stored_negated_via_numba
+      _fractional_pixel_index
+      _gaussian_ccf_model
+      _gaussian_preview_params_from_peak_up_ccf
+      _lagrange_stencil_index_and_weights
+      _lanczos_kernel
+      _levmar_ccf_y_scale
+      _levmar_lsq_fit
+      _line_mask_ccf_fit_free_baseline_requested
+      _line_mask_peak_index_integral_and_prominence
+      _linear_interp_sorted_1d
+      _ln_lam
+      _masked_ccf_rv_core
+      _nan_stderr_of_mean_axis0
+      _nanmean_axis0_ignore_empty_columns
+      _nanmedian_numba_1d
+      _normalized_sinc
+      _poly_interp_sorted_1d
+      _poly_interp_sorted_1d_value_and_flux_variance
+      _process_all_orders_ccf_numba
+      _process_all_orders_ccf_numba_vgrid
+      _process_all_orders_rvs_numba_single_grid
+      _process_all_orders_rvs_numba_single_vgrid
+      _rv_err_slope_propagation_m_s
+      _rv_from_ccf_line_mask_numba_single
+      _rv_from_ccf_line_mask_peak_index_numba
+      _rv_from_ccf_line_mask_rows_numba
+      _smooth_uniform5_numba
+      _subsample_velocity_ccf_for_gaussian_fit
+      assemble_rvccf_fib_table
+      build_ccf_preview_dict
+      build_centered_uniform_velocity_grid
+      build_line_mask_chunk_wavelength_intervals_line_by_line
+      build_rvccf_chunk_supplement
+      ccf_order_n_chunks_for_span
+      clip_gaussian_plot_velocity_range_m_s
+      continuum_normalize
+      count_mask_lines_in_observed_wavelength_interval
+      doppler_paint_lagrange
+      doppler_paint_lanczos
+      dv_per_pixel_m_s
+      estimate_ccf_uncertainty_highpass_residual
+      finalize_ccf_preview_dict
+      fit_ccf_rv
+      flat_chunk_echelle_orders
+      flat_chunk_wl_lo_hi
+      line_mask_chunk_restrict_velocity_range_m_s
+      line_mask_line_window_velocity_half_width_m_s
+      line_mask_n_chunks_for_order_line_by_line
+      mask_line_window_spectrum_band_um
+      masked_ccf_rv
+      median_pixel_dv_m_s
+      prepare_template_for_doppler_paint
+      process_all_orders_rvs_numba
+      process_one_order_rvs
+      process_orders_rvs_numba_parallel
+      run_ccf_line_mask_for_fiber
+      rv_per_chunks
+      rv_per_chunks_line_mask
+      template_min_resolution_for_doppler_paint
+      validate_line_mask_line_window_chunking_config
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CCFFitConfig
+   

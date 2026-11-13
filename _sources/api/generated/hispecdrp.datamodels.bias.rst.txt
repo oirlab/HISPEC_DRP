@@ -1,0 +1,12 @@
+hispecdrp.datamodels.bias
+=========================
+
+.. automodule:: hispecdrp.datamodels.bias
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      BiasModel
+   

@@ -1,0 +1,12 @@
+hispecdrp.primitives.bias\_subtraction.master\_bias\_primitive
+==============================================================
+
+.. automodule:: hispecdrp.primitives.bias_subtraction.master_bias_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeMasterBiasPrimitive
+   

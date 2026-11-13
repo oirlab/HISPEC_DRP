@@ -1,0 +1,17 @@
+hispecdrp.primitives.spectral\_extraction.extract\_optimal
+==========================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_optimal
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _extract_optimal_numba
+      _extract_optimal_sheared_numba
+      _horne_accumulate
+      _interp_spectral_sample
+      _nearest_dq_sample
+      extract_spectrum_optimal
+   

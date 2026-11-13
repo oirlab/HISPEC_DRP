@@ -1,0 +1,6 @@
+hispecdrp.primitives.jump\_detection.jump\_detection\_difference
+================================================================
+
+.. currentmodule:: hispecdrp.primitives.jump_detection
+
+.. autofunction:: jump_detection_difference

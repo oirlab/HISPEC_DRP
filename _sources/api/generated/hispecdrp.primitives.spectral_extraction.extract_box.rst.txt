@@ -1,0 +1,13 @@
+hispecdrp.primitives.spectral\_extraction.extract\_box
+======================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_box
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _extract_box_numba
+      extract_spectrum_box
+   

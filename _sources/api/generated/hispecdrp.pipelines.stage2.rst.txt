@@ -1,0 +1,14 @@
+hispecdrp.pipelines.stage2
+==========================
+
+.. automodule:: hispecdrp.pipelines.stage2
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   stage2_pipeline

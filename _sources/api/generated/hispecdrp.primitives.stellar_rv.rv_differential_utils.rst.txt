@@ -1,0 +1,15 @@
+hispecdrp.primitives.stellar\_rv.rv\_differential\_utils
+========================================================
+
+.. automodule:: hispecdrp.primitives.stellar_rv.rv_differential_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      ccf_peak_velocity_m_s
+      estimate_matched_line_differential_rv
+      line_passes_hard_qc
+      match_rvccf_rows_by_wavelength
+   

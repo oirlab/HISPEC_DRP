@@ -1,0 +1,17 @@
+hispecdrp.primitives.ramp\_fitting.utils
+========================================
+
+.. automodule:: hispecdrp.primitives.ramp_fitting.utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      bitwise_or_reduce
+      get_mid_delta_times
+      get_mid_delta_times_ramp
+      get_ramp_chunks
+      mean_numba_if_not_zero
+      seconds_to_mjd_offset
+   

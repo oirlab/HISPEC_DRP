@@ -1,0 +1,18 @@
+hispecdrp.pipelines.stage2.stage2\_pipeline
+===========================================
+
+.. automodule:: hispecdrp.pipelines.stage2.stage2_pipeline
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _primitive_config_has_explicit_ccf_zb
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      Stage2Pipeline
+   

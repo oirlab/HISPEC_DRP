@@ -1,0 +1,16 @@
+hispecdrp.primitives.trace\_fitting
+===================================
+
+.. automodule:: hispecdrp.primitives.trace_fitting
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   tracepos_primitive
+   traceprof_moments
+   traceprof_primitive

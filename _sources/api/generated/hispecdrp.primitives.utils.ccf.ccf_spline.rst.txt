@@ -1,0 +1,16 @@
+hispecdrp.primitives.utils.ccf.ccf\_spline
+==========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_spline
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _compute_ccf_spline
+      _doppler_shift_scalar
+      _interp_var_linear
+      _line_lands_in_spectrum
+      compute_ccf_spline
+   

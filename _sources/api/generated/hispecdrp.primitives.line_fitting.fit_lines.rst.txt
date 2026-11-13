@@ -1,0 +1,26 @@
+hispecdrp.primitives.line\_fitting.fit\_lines
+=============================================
+
+.. automodule:: hispecdrp.primitives.line_fitting.fit_lines
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _gauss_absorption_jac
+      _gauss_absorption_model
+      _gauss_absorption_residuals
+      _gauss_emission_jac
+      _gauss_emission_model
+      _gauss_emission_residuals
+      _gaussian
+      fit_line_gauss
+      fit_lines_gauss
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      GaussianLineFitResult
+   

@@ -1,0 +1,12 @@
+hispecdrp.datamodels.read\_noise
+================================
+
+.. automodule:: hispecdrp.datamodels.read_noise
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ReadNoiseModel
+   

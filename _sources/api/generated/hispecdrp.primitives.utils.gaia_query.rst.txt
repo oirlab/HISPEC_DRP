@@ -1,0 +1,35 @@
+hispecdrp.primitives.utils.gaia\_query
+======================================
+
+.. automodule:: hispecdrp.primitives.utils.gaia_query
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _cell
+      _convert_epoch_gaia
+      _gaia_class
+      _linear_pm_epoch_shift
+      _norm
+      _query_2mass_by_designation
+      _query_gaia_dr3
+      _query_gaia_dr3_tap
+      _query_gaia_dr3_vizier
+      _row_to_dict
+      _tap_row_to_gaia_dict
+      _tmass_designation_from_vizier
+      _tmass_from_tap
+      _twomass_row_to_dict
+      _vizier_class
+      _vizier_row_to_gaia_dict
+      gaia_backend
+      get_2mass_data_vizier
+      get_2mass_from_gaia
+      get_stellar_data_gaia_by_coordinates
+      get_stellar_data_gaia_from_source_id
+      query_vizier
+      vizier_mirrors
+      vizier_timeout
+   

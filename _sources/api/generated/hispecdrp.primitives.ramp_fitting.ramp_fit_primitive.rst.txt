@@ -1,0 +1,21 @@
+hispecdrp.primitives.ramp\_fitting.ramp\_fit\_primitive
+=======================================================
+
+.. automodule:: hispecdrp.primitives.ramp_fitting.ramp_fit_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _nan_safe_gaussian_filter
+      clip_noise_driven_poisson_variance
+      flag_nonfinite_rate_pixels
+      sanitize_ramp_fit_rate_err
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      FitRampPrimitive
+   

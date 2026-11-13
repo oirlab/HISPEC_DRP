@@ -1,0 +1,12 @@
+hispecdrp.primitives.jump\_detection.jump\_detection\_primitive
+===============================================================
+
+.. automodule:: hispecdrp.primitives.jump_detection.jump_detection_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      JumpDetectionPrimitive
+   

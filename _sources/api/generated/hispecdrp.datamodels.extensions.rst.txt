@@ -1,0 +1,32 @@
+hispecdrp.datamodels.extensions
+===============================
+
+.. automodule:: hispecdrp.datamodels.extensions
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      IMAGE_HDU
+      TABLE_HDU
+      _base_title
+      _units_squared
+      create_L0_extensions
+      create_barycorr_extensions
+      create_chebyshev_extensions
+      create_dataspec_extensions
+      create_drift_extensions
+      create_etalonfitparam_extensions
+      create_fluxabs_extensions
+      create_lfcfitparam_extensions
+      create_midtime_extensions
+      create_rv_extensions
+      create_sky_extensions
+      create_specdq_extensions
+      create_starmodel_extensions
+      create_telluric_extensions
+      create_throughput_extensions
+      create_trans_extensions
+      create_wave_extensions
+   

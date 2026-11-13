@@ -1,0 +1,15 @@
+hispecdrp.primitives.refpix
+===========================
+
+.. automodule:: hispecdrp.primitives.refpix
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   reference_SCALES_DRP
+   refpix_primitive

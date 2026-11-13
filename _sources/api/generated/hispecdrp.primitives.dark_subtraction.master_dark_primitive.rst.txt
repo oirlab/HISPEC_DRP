@@ -1,0 +1,12 @@
+hispecdrp.primitives.dark\_subtraction.master\_dark\_primitive
+==============================================================
+
+.. automodule:: hispecdrp.primitives.dark_subtraction.master_dark_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeMasterDarkPrimitive
+   

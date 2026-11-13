@@ -1,0 +1,12 @@
+hispecdrp.pipelines.calibration.process\_darks\_pipeline
+========================================================
+
+.. automodule:: hispecdrp.pipelines.calibration.process_darks_pipeline
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ProcessDarksPipeline
+   

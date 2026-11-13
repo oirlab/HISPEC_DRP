@@ -1,0 +1,12 @@
+hispecdrp.pipelines.calibration.process\_fiberflats\_pipeline
+=============================================================
+
+.. automodule:: hispecdrp.pipelines.calibration.process_fiberflats_pipeline
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ProcessFiberflatsPipeline
+   

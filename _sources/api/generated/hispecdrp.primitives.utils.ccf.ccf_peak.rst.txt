@@ -1,0 +1,15 @@
+hispecdrp.primitives.utils.ccf.ccf\_peak
+========================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_peak
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _ccf_raw_grid_subpixel_peak_m_s
+      _ccf_raw_grid_subpixel_peak_nearest_disc_max_m_s
+      _collapse_duplicate_velocity_samples_m_s
+      _subpixel_peak_cubic_spline_m_s
+   

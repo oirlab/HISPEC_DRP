@@ -1,0 +1,29 @@
+hispecdrp.primitives.utils.spectral\_utils
+==========================================
+
+.. automodule:: hispecdrp.primitives.utils.spectral_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _ab_mag_through_filter
+      _coalesce_existing_spectrum_path
+      _edlen_refractivity_ppm_nm
+      _load_2mass_filter_table
+      air_wavelength_nm_to_vacuum_nm
+      delta_pix_to_delta_wave
+      delta_vel_to_delta_wave
+      delta_wave_to_delta_vel
+      fetch_svo_2mass_filter
+      get_spectrum_path
+      load_btsettl_spectrum
+      load_template_from_path
+      normalize_2mass_band
+      resolve_stellar_template_to_log_micron
+      resolve_twomass_mag_ab
+      twomass_ab_to_vega
+      twomass_vega_to_ab
+      vacuum_wavelength_nm_to_air_nm
+   

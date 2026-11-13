@@ -1,0 +1,15 @@
+hispecdrp.primitives.blaze\_correction
+======================================
+
+.. automodule:: hispecdrp.primitives.blaze_correction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   blaze_correction_primitive
+   make_fiberflat_primitive

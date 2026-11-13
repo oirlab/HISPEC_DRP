@@ -1,0 +1,20 @@
+hispecdrp.primitives.utils.array\_utils
+=======================================
+
+.. automodule:: hispecdrp.primitives.utils.array_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _calc_median_insertion_sort
+      all_sc
+      any_sc
+      bitwise_or_reduce_uint32
+      median_filter_1d
+      median_filter_2d
+      nanmedian_axis0_ignore_empty_columns
+      polyval1d
+      solve_chebyshev2d_ols
+   

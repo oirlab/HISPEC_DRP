@@ -1,0 +1,21 @@
+hispecdrp.primitives.utils.ccf.ccf\_gauss\_fit\_numba
+=====================================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_gauss_fit_numba
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _fit_ccf_rv_rows_numba_impl
+      _fit_one_ccf_row
+      _gauss
+      _lm_gauss_fixed_baseline
+      _mad_1d
+      _median_positive_1d
+      _nanmedian_1d
+      _sigma_clipped_median
+      _window_gauss_fit
+      fit_ccf_rv_rows_numba
+   

@@ -1,0 +1,12 @@
+hispecdrp.primitives.spectral\_extraction.extraction\_utils
+===========================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extraction_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      get_extraction_window
+   

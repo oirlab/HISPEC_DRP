@@ -1,0 +1,26 @@
+hispecdrp.primitives.utils.cubic\_spline
+========================================
+
+.. automodule:: hispecdrp.primitives.utils.cubic_spline
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _coeffs_from_slopes
+      _cubic_from_ends
+      _find_segment
+      _solve_slopes_not_a_knot
+      cubic_spline2d_build
+      cubic_spline2d_eval
+      cubic_spline2d_eval_cell
+      cubic_spline2d_eval_grid
+      cubic_spline2d_eval_scalar
+      cubic_spline2d_eval_scalar_arrays
+      cubic_spline_build
+      cubic_spline_eval
+      cubic_spline_eval_scalar
+      cubic_spline_eval_scalar_arrays
+      doppler_paint_cubic_spline
+   

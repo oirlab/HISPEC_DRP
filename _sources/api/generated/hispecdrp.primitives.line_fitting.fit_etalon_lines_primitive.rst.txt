@@ -1,0 +1,18 @@
+hispecdrp.primitives.line\_fitting.fit\_etalon\_lines\_primitive
+================================================================
+
+.. automodule:: hispecdrp.primitives.line_fitting.fit_etalon_lines_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _get_etalon_spacing_pixels
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      FitEtalonLinesPrimitive
+   

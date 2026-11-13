@@ -1,0 +1,14 @@
+hispecdrp.primitives.readnoise
+==============================
+
+.. automodule:: hispecdrp.primitives.readnoise
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   make_rn_primitive

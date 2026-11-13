@@ -1,0 +1,12 @@
+hispecdrp.primitives.sky\_subtraction.sky\_primitive
+====================================================
+
+.. automodule:: hispecdrp.primitives.sky_subtraction.sky_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SkySubtractionPrimitive
+   

@@ -1,0 +1,20 @@
+hispecdrp.primitives.utils
+==========================
+
+.. automodule:: hispecdrp.primitives.utils
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   array_utils
+   ccf
+   cubic_spline
+   gaia_query
+   linear_interp
+   spectral_utils
+   stats

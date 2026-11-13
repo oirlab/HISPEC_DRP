@@ -1,0 +1,22 @@
+hispecdrp.primitives.spectral\_extraction
+=========================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   extract_box
+   extract_cross_talk
+   extract_optimal
+   extract_sheared_sp
+   extract_spectroperfection
+   extract_spectroperfectionism
+   extraction_utils
+   iso_lambda_shear
+   spectral_extraction_primitive

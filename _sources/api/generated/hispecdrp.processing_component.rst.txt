@@ -1,0 +1,12 @@
+﻿hispecdrp.processing\_component
+===============================
+
+.. automodule:: hispecdrp.processing_component
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ProcessingComponent
+   

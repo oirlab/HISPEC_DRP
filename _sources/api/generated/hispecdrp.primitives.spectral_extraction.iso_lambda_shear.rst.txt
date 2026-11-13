@@ -1,0 +1,14 @@
+hispecdrp.primitives.spectral\_extraction.iso\_lambda\_shear
+============================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.iso_lambda_shear
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      create_trace_shear_from_sim_hdf
+      order_list_for_spectrograph
+      psf_stamp_shear_dx_dy
+   

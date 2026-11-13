@@ -1,0 +1,14 @@
+hispecdrp.primitives.line\_fitting.find\_lines
+==============================================
+
+.. automodule:: hispecdrp.primitives.line_fitting.find_lines
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _estimate_emission_spectrum_background
+      _nanmin_filter1d
+      find_emission_lines
+   

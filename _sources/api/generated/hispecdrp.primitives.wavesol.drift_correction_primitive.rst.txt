@@ -1,0 +1,19 @@
+hispecdrp.primitives.wavesol.drift\_correction\_primitive
+=========================================================
+
+.. automodule:: hispecdrp.primitives.wavesol.drift_correction_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      calculate_drifts_from_line_centers
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ApplyDriftCorrectionPrimitive
+      CalculateEtalonDriftCorrectionPrimitive
+   

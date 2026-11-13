@@ -1,0 +1,26 @@
+hispecdrp.calibrations.selectors
+================================
+
+.. automodule:: hispecdrp.calibrations.selectors
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      BiasSelector
+      DQSelector
+      DarkSelector
+      DetectorFlatSelector
+      FiberFlatSelector
+      GainSelector
+      HISPECCalibrationSelector
+      LSFSelector
+      NonlinearCorrectionSelector
+      ReadNoiseSelector
+      ReferenceEtalonSelector
+      SaturationSelector
+      TracePosSelector
+      TraceProfSelector
+      WavelengthSolutionSelector
+   

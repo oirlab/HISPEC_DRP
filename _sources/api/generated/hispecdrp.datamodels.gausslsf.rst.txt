@@ -1,0 +1,20 @@
+hispecdrp.datamodels.gausslsf
+=============================
+
+.. automodule:: hispecdrp.datamodels.gausslsf
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _interp_pixel_from_wave
+      _make_gaussians_chromatic
+      _make_kernel_grid
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      GaussianLSFModel
+   

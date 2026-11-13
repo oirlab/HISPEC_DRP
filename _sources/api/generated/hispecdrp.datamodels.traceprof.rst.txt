@@ -1,0 +1,12 @@
+hispecdrp.datamodels.traceprof
+==============================
+
+.. automodule:: hispecdrp.datamodels.traceprof
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      TraceProfModel
+   

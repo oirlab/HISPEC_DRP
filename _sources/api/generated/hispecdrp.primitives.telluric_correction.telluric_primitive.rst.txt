@@ -1,0 +1,12 @@
+hispecdrp.primitives.telluric\_correction.telluric\_primitive
+=============================================================
+
+.. automodule:: hispecdrp.primitives.telluric_correction.telluric_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      TelluricCorrectionPrimitive
+   

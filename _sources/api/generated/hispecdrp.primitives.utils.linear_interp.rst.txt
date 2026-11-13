@@ -1,0 +1,16 @@
+hispecdrp.primitives.utils.linear\_interp
+=========================================
+
+.. automodule:: hispecdrp.primitives.utils.linear_interp
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      linear_interp2d_eval
+      linear_interp2d_eval_cell
+      linear_interp2d_eval_grid
+      linear_interp2d_eval_scalar
+      linear_interp2d_from_corners
+   

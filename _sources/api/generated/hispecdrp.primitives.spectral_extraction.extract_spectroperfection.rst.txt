@@ -1,0 +1,16 @@
+hispecdrp.primitives.spectral\_extraction.extract\_spectroperfection
+====================================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_spectroperfection
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _gauss_pdf
+      _pix_lo_hi
+      extract_spectroperfection
+      forward_spectroperfection
+      iter_spectroperfection_weights
+   

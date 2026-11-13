@@ -1,0 +1,12 @@
+hispecdrp.primitives.refpix.refpix\_primitive
+=============================================
+
+.. automodule:: hispecdrp.primitives.refpix.refpix_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      RefPixelCorrectionPrimitive
+   

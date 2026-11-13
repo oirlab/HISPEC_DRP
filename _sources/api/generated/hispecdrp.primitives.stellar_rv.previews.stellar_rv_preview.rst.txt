@@ -1,0 +1,67 @@
+hispecdrp.primitives.stellar\_rv.previews.stellar\_rv\_preview
+==============================================================
+
+.. automodule:: hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _aggregated_mask_chunk_rv_for_order
+      _bisector_preview_plotly_traces
+      _ccf_slot_dropdown_paper_xy
+      _chunk_rv_for_overlay_slot
+      _collapse_line_mask_rv_scatter_rows
+      _downsample_ccf_for_plot
+      _env_flag
+      _env_positive_int
+      _figure_to_png_bytes_with_timeout
+      _first_output_model_from_primitive
+      _fits_base_path
+      _format_rv_value
+      _iterative_sigma_clip_ylim
+      _json_float_list_sigfig
+      _json_opt_float
+      _json_round_list
+      _kaleido_render_png_worker
+      _line_mask_preview_gaussian_overlay_params
+      _line_mask_refine_ccf_add_plotly_traces
+      _line_mask_refine_plotly_traces_from_cached_rmeta
+      _mask_overlay_downsample_limits
+      _mask_overlay_spec_interp_curve
+      _mask_unique_sorted_xy
+      _overlay_v_init_m_s
+      _per_order_pipeline_rv_iv_mean_m_s
+      _pipeline_rv_avg_from_tables
+      _pipeline_rv_for_line_mask_preview_slot
+      _plotly_domain_axis_refs
+      _plotly_subplot_x_anchor_name
+      _poly_interp_sorted_1d_numpy
+      _preview_abbrev_ccf_uncertainty
+      _preview_ccf_velocity_range_m_s
+      _preview_ccf_y_limits
+      _preview_export_combined_html
+      _preview_gaussian_cache_and_slot_legends
+      _preview_gaussian_curve_v_range_m_s
+      _preview_kaleido_png_max_ccf_traces
+      _preview_kaleido_png_timeout_s
+      _preview_max_plot_slots
+      _preview_should_write_png
+      _preview_slots_for_plot
+      _primitive_output_dir
+      _rv_sidebar_paper_xy
+      _rvcc_hover_order_segment_line
+      _slot_by_order_chunk_from_line_mask_preview
+      _template_overlay_max_template_points_from_env
+      _to_serializable_order_payload
+      _to_serializable_template_overlay_payload
+      _truthy_env
+      _write_ccf_overlay_debug_html_pages
+      collect_mask_overlay_payload_for_primitive
+      collect_template_overlay_payload_for_primitive
+      create_stellar_rv_preview
+      maybe_write_ccf_overlay_debug_html
+      write_mask_overlay_debug_pages
+      write_template_overlay_debug_pages
+   

@@ -1,0 +1,12 @@
+hispecdrp.datamodels.detector\_flat
+===================================
+
+.. automodule:: hispecdrp.datamodels.detector_flat
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      DetectorFlatModel
+   

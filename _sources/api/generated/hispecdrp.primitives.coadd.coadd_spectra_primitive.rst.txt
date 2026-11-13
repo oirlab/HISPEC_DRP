@@ -1,0 +1,23 @@
+hispecdrp.primitives.coadd.coadd\_spectra\_primitive
+====================================================
+
+.. automodule:: hispecdrp.primitives.coadd.coadd_spectra_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _coadd_spectra
+      _coadd_spectra_numba
+      _get_spec_data_attrs
+      _make_spec_batch
+      coadd_spectra
+      sigma_clip_spectra
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CoaddSpectraPrimitive
+   

@@ -1,0 +1,17 @@
+hispecdrp.primitives.nonlinear\_correction
+==========================================
+
+.. automodule:: hispecdrp.primitives.nonlinear_correction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   calc_nonlin_coefs_Brandt
+   make_nonlin_primitive
+   nonlin_primitive
+   nonlincorr_numba

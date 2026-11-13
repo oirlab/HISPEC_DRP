@@ -1,0 +1,19 @@
+hispecdrp.primitives.detector\_flat.detflat\_primitive
+======================================================
+
+.. automodule:: hispecdrp.primitives.detector_flat.detflat_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _detector_flat_correction_numba
+      detector_flat_correction
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      DetectorFlatCorrectionPrimitive
+   

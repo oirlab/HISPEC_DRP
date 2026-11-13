@@ -1,0 +1,12 @@
+hispecdrp.datamodels.hispec\_config
+===================================
+
+.. automodule:: hispecdrp.datamodels.hispec_config
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      HISPECConfig
+   

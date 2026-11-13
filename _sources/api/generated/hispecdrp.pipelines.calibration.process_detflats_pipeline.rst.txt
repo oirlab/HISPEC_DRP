@@ -1,0 +1,12 @@
+hispecdrp.pipelines.calibration.process\_detflats\_pipeline
+===========================================================
+
+.. automodule:: hispecdrp.pipelines.calibration.process_detflats_pipeline
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ProcessDetFlatsPipeline
+   

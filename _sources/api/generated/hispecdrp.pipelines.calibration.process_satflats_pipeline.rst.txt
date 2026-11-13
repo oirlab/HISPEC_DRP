@@ -1,0 +1,12 @@
+hispecdrp.pipelines.calibration.process\_satflats\_pipeline
+===========================================================
+
+.. automodule:: hispecdrp.pipelines.calibration.process_satflats_pipeline
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ProcessSatFlatsPipeline
+   

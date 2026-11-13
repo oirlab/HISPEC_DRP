@@ -1,0 +1,12 @@
+hispecdrp.datamodels.parvi\_config
+==================================
+
+.. automodule:: hispecdrp.datamodels.parvi_config
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      PARVIConfig
+   

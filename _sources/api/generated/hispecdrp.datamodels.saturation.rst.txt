@@ -1,0 +1,12 @@
+hispecdrp.datamodels.saturation
+===============================
+
+.. automodule:: hispecdrp.datamodels.saturation
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SaturationModel
+   

@@ -1,0 +1,20 @@
+hispecdrp.primitives.nonlinear\_correction.calc\_nonlin\_coefs\_Brandt
+======================================================================
+
+.. automodule:: hispecdrp.primitives.nonlinear_correction.calc_nonlin_coefs_Brandt
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      calc_A_matrix
+      get_nonlin_coefs
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      Covar
+      Nonlin_Result
+   

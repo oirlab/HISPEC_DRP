@@ -1,0 +1,18 @@
+hispecdrp.primitives.dq\_init.dqinit\_primitive
+===============================================
+
+.. automodule:: hispecdrp.primitives.dq_init.dqinit_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _apply_dq_mask
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      DQInitPrimitive
+   

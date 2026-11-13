@@ -1,0 +1,14 @@
+hispecdrp.primitives.utils.ccf.ccf\_rv\_content
+===============================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_rv_content
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _gradient
+      compute_rv_content
+      doppler_shift_from_barycenter
+   

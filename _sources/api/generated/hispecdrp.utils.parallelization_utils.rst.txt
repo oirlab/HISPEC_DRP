@@ -1,0 +1,16 @@
+hispecdrp.utils.parallelization\_utils
+======================================
+
+.. automodule:: hispecdrp.utils.parallelization_utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _arraytonumpy
+      _effective_numba_threads
+      _numba_max_parallel_threads
+      numba_thread_scope
+      resolve_numba_threads
+   

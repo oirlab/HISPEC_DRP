@@ -1,0 +1,19 @@
+hispecdrp.pipelines.calibration
+===============================
+
+.. automodule:: hispecdrp.pipelines.calibration
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   process_bias_pipeline
+   process_darks_pipeline
+   process_detflats_pipeline
+   process_fiberflats_pipeline
+   process_lfc_pipeline
+   process_satflats_pipeline

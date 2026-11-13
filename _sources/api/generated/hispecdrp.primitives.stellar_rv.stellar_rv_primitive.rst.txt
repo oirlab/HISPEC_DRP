@@ -1,0 +1,18 @@
+hispecdrp.primitives.stellar\_rv.stellar\_rv\_primitive
+=======================================================
+
+.. automodule:: hispecdrp.primitives.stellar_rv.stellar_rv_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _fiber_l2_bundle
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      StellarRVPrimitive
+   

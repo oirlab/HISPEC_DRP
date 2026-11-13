@@ -1,0 +1,19 @@
+hispecdrp.primitives.bias\_subtraction.bias\_primitive
+======================================================
+
+.. automodule:: hispecdrp.primitives.bias_subtraction.bias_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _bias_subtraction
+      _bias_subtraction_numba
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      BiasSubtractionPrimitive
+   

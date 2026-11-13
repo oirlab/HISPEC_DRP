@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en" data-content_root="../../../../"
+  x-data="{ darkMode: $persist(window.matchMedia('(prefers-color-scheme: dark)').matches), activeSection: ''}"
+  :class="{ 'dark' : darkMode === true }">
+
+<head>
+  <script>
+    (function () {
+      // Set initial color scheme
+      if ((localStorage.getItem("_x_darkMode") === "true") || (window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Watch for media preference changes
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+        localStorage.setItem("_x_darkMode", event.matches);
+        document.documentElement.classList.toggle("dark", event.matches);
+      });
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#030711" />
+  
+  <title>hispecdrp.primitives.ramp_fitting.ramp_fit_primitive | HISPEC DRP  documentation</title>
+  <meta property="og:title" content="hispecdrp.primitives.ramp_fitting.ramp_fit_primitive | HISPEC DRP  documentation" />
+  <meta name="twitter:title" content="hispecdrp.primitives.ramp_fitting.ramp_fit_primitive | HISPEC DRP  documentation" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=d862e8e8" />
+  <link id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css" href="../../../../_static/pygments_dark.css" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/theme.css?v=73505e79" />
+  <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=228efd53" />
+  <link rel="canonical" href="https://oirlab.github.io/HISPEC_DRP/_modules/hispecdrp/primitives/ramp_fitting/ramp_fit_primitive.html" />
+  <link rel="search" title="Search" href="../../../../search.html" />
+  <link rel="index" title="Index" href="../../../../genindex.html" />
+</head>
+
+<body x-data="{ showSidebar: false, showScrollTop: false }"
+  class="min-h-screen font-sans antialiased bg-background text-foreground" :class="{ 'overflow-hidden': showSidebar }">
+  <div x-cloak x-show="showSidebar"
+    class="fixed inset-0 z-50 overflow-hidden bg-background/80 backdrop-blur-sm md:hidden"
+    @click.self="showSidebar = false"></div><div id="page" class="relative flex flex-col min-h-screen"><a href="#content"
+      class="absolute top-0 left-0 z-[100] block bg-background p-4 text-xl transition -translate-x-full opacity-0 focus:translate-x-0 focus:opacity-100">
+      Skip to content
+    </a><header class="sticky top-0 z-40 w-full border-b shadow-xs border-border bg-background/90 backdrop-blur"><div class="container flex items-center h-14">
+    <div class="hidden mr-4 md:flex">
+      <a href="../../../../index.html" class="flex items-center mr-6"><span class="hidden font-bold sm:inline-block text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+      </a></div><button
+      class="inline-flex items-center justify-center h-10 px-0 py-2 mr-2 text-base font-medium transition-colors rounded-md hover:text-accent-foreground hover:bg-transparent md:hidden"
+      type="button" @click="showSidebar = true">
+      <svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 96 960 960" aria-hidden="true"
+        fill="currentColor">
+        <path
+          d="M152.587 825.087q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440Zm0-203.587q-19.152 0-32.326-13.174T107.087 576q0-19.152 13.174-32.326t32.326-13.174h320q19.152 0 32.326 13.174T518.087 576q0 19.152-13.174 32.326T472.587 621.5h-320Zm0-203.587q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440ZM708.913 576l112.174 112.174q12.674 12.674 12.674 31.826t-12.674 31.826Q808.413 764.5 789.261 764.5t-31.826-12.674l-144-144Q600 594.391 600 576t13.435-31.826l144-144q12.674-12.674 31.826-12.674t31.826 12.674q12.674 12.674 12.674 31.826t-12.674 31.826L708.913 576Z" />
+      </svg>
+      <span class="sr-only">Toggle navigation menu</span>
+    </button>
+    <div class="flex items-center justify-between flex-1 gap-2 sm:gap-4 md:justify-end">
+      <div class="flex-1 w-full md:w-auto md:flex-none"><form id="searchbox"
+      action="../../../../search.html"
+      method="get"
+      class="relative flex items-center group"
+      @keydown.k.window.meta="$refs.search.focus()">
+  <input x-ref="search"
+          name="q"
+          id="search-input"
+          type="search"
+          aria-label="Search the docs"
+          placeholder="Search ..."
+          class="inline-flex items-center font-medium transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-input hover:bg-accent focus:bg-accent hover:text-accent-foreground focus:text-accent-foreground hover:placeholder-accent-foreground py-2 px-4 relative h-9 w-full justify-start rounded-[0.5rem] text-sm text-muted-foreground sm:pr-12 md:w-40 lg:w-64" />
+  <kbd class="pointer-events-none absolute right-1.5 top-2 hidden h-5 select-none text-muted-foreground items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex group-hover:bg-accent group-hover:text-accent-foreground">
+    <span class="text-xs">⌘</span>
+    K
+  </kbd>
+</form>
+      </div>
+      <nav class="flex items-center gap-1">
+        <button @click="darkMode = !darkMode"
+          class="relative inline-flex items-center justify-center px-0 text-sm font-medium transition-colors rounded-md hover:bg-accent hover:text-accent-foreground h-9 w-9"
+          type="button"
+          title="Toggle color scheme">
+          <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 96 960 960" fill="currentColor"
+            class="absolute transition-all scale-100 rotate-0 dark:-rotate-90 dark:scale-0">
+            <path
+              d="M480 685q45.456 0 77.228-31.772Q589 621.456 589 576q0-45.456-31.772-77.228Q525.456 467 480 467q-45.456 0-77.228 31.772Q371 530.544 371 576q0 45.456 31.772 77.228Q434.544 685 480 685Zm0 91q-83 0-141.5-58.5T280 576q0-83 58.5-141.5T480 376q83 0 141.5 58.5T680 576q0 83-58.5 141.5T480 776ZM80 621.5q-19.152 0-32.326-13.174T34.5 576q0-19.152 13.174-32.326T80 530.5h80q19.152 0 32.326 13.174T205.5 576q0 19.152-13.174 32.326T160 621.5H80Zm720 0q-19.152 0-32.326-13.174T754.5 576q0-19.152 13.174-32.326T800 530.5h80q19.152 0 32.326 13.174T925.5 576q0 19.152-13.174 32.326T880 621.5h-80Zm-320-320q-19.152 0-32.326-13.174T434.5 256v-80q0-19.152 13.174-32.326T480 130.5q19.152 0 32.326 13.174T525.5 176v80q0 19.152-13.174 32.326T480 301.5Zm0 720q-19.152 0-32.326-13.17Q434.5 995.152 434.5 976v-80q0-19.152 13.174-32.326T480 850.5q19.152 0 32.326 13.174T525.5 896v80q0 19.152-13.174 32.33-13.174 13.17-32.326 13.17ZM222.174 382.065l-43-42Q165.5 327.391 166 308.239t13.174-33.065q13.435-13.674 32.587-13.674t32.065 13.674l42.239 43q12.674 13.435 12.555 31.706-.12 18.272-12.555 31.946-12.674 13.674-31.445 13.413-18.772-.261-32.446-13.174Zm494 494.761-42.239-43q-12.674-13.435-12.674-32.087t12.674-31.565Q686.609 756.5 705.38 757q18.772.5 32.446 13.174l43 41.761Q794.5 824.609 794 843.761t-13.174 33.065Q767.391 890.5 748.239 890.5t-32.065-13.674Zm-42-494.761Q660.5 369.391 661 350.62q.5-18.772 13.174-32.446l41.761-43Q728.609 261.5 747.761 262t33.065 13.174q13.674 13.435 13.674 32.587t-13.674 32.065l-43 42.239q-13.435 12.674-31.706 12.555-18.272-.12-31.946-12.555Zm-495 494.761Q165.5 863.391 165.5 844.239t13.674-32.065l43-42.239q13.435-12.674 32.087-12.674t31.565 12.674Q299.5 782.609 299 801.38q-.5 18.772-13.174 32.446l-41.761 43Q231.391 890.5 212.239 890t-33.065-13.174ZM480 576Z" />
+          </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 96 960 960" fill="currentColor"
+            class="absolute transition-all scale-0 rotate-90 dark:rotate-0 dark:scale-100">
+            <path
+              d="M480 936q-151 0-255.5-104.5T120 576q0-138 90-239.5T440 218q25-3 39 18t-1 44q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q21-14 43-1.5t19 39.5q-14 138-117.5 229T480 936Zm0-80q88 0 158-48.5T740 681q-20 5-40 8t-40 3q-123 0-209.5-86.5T364 396q0-20 3-40t8-40q-78 32-126.5 102T200 576q0 116 82 198t198 82Zm-10-270Z" />
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </div>
+</header>
+
+    <div class="flex-1"><div
+        class="container md:grid md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10"><aside id="left-sidebar"
+  class="fixed inset-y-0 left-0 md:top-14 z-50 md:z-30 bg-background md:bg-transparent transition-all duration-100 -translate-x-full md:translate-x-0 ml-0 p-6 md:p-0 md:-ml-2 md:h-[calc(100vh-3.5rem)] w-5/6 md:w-full overflow-y-auto border-r border-border md:sticky"
+  :aria-hidden="!showSidebar" :class="{ 'translate-x-0': showSidebar }">
+
+    <a href="../../../../index.html" class="justify-start text-sm md:!hidden bg-background"><span class="font-bold text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+    </a>
+
+    <div class="relative overflow-hidden md:overflow-auto my-4 md:my-0">
+      <div class="overflow-y-auto h-full w-full relative pr-6"><nav class="table w-full min-w-full my-6 lg:my-8">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart/quickstart.html">Quickstart</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/pipelines_and_primitives.html">Run Pipelines and Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/data_handling.html">Data Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/calibration_examples.html">Working with Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../quickstart/create_simulations.html">Create Simulated HISPEC Data</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data_products/data_products.html">Data Products</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../data_products/data_format.html">HISPEC Data Format</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../simulations/simulations.html">Simulations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/basic_usage.html">Basic Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/examples/examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../simulations/limitations.html">Limitations and Known Issues</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../pipelines/pipelines.html">Pipelines</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../calibrations/calibrations.html">Calibrations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../calibrations/configure.html">Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../calibrations/calibration_database.html">Calibration Database</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../algorithms/algorithms.html">Algorithms</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/stellar_rv.html">Stellar RV primitive (L2)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/ccf.html">Cross-correlation (CCF)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/line_mask.html">Line masks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/spectral_extraction.html">Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/ramp_fitting.html">Ramp Fitting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../algorithms/trace_fitting.html">Trace Fitting</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../development/development.html">Development</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/datamodels.html">Data Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/pipelines.html">Pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/primitives.html">Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/selectors.html">Calibration Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../development/configuration.html">Configuration</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api/api.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.processing_component.html">hispecdrp.processing_component</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.primitives.html">hispecdrp.primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.pipelines.html">hispecdrp.pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.datamodels.html">hispecdrp.datamodels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.calibrations.html">hispecdrp.calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.driver.html">hispecdrp.driver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/generated/hispecdrp.utils.html">hispecdrp.utils</a></li>
+</ul>
+</li>
+</ul>
+
+</nav>
+      </div>
+    </div>
+    <button type="button" @click="showSidebar = false"
+      class="absolute md:hidden right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100">
+      <svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 96 960 960" fill="currentColor"
+        stroke="none" class="h-4 w-4">
+        <path
+          d="M480 632 284 828q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536 576l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480 632Z" />
+      </svg>
+    </button>
+  </aside>
+          <main class="relative py-6 lg:gap-10 lg:py-8 xl:grid xl:grid-cols-[1fr_300px]">
+<div class="w-full min-w-0 mx-auto">
+<nav aria-label="breadcrumbs"
+     class="flex items-center mb-4 space-x-1 text-sm text-muted-foreground">
+  <a class="overflow-hidden text-ellipsis whitespace-nowrap hover:text-foreground"
+     href="../../../../index.html">
+    <span class="hidden md:inline">HISPEC DRP  documentation</span>
+    <svg xmlns="http://www.w3.org/2000/svg"
+         height="18"
+         width="18"
+         viewBox="0 96 960 960"
+         aria-label="Home"
+         fill="currentColor"
+         stroke="none"
+         class="md:hidden">
+      <path d="M240 856h120V616h240v240h120V496L480 316 240 496v360Zm-80 80V456l320-240 320 240v480H520V696h-80v240H160Zm320-350Z" />
+    </svg>
+  </a>
+  
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap"
+       href="../../../index.html">Module code</a>
+    
+<div class="mr-1">/</div><span aria-current="page"
+        class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">hispecdrp.primitives.ramp_fitting.ramp_fit_primitive</span>
+</nav>
+
+    <div id="content" role="main">
+      <h1>Source code for hispecdrp.primitives.ramp_fitting.ramp_fit_primitive</h1><div class="highlight"><pre>
+<span></span><code><span id="line-1"><span class="kn">from</span><span class="w"> </span><span class="nn">..base_primitive</span><span class="w"> </span><span class="kn">import</span> <span class="n">BasePrimitive</span>
+</span><span id="line-2"><span class="kn">from</span><span class="w"> </span><span class="nn">...</span><span class="w"> </span><span class="kn">import</span> <span class="n">datamodels</span>
+</span><span id="line-3"><span class="kn">from</span><span class="w"> </span><span class="nn">...calibrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">GainSelector</span><span class="p">,</span><span class="n">ReadNoiseSelector</span>
+</span><span id="line-4"><span class="kn">from</span><span class="w"> </span><span class="nn">...datamodels.dqflags</span><span class="w"> </span><span class="kn">import</span> <span class="n">DQ_FLAGS</span>
+</span><span id="line-5"><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+</span><span id="line-6">
+</span><span id="line-7"><span class="kn">from</span><span class="w"> </span><span class="nn">.fit_ramp_numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">fit_ramps_ols</span><span class="p">,</span> <span class="n">fit_ramps_mcds</span>
+</span><span id="line-8"><span class="kn">from</span><span class="w"> </span><span class="nn">.fit_ramp_jwst</span><span class="w"> </span><span class="kn">import</span> <span class="n">fit_ramps_jwst</span>
+</span><span id="line-9">
+</span><span id="line-10"><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="line-11">
+</span><span id="line-12"><span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+</span><span id="line-13">
+</span><span id="line-14"><span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="line-15">    <span class="s1">'FitRampPrimitive'</span><span class="p">,</span>
+</span><span id="line-16">    <span class="s1">'sanitize_ramp_fit_rate_err'</span><span class="p">,</span>
+</span><span id="line-17">    <span class="s1">'clip_noise_driven_poisson_variance'</span><span class="p">,</span>
+</span><span id="line-18"><span class="p">]</span>
+</span><span id="line-19">
+</span><span id="line-20"><span class="n">_DO_NOT_USE</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">DQ_FLAGS</span><span class="p">[</span><span class="s2">"DO_NOT_USE"</span><span class="p">])</span>
+</span><span id="line-21">
+</span><span id="line-22"><span class="c1"># Optional detection gate for mode='detect_nsigma' (legacy empty-sky policy).</span>
+</span><span id="line-23"><span class="n">_POISSON_DETECT_NSIGMA</span> <span class="o">=</span> <span class="mf">3.0</span>
+</span><span id="line-24">
+</span><span id="line-25"><span class="c1"># smooth_detect: gate on a spatially smoothed rate so empty sky stays RN-only</span>
+</span><span id="line-26"><span class="c1"># while faint illuminated structure (orders) keeps pixel Poisson.</span>
+</span><span id="line-27"><span class="n">_POISSON_SMOOTH_SIGMA</span> <span class="o">=</span> <span class="mf">1.0</span>
+</span><span id="line-28"><span class="n">_POISSON_SMOOTH_NSIGMA</span> <span class="o">=</span> <span class="mf">1.0</span>
+</span><span id="line-29">
+</span><span id="line-30"><span class="c1"># Default balances empty-sky pulls with faint illuminated emp/mean(err²).</span>
+</span><span id="line-31"><span class="n">_POISSON_VARIANCE_MODE_DEFAULT</span> <span class="o">=</span> <span class="s2">"smooth_detect"</span>
+</span><span id="line-32"><span class="n">_POISSON_VARIANCE_MODES</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
+</span><span id="line-33">    <span class="s2">"positive_only"</span><span class="p">,</span>
+</span><span id="line-34">    <span class="s2">"detect_nsigma"</span><span class="p">,</span>
+</span><span id="line-35">    <span class="s2">"smooth_detect"</span><span class="p">,</span>
+</span><span id="line-36">    <span class="s2">"stcal"</span><span class="p">,</span>
+</span><span id="line-37"><span class="p">})</span>
+</span><span id="line-38">
+</span><span id="line-39">
+</span><span id="line-40"><span class="k">def</span><span class="w"> </span><span class="nf">_nan_safe_gaussian_filter</span><span class="p">(</span><span class="n">rate</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+</span><span id="line-41"><span class="w">    </span><span class="sd">"""Gaussian smooth that ignores non-finite pixels (normalized by weight)."""</span>
+</span><span id="line-42">    <span class="kn">from</span><span class="w"> </span><span class="nn">scipy.ndimage</span><span class="w"> </span><span class="kn">import</span> <span class="n">gaussian_filter</span>
+</span><span id="line-43">
+</span><span id="line-44">    <span class="n">sig</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span>
+</span><span id="line-45">    <span class="k">if</span> <span class="n">sig</span> <span class="o">&lt;=</span> <span class="mf">0.0</span><span class="p">:</span>
+</span><span id="line-46">        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+</span><span id="line-47">
+</span><span id="line-48">    <span class="n">rate_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+</span><span id="line-49">    <span class="n">finite</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_a</span><span class="p">)</span>
+</span><span id="line-50">    <span class="n">fill</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">finite</span><span class="p">,</span> <span class="n">rate_a</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+</span><span id="line-51">    <span class="n">weight</span> <span class="o">=</span> <span class="n">finite</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+</span><span id="line-52">    <span class="c1"># Support 1-D unit tests and 2-D detector images.</span>
+</span><span id="line-53">    <span class="n">num</span> <span class="o">=</span> <span class="n">gaussian_filter</span><span class="p">(</span><span class="n">fill</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="n">sig</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"nearest"</span><span class="p">)</span>
+</span><span id="line-54">    <span class="n">den</span> <span class="o">=</span> <span class="n">gaussian_filter</span><span class="p">(</span><span class="n">weight</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="n">sig</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"nearest"</span><span class="p">)</span>
+</span><span id="line-55">    <span class="n">out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">num</span><span class="p">)</span>
+</span><span id="line-56">    <span class="n">np</span><span class="o">.</span><span class="n">divide</span><span class="p">(</span><span class="n">num</span><span class="p">,</span> <span class="n">den</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="n">out</span><span class="p">,</span> <span class="n">where</span><span class="o">=</span><span class="n">den</span> <span class="o">&gt;</span> <span class="mf">1e-6</span><span class="p">)</span>
+</span><span id="line-57">    <span class="k">return</span> <span class="n">out</span>
+</span><span id="line-58">
+</span><span id="line-59">
+<div class="viewcode-block" id="clip_noise_driven_poisson_variance">
+<a class="viewcode-back" href="../../../../api/generated/hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.html#hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.clip_noise_driven_poisson_variance">[docs]</a>
+</span><span id="line-60"><span class="k">def</span><span class="w"> </span><span class="nf">clip_noise_driven_poisson_variance</span><span class="p">(</span>
+</span><span id="line-61">    <span class="n">rate</span><span class="p">,</span>
+</span><span id="line-62">    <span class="n">rate_var_poisson</span><span class="p">,</span>
+</span><span id="line-63">    <span class="n">rate_var_rnoise</span><span class="p">,</span>
+</span><span id="line-64">    <span class="o">*</span><span class="p">,</span>
+</span><span id="line-65">    <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">_POISSON_VARIANCE_MODE_DEFAULT</span><span class="p">,</span>
+</span><span id="line-66">    <span class="n">n_sigma</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">_POISSON_DETECT_NSIGMA</span><span class="p">,</span>
+</span><span id="line-67">    <span class="n">smooth_sigma</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">_POISSON_SMOOTH_SIGMA</span><span class="p">,</span>
+</span><span id="line-68">    <span class="n">smooth_nsigma</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">_POISSON_SMOOTH_NSIGMA</span><span class="p">,</span>
+</span><span id="line-69">    <span class="n">rate_err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="line-70"><span class="p">):</span>
+</span><span id="line-71"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-72"><span class="sd">    Adjust reported Poisson variance after the ramp fit.</span>
+</span><span id="line-73">
+</span><span id="line-74"><span class="sd">    Ramp fits (including ``stcal`` likely) evaluate photon-noise variance at a</span>
+</span><span id="line-75"><span class="sd">    non-negative function of the fitted rate (Wald plug-in). Modes:</span>
+</span><span id="line-76">
+</span><span id="line-77"><span class="sd">    - ``'smooth_detect'`` (default): keep the fit Poisson term where</span>
+</span><span id="line-78"><span class="sd">      ``rate &gt; 0`` **and** a Gaussian-smoothed rate exceeds</span>
+</span><span id="line-79"><span class="sd">      ``smooth_nsigma * sqrt(rate_var_rnoise)``. Empty sky stays RN-limited</span>
+</span><span id="line-80"><span class="sd">      (isolated positive noise spikes are dropped); faint illuminated</span>
+</span><span id="line-81"><span class="sd">      structure keeps Poisson because neighbors hold the smooth rate up.</span>
+</span><span id="line-82"><span class="sd">    - ``'positive_only'``: zero Poisson only where ``rate &lt;= 0``.</span>
+</span><span id="line-83"><span class="sd">    - ``'detect_nsigma'``: also zero Poisson unless</span>
+</span><span id="line-84"><span class="sd">      ``rate &gt; n_sigma * sqrt(rate_var_rnoise)`` (legacy; underestimates</span>
+</span><span id="line-85"><span class="sd">      faint-source ``rate_err``).</span>
+</span><span id="line-86"><span class="sd">    - ``'stcal'``: leave ``rate_var_poisson`` unchanged; only rebuild</span>
+</span><span id="line-87"><span class="sd">      ``rate_err = sqrt(var_poisson + var_rnoise)``.</span>
+</span><span id="line-88">
+</span><span id="line-89"><span class="sd">    If ``rate_err`` is provided, it is preserved wherever ``var_poisson`` /</span>
+</span><span id="line-90"><span class="sd">    ``var_rnoise`` cannot form a finite rebuilt uncertainty (e.g. legacy</span>
+</span><span id="line-91"><span class="sd">    fitters that omit the variance split).</span>
+</span><span id="line-92">
+</span><span id="line-93"><span class="sd">    Returns</span>
+</span><span id="line-94"><span class="sd">    -------</span>
+</span><span id="line-95"><span class="sd">    rate_var_poisson_out, rate_err_out, n_clipped</span>
+</span><span id="line-96"><span class="sd">    """</span>
+</span><span id="line-97">    <span class="n">rate_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+</span><span id="line-98">    <span class="n">vp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_var_poisson</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</span><span id="line-99">    <span class="n">vr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_var_rnoise</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+</span><span id="line-100">    <span class="k">if</span> <span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">vp</span><span class="o">.</span><span class="n">shape</span> <span class="ow">or</span> <span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">vr</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+</span><span id="line-101">        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+</span><span id="line-102">            <span class="sa">f</span><span class="s2">"shape mismatch: rate=</span><span class="si">{</span><span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> var_poisson=</span><span class="si">{</span><span class="n">vp</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> "</span>
+</span><span id="line-103">            <span class="sa">f</span><span class="s2">"var_rnoise=</span><span class="si">{</span><span class="n">vr</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="line-104">        <span class="p">)</span>
+</span><span id="line-105">
+</span><span id="line-106">    <span class="n">mode_key</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">mode</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+</span><span id="line-107">    <span class="k">if</span> <span class="n">mode_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_POISSON_VARIANCE_MODES</span><span class="p">:</span>
+</span><span id="line-108">        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+</span><span id="line-109">            <span class="sa">f</span><span class="s2">"poisson variance mode must be one of </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">_POISSON_VARIANCE_MODES</span><span class="p">)</span><span class="si">}</span><span class="s2">, "</span>
+</span><span id="line-110">            <span class="sa">f</span><span class="s2">"got </span><span class="si">{</span><span class="n">mode</span><span class="si">!r}</span><span class="s2">"</span>
+</span><span id="line-111">        <span class="p">)</span>
+</span><span id="line-112">
+</span><span id="line-113">    <span class="c1"># Only gate / rebuild where variance planes are usable. Fitters that leave</span>
+</span><span id="line-114">    <span class="c1"># NaN var_* (historical cython_likely) must not wipe a finite rate_err.</span>
+</span><span id="line-115">    <span class="n">var_ok</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">vp</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">vr</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">vr</span> <span class="o">&gt;=</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">vp</span> <span class="o">&gt;=</span> <span class="mf">0.0</span><span class="p">)</span>
+</span><span id="line-116">
+</span><span id="line-117">    <span class="n">n_clipped</span> <span class="o">=</span> <span class="mi">0</span>
+</span><span id="line-118">    <span class="k">if</span> <span class="n">mode_key</span> <span class="o">!=</span> <span class="s2">"stcal"</span><span class="p">:</span>
+</span><span id="line-119">        <span class="n">nondetect</span> <span class="o">=</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_a</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">rate_a</span> <span class="o">&lt;=</span> <span class="mf">0.0</span><span class="p">)</span>
+</span><span id="line-120">        <span class="k">if</span> <span class="n">mode_key</span> <span class="o">==</span> <span class="s2">"detect_nsigma"</span><span class="p">:</span>
+</span><span id="line-121">            <span class="n">sig_rn</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">vr</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</span><span id="line-122">            <span class="n">thresh</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">n_sigma</span><span class="p">)</span> <span class="o">*</span> <span class="n">sig_rn</span>
+</span><span id="line-123">            <span class="n">nondetect</span> <span class="o">=</span> <span class="n">nondetect</span> <span class="o">|</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">sig_rn</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">rate_a</span> <span class="o">&lt;</span> <span class="n">thresh</span><span class="p">)</span>
+</span><span id="line-124">        <span class="k">elif</span> <span class="n">mode_key</span> <span class="o">==</span> <span class="s2">"smooth_detect"</span><span class="p">:</span>
+</span><span id="line-125">            <span class="n">sig_rn</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">vr</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</span><span id="line-126">            <span class="c1"># Smooth only where rates are finite; invalid vr already in ~var_ok.</span>
+</span><span id="line-127">            <span class="n">rate_s</span> <span class="o">=</span> <span class="n">_nan_safe_gaussian_filter</span><span class="p">(</span><span class="n">rate_a</span><span class="p">,</span> <span class="n">smooth_sigma</span><span class="p">)</span>
+</span><span id="line-128">            <span class="n">thresh</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">smooth_nsigma</span><span class="p">)</span> <span class="o">*</span> <span class="n">sig_rn</span>
+</span><span id="line-129">            <span class="n">nondetect</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="line-130">                <span class="n">nondetect</span>
+</span><span id="line-131">                <span class="o">|</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">sig_rn</span><span class="p">)</span>
+</span><span id="line-132">                <span class="o">|</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_s</span><span class="p">)</span>
+</span><span id="line-133">                <span class="o">|</span> <span class="p">(</span><span class="n">rate_s</span> <span class="o">&lt;</span> <span class="n">thresh</span><span class="p">)</span>
+</span><span id="line-134">            <span class="p">)</span>
+</span><span id="line-135">        <span class="n">clip_mask</span> <span class="o">=</span> <span class="n">nondetect</span> <span class="o">&amp;</span> <span class="n">var_ok</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">vp</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">)</span>
+</span><span id="line-136">        <span class="n">n_clipped</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">count_nonzero</span><span class="p">(</span><span class="n">clip_mask</span><span class="p">))</span>
+</span><span id="line-137">        <span class="n">vp</span> <span class="o">=</span> <span class="n">vp</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</span><span id="line-138">        <span class="n">vp</span><span class="p">[</span><span class="n">clip_mask</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+</span><span id="line-139">
+</span><span id="line-140">    <span class="n">rebuilt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">vp</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">vr</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</span><span id="line-141">    <span class="n">rebuild_ok</span> <span class="o">=</span> <span class="n">var_ok</span> <span class="o">&amp;</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rebuilt</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">rebuilt</span> <span class="o">&gt;=</span> <span class="mf">0.0</span><span class="p">)</span>
+</span><span id="line-142">
+</span><span id="line-143">    <span class="k">if</span> <span class="n">rate_err</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-144">        <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_err</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</span><span id="line-145">        <span class="k">if</span> <span class="n">rate_err_out</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+</span><span id="line-146">            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+</span><span id="line-147">                <span class="sa">f</span><span class="s2">"shape mismatch: rate=</span><span class="si">{</span><span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> rate_err=</span><span class="si">{</span><span class="n">rate_err_out</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="line-148">            <span class="p">)</span>
+</span><span id="line-149">        <span class="n">rate_err_out</span><span class="p">[</span><span class="n">rebuild_ok</span><span class="p">]</span> <span class="o">=</span> <span class="n">rebuilt</span><span class="p">[</span><span class="n">rebuild_ok</span><span class="p">]</span>
+</span><span id="line-150">    <span class="k">else</span><span class="p">:</span>
+</span><span id="line-151">        <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">rebuilt</span>
+</span><span id="line-152">        <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">rebuild_ok</span><span class="p">,</span> <span class="n">rate_err_out</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+</span><span id="line-153">
+</span><span id="line-154">    <span class="n">bad</span> <span class="o">=</span> <span class="o">~</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_err_out</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">rate_err_out</span> <span class="o">&gt;=</span> <span class="mf">0.0</span><span class="p">))</span>
+</span><span id="line-155">    <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">rate_err_out</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span>
+</span><span id="line-156">        <span class="n">np</span><span class="o">.</span><span class="n">result_type</span><span class="p">(</span><span class="n">rate_var_poisson</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span>
+</span><span id="line-157">    <span class="p">)</span>
+</span><span id="line-158">    <span class="n">vp_out</span> <span class="o">=</span> <span class="n">vp</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_var_poisson</span><span class="p">)</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="line-159">    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">bad</span><span class="p">):</span>
+</span><span id="line-160">        <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">rate_err_out</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="line-161">        <span class="n">rate_err_out</span><span class="p">[</span><span class="n">bad</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+</span><span id="line-162">    <span class="k">return</span> <span class="n">vp_out</span><span class="p">,</span> <span class="n">rate_err_out</span><span class="p">,</span> <span class="n">n_clipped</span></div>
+
+</span><span id="line-163">
+</span><span id="line-164">
+<div class="viewcode-block" id="sanitize_ramp_fit_rate_err">
+<a class="viewcode-back" href="../../../../api/generated/hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.html#hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.sanitize_ramp_fit_rate_err">[docs]</a>
+</span><span id="line-165"><span class="k">def</span><span class="w"> </span><span class="nf">sanitize_ramp_fit_rate_err</span><span class="p">(</span>
+</span><span id="line-166">    <span class="n">rate</span><span class="p">,</span>
+</span><span id="line-167">    <span class="n">rate_err</span><span class="p">,</span>
+</span><span id="line-168">    <span class="n">dq</span><span class="p">,</span>
+</span><span id="line-169">    <span class="o">*</span><span class="p">,</span>
+</span><span id="line-170">    <span class="n">rate_var_rnoise</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="line-171">    <span class="n">do_not_use</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_DO_NOT_USE</span><span class="p">,</span>
+</span><span id="line-172"><span class="p">):</span>
+</span><span id="line-173"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-174"><span class="sd">    Make ramp-fit ``rate_err`` safe for downstream extraction.</span>
+</span><span id="line-175">
+</span><span id="line-176"><span class="sd">    Ramp fits often leave empty / inter-order pixels as ``rate==0`` with NaN</span>
+</span><span id="line-177"><span class="sd">    ``rate_err``. Flagging those as ``DO_NOT_USE`` and letting box extract</span>
+</span><span id="line-178"><span class="sd">    renormalize the aperture caused large spectral spikes for undersampled</span>
+</span><span id="line-179"><span class="sd">    PSFs. Instead:</span>
+</span><span id="line-180">
+</span><span id="line-181"><span class="sd">    - Where ``rate`` is finite and ``rate_err`` is not: fill ``rate_err`` with</span>
+</span><span id="line-182"><span class="sd">      ``sqrt(rate_var_rnoise)`` when that variance is finite and positive,</span>
+</span><span id="line-183"><span class="sd">      otherwise ``0``. Do **not** mark ``DO_NOT_USE``.</span>
+</span><span id="line-184"><span class="sd">    - Where ``rate`` is non-finite: OR ``do_not_use`` into ``dq`` and set</span>
+</span><span id="line-185"><span class="sd">      ``rate_err`` to ``0`` for array hygiene.</span>
+</span><span id="line-186">
+</span><span id="line-187"><span class="sd">    Returns</span>
+</span><span id="line-188"><span class="sd">    -------</span>
+</span><span id="line-189"><span class="sd">    rate_err_out, dq_out, n_filled_err, n_flagged_rate</span>
+</span><span id="line-190"><span class="sd">        ``rate_err`` / ``dq`` are copied only when modified.</span>
+</span><span id="line-191"><span class="sd">    """</span>
+</span><span id="line-192">    <span class="n">rate_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate</span><span class="p">)</span>
+</span><span id="line-193">    <span class="n">rate_err_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_err</span><span class="p">)</span>
+</span><span id="line-194">    <span class="n">dq_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">dq</span><span class="p">)</span>
+</span><span id="line-195">
+</span><span id="line-196">    <span class="n">rate_finite</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_a</span><span class="p">)</span>
+</span><span id="line-197">    <span class="n">err_bad</span> <span class="o">=</span> <span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">rate_err_a</span><span class="p">)</span>
+</span><span id="line-198">    <span class="n">fill</span> <span class="o">=</span> <span class="n">rate_finite</span> <span class="o">&amp;</span> <span class="n">err_bad</span>
+</span><span id="line-199">    <span class="n">flag</span> <span class="o">=</span> <span class="o">~</span><span class="n">rate_finite</span>
+</span><span id="line-200">    <span class="n">n_filled</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">count_nonzero</span><span class="p">(</span><span class="n">fill</span><span class="p">))</span>
+</span><span id="line-201">    <span class="n">n_flagged</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">count_nonzero</span><span class="p">(</span><span class="n">flag</span><span class="p">))</span>
+</span><span id="line-202">
+</span><span id="line-203">    <span class="k">if</span> <span class="n">n_filled</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">n_flagged</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="line-204">        <span class="k">return</span> <span class="n">rate_err_a</span><span class="p">,</span> <span class="n">dq_a</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+</span><span id="line-205">
+</span><span id="line-206">    <span class="n">rate_err_out</span> <span class="o">=</span> <span class="n">rate_err_a</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</span><span id="line-207">    <span class="n">dq_out</span> <span class="o">=</span> <span class="n">dq_a</span>
+</span><span id="line-208">
+</span><span id="line-209">    <span class="k">if</span> <span class="n">n_filled</span><span class="p">:</span>
+</span><span id="line-210">        <span class="n">fill_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_filled</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">rate_err_out</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+</span><span id="line-211">        <span class="k">if</span> <span class="n">rate_var_rnoise</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-212">            <span class="n">vr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rate_var_rnoise</span><span class="p">)</span>
+</span><span id="line-213">            <span class="k">if</span> <span class="n">vr</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="n">rate_a</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+</span><span id="line-214">                <span class="n">vr_fill</span> <span class="o">=</span> <span class="n">vr</span><span class="p">[</span><span class="n">fill</span><span class="p">]</span>
+</span><span id="line-215">                <span class="n">ok</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">vr_fill</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">vr_fill</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+</span><span id="line-216">                <span class="n">fill_val</span> <span class="o">=</span> <span class="n">fill_val</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">result_type</span><span class="p">(</span><span class="n">fill_val</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">),</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="line-217">                <span class="n">fill_val</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">vr_fill</span><span class="p">[</span><span class="n">ok</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">fill_val</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="line-218">        <span class="n">rate_err_out</span><span class="p">[</span><span class="n">fill</span><span class="p">]</span> <span class="o">=</span> <span class="n">fill_val</span>
+</span><span id="line-219">
+</span><span id="line-220">    <span class="k">if</span> <span class="n">n_flagged</span><span class="p">:</span>
+</span><span id="line-221">        <span class="n">dq_out</span> <span class="o">=</span> <span class="n">dq_a</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</span><span id="line-222">        <span class="n">dq_out</span><span class="p">[</span><span class="n">flag</span><span class="p">]</span> <span class="o">=</span> <span class="n">dq_out</span><span class="p">[</span><span class="n">flag</span><span class="p">]</span> <span class="o">|</span> <span class="nb">int</span><span class="p">(</span><span class="n">do_not_use</span><span class="p">)</span>
+</span><span id="line-223">        <span class="n">rate_err_out</span><span class="p">[</span><span class="n">flag</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">rate_err_out</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+</span><span id="line-224">
+</span><span id="line-225">    <span class="k">return</span> <span class="n">rate_err_out</span><span class="p">,</span> <span class="n">dq_out</span><span class="p">,</span> <span class="n">n_filled</span><span class="p">,</span> <span class="n">n_flagged</span></div>
+
+</span><span id="line-226">
+</span><span id="line-227">
+</span><span id="line-228"><span class="k">def</span><span class="w"> </span><span class="nf">flag_nonfinite_rate_pixels</span><span class="p">(</span><span class="n">rate</span><span class="p">,</span> <span class="n">rate_err</span><span class="p">,</span> <span class="n">dq</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">do_not_use</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_DO_NOT_USE</span><span class="p">):</span>
+</span><span id="line-229"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-230"><span class="sd">    Backward-compatible wrapper around :func:`sanitize_ramp_fit_rate_err`.</span>
+</span><span id="line-231">
+</span><span id="line-232"><span class="sd">    Historically this ORed ``DO_NOT_USE`` for non-finite ``rate`` **or**</span>
+</span><span id="line-233"><span class="sd">    ``rate_err``. That mistreated empty pixels (``rate==0``, NaN err) and</span>
+</span><span id="line-234"><span class="sd">    caused extraction spikes. The sanitizer now fills finite ``rate_err`` for</span>
+</span><span id="line-235"><span class="sd">    those pixels and only flags non-finite ``rate``.</span>
+</span><span id="line-236">
+</span><span id="line-237"><span class="sd">    Returns ``(dq, n_flagged_rate)`` for compatibility with existing callers.</span>
+</span><span id="line-238"><span class="sd">    """</span>
+</span><span id="line-239">    <span class="n">_rate_err</span><span class="p">,</span> <span class="n">dq_out</span><span class="p">,</span> <span class="n">_n_filled</span><span class="p">,</span> <span class="n">n_flagged</span> <span class="o">=</span> <span class="n">sanitize_ramp_fit_rate_err</span><span class="p">(</span>
+</span><span id="line-240">        <span class="n">rate</span><span class="p">,</span> <span class="n">rate_err</span><span class="p">,</span> <span class="n">dq</span><span class="p">,</span> <span class="n">do_not_use</span><span class="o">=</span><span class="n">do_not_use</span>
+</span><span id="line-241">    <span class="p">)</span>
+</span><span id="line-242">    <span class="k">return</span> <span class="n">dq_out</span><span class="p">,</span> <span class="n">n_flagged</span>
+</span><span id="line-243">
+</span><span id="line-244">
+<div class="viewcode-block" id="FitRampPrimitive">
+<a class="viewcode-back" href="../../../../api/generated/hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.html#hispecdrp.primitives.ramp_fitting.ramp_fit_primitive.FitRampPrimitive">[docs]</a>
+</span><span id="line-245"><span class="k">class</span><span class="w"> </span><span class="nc">FitRampPrimitive</span><span class="p">(</span><span class="n">BasePrimitive</span><span class="p">):</span>
+</span><span id="line-246"><span class="w">    </span><span class="sd">"""</span>
+</span><span id="line-247"><span class="sd">    This step fits the slope (DN/s) from the UTR for each pixel.</span>
+</span><span id="line-248">
+</span><span id="line-249"><span class="sd">    While fitting the ramps, this step will also calculate the wavelength dependent mid-exposure times, which is then used to calculate the wavelength dependent barycentric correction.</span>
+</span><span id="line-250"><span class="sd">    HISPEC leverages the UTR instead of having an exposure meter for this purpose.</span>
+</span><span id="line-251">
+</span><span id="line-252"><span class="sd">    The entire ramp does not need to be discarded for a single jump, which is a significant advantage of UTR.</span>
+</span><span id="line-253"><span class="sd">    Each ramp might be divided into separate chunks after the jump detection step.</span>
+</span><span id="line-254"><span class="sd">    The final slope will be the combined slope estimate from every valid chunk in that pixel.</span>
+</span><span id="line-255">
+</span><span id="line-256"><span class="sd">    Descriptions of the different ramp fitting algorithms:</span>
+</span><span id="line-257">
+</span><span id="line-258"><span class="sd">    - **Ordinary Least Squares ('ols'):** This method fits a straight line to the ramp data using the ordinary least squares approach. This method is simple and computationally efficient but is not optimal with significant photon noise.</span>
+</span><span id="line-259"><span class="sd">    - **Correlated Double Sampling ('cds'):** This method uses the difference between last read and the first read to estimate the slope. It is very fast but not optimal for readnoise dominated ramps.</span>
+</span><span id="line-260"><span class="sd">    - **Multiple Correlated Double Sampling ('mcds'):** This method generalizes CDS by using multiple reads (see argument mcds_num_coadd) at the beginning and end of the ramp to reduce the readnoise.</span>
+</span><span id="line-261"><span class="sd">    - **JWST Fixsen ('jwst_fixsen'):** This method assumes that the covariance is piece-wise constant by dividing 9 different regimes of various ratios of readnoise and photon noise. This is referenced as OLS in the JWST pipeline. Fixsen+2000 https://ui.adsabs.harvard.edu/abs/2000PASP..112.1350F/abstract</span>
+</span><span id="line-262"><span class="sd">    - **JWST Likely ('jwst_likely'):** Uses the maximum-likelihood from Brandt (2024) to fit the ramps, which is the optimal approach (but assuming constant illumination). Reference: Brandt, T. D., PASP, 136, 045005 (2024) https://ui.adsabs.harvard.edu/abs/2024PASP..136d5005B/abstract</span>
+</span><span id="line-263"><span class="sd">    - **Cython Likely ('cython_likely'):** Same as JWST Likely but implemented in Cython for better performance (author: Brandt, Tim).</span>
+</span><span id="line-264">
+</span><span id="line-265"><span class="sd">    todo: As a future research avenue, although not a DRP requirement, we plan to explore using the UTR and the ATC images to optimize the slope fitting to account for the variable slopes due to cloud or seeing variability. For example, a simple strategy could be that reads acquired during spikes in seeing (as monitored in the ATC data) could simply be masked in the same manner as cosmic rays. This could be particularly beneficial for high contrast spectroscopy of companions because spikes in seeing means that there is more speckles and less planet signal getting through the fiber.</span>
+</span><span id="line-266">
+</span><span id="line-267"><span class="sd">    Parameters</span>
+</span><span id="line-268"><span class="sd">    ----------</span>
+</span><span id="line-269"><span class="sd">    dataset : str or RampModel</span>
+</span><span id="line-270"><span class="sd">        Input file path or data model to process. This must be a raw</span>
+</span><span id="line-271"><span class="sd">        up-the-ramp (UTR) ramp data product in which ramps are to be fitted.</span>
+</span><span id="line-272"><span class="sd">    suffix : str or None, optional</span>
+</span><span id="line-273"><span class="sd">        Suffix to append to the output filename. Default is ``'rampfit'``.</span>
+</span><span id="line-274"><span class="sd">    method : {'ols', 'cds', 'mcds', 'jwst_likely', 'jwst_fixsen', 'cython_likely'}, optional</span>
+</span><span id="line-275"><span class="sd">        Ramp fitting algorithm to use. See descriptions above for details.</span>
+</span><span id="line-276"><span class="sd">        Default is ``'cython_likely'``.</span>
+</span><span id="line-277"><span class="sd">    mcds_num_coadd : int or None, optional</span>
+</span><span id="line-278"><span class="sd">        Number of reads to coadd for MCDS ramp fitting. If None, it will be set to n_reads/4.</span>
+</span><span id="line-279"><span class="sd">        Only used if method is set to 'mcds'. Default is None.</span>
+</span><span id="line-280"><span class="sd">    max_cores : int, optional</span>
+</span><span id="line-281"><span class="sd">        Maximum number of CPU cores to use for parallel processing. Default</span>
+</span><span id="line-282"><span class="sd">        is 1 (no parallel execution).</span>
+</span><span id="line-283"><span class="sd">    jwst_jump_detection : bool, optional</span>
+</span><span id="line-284"><span class="sd">        If True, use shared memory optimization for jump detection in combination with JWST ramp fitting methods.</span>
+</span><span id="line-285"><span class="sd">        Default is False.</span>
+</span><span id="line-286"><span class="sd">    jwst_jump_rejection_threshold : float, optional</span>
+</span><span id="line-287"><span class="sd">        Rejection threshold (approximately in signal-to-noise) above which</span>
+</span><span id="line-288"><span class="sd">        discontinuities are flagged as jumps when using JWST ramp fitting methods.</span>
+</span><span id="line-289"><span class="sd">        Default is 4.0.</span>
+</span><span id="line-290"><span class="sd">    poisson_variance_mode : {'smooth_detect', 'positive_only', 'detect_nsigma', 'stcal'}, optional</span>
+</span><span id="line-291"><span class="sd">        How to adjust reported ``rate_var_poisson`` / ``rate_err`` after the fit.</span>
+</span><span id="line-292"><span class="sd">        ``'smooth_detect'`` (default) gates Poisson on a smoothed rate so empty</span>
+</span><span id="line-293"><span class="sd">        sky stays RN-limited while faint illuminated structure keeps Poisson;</span>
+</span><span id="line-294"><span class="sd">        ``'positive_only'`` clears Poisson only for ``rate &lt;= 0``;</span>
+</span><span id="line-295"><span class="sd">        ``'detect_nsigma'`` uses a per-pixel ``poisson_detect_nsigma`` gate</span>
+</span><span id="line-296"><span class="sd">        (legacy); ``'stcal'`` leaves the fit Poisson term unchanged.</span>
+</span><span id="line-297"><span class="sd">    poisson_detect_nsigma : float, optional</span>
+</span><span id="line-298"><span class="sd">        Per-pixel detection threshold for ``poisson_variance_mode='detect_nsigma'``.</span>
+</span><span id="line-299"><span class="sd">        Default is 3.0.</span>
+</span><span id="line-300"><span class="sd">    poisson_smooth_sigma : float, optional</span>
+</span><span id="line-301"><span class="sd">        Gaussian smoothing scale (pixels) for ``smooth_detect``. Default is 1.0.</span>
+</span><span id="line-302"><span class="sd">    poisson_smooth_nsigma : float, optional</span>
+</span><span id="line-303"><span class="sd">        Smoothed-rate detection threshold in RN σ for ``smooth_detect``.</span>
+</span><span id="line-304"><span class="sd">        Default is 1.0.</span>
+</span><span id="line-305">
+</span><span id="line-306"><span class="sd">    Calibrations</span>
+</span><span id="line-307"><span class="sd">    ------------</span>
+</span><span id="line-308"><span class="sd">    gain : GainModel</span>
+</span><span id="line-309"><span class="sd">        - selector: :class:`~hispecdrp.calibrations.selectors.GainSelector`</span>
+</span><span id="line-310"><span class="sd">    rn : ReadNoiseModel</span>
+</span><span id="line-311"><span class="sd">        - selector: :class:`~hispecdrp.calibrations.selectors.ReadNoiseSelector`</span>
+</span><span id="line-312">
+</span><span id="line-313"><span class="sd">    Returns</span>
+</span><span id="line-314"><span class="sd">    -------</span>
+</span><span id="line-315"><span class="sd">    output : Level0Model</span>
+</span><span id="line-316"><span class="sd">        Level 0 data model with fitted slope (rate) and associated arrays.</span>
+</span><span id="line-317">
+</span><span id="line-318">
+</span><span id="line-319"><span class="sd">    Notes</span>
+</span><span id="line-320"><span class="sd">    -----</span>
+</span><span id="line-321"><span class="sd">    Roman calibration pipeline reference for ramp fitting algorithms:</span>
+</span><span id="line-322"><span class="sd">    https://github.com/spacetelescope/romancal</span>
+</span><span id="line-323">
+</span><span id="line-324"><span class="sd">    Ramp fitting roman reference:</span>
+</span><span id="line-325"><span class="sd">    https://www.stsci.edu/files/live/sites/www/files/home/roman/_documents/Roman-STScI-000394_DeterminingTheBestFittingSlope.pdf</span>
+</span><span id="line-326">
+</span><span id="line-327"><span class="sd">    See JWST primitive:</span>
+</span><span id="line-328"><span class="sd">    https://jwst-pipeline.readthedocs.io/en/latest/jwst/ramp_fitting/description.html</span>
+</span><span id="line-329">
+</span><span id="line-330"><span class="sd">    CHARIS reference:</span>
+</span><span id="line-331"><span class="sd">    https://ui.adsabs.harvard.edu/abs/2017JATIS...3d8002B/abstract</span>
+</span><span id="line-332">
+</span><span id="line-333"><span class="sd">    HPF DRP:</span>
+</span><span id="line-334"><span class="sd">    https://github.com/indiajoe/HxRGproc</span>
+</span><span id="line-335">
+</span><span id="line-336"><span class="sd">    """</span>
+</span><span id="line-337">
+</span><span id="line-338">    <span class="n">PARAMETERS</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="line-339">        <span class="s1">'suffix'</span> <span class="p">:</span> <span class="s1">'rampfit'</span><span class="p">,</span>
+</span><span id="line-340">        <span class="s1">'method'</span> <span class="p">:</span> <span class="s1">'cython_likely'</span><span class="p">,</span>
+</span><span id="line-341">        <span class="s1">'mcds_num_coadd'</span> <span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="line-342">        <span class="s1">'output_model'</span> <span class="p">:</span> <span class="s1">'L0Model'</span><span class="p">,</span>
+</span><span id="line-343">        <span class="s1">'jwst_jump_detection'</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="line-344">        <span class="s1">'jwst_jump_rejection_threshold'</span><span class="p">:</span> <span class="mf">4.0</span><span class="p">,</span>
+</span><span id="line-345">        <span class="s1">'poisson_variance_mode'</span><span class="p">:</span> <span class="n">_POISSON_VARIANCE_MODE_DEFAULT</span><span class="p">,</span>
+</span><span id="line-346">        <span class="s1">'poisson_detect_nsigma'</span><span class="p">:</span> <span class="n">_POISSON_DETECT_NSIGMA</span><span class="p">,</span>
+</span><span id="line-347">        <span class="s1">'poisson_smooth_sigma'</span><span class="p">:</span> <span class="n">_POISSON_SMOOTH_SIGMA</span><span class="p">,</span>
+</span><span id="line-348">        <span class="s1">'poisson_smooth_nsigma'</span><span class="p">:</span> <span class="n">_POISSON_SMOOTH_NSIGMA</span><span class="p">,</span>
+</span><span id="line-349">    <span class="p">}</span>
+</span><span id="line-350">
+</span><span id="line-351">    <span class="n">CALIBRATIONS</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="line-352">        <span class="s1">'gain'</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="line-353">            <span class="s1">'selector'</span><span class="p">:</span> <span class="n">GainSelector</span><span class="p">,</span>
+</span><span id="line-354">            <span class="s1">'selector_kwargs'</span><span class="p">:</span> <span class="p">{}</span>
+</span><span id="line-355">        <span class="p">},</span>
+</span><span id="line-356">        <span class="c1"># 'dark': { # would need to be defined if we implement dark subtraction before ramp fitting.</span>
+</span><span id="line-357">        <span class="c1">#     'selector': DarkSelector,</span>
+</span><span id="line-358">        <span class="c1">#     'selector_kwargs': {}</span>
+</span><span id="line-359">        <span class="c1"># },</span>
+</span><span id="line-360">        <span class="s1">'rn'</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="line-361">            <span class="s1">'selector'</span><span class="p">:</span> <span class="n">ReadNoiseSelector</span><span class="p">,</span>
+</span><span id="line-362">            <span class="s1">'selector_kwargs'</span><span class="p">:</span> <span class="p">{}</span>
+</span><span id="line-363">        <span class="p">}</span>
+</span><span id="line-364">    <span class="p">}</span>
+</span><span id="line-365">    <span class="k">def</span><span class="w"> </span><span class="nf">_perform</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="line-366">
+</span><span id="line-367">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">jwst_jump_detection</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">'jwst_likely'</span><span class="p">,</span> <span class="s1">'jwst_fixsen'</span><span class="p">):</span>
+</span><span id="line-368">            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"JWST jump detection is only for shared memory optimization in combination with JWST ramp fitting methods. "</span>
+</span><span id="line-369">                             <span class="s2">"Please set jwst_jump_detection to False or change ramp fitting algorithm."</span><span class="p">)</span>
+</span><span id="line-370">
+</span><span id="line-371">        <span class="n">input_model</span> <span class="o">=</span> <span class="n">datamodels</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="line-372">        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Fitting ramp to </span><span class="si">{</span><span class="n">input_model</span><span class="si">}</span><span class="s2"> with method=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</span><span id="line-373">
+</span><span id="line-374">        <span class="n">gain_cal</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_calibration</span><span class="p">(</span><span class="n">input_model</span><span class="p">,</span> <span class="s1">'gain'</span><span class="p">)</span>
+</span><span id="line-375">        <span class="n">gain_model</span> <span class="o">=</span> <span class="n">datamodels</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">gain_cal</span><span class="p">)</span>
+</span><span id="line-376">        <span class="c1"># Dark would need to be defined if we implement dark subtraction before ramp fitting.</span>
+</span><span id="line-377">        <span class="c1"># dark_cal, _ = self.get_calibration(input_model, 'dark')</span>
+</span><span id="line-378">        <span class="c1"># dark_model = datamodels.open(dark_cal)</span>
+</span><span id="line-379">        <span class="n">rn_cal</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_calibration</span><span class="p">(</span><span class="n">input_model</span><span class="p">,</span> <span class="s1">'rn'</span><span class="p">)</span>
+</span><span id="line-380">        <span class="n">rn_model</span> <span class="o">=</span> <span class="n">datamodels</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">rn_cal</span><span class="p">)</span>
+</span><span id="line-381">
+</span><span id="line-382">        <span class="n">_mcds_num_coadd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mcds_num_coadd</span>
+</span><span id="line-383">
+</span><span id="line-384">        <span class="n">delta_readtimes</span> <span class="o">=</span> <span class="n">input_model</span><span class="o">.</span><span class="n">get_delta_readtimes</span><span class="p">()</span>
+</span><span id="line-385">        <span class="n">first_read_mjd</span> <span class="o">=</span> <span class="n">input_model</span><span class="o">.</span><span class="n">get_first_read_mjd</span><span class="p">()</span>
+</span><span id="line-386">
+</span><span id="line-387">        <span class="n">max_cores</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_cores</span> <span class="ow">or</span> <span class="mi">1</span>
+</span><span id="line-388">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">'ols'</span><span class="p">:</span>
+</span><span id="line-389">            <span class="n">result</span> <span class="o">=</span> <span class="n">fit_ramps_ols</span><span class="p">(</span>
+</span><span id="line-390">                <span class="n">delta_readtimes</span><span class="p">,</span>
+</span><span id="line-391">                <span class="n">input_model</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+</span><span id="line-392">                <span class="n">dq_raw</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq_raw</span><span class="p">,</span>
+</span><span id="line-393">                <span class="n">dq</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-394">                <span class="n">rdnoise</span><span class="o">=</span><span class="n">rn_model</span><span class="o">.</span><span class="n">rn</span><span class="p">,</span>
+</span><span id="line-395">                <span class="n">gain</span><span class="o">=</span><span class="n">gain_model</span><span class="o">.</span><span class="n">gain</span><span class="p">,</span>
+</span><span id="line-396">                <span class="n">start_times</span><span class="o">=</span><span class="n">first_read_mjd</span><span class="p">,</span>
+</span><span id="line-397">                <span class="n">dark_current</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># Not used because we assume dark subtraction is done in rate maps.</span>
+</span><span id="line-398">                <span class="n">max_cores</span><span class="o">=</span><span class="n">max_cores</span>
+</span><span id="line-399">            <span class="p">)</span>
+</span><span id="line-400">        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">'cds'</span><span class="p">):</span>
+</span><span id="line-401">            <span class="n">result</span> <span class="o">=</span> <span class="n">fit_ramps_mcds</span><span class="p">(</span>
+</span><span id="line-402">                <span class="n">delta_readtimes</span><span class="p">,</span>
+</span><span id="line-403">                <span class="n">input_model</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+</span><span id="line-404">                <span class="n">dq_raw</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq_raw</span><span class="p">,</span>
+</span><span id="line-405">                <span class="n">dq</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-406">                <span class="n">rdnoise</span><span class="o">=</span><span class="n">rn_model</span><span class="o">.</span><span class="n">rn</span><span class="p">,</span>
+</span><span id="line-407">                <span class="n">gain</span><span class="o">=</span><span class="n">gain_model</span><span class="o">.</span><span class="n">gain</span><span class="p">,</span>
+</span><span id="line-408">                <span class="n">start_times</span><span class="o">=</span><span class="n">first_read_mjd</span><span class="p">,</span>
+</span><span id="line-409">                <span class="n">dark_current</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="c1"># Not used because we assume dark subtraction is done in rate maps.</span>
+</span><span id="line-410">                <span class="n">num_coadd</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+</span><span id="line-411">                <span class="n">max_cores</span><span class="o">=</span><span class="n">max_cores</span>
+</span><span id="line-412">            <span class="p">)</span>
+</span><span id="line-413">        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">'mcds'</span><span class="p">):</span>
+</span><span id="line-414">            <span class="k">if</span> <span class="n">_mcds_num_coadd</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="line-415">                <span class="n">n_read</span> <span class="o">=</span> <span class="n">input_model</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="line-416">                <span class="n">_mcds_num_coadd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">([</span><span class="n">n_read</span> <span class="o">//</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span> <span class="c1"># Ensure at least 1 read is used.</span>
+</span><span id="line-417">            <span class="n">result</span> <span class="o">=</span> <span class="n">fit_ramps_mcds</span><span class="p">(</span>
+</span><span id="line-418">                <span class="n">delta_readtimes</span><span class="p">,</span>
+</span><span id="line-419">                <span class="n">input_model</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+</span><span id="line-420">                <span class="n">dq_raw</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq_raw</span><span class="p">,</span>
+</span><span id="line-421">                <span class="n">dq</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-422">                <span class="n">rdnoise</span><span class="o">=</span><span class="n">rn_model</span><span class="o">.</span><span class="n">rn</span><span class="p">,</span>
+</span><span id="line-423">                <span class="n">gain</span><span class="o">=</span><span class="n">gain_model</span><span class="o">.</span><span class="n">gain</span><span class="p">,</span>
+</span><span id="line-424">                <span class="n">start_times</span><span class="o">=</span><span class="n">first_read_mjd</span><span class="p">,</span>
+</span><span id="line-425">                <span class="n">dark_current</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="c1"># Not used because we assume dark subtraction is done in rate maps.</span>
+</span><span id="line-426">                <span class="n">num_coadd</span><span class="o">=</span><span class="n">_mcds_num_coadd</span><span class="p">,</span>
+</span><span id="line-427">                <span class="n">max_cores</span><span class="o">=</span><span class="n">max_cores</span>
+</span><span id="line-428">            <span class="p">)</span>
+</span><span id="line-429">
+</span><span id="line-430">        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">'jwst_likely'</span><span class="p">,</span> <span class="s1">'jwst_fixsen'</span><span class="p">,</span> <span class="s1">'cython_likely'</span><span class="p">):</span>
+</span><span id="line-431">            <span class="n">result</span> <span class="o">=</span> <span class="n">fit_ramps_jwst</span><span class="p">(</span>
+</span><span id="line-432">                <span class="n">delta_readtimes</span><span class="p">,</span> <span class="n">input_model</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+</span><span id="line-433">                <span class="n">dq_raw</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq_raw</span><span class="p">,</span>
+</span><span id="line-434">                <span class="n">dq</span><span class="o">=</span><span class="n">input_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-435">                <span class="n">rdnoise</span><span class="o">=</span><span class="n">rn_model</span><span class="o">.</span><span class="n">rn</span><span class="p">,</span>
+</span><span id="line-436">                <span class="n">gain</span><span class="o">=</span><span class="n">gain_model</span><span class="o">.</span><span class="n">gain</span><span class="p">,</span>
+</span><span id="line-437">                <span class="n">start_times</span><span class="o">=</span><span class="n">first_read_mjd</span><span class="p">,</span>
+</span><span id="line-438">                <span class="n">dark_current</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="c1"># Not used because we assume dark subtraction is done in rate maps.</span>
+</span><span id="line-439">                <span class="n">max_cores</span><span class="o">=</span><span class="n">max_cores</span><span class="p">,</span>
+</span><span id="line-440">                <span class="n">algorithm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span>
+</span><span id="line-441">                <span class="n">jump_detection</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">jwst_jump_detection</span><span class="p">,</span>
+</span><span id="line-442">                <span class="n">jump_rejection_threshold</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">jwst_jump_rejection_threshold</span>
+</span><span id="line-443">            <span class="p">)</span>
+</span><span id="line-444">        <span class="k">else</span><span class="p">:</span>
+</span><span id="line-445">            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Invalid ramp fit method </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</span><span id="line-446">            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Invalid ramp fit method </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</span><span id="line-447">
+</span><span id="line-448">        <span class="n">output_model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_output_model</span><span class="p">(</span><span class="n">input_model</span><span class="p">)</span>
+</span><span id="line-449">        <span class="n">output_model</span><span class="o">.</span><span class="n">rate</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'rate'</span><span class="p">]</span>
+</span><span id="line-450">        <span class="n">output_model</span><span class="o">.</span><span class="n">rate_err</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'rate_err'</span><span class="p">]</span>
+</span><span id="line-451">        <span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_poisson</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'rate_var_poisson'</span><span class="p">]</span>
+</span><span id="line-452">        <span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_rnoise</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'rate_var_rnoise'</span><span class="p">]</span>
+</span><span id="line-453">        <span class="n">output_model</span><span class="o">.</span><span class="n">dq</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'dq'</span><span class="p">]</span>
+</span><span id="line-454">        <span class="n">output_model</span><span class="o">.</span><span class="n">mid_time</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s1">'mid_time'</span><span class="p">]</span>
+</span><span id="line-455">
+</span><span id="line-456">        <span class="c1"># Adjust reported Poisson variance (see clip_noise_driven_poisson_variance).</span>
+</span><span id="line-457">        <span class="c1"># Default 'smooth_detect' keeps empty-sky RN pulls while preserving</span>
+</span><span id="line-458">        <span class="c1"># faint illuminated Poisson; see poisson_variance_mode for alternatives.</span>
+</span><span id="line-459">        <span class="p">(</span>
+</span><span id="line-460">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_poisson</span><span class="p">,</span>
+</span><span id="line-461">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_err</span><span class="p">,</span>
+</span><span id="line-462">            <span class="n">n_pois_clipped</span><span class="p">,</span>
+</span><span id="line-463">        <span class="p">)</span> <span class="o">=</span> <span class="n">clip_noise_driven_poisson_variance</span><span class="p">(</span>
+</span><span id="line-464">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate</span><span class="p">,</span>
+</span><span id="line-465">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_poisson</span><span class="p">,</span>
+</span><span id="line-466">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_rnoise</span><span class="p">,</span>
+</span><span id="line-467">            <span class="n">mode</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">poisson_variance_mode</span><span class="p">,</span>
+</span><span id="line-468">            <span class="n">n_sigma</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">poisson_detect_nsigma</span><span class="p">,</span>
+</span><span id="line-469">            <span class="n">smooth_sigma</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">poisson_smooth_sigma</span><span class="p">,</span>
+</span><span id="line-470">            <span class="n">smooth_nsigma</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">poisson_smooth_nsigma</span><span class="p">,</span>
+</span><span id="line-471">            <span class="n">rate_err</span><span class="o">=</span><span class="n">output_model</span><span class="o">.</span><span class="n">rate_err</span><span class="p">,</span>
+</span><span id="line-472">        <span class="p">)</span>
+</span><span id="line-473">        <span class="k">if</span> <span class="n">n_pois_clipped</span><span class="p">:</span>
+</span><span id="line-474">            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="line-475">                <span class="s2">"Ramp fit: cleared Poisson variance on </span><span class="si">%d</span><span class="s2"> pixel(s) "</span>
+</span><span id="line-476">                <span class="s2">"(mode=</span><span class="si">%s</span><span class="s2">) for reported rate_err."</span><span class="p">,</span>
+</span><span id="line-477">                <span class="n">n_pois_clipped</span><span class="p">,</span>
+</span><span id="line-478">                <span class="bp">self</span><span class="o">.</span><span class="n">poisson_variance_mode</span><span class="p">,</span>
+</span><span id="line-479">            <span class="p">)</span>
+</span><span id="line-480">
+</span><span id="line-481">        <span class="c1"># Empty / unfitted pixels often return rate=0 with NaN rate_err. Fill a</span>
+</span><span id="line-482">        <span class="c1"># finite rate_err (0 or RN floor) so box extract does not drop aperture</span>
+</span><span id="line-483">        <span class="c1"># edge pixels and renormalize; only flag DO_NOT_USE when rate itself is</span>
+</span><span id="line-484">        <span class="c1"># non-finite.</span>
+</span><span id="line-485">        <span class="p">(</span>
+</span><span id="line-486">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_err</span><span class="p">,</span>
+</span><span id="line-487">            <span class="n">output_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-488">            <span class="n">n_filled</span><span class="p">,</span>
+</span><span id="line-489">            <span class="n">n_flagged</span><span class="p">,</span>
+</span><span id="line-490">        <span class="p">)</span> <span class="o">=</span> <span class="n">sanitize_ramp_fit_rate_err</span><span class="p">(</span>
+</span><span id="line-491">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate</span><span class="p">,</span>
+</span><span id="line-492">            <span class="n">output_model</span><span class="o">.</span><span class="n">rate_err</span><span class="p">,</span>
+</span><span id="line-493">            <span class="n">output_model</span><span class="o">.</span><span class="n">dq</span><span class="p">,</span>
+</span><span id="line-494">            <span class="n">rate_var_rnoise</span><span class="o">=</span><span class="n">output_model</span><span class="o">.</span><span class="n">rate_var_rnoise</span><span class="p">,</span>
+</span><span id="line-495">        <span class="p">)</span>
+</span><span id="line-496">        <span class="k">if</span> <span class="n">n_filled</span> <span class="ow">or</span> <span class="n">n_flagged</span><span class="p">:</span>
+</span><span id="line-497">            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="line-498">                <span class="s2">"Ramp fit: filled non-finite rate_err on </span><span class="si">%d</span><span class="s2"> finite-rate pixel(s); "</span>
+</span><span id="line-499">                <span class="s2">"flagged </span><span class="si">%d</span><span class="s2"> non-finite-rate pixel(s) as DO_NOT_USE."</span><span class="p">,</span>
+</span><span id="line-500">                <span class="n">n_filled</span><span class="p">,</span>
+</span><span id="line-501">                <span class="n">n_flagged</span><span class="p">,</span>
+</span><span id="line-502">            <span class="p">)</span>
+</span><span id="line-503">
+</span><span id="line-504">        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">output</span><span class="o">=</span><span class="n">output_model</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">mcds_num_coadd</span><span class="o">=</span><span class="n">_mcds_num_coadd</span><span class="p">)</span></div>
+
+</span><span id="line-505">    
+</span></code></pre></div>
+    </div></div>
+          </main>
+        </div>
+      </div><footer class="py-6 border-t border-border md:py-0">
+    <div class="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+      <div class="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+        <p class="text-sm leading-loose text-center text-muted-foreground md:text-left">© 2025, HISPEC DRP Team&nbsp;Built with <a class="font-medium underline underline-offset-4"
+    href="https://www.sphinx-doc.org"
+    rel="noreferrer">Sphinx 9.1.0</a></p>
+</div>
+</div>
+</footer>
+    </div>
+    
+    <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script defer="defer" src="../../../../_static/theme.js?v=582b20c5"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script src="../../../../_static/notebook_embeds.90d683dfd339.js?v=8d1fbc6d"></script>
+    <script src="../../../../_static/download_notebook.js?v=df93580d"></script>
+    
+</body>
+
+</html>

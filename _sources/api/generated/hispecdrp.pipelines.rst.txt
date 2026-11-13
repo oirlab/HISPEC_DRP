@@ -1,0 +1,19 @@
+﻿hispecdrp.pipelines
+===================
+
+.. automodule:: hispecdrp.pipelines
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   base_pipeline
+   calibration
+   calibration_pipeline_base
+   stage0
+   stage1
+   stage2

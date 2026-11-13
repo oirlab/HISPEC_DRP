@@ -1,0 +1,15 @@
+hispecdrp.primitives.barycenter\_correction
+===========================================
+
+.. automodule:: hispecdrp.primitives.barycenter_correction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   barycenter_corr
+   barycorr_primitive

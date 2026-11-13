@@ -1,0 +1,19 @@
+hispecdrp.primitives.spectral\_extraction.extract\_spectroperfectionism
+=======================================================================
+
+.. automodule:: hispecdrp.primitives.spectral_extraction.extract_spectroperfectionism
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _emit_oriented_deposit_weights
+      _nearest_psf_index
+      _psf_oversample
+      crop_psf_stamp
+      deposit_psf_to_oriented
+      extract_order_spectroperfectionism_from_hdf
+      extract_spectrum_spectroperfectionism
+      forward_psf_deposit_oriented
+   

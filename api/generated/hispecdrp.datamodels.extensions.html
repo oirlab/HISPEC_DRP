@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+
+<html :class="{ 'dark' : darkMode === true }" data-content_root="../../" lang="en" x-data="{ darkMode: $persist(window.matchMedia('(prefers-color-scheme: dark)').matches), activeSection: ''}">
+<head>
+<script>
+    (function () {
+      // Set initial color scheme
+      if ((localStorage.getItem("_x_darkMode") === "true") || (window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Watch for media preference changes
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+        localStorage.setItem("_x_darkMode", event.matches);
+        document.documentElement.classList.toggle("dark", event.matches);
+      });
+    })();
+  </script>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta charset="utf-8"/>
+<meta content="#ffffff" media="(prefers-color-scheme: light)" name="theme-color"/>
+<meta content="#030711" media="(prefers-color-scheme: dark)" name="theme-color"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>hispecdrp.datamodels.extensions | HISPEC DRP  documentation</title>
+<meta content="hispecdrp.datamodels.extensions | HISPEC DRP  documentation" property="og:title"/>
+<meta content="hispecdrp.datamodels.extensions | HISPEC DRP  documentation" name="twitter:title"/>
+<link href="../../_static/pygments.css?v=d862e8e8" rel="stylesheet" type="text/css"/>
+<link href="../../_static/pygments_dark.css" id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css"/>
+<link href="../../_static/theme.css?v=73505e79" rel="stylesheet" type="text/css"/>
+<link href="../../_static/custom.css?v=228efd53" rel="stylesheet" type="text/css"/>
+<link href="https://oirlab.github.io/HISPEC_DRP/api/generated/hispecdrp.datamodels.extensions.html" rel="canonical"/>
+<link href="../../search.html" rel="search" title="Search"/>
+<link href="../../genindex.html" rel="index" title="Index"/>
+<link href="hispecdrp.datamodels.fiberflat.html" rel="next" title="hispecdrp.datamodels.fiberflat"/>
+<link href="hispecdrp.datamodels.dqflags.html" rel="prev" title="hispecdrp.datamodels.dqflags"/>
+</head>
+<body :class="{ 'overflow-hidden': showSidebar }" class="min-h-screen font-sans antialiased bg-background text-foreground" x-data="{ showSidebar: false, showScrollTop: false }">
+<div @click.self="showSidebar = false" class="fixed inset-0 z-50 overflow-hidden bg-background/80 backdrop-blur-sm md:hidden" x-cloak="" x-show="showSidebar"></div><div class="relative flex flex-col min-h-screen" id="page"><a class="absolute top-0 left-0 z-[100] block bg-background p-4 text-xl transition -translate-x-full opacity-0 focus:translate-x-0 focus:opacity-100" href="#content">
+      Skip to content
+    </a><header class="sticky top-0 z-40 w-full border-b shadow-xs border-border bg-background/90 backdrop-blur"><div class="container flex items-center h-14">
+<div class="hidden mr-4 md:flex">
+<a class="flex items-center mr-6" href="../../index.html"><span class="hidden font-bold sm:inline-block text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a></div><button @click="showSidebar = true" class="inline-flex items-center justify-center h-10 px-0 py-2 mr-2 text-base font-medium transition-colors rounded-md hover:text-accent-foreground hover:bg-transparent md:hidden" type="button">
+<svg aria-hidden="true" fill="currentColor" height="24" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M152.587 825.087q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440Zm0-203.587q-19.152 0-32.326-13.174T107.087 576q0-19.152 13.174-32.326t32.326-13.174h320q19.152 0 32.326 13.174T518.087 576q0 19.152-13.174 32.326T472.587 621.5h-320Zm0-203.587q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440ZM708.913 576l112.174 112.174q12.674 12.674 12.674 31.826t-12.674 31.826Q808.413 764.5 789.261 764.5t-31.826-12.674l-144-144Q600 594.391 600 576t13.435-31.826l144-144q12.674-12.674 31.826-12.674t31.826 12.674q12.674 12.674 12.674 31.826t-12.674 31.826L708.913 576Z"></path>
+</svg>
+<span class="sr-only">Toggle navigation menu</span>
+</button>
+<div class="flex items-center justify-between flex-1 gap-2 sm:gap-4 md:justify-end">
+<div class="flex-1 w-full md:w-auto md:flex-none"><form @keydown.k.window.meta="$refs.search.focus()" action="../../search.html" class="relative flex items-center group" id="searchbox" method="get">
+<input aria-label="Search the docs" class="inline-flex items-center font-medium transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-input hover:bg-accent focus:bg-accent hover:text-accent-foreground focus:text-accent-foreground hover:placeholder-accent-foreground py-2 px-4 relative h-9 w-full justify-start rounded-[0.5rem] text-sm text-muted-foreground sm:pr-12 md:w-40 lg:w-64" id="search-input" name="q" placeholder="Search ..." type="search" x-ref="search"/>
+<kbd class="pointer-events-none absolute right-1.5 top-2 hidden h-5 select-none text-muted-foreground items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex group-hover:bg-accent group-hover:text-accent-foreground">
+<span class="text-xs">⌘</span>
+    K
+  </kbd>
+</form>
+</div>
+<nav class="flex items-center gap-1">
+<button @click="darkMode = !darkMode" class="relative inline-flex items-center justify-center px-0 text-sm font-medium transition-colors rounded-md hover:bg-accent hover:text-accent-foreground h-9 w-9" title="Toggle color scheme" type="button">
+<svg class="absolute transition-all scale-100 rotate-0 dark:-rotate-90 dark:scale-0" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 685q45.456 0 77.228-31.772Q589 621.456 589 576q0-45.456-31.772-77.228Q525.456 467 480 467q-45.456 0-77.228 31.772Q371 530.544 371 576q0 45.456 31.772 77.228Q434.544 685 480 685Zm0 91q-83 0-141.5-58.5T280 576q0-83 58.5-141.5T480 376q83 0 141.5 58.5T680 576q0 83-58.5 141.5T480 776ZM80 621.5q-19.152 0-32.326-13.174T34.5 576q0-19.152 13.174-32.326T80 530.5h80q19.152 0 32.326 13.174T205.5 576q0 19.152-13.174 32.326T160 621.5H80Zm720 0q-19.152 0-32.326-13.174T754.5 576q0-19.152 13.174-32.326T800 530.5h80q19.152 0 32.326 13.174T925.5 576q0 19.152-13.174 32.326T880 621.5h-80Zm-320-320q-19.152 0-32.326-13.174T434.5 256v-80q0-19.152 13.174-32.326T480 130.5q19.152 0 32.326 13.174T525.5 176v80q0 19.152-13.174 32.326T480 301.5Zm0 720q-19.152 0-32.326-13.17Q434.5 995.152 434.5 976v-80q0-19.152 13.174-32.326T480 850.5q19.152 0 32.326 13.174T525.5 896v80q0 19.152-13.174 32.33-13.174 13.17-32.326 13.17ZM222.174 382.065l-43-42Q165.5 327.391 166 308.239t13.174-33.065q13.435-13.674 32.587-13.674t32.065 13.674l42.239 43q12.674 13.435 12.555 31.706-.12 18.272-12.555 31.946-12.674 13.674-31.445 13.413-18.772-.261-32.446-13.174Zm494 494.761-42.239-43q-12.674-13.435-12.674-32.087t12.674-31.565Q686.609 756.5 705.38 757q18.772.5 32.446 13.174l43 41.761Q794.5 824.609 794 843.761t-13.174 33.065Q767.391 890.5 748.239 890.5t-32.065-13.674Zm-42-494.761Q660.5 369.391 661 350.62q.5-18.772 13.174-32.446l41.761-43Q728.609 261.5 747.761 262t33.065 13.174q13.674 13.435 13.674 32.587t-13.674 32.065l-43 42.239q-13.435 12.674-31.706 12.555-18.272-.12-31.946-12.555Zm-495 494.761Q165.5 863.391 165.5 844.239t13.674-32.065l43-42.239q13.435-12.674 32.087-12.674t31.565 12.674Q299.5 782.609 299 801.38q-.5 18.772-13.174 32.446l-41.761 43Q231.391 890.5 212.239 890t-33.065-13.174ZM480 576Z"></path>
+</svg>
+<svg class="absolute transition-all scale-0 rotate-90 dark:rotate-0 dark:scale-100" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 936q-151 0-255.5-104.5T120 576q0-138 90-239.5T440 218q25-3 39 18t-1 44q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q21-14 43-1.5t19 39.5q-14 138-117.5 229T480 936Zm0-80q88 0 158-48.5T740 681q-20 5-40 8t-40 3q-123 0-209.5-86.5T364 396q0-20 3-40t8-40q-78 32-126.5 102T200 576q0 116 82 198t198 82Zm-10-270Z"></path>
+</svg>
+</button>
+</nav>
+</div>
+</div>
+</header>
+<div class="flex-1"><div class="container md:grid md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10"><aside :aria-hidden="!showSidebar" :class="{ 'translate-x-0': showSidebar }" class="fixed inset-y-0 left-0 md:top-14 z-50 md:z-30 bg-background md:bg-transparent transition-all duration-100 -translate-x-full md:translate-x-0 ml-0 p-6 md:p-0 md:-ml-2 md:h-[calc(100vh-3.5rem)] w-5/6 md:w-full overflow-y-auto border-r border-border md:sticky" id="left-sidebar">
+<a class="justify-start text-sm md:!hidden bg-background" href="../../index.html"><span class="font-bold text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a>
+<div class="relative overflow-hidden md:overflow-auto my-4 md:my-0">
+<div class="overflow-y-auto h-full w-full relative pr-6"><nav class="table w-full min-w-full my-6 lg:my-8">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../quickstart/quickstart.html">Quickstart<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/pipelines_and_primitives.html">Run Pipelines and Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/data_handling.html">Data Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/calibration_examples.html">Working with Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/create_simulations.html">Create Simulated HISPEC Data</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../data_products/data_products.html">Data Products<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../data_products/data_format.html">HISPEC Data Format</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../simulations/simulations.html">Simulations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/basic_usage.html">Basic Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/examples/examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/limitations.html">Limitations and Known Issues</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../pipelines/pipelines.html">Pipelines</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../calibrations/calibrations.html">Calibrations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/configure.html">Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/calibration_database.html">Calibration Database</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../algorithms/algorithms.html">Algorithms<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/stellar_rv.html">Stellar RV primitive (L2)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ccf.html">Cross-correlation (CCF)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/line_mask.html">Line masks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/spectral_extraction.html">Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ramp_fitting.html">Ramp Fitting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/trace_fitting.html">Trace Fitting</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../development/development.html">Development<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../development/datamodels.html">Data Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/pipelines.html">Pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/primitives.html">Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/selectors.html">Calibration Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/configuration.html">Configuration</a></li>
+</ul>
+</li>
+</ul>
+<ul class="current">
+<li class="toctree-l1 current" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../api.html">API Reference<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul class="current" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.processing_component.html">hispecdrp.processing_component</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.primitives.html">hispecdrp.primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.pipelines.html">hispecdrp.pipelines</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="hispecdrp.datamodels.html">hispecdrp.datamodels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.calibrations.html">hispecdrp.calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.driver.html">hispecdrp.driver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.utils.html">hispecdrp.utils</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<button @click="showSidebar = false" class="absolute md:hidden right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100" type="button">
+<svg class="h-4 w-4" fill="currentColor" height="24" stroke="none" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 632 284 828q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536 576l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480 632Z"></path>
+</svg>
+</button>
+</aside>
+<main class="relative py-6 lg:gap-10 lg:py-8 xl:grid xl:grid-cols-[1fr_300px]">
+<div class="w-full min-w-0 mx-auto">
+<nav aria-label="breadcrumbs" class="flex items-center mb-4 space-x-1 text-sm text-muted-foreground">
+<a class="overflow-hidden text-ellipsis whitespace-nowrap hover:text-foreground" href="../../index.html">
+<span class="hidden md:inline">HISPEC DRP  documentation</span>
+<svg aria-label="Home" class="md:hidden" fill="currentColor" height="18" stroke="none" viewbox="0 96 960 960" width="18" xmlns="http://www.w3.org/2000/svg">
+<path d="M240 856h120V616h240v240h120V496L480 316 240 496v360Zm-80 80V456l320-240 320 240v480H520V696h-80v240H160Zm320-350Z"></path>
+</svg>
+</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="../api.html">API Reference</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="hispecdrp.datamodels.html">hispecdrp.datamodels</a>
+<div class="mr-1">/</div><span aria-current="page" class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">hispecdrp.datamodels.extensions</span>
+</nav>
+<div id="content" role="main">
+<section id="module-hispecdrp.datamodels.extensions">
+<span id="hispecdrp-datamodels-extensions"></span><h1>hispecdrp.datamodels.extensions<a class="headerlink" href="#module-hispecdrp.datamodels.extensions" title="Link to this heading"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></h1>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.IMAGE_HDU" title="hispecdrp.datamodels.extensions.IMAGE_HDU"><code class="xref py py-obj docutils literal notranslate"><span class="pre">IMAGE_HDU</span></code></a>(dtype[, shape, default, ...])</p></td>
+<td><p>Build an image extension descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.TABLE_HDU" title="hispecdrp.datamodels.extensions.TABLE_HDU"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TABLE_HDU</span></code></a>(columns[, enumerate, title, units])</p></td>
+<td><p>Build a table extension descriptor.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions._base_title" title="hispecdrp.datamodels.extensions._base_title"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_base_title</span></code></a>(title)</p></td>
+<td><p>Strip a trailing '.' so a derived title (e.g. '{base} error.') doesn't get a stray one mid-sentence.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions._units_squared" title="hispecdrp.datamodels.extensions._units_squared"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_units_squared</span></code></a>(units)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_L0_extensions" title="hispecdrp.datamodels.extensions.create_L0_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_L0_extensions</span></code></a>([name, title, units])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_barycorr_extensions" title="hispecdrp.datamodels.extensions.create_barycorr_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_barycorr_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_chebyshev_extensions" title="hispecdrp.datamodels.extensions.create_chebyshev_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_chebyshev_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_dataspec_extensions" title="hispecdrp.datamodels.extensions.create_dataspec_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_dataspec_extensions</span></code></a>([prefix, title, ...])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_drift_extensions" title="hispecdrp.datamodels.extensions.create_drift_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_drift_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_etalonfitparam_extensions" title="hispecdrp.datamodels.extensions.create_etalonfitparam_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_etalonfitparam_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_fluxabs_extensions" title="hispecdrp.datamodels.extensions.create_fluxabs_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_fluxabs_extensions</span></code></a>([units])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_lfcfitparam_extensions" title="hispecdrp.datamodels.extensions.create_lfcfitparam_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_lfcfitparam_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_midtime_extensions" title="hispecdrp.datamodels.extensions.create_midtime_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_midtime_extensions</span></code></a>([title, units])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_rv_extensions" title="hispecdrp.datamodels.extensions.create_rv_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_rv_extensions</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_sky_extensions" title="hispecdrp.datamodels.extensions.create_sky_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_sky_extensions</span></code></a>([title, units])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_specdq_extensions" title="hispecdrp.datamodels.extensions.create_specdq_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_specdq_extensions</span></code></a>([title, prefix])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_starmodel_extensions" title="hispecdrp.datamodels.extensions.create_starmodel_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_starmodel_extensions</span></code></a>([title, units])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_telluric_extensions" title="hispecdrp.datamodels.extensions.create_telluric_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_telluric_extensions</span></code></a>([title])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_throughput_extensions" title="hispecdrp.datamodels.extensions.create_throughput_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_throughput_extensions</span></code></a>(**kwargs)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_trans_extensions" title="hispecdrp.datamodels.extensions.create_trans_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_trans_extensions</span></code></a>([title])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.datamodels.extensions.create_wave_extensions" title="hispecdrp.datamodels.extensions.create_wave_extensions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">create_wave_extensions</span></code></a>(**kwargs)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.IMAGE_HDU">
+<span class="sig-name descname"><span class="pre">IMAGE_HDU</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dtype</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">enumerate</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#IMAGE_HDU"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.IMAGE_HDU" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.IMAGE_HDU'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Build an image extension descriptor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>dtype</strong> – Numpy dtype of the array (np.float64, np.int32, etc.). For an
+extension with more than one legitimate dtype (e.g. RampModel.DATA,
+uint16 for real detector data vs. float32 for simulations run with
+<code class="docutils literal notranslate"><span class="pre">convert_to_uint16=False</span></code>), pass a precedence-ordered tuple or a
+<code class="docutils literal notranslate"><span class="pre">X</span> <span class="pre">|</span> <span class="pre">Y</span></code> union (e.g. <code class="docutils literal notranslate"><span class="pre">np.uint16</span> <span class="pre">|</span> <span class="pre">np.float32</span></code>); the first entry is
+canonical – used to build auto-initialized default arrays, and as the
+dtype-correction target when the actual array matches none of them.
+A single dtype is stored as-is (not wrapped in a tuple).</p></li>
+<li><p><strong>shape</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple" title="(in Python v3.15)"><em>tuple</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – The array’s shape, as a tuple of literal ints and/or the symbolic
+axis-name strings <code class="docutils literal notranslate"><span class="pre">'DETECTOR_SIZE_Y'</span></code>, <code class="docutils literal notranslate"><span class="pre">'DETECTOR_SIZE_X'</span></code>,
+<code class="docutils literal notranslate"><span class="pre">'N_ORDERS'</span></code>, <code class="docutils literal notranslate"><span class="pre">'N_FIBERS'</span></code>, <code class="docutils literal notranslate"><span class="pre">'N_READS'</span></code>, <code class="docutils literal notranslate"><span class="pre">'ANY'</span></code> (matched
+case-insensitively, but write them uppercase by convention), e.g.
+<code class="docutils literal notranslate"><span class="pre">('N_ORDERS',</span> <span class="pre">'DETECTOR_SIZE_Y')</span></code> or <code class="docutils literal notranslate"><span class="pre">('N_READS',</span> <span class="pre">'DETECTOR_SIZE_Y',</span> <span class="pre">'DETECTOR_SIZE_X')</span></code>.
+Axis order is always Y before X. Resolved per-instance by
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">DataModel._resolve_shape()</span></code>. May be omitted (<code class="docutils literal notranslate"><span class="pre">None</span></code>) when this
+extension’s real shape is always identical to the model’s primary
+extension’s (see <code class="xref py py-attr docutils literal notranslate"><span class="pre">DataModel.primary_extension_name</span></code>) – e.g.
+<code class="docutils literal notranslate"><span class="pre">KTC</span></code> next to <code class="docutils literal notranslate"><span class="pre">BIAS</span></code>, or <code class="docutils literal notranslate"><span class="pre">RATE_ERR</span></code> next to <code class="docutils literal notranslate"><span class="pre">RATE</span></code> – in which
+case it’s filled in from the primary’s own <code class="docutils literal notranslate"><span class="pre">shape=</span></code> at construction
+time instead of being repeated here (see
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">DataModel._populate_shape_info()</span></code>). Only useful on a model
+whose <code class="docutils literal notranslate"><span class="pre">primary_extension_name</span></code> is knowable without first resolving
+any extension’s shape (the base first-declared-key default); a model
+with a dynamic per-fiber override (returning <code class="docutils literal notranslate"><span class="pre">None</span></code> until some
+fiber’s data is set) can’t use this and must always give its own
+<code class="docutils literal notranslate"><span class="pre">shape=</span></code>.</p></li>
+<li><p><strong>default</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Fill value used to lazily auto-initialize the array to
+<code class="docutils literal notranslate"><span class="pre">np.full(resolved_shape,</span> <span class="pre">default,</span> <span class="pre">dtype=dtype)</span></code> the first time the
+attribute is accessed, once every axis of <code class="docutils literal notranslate"><span class="pre">shape</span></code> resolves to a
+concrete size (an unresolvable axis –
+e.g. containing <code class="docutils literal notranslate"><span class="pre">ANY</span></code>, or a symbol with no source available on this
+model – means this automatic path doesn’t apply). Defaults to
+<code class="docutils literal notranslate"><span class="pre">None</span></code>. Regardless of whether <code class="docutils literal notranslate"><span class="pre">default</span></code> is given, building the
+array falls to <code class="xref py py-meth docutils literal notranslate"><span class="pre">DataModel.make_default_array()</span></code> whenever the
+automatic path doesn’t apply – override it in a subclass for
+extensions needing custom construction (e.g. polynomial coefficients,
+whose axis sizes are a per-instance fit result with no symbol at all).
+With no <code class="docutils literal notranslate"><span class="pre">default</span></code> and no such override, the attribute stays <code class="docutils literal notranslate"><span class="pre">None</span></code>
+until explicitly assigned.</p></li>
+<li><p><strong>enumerate</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – If given, declare this extension once (without a suffix) and let
+<code class="docutils literal notranslate"><span class="pre">DataModel._get_extensions</span></code> expand it into one
+<code class="docutils literal notranslate"><span class="pre">&lt;NAME&gt;_&lt;enumerate&gt;{n}</span></code> entry per fiber (the format is always
+<code class="docutils literal notranslate"><span class="pre">prefix_{enumerate}#</span></code>), for <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">in</span> <span class="pre">1..model.num_fibers</span></code>.</p></li>
+<li><p><strong>title</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Short human-readable description, purely for documentation – shown
+as the “Description” column of the <code class="docutils literal notranslate"><span class="pre">Extensions</span></code> table that
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">DataModel.extensions_table()</span></code> generates from <code class="docutils literal notranslate"><span class="pre">EXTENSIONS</span></code> and
+splices into the model class’s docstring. Never read by any
+auto-init or I/O logic.</p></li>
+<li><p><strong>units</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Physical units, purely for documentation – shown as the “Units”
+column of the same generated table. Never read by any auto-init or
+I/O logic.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.TABLE_HDU">
+<span class="sig-name descname"><span class="pre">TABLE_HDU</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">enumerate</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#TABLE_HDU"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.TABLE_HDU" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.TABLE_HDU'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Build a table extension descriptor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>columns</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#dict" title="(in Python v3.15)"><em>dict</em></a>) – Mapping of column name -&gt; dtype (e.g. <code class="docutils literal notranslate"><span class="pre">str</span></code>, <code class="docutils literal notranslate"><span class="pre">np.float64</span></code>, <code class="docutils literal notranslate"><span class="pre">object</span></code>
+for a variable-length array per row, as used by the <code class="docutils literal notranslate"><span class="pre">CCF</span></code> column).</p></li>
+<li><p><strong>enumerate</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – If given, declare this extension once (without a suffix) and let
+<code class="docutils literal notranslate"><span class="pre">DataModel._get_extensions</span></code> expand it into one
+<code class="docutils literal notranslate"><span class="pre">&lt;NAME&gt;_&lt;enumerate&gt;{n}</span></code> entry per fiber (the format is always
+<code class="docutils literal notranslate"><span class="pre">prefix_{enumerate}#</span></code>), for <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">in</span> <span class="pre">1..model.config.num_fibers</span></code>.
+Table extensions are always eagerly initialized as an empty (0-row)
+Table at datamodel construction, regardless of this flag.</p></li>
+<li><p><strong>title</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Short human-readable description, purely for documentation – see
+<a class="reference internal" href="#hispecdrp.datamodels.extensions.IMAGE_HDU" title="hispecdrp.datamodels.extensions.IMAGE_HDU"><code class="xref py py-func docutils literal notranslate"><span class="pre">IMAGE_HDU()</span></code></a>’s <code class="docutils literal notranslate"><span class="pre">title</span></code>.</p></li>
+<li><p><strong>units</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Physical units, purely for documentation – see <a class="reference internal" href="#hispecdrp.datamodels.extensions.IMAGE_HDU" title="hispecdrp.datamodels.extensions.IMAGE_HDU"><code class="xref py py-func docutils literal notranslate"><span class="pre">IMAGE_HDU()</span></code></a>’s
+<code class="docutils literal notranslate"><span class="pre">units</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions._base_title">
+<span class="sig-name descname"><span class="pre">_base_title</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#_base_title"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions._base_title" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions._base_title'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Strip a trailing ‘.’ so a derived title (e.g. ‘{base} error.’) doesn’t get a stray one mid-sentence.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions._units_squared">
+<span class="sig-name descname"><span class="pre">_units_squared</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">units</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#_units_squared"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions._units_squared" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions._units_squared'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_L0_extensions">
+<span class="sig-name descname"><span class="pre">create_L0_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'RATE'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Rate</span> <span class="pre">map.'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'e-/s'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_L0_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_L0_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_L0_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_barycorr_extensions">
+<span class="sig-name descname"><span class="pre">create_barycorr_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_barycorr_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_barycorr_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_barycorr_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_chebyshev_extensions">
+<span class="sig-name descname"><span class="pre">create_chebyshev_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_chebyshev_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_chebyshev_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_chebyshev_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_dataspec_extensions">
+<span class="sig-name descname"><span class="pre">create_dataspec_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'SPEC'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_dataspec_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_dataspec_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_dataspec_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_drift_extensions">
+<span class="sig-name descname"><span class="pre">create_drift_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_drift_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_drift_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_drift_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_etalonfitparam_extensions">
+<span class="sig-name descname"><span class="pre">create_etalonfitparam_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_etalonfitparam_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_etalonfitparam_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_etalonfitparam_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_fluxabs_extensions">
+<span class="sig-name descname"><span class="pre">create_fluxabs_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'W/m^2/micron'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_fluxabs_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_fluxabs_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_fluxabs_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_lfcfitparam_extensions">
+<span class="sig-name descname"><span class="pre">create_lfcfitparam_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_lfcfitparam_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_lfcfitparam_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_lfcfitparam_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_midtime_extensions">
+<span class="sig-name descname"><span class="pre">create_midtime_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Exposure</span> <span class="pre">mid-point</span> <span class="pre">times.'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'MJD'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_midtime_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_midtime_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_midtime_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_rv_extensions">
+<span class="sig-name descname"><span class="pre">create_rv_extensions</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_rv_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_rv_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_rv_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_sky_extensions">
+<span class="sig-name descname"><span class="pre">create_sky_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_sky_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_sky_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_sky_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_specdq_extensions">
+<span class="sig-name descname"><span class="pre">create_specdq_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Data</span> <span class="pre">quality.'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'SPEC'</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_specdq_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_specdq_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_specdq_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_starmodel_extensions">
+<span class="sig-name descname"><span class="pre">create_starmodel_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Stellar</span> <span class="pre">model</span> <span class="pre">spectrum.'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">units</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_starmodel_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_starmodel_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_starmodel_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_telluric_extensions">
+<span class="sig-name descname"><span class="pre">create_telluric_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Telluric</span> <span class="pre">model</span> <span class="pre">spectrum.'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_telluric_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_telluric_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_telluric_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_throughput_extensions">
+<span class="sig-name descname"><span class="pre">create_throughput_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_throughput_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_throughput_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_throughput_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_trans_extensions">
+<span class="sig-name descname"><span class="pre">create_trans_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Transmission</span> <span class="pre">correction.'</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_trans_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_trans_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_trans_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.datamodels.extensions.create_wave_extensions">
+<span class="sig-name descname"><span class="pre">create_wave_extensions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/datamodels/extensions.html#create_wave_extensions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.datamodels.extensions.create_wave_extensions" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.datamodels.extensions.create_wave_extensions'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+</section>
+</div></div><aside class="hidden text-sm xl:block" id="right-sidebar">
+<div class="sticky top-16 -mt-10 max-h-[calc(100vh-5rem)] h-full overflow-y-auto pt-6 space-y-2"><p class="font-medium">On this page</p>
+<ul>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.IMAGE_HDU'" class="reference internal" href="#hispecdrp.datamodels.extensions.IMAGE_HDU"><code class="docutils literal notranslate"><span class="pre">IMAGE_HDU()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.TABLE_HDU'" class="reference internal" href="#hispecdrp.datamodels.extensions.TABLE_HDU"><code class="docutils literal notranslate"><span class="pre">TABLE_HDU()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions._base_title'" class="reference internal" href="#hispecdrp.datamodels.extensions._base_title"><code class="docutils literal notranslate"><span class="pre">_base_title()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions._units_squared'" class="reference internal" href="#hispecdrp.datamodels.extensions._units_squared"><code class="docutils literal notranslate"><span class="pre">_units_squared()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_L0_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_L0_extensions"><code class="docutils literal notranslate"><span class="pre">create_L0_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_barycorr_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_barycorr_extensions"><code class="docutils literal notranslate"><span class="pre">create_barycorr_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_chebyshev_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_chebyshev_extensions"><code class="docutils literal notranslate"><span class="pre">create_chebyshev_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_dataspec_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_dataspec_extensions"><code class="docutils literal notranslate"><span class="pre">create_dataspec_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_drift_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_drift_extensions"><code class="docutils literal notranslate"><span class="pre">create_drift_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_etalonfitparam_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_etalonfitparam_extensions"><code class="docutils literal notranslate"><span class="pre">create_etalonfitparam_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_fluxabs_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_fluxabs_extensions"><code class="docutils literal notranslate"><span class="pre">create_fluxabs_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_lfcfitparam_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_lfcfitparam_extensions"><code class="docutils literal notranslate"><span class="pre">create_lfcfitparam_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_midtime_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_midtime_extensions"><code class="docutils literal notranslate"><span class="pre">create_midtime_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_rv_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_rv_extensions"><code class="docutils literal notranslate"><span class="pre">create_rv_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_sky_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_sky_extensions"><code class="docutils literal notranslate"><span class="pre">create_sky_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_specdq_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_specdq_extensions"><code class="docutils literal notranslate"><span class="pre">create_specdq_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_starmodel_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_starmodel_extensions"><code class="docutils literal notranslate"><span class="pre">create_starmodel_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_telluric_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_telluric_extensions"><code class="docutils literal notranslate"><span class="pre">create_telluric_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_throughput_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_throughput_extensions"><code class="docutils literal notranslate"><span class="pre">create_throughput_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_trans_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_trans_extensions"><code class="docutils literal notranslate"><span class="pre">create_trans_extensions()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.datamodels.extensions.create_wave_extensions'" class="reference internal" href="#hispecdrp.datamodels.extensions.create_wave_extensions"><code class="docutils literal notranslate"><span class="pre">create_wave_extensions()</span></code></a></li>
+</ul>
+</div>
+</aside>
+</main>
+</div>
+</div><footer class="py-6 border-t border-border md:py-0">
+<div class="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+<div class="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+<p class="text-sm leading-loose text-center text-muted-foreground md:text-left">© 2025, HISPEC DRP Team Built with <a class="font-medium underline underline-offset-4" href="https://www.sphinx-doc.org" rel="noreferrer">Sphinx 9.1.0</a></p>
+</div>
+</div>
+</footer>
+</div>
+<script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+<script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+<script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+<script defer="defer" src="../../_static/theme.js?v=582b20c5"></script>
+<script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+<script src="../../_static/notebook_embeds.90d683dfd339.js?v=8d1fbc6d"></script>
+<script src="../../_static/download_notebook.js?v=df93580d"></script>
+</body>
+</html>

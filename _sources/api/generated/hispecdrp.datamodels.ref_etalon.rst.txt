@@ -1,0 +1,12 @@
+hispecdrp.datamodels.ref\_etalon
+================================
+
+.. automodule:: hispecdrp.datamodels.ref_etalon
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      ReferenceEtalonModel
+   

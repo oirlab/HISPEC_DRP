@@ -1,0 +1,15 @@
+hispecdrp.primitives.telluric\_correction
+=========================================
+
+.. automodule:: hispecdrp.primitives.telluric_correction
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   telluric_models
+   telluric_primitive

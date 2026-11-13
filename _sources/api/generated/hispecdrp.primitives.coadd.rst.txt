@@ -1,0 +1,15 @@
+hispecdrp.primitives.coadd
+==========================
+
+.. automodule:: hispecdrp.primitives.coadd
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   coadd_frames_primitive
+   coadd_spectra_primitive

@@ -1,0 +1,18 @@
+hispecdrp.primitives.detector\_flat.make\_detflat\_primitive
+============================================================
+
+.. automodule:: hispecdrp.primitives.detector_flat.make_detflat_primitive
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _detect_cold_pixels
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeDetectorFlatPrimitive
+   

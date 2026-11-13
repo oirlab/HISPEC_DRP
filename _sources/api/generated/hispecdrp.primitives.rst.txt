@@ -1,0 +1,38 @@
+﻿hispecdrp.primitives
+====================
+
+.. automodule:: hispecdrp.primitives
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   barycenter_correction
+   base_primitive
+   bias_subtraction
+   blaze_correction
+   coadd
+   dark_subtraction
+   detector_flat
+   dq_init
+   gain
+   jump_detection
+   line_fitting
+   lsf
+   nonlinear_correction
+   ramp_fitting
+   readnoise
+   refpix
+   register_calibration
+   saturation
+   sky_subtraction
+   spectral_extraction
+   stellar_rv
+   telluric_correction
+   trace_fitting
+   utils
+   wavesol

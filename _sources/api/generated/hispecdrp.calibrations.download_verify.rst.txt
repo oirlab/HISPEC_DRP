@@ -1,0 +1,13 @@
+hispecdrp.calibrations.download\_verify
+=======================================
+
+.. automodule:: hispecdrp.calibrations.download_verify
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      ensure_calibration_on_disk
+      normalize_downloaded_calibration_path
+   

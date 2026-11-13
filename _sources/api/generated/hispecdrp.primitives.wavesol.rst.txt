@@ -1,0 +1,16 @@
+hispecdrp.primitives.wavesol
+============================
+
+.. automodule:: hispecdrp.primitives.wavesol
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   drift_correction_primitive
+   set_wavesol_primitive
+   wavesol_cheb2d_primitive

@@ -1,0 +1,6 @@
+hispecdrp.primitives.jump\_detection.jump\_detection\_jwst
+==========================================================
+
+.. currentmodule:: hispecdrp.primitives.jump_detection
+
+.. autofunction:: jump_detection_jwst

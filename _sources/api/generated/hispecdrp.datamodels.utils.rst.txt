@@ -1,0 +1,29 @@
+hispecdrp.datamodels.utils
+==========================
+
+.. automodule:: hispecdrp.datamodels.utils
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _as_model_list
+      _set_datetime_meta
+      _set_koa_meta
+      _set_target_meta
+      append_ancestors
+      append_calibrations
+      append_receipts
+      get_first_model
+      get_instrument_alias
+      get_instrument_config
+      get_instrument_name
+      get_model_type
+      group_by_fiber_combination
+      group_by_illuminated_fiber
+      meta_to_csv
+      migrate_receipt_table
+      open
+      set_instrument
+   

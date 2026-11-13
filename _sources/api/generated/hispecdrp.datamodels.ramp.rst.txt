@@ -1,0 +1,12 @@
+hispecdrp.datamodels.ramp
+=========================
+
+.. automodule:: hispecdrp.datamodels.ramp
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      RampModel
+   

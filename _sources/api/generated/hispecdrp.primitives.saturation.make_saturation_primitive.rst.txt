@@ -1,0 +1,12 @@
+hispecdrp.primitives.saturation.make\_saturation\_primitive
+===========================================================
+
+.. automodule:: hispecdrp.primitives.saturation.make_saturation_primitive
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      MakeSaturationPrimitive
+   

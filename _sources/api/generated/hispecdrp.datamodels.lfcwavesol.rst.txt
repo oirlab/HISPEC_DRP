@@ -1,0 +1,12 @@
+hispecdrp.datamodels.lfcwavesol
+===============================
+
+.. automodule:: hispecdrp.datamodels.lfcwavesol
+
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      LFCWavesolModel
+   

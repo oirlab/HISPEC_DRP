@@ -1,0 +1,14 @@
+hispecdrp.primitives.telluric\_correction.telluric\_models
+==========================================================
+
+.. automodule:: hispecdrp.primitives.telluric_correction.telluric_models
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _convolve_and_resample
+      _convolve_telluric_with_gaussian_lsf
+      airmass_scale_singlemodel
+   

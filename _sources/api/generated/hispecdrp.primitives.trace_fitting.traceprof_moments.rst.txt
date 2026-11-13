@@ -1,0 +1,17 @@
+hispecdrp.primitives.trace\_fitting.traceprof\_moments
+======================================================
+
+.. automodule:: hispecdrp.primitives.trace_fitting.traceprof_moments
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _n_orders_n_pix
+      fill_traceprof_spectroperfection_moments
+      interpolate_moments_to_pixels
+      measure_fiberflat_spatial_sigma
+      measure_lfc_spot_moments_along_trace
+      spot_window_moments
+   

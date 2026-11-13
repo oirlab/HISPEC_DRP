@@ -1,0 +1,42 @@
+﻿hispecdrp.datamodels
+====================
+
+.. automodule:: hispecdrp.datamodels
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   base_model
+   bias
+   dark
+   detector_flat
+   dq
+   dqflags
+   extensions
+   fiberflat
+   gain
+   gausslsf
+   hispec_config
+   instrument_params
+   level0
+   level1
+   level2
+   lfcfitparams
+   lfcwavesol
+   meta_data
+   mixins
+   nonlin
+   parvi_config
+   ramp
+   read_noise
+   ref_etalon
+   saturation
+   sim_wavesol
+   tracepos
+   traceprof
+   utils

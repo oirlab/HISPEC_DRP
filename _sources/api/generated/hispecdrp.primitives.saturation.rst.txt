@@ -1,0 +1,15 @@
+hispecdrp.primitives.saturation
+===============================
+
+.. automodule:: hispecdrp.primitives.saturation
+   :no-members:
+
+   
+.. rubric:: Modules
+
+.. autosummary::
+   :toctree:
+   :recursive:
+
+   make_saturation_primitive
+   saturation_primitive

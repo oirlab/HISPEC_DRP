@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+
+<html :class="{ 'dark' : darkMode === true }" data-content_root="../../" lang="en" x-data="{ darkMode: $persist(window.matchMedia('(prefers-color-scheme: dark)').matches), activeSection: ''}">
+<head>
+<script>
+    (function () {
+      // Set initial color scheme
+      if ((localStorage.getItem("_x_darkMode") === "true") || (window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Watch for media preference changes
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+        localStorage.setItem("_x_darkMode", event.matches);
+        document.documentElement.classList.toggle("dark", event.matches);
+      });
+    })();
+  </script>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta charset="utf-8"/>
+<meta content="#ffffff" media="(prefers-color-scheme: light)" name="theme-color"/>
+<meta content="#030711" media="(prefers-color-scheme: dark)" name="theme-color"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>hispecdrp.primitives.stellar_rv.stellar_rv_primitive | HISPEC DRP  documentation</title>
+<meta content="hispecdrp.primitives.stellar_rv.stellar_rv_primitive | HISPEC DRP  documentation" property="og:title"/>
+<meta content="hispecdrp.primitives.stellar_rv.stellar_rv_primitive | HISPEC DRP  documentation" name="twitter:title"/>
+<link href="../../_static/pygments.css?v=d862e8e8" rel="stylesheet" type="text/css"/>
+<link href="../../_static/pygments_dark.css" id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css"/>
+<link href="../../_static/theme.css?v=73505e79" rel="stylesheet" type="text/css"/>
+<link href="../../_static/custom.css?v=228efd53" rel="stylesheet" type="text/css"/>
+<link href="https://oirlab.github.io/HISPEC_DRP/api/generated/hispecdrp.primitives.stellar_rv.stellar_rv_primitive.html" rel="canonical"/>
+<link href="../../search.html" rel="search" title="Search"/>
+<link href="../../genindex.html" rel="index" title="Index"/>
+<link href="hispecdrp.primitives.telluric_correction.html" rel="next" title="hispecdrp.primitives.telluric_correction"/>
+<link href="hispecdrp.primitives.stellar_rv.rv_differential_utils.html" rel="prev" title="hispecdrp.primitives.stellar_rv.rv_differential_utils"/>
+</head>
+<body :class="{ 'overflow-hidden': showSidebar }" class="min-h-screen font-sans antialiased bg-background text-foreground" x-data="{ showSidebar: false, showScrollTop: false }">
+<div @click.self="showSidebar = false" class="fixed inset-0 z-50 overflow-hidden bg-background/80 backdrop-blur-sm md:hidden" x-cloak="" x-show="showSidebar"></div><div class="relative flex flex-col min-h-screen" id="page"><a class="absolute top-0 left-0 z-[100] block bg-background p-4 text-xl transition -translate-x-full opacity-0 focus:translate-x-0 focus:opacity-100" href="#content">
+      Skip to content
+    </a><header class="sticky top-0 z-40 w-full border-b shadow-xs border-border bg-background/90 backdrop-blur"><div class="container flex items-center h-14">
+<div class="hidden mr-4 md:flex">
+<a class="flex items-center mr-6" href="../../index.html"><span class="hidden font-bold sm:inline-block text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a></div><button @click="showSidebar = true" class="inline-flex items-center justify-center h-10 px-0 py-2 mr-2 text-base font-medium transition-colors rounded-md hover:text-accent-foreground hover:bg-transparent md:hidden" type="button">
+<svg aria-hidden="true" fill="currentColor" height="24" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M152.587 825.087q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440Zm0-203.587q-19.152 0-32.326-13.174T107.087 576q0-19.152 13.174-32.326t32.326-13.174h320q19.152 0 32.326 13.174T518.087 576q0 19.152-13.174 32.326T472.587 621.5h-320Zm0-203.587q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440ZM708.913 576l112.174 112.174q12.674 12.674 12.674 31.826t-12.674 31.826Q808.413 764.5 789.261 764.5t-31.826-12.674l-144-144Q600 594.391 600 576t13.435-31.826l144-144q12.674-12.674 31.826-12.674t31.826 12.674q12.674 12.674 12.674 31.826t-12.674 31.826L708.913 576Z"></path>
+</svg>
+<span class="sr-only">Toggle navigation menu</span>
+</button>
+<div class="flex items-center justify-between flex-1 gap-2 sm:gap-4 md:justify-end">
+<div class="flex-1 w-full md:w-auto md:flex-none"><form @keydown.k.window.meta="$refs.search.focus()" action="../../search.html" class="relative flex items-center group" id="searchbox" method="get">
+<input aria-label="Search the docs" class="inline-flex items-center font-medium transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-input hover:bg-accent focus:bg-accent hover:text-accent-foreground focus:text-accent-foreground hover:placeholder-accent-foreground py-2 px-4 relative h-9 w-full justify-start rounded-[0.5rem] text-sm text-muted-foreground sm:pr-12 md:w-40 lg:w-64" id="search-input" name="q" placeholder="Search ..." type="search" x-ref="search"/>
+<kbd class="pointer-events-none absolute right-1.5 top-2 hidden h-5 select-none text-muted-foreground items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex group-hover:bg-accent group-hover:text-accent-foreground">
+<span class="text-xs">⌘</span>
+    K
+  </kbd>
+</form>
+</div>
+<nav class="flex items-center gap-1">
+<button @click="darkMode = !darkMode" class="relative inline-flex items-center justify-center px-0 text-sm font-medium transition-colors rounded-md hover:bg-accent hover:text-accent-foreground h-9 w-9" title="Toggle color scheme" type="button">
+<svg class="absolute transition-all scale-100 rotate-0 dark:-rotate-90 dark:scale-0" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 685q45.456 0 77.228-31.772Q589 621.456 589 576q0-45.456-31.772-77.228Q525.456 467 480 467q-45.456 0-77.228 31.772Q371 530.544 371 576q0 45.456 31.772 77.228Q434.544 685 480 685Zm0 91q-83 0-141.5-58.5T280 576q0-83 58.5-141.5T480 376q83 0 141.5 58.5T680 576q0 83-58.5 141.5T480 776ZM80 621.5q-19.152 0-32.326-13.174T34.5 576q0-19.152 13.174-32.326T80 530.5h80q19.152 0 32.326 13.174T205.5 576q0 19.152-13.174 32.326T160 621.5H80Zm720 0q-19.152 0-32.326-13.174T754.5 576q0-19.152 13.174-32.326T800 530.5h80q19.152 0 32.326 13.174T925.5 576q0 19.152-13.174 32.326T880 621.5h-80Zm-320-320q-19.152 0-32.326-13.174T434.5 256v-80q0-19.152 13.174-32.326T480 130.5q19.152 0 32.326 13.174T525.5 176v80q0 19.152-13.174 32.326T480 301.5Zm0 720q-19.152 0-32.326-13.17Q434.5 995.152 434.5 976v-80q0-19.152 13.174-32.326T480 850.5q19.152 0 32.326 13.174T525.5 896v80q0 19.152-13.174 32.33-13.174 13.17-32.326 13.17ZM222.174 382.065l-43-42Q165.5 327.391 166 308.239t13.174-33.065q13.435-13.674 32.587-13.674t32.065 13.674l42.239 43q12.674 13.435 12.555 31.706-.12 18.272-12.555 31.946-12.674 13.674-31.445 13.413-18.772-.261-32.446-13.174Zm494 494.761-42.239-43q-12.674-13.435-12.674-32.087t12.674-31.565Q686.609 756.5 705.38 757q18.772.5 32.446 13.174l43 41.761Q794.5 824.609 794 843.761t-13.174 33.065Q767.391 890.5 748.239 890.5t-32.065-13.674Zm-42-494.761Q660.5 369.391 661 350.62q.5-18.772 13.174-32.446l41.761-43Q728.609 261.5 747.761 262t33.065 13.174q13.674 13.435 13.674 32.587t-13.674 32.065l-43 42.239q-13.435 12.674-31.706 12.555-18.272-.12-31.946-12.555Zm-495 494.761Q165.5 863.391 165.5 844.239t13.674-32.065l43-42.239q13.435-12.674 32.087-12.674t31.565 12.674Q299.5 782.609 299 801.38q-.5 18.772-13.174 32.446l-41.761 43Q231.391 890.5 212.239 890t-33.065-13.174ZM480 576Z"></path>
+</svg>
+<svg class="absolute transition-all scale-0 rotate-90 dark:rotate-0 dark:scale-100" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 936q-151 0-255.5-104.5T120 576q0-138 90-239.5T440 218q25-3 39 18t-1 44q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q21-14 43-1.5t19 39.5q-14 138-117.5 229T480 936Zm0-80q88 0 158-48.5T740 681q-20 5-40 8t-40 3q-123 0-209.5-86.5T364 396q0-20 3-40t8-40q-78 32-126.5 102T200 576q0 116 82 198t198 82Zm-10-270Z"></path>
+</svg>
+</button>
+</nav>
+</div>
+</div>
+</header>
+<div class="flex-1"><div class="container md:grid md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10"><aside :aria-hidden="!showSidebar" :class="{ 'translate-x-0': showSidebar }" class="fixed inset-y-0 left-0 md:top-14 z-50 md:z-30 bg-background md:bg-transparent transition-all duration-100 -translate-x-full md:translate-x-0 ml-0 p-6 md:p-0 md:-ml-2 md:h-[calc(100vh-3.5rem)] w-5/6 md:w-full overflow-y-auto border-r border-border md:sticky" id="left-sidebar">
+<a class="justify-start text-sm md:!hidden bg-background" href="../../index.html"><span class="font-bold text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a>
+<div class="relative overflow-hidden md:overflow-auto my-4 md:my-0">
+<div class="overflow-y-auto h-full w-full relative pr-6"><nav class="table w-full min-w-full my-6 lg:my-8">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../quickstart/quickstart.html">Quickstart<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/pipelines_and_primitives.html">Run Pipelines and Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/data_handling.html">Data Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/calibration_examples.html">Working with Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/create_simulations.html">Create Simulated HISPEC Data</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../data_products/data_products.html">Data Products<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../data_products/data_format.html">HISPEC Data Format</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../simulations/simulations.html">Simulations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/basic_usage.html">Basic Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/examples/examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/limitations.html">Limitations and Known Issues</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../pipelines/pipelines.html">Pipelines</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../calibrations/calibrations.html">Calibrations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/configure.html">Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/calibration_database.html">Calibration Database</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../algorithms/algorithms.html">Algorithms<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/stellar_rv.html">Stellar RV primitive (L2)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ccf.html">Cross-correlation (CCF)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/line_mask.html">Line masks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/spectral_extraction.html">Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ramp_fitting.html">Ramp Fitting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/trace_fitting.html">Trace Fitting</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../development/development.html">Development<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../development/datamodels.html">Data Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/pipelines.html">Pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/primitives.html">Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/selectors.html">Calibration Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/configuration.html">Configuration</a></li>
+</ul>
+</li>
+</ul>
+<ul class="current">
+<li class="toctree-l1 current" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../api.html">API Reference<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul class="current" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.processing_component.html">hispecdrp.processing_component</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="hispecdrp.primitives.html">hispecdrp.primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.pipelines.html">hispecdrp.pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.datamodels.html">hispecdrp.datamodels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.calibrations.html">hispecdrp.calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.driver.html">hispecdrp.driver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.utils.html">hispecdrp.utils</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<button @click="showSidebar = false" class="absolute md:hidden right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100" type="button">
+<svg class="h-4 w-4" fill="currentColor" height="24" stroke="none" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 632 284 828q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536 576l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480 632Z"></path>
+</svg>
+</button>
+</aside>
+<main class="relative py-6 lg:gap-10 lg:py-8 xl:grid xl:grid-cols-[1fr_300px]">
+<div class="w-full min-w-0 mx-auto">
+<nav aria-label="breadcrumbs" class="flex items-center mb-4 space-x-1 text-sm text-muted-foreground">
+<a class="overflow-hidden text-ellipsis whitespace-nowrap hover:text-foreground" href="../../index.html">
+<span class="hidden md:inline">HISPEC DRP  documentation</span>
+<svg aria-label="Home" class="md:hidden" fill="currentColor" height="18" stroke="none" viewbox="0 96 960 960" width="18" xmlns="http://www.w3.org/2000/svg">
+<path d="M240 856h120V616h240v240h120V496L480 316 240 496v360Zm-80 80V456l320-240 320 240v480H520V696h-80v240H160Zm320-350Z"></path>
+</svg>
+</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="../api.html">API Reference</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="hispecdrp.primitives.html">hispecdrp.primitives</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="hispecdrp.primitives.stellar_rv.html">hispecdrp.primitives.stellar_rv</a>
+<div class="mr-1">/</div><span aria-current="page" class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">hispecdrp.primitives.stellar_rv.stellar_rv_primitive</span>
+</nav>
+<div id="content" role="main">
+<section id="module-hispecdrp.primitives.stellar_rv.stellar_rv_primitive">
+<span id="hispecdrp-primitives-stellar-rv-stellar-rv-primitive"></span><h1>hispecdrp.primitives.stellar_rv.stellar_rv_primitive<a class="headerlink" href="#module-hispecdrp.primitives.stellar_rv.stellar_rv_primitive" title="Link to this heading"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></h1>
+<p>Stellar radial-velocity primitive (template and mask-line CCF).</p>
+<p>Algorithm overview and references live in <code class="docutils literal notranslate"><span class="pre">docs/source/algorithms/stellar_rv.rst</span></code>.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">_fiber_l2_bundle</span></code>(input_model, fiber)</p></td>
+<td><p>Return (spec, err, dq, wave) for a fiber, or None if SPEC/WAVE missing.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive" title="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive"><code class="xref py py-obj docutils literal notranslate"><span class="pre">StellarRVPrimitive</span></code></a>([dataset, config, ...])</p></td>
+<td><p>Cross-correlate L2 spectra against a template or a line mask to measure RV.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">StellarRVPrimitive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parent</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Bases: <a class="reference internal" href="hispecdrp.primitives.base_primitive.html#hispecdrp.primitives.base_primitive.BasePrimitive" title="hispecdrp.primitives.base_primitive.BasePrimitive"><code class="xref py py-class docutils literal notranslate"><span class="pre">BasePrimitive</span></code></a></p>
+<p>Cross-correlate L2 spectra against a template or a line mask to measure RV.</p>
+<p><strong>Algorithms</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code> (default) — mask-shifted CCF using a <strong>line mask</strong> (SPIROU <code class="docutils literal notranslate"><span class="pre">.mas</span></code> or
+two-column center+weight tables; see <a class="reference internal" href="hispecdrp.utils.line_mask_utils.html#module-hispecdrp.utils.line_mask_utils" title="hispecdrp.utils.line_mask_utils"><code class="xref py py-mod docutils literal notranslate"><span class="pre">line_mask_utils</span></code></a>). Per-chunk
+CCFs use Numba Lanczos / linear spectrum sampling
+(<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask" title="hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask"><code class="xref py py-func docutils literal notranslate"><span class="pre">rv_per_chunks_line_mask()</span></code></a> /
+<code class="docutils literal notranslate"><span class="pre">mask_ccf_pixel_interp_order</span></code>; default Lanczos-3); final RVs are Gaussian centroids from
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv" title="hispecdrp.primitives.utils.ccf.ccf_utils.fit_ccf_rv"><code class="xref py py-func docutils literal notranslate"><span class="pre">fit_ccf_rv()</span></code></a>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code> — weighted CCF in <span class="math notranslate nohighlight">\(\ln\lambda\)</span> against a stellar
+template; per-chunk RVs; median/MAD rejection; inverse-variance mean
+(<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#module-hispecdrp.primitives.utils.ccf.ccf_utils" title="hispecdrp.primitives.utils.ccf.ccf_utils"><code class="xref py py-mod docutils literal notranslate"><span class="pre">ccf_utils</span></code></a>).</p></li>
+</ul>
+<p>All constructor arguments list their <strong>default</strong> from <code class="xref py py-attr docutils literal notranslate"><span class="pre">PARAMETERS</span></code>; override per run as
+needed. Order matches the grouped layout in <code class="xref py py-attr docutils literal notranslate"><span class="pre">PARAMETERS</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>suffix</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">"stellar_rv"</span></code>. Short label used by the framework for this primitive’s
+derived products, logging, and file naming together with <code class="docutils literal notranslate"><span class="pre">output_dir</span></code>.</p></li>
+<li><p><strong>algorithm</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">"ccf_line_mask"</span></code>. Must be a key of <code class="xref py py-data docutils literal notranslate"><span class="pre">STELLAR_RV_ALGORITHMS</span></code>.
+Chooses <code class="docutils literal notranslate"><span class="pre">_run_algorithm_ccf_line_mask</span></code> (line-mask CCF, no PHOENIX template) or
+<code class="docutils literal notranslate"><span class="pre">_run_algorithm_ccf_stellar_template</span></code> (log-λ template CCF).</p></li>
+<li><p><strong>do_fibers</strong> (<em>sequence</em><em> of </em><a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Which fiber indices to process (e.g. <code class="docutils literal notranslate"><span class="pre">["1","2"]</span></code>). <code class="docutils literal notranslate"><span class="pre">None</span></code>
+uses <a class="reference internal" href="hispecdrp.processing_component.html#hispecdrp.processing_component.ProcessingComponent.get_do_traces" title="hispecdrp.processing_component.ProcessingComponent.get_do_traces"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_do_traces()</span></code></a> /
+recipe defaults for the input model.</p></li>
+<li><p><strong>do_orders</strong> (<em>sequence</em><em> of </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Echelle <strong>order numbers</strong> (not row indices) to include. <code class="docutils literal notranslate"><span class="pre">None</span></code>
+selects all orders handled by the same L2 helper as sibling primitives (subject to
+config / model).</p></li>
+<li><p><strong>template_path</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Path to a stellar template spectrum on disk for
+<code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>. Passed to
+<a class="reference internal" href="hispecdrp.primitives.utils.spectral_utils.html#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron" title="hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron"><code class="xref py py-func docutils literal notranslate"><span class="pre">resolve_stellar_template_to_log_micron()</span></code></a>
+with <code class="docutils literal notranslate"><span class="pre">template_wavelength</span></code> / <code class="docutils literal notranslate"><span class="pre">template_flux</span></code> when those are set.</p></li>
+<li><p><strong>template_wavelength</strong> (<em>array-like</em><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. In-memory template wavelength grid (µm). Used with
+<code class="docutils literal notranslate"><span class="pre">template_flux</span></code> when you do not load from <code class="docutils literal notranslate"><span class="pre">template_path</span></code>.</p></li>
+<li><p><strong>template_flux</strong> (<em>array-like</em><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Template flux samples matching <code class="docutils literal notranslate"><span class="pre">template_wavelength</span></code> (same length).</p></li>
+<li><p><strong>mask_path</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Path to a SPIROU <code class="docutils literal notranslate"><span class="pre">.mas</span></code> or KPF-style two-column mask file for
+<code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code> (delta-line model). <code class="docutils literal notranslate"><span class="pre">None</span></code> resolves to the packaged lte049
+<strong>ccfopt</strong> delta mask (see
+<a class="reference internal" href="hispecdrp.utils.line_mask_utils.html#hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path" title="hispecdrp.utils.line_mask_utils.packaged_default_line_mask_path"><code class="xref py py-func docutils literal notranslate"><span class="pre">packaged_default_line_mask_path()</span></code></a>) via
+<a class="reference internal" href="hispecdrp.utils.line_mask_utils.html#hispecdrp.utils.line_mask_utils.resolve_mask_path" title="hispecdrp.utils.line_mask_utils.resolve_mask_path"><code class="xref py py-func docutils literal notranslate"><span class="pre">resolve_mask_path()</span></code></a> when you are <strong>not</strong>
+passing <code class="docutils literal notranslate"><span class="pre">mask_wavelength</span></code> / <code class="docutils literal notranslate"><span class="pre">mask_weight</span></code>.</p></li>
+<li><p><strong>mask_wavelength</strong> (<em>array-like</em><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. In-memory mask rest wavelengths (µm) for <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code>. Must be
+paired with <code class="docutils literal notranslate"><span class="pre">mask_weight</span></code>; when both are set, <code class="docutils literal notranslate"><span class="pre">mask_path</span></code> is not required for loading.</p></li>
+<li><p><strong>mask_weight</strong> (<em>array-like</em><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Weights matching <code class="docutils literal notranslate"><span class="pre">mask_wavelength</span></code> (same length).</p></li>
+<li><p><strong>mask_ccf_pixel_interp_order</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">3</span></code>. <strong>Mask algorithm only:</strong> Lanczos parameter <em>a</em> (<code class="docutils literal notranslate"><span class="pre">1</span></code> = linear;
+<code class="docutils literal notranslate"><span class="pre">3</span></code> = Lanczos-3 windowed-sinc in pixel-index space) for sampling flux and the
+per-pixel gate onto Doppler-shifted mask-line wavelengths in
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba" title="hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba"><code class="xref py py-func docutils literal notranslate"><span class="pre">_calc_mask_ccf_chunks_numba()</span></code></a>. Values are clamped
+to <code class="docutils literal notranslate"><span class="pre">[1,</span> <span class="pre">ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]</span></code>. Values <strong>greater than 1</strong> use
+Lanczos-<em>a</em> (not historical Lagrange polynomials).</p></li>
+<li><p><strong>window_size_um</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">0.25</span></code>. Approximate wavelength span (µm) of each <strong>chunk</strong> along an order:
+spectra are split into contiguous bins of roughly this width for per-chunk RVs (template
+algorithm) or mask CCF chunking (mask algorithm).</p></li>
+<li><p><strong>outlier_sigma</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">3.0</span></code>. Multiplier for error-aware chunk rejection before the
+inverse-variance weighted mean: keep chunks with
+<code class="docutils literal notranslate"><span class="pre">|RV</span> <span class="pre">−</span> <span class="pre">center|</span> <span class="pre">&lt;=</span> <span class="pre">outlier_sigma</span> <span class="pre">*</span> <span class="pre">max(MAD,</span> <span class="pre">σ_i)</span></code> (see
+<a class="reference internal" href="hispecdrp.primitives.stellar_rv.rv_combine_utils.html#hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_stellar_rv_chunk_estimates" title="hispecdrp.primitives.stellar_rv.rv_combine_utils.combine_stellar_rv_chunk_estimates"><code class="xref py py-func docutils literal notranslate"><span class="pre">combine_stellar_rv_chunk_estimates()</span></code></a>).</p></li>
+<li><p><strong>chunk_rv_max_abs_m_s</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">120000.0</span></code> (120 km s<sup>−1</sup>). Per-chunk RVs with <code class="docutils literal notranslate"><span class="pre">|RV|</span></code> above this limit
+are excluded before aggregation (coarse-grid CCF alias peaks). Set very large to disable.
+Ignored when <code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code> is set (prior gate used instead).</p></li>
+<li><p><strong>chunk_rv_prior_half_width_m_s</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. When <code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code> is set, keep only chunks with
+<code class="docutils literal notranslate"><span class="pre">|RV</span> <span class="pre">−</span> <span class="pre">ccf_input_velocity|</span> <span class="pre">&lt;=</span> <span class="pre">half_width</span></code> before aggregation. <code class="docutils literal notranslate"><span class="pre">None</span></code> uses
+<code class="docutils literal notranslate"><span class="pre">max(2000,</span> <span class="pre">0.5</span> <span class="pre">×</span> <span class="pre">v_half_window)</span></code> m/s.</p></li>
+<li><p><strong>window_line_by_line</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">True</span></code>. <strong>Line-mask algorithm only</strong> (<code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code>). Ignored for
+<code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code> (that path always chunks on <code class="docutils literal notranslate"><span class="pre">window_size_um</span></code>). When <code class="docutils literal notranslate"><span class="pre">False</span></code>,
+chunk boundaries follow <code class="docutils literal notranslate"><span class="pre">window_size_um</span></code> via
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span" title="hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span"><code class="xref py py-func docutils literal notranslate"><span class="pre">ccf_order_n_chunks_for_span()</span></code></a>.
+When <code class="docutils literal notranslate"><span class="pre">True</span></code>, each mask line defines its own wavelength chunk (Voronoi bins in observed λ
+at <code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code>, which must be finite — grid center). Spectral pixels
+per chunk use the intersection of that Voronoi interval with a symmetric <code class="docutils literal notranslate"><span class="pre">window_size_um</span></code>
+band; see <a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line" title="hispecdrp.primitives.utils.ccf.ccf_utils.build_line_mask_chunk_wavelength_intervals_line_by_line"><code class="xref py py-func docutils literal notranslate"><span class="pre">build_line_mask_chunk_wavelength_intervals_line_by_line()</span></code></a>.</p></li>
+<li><p><strong>v_min_coarse</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Broad uniform CCF lower bound (m/s) when no center is set (scout /
+full-range search). <code class="docutils literal notranslate"><span class="pre">None</span></code> → <code class="xref py py-data docutils literal notranslate"><span class="pre">V_MIN_DEFAULT_M_S</span></code>.</p></li>
+<li><p><strong>v_max_coarse</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Broad uniform CCF upper bound (m/s). <code class="docutils literal notranslate"><span class="pre">None</span></code> → <code class="docutils literal notranslate"><span class="pre">V_MAX_DEFAULT_M_S</span></code>.</p></li>
+<li><p><strong>v_step_coarse</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">25.0</span></code>. Uniform velocity sampling (m/s) for <strong>both</strong> the broad and centered
+grids. <code class="docutils literal notranslate"><span class="pre">None</span></code> → <code class="xref py py-data docutils literal notranslate"><span class="pre">V_STEP_DEFAULT_M_S</span></code>.</p></li>
+<li><p><strong>ccf_input_velocity</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. If set (m/s), the CCF uses a <strong>uniform</strong> window centered here:
+<code class="docutils literal notranslate"><span class="pre">[ccf_input_velocity</span> <span class="pre">−</span> <span class="pre">v_half_window,</span> <span class="pre">ccf_input_velocity</span> <span class="pre">+</span> <span class="pre">v_half_window]</span></code> at
+<code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code>. If <code class="docutils literal notranslate"><span class="pre">None</span></code>, a scout pass on the broad uniform grid estimates the
+peak, then the fiber is evaluated on a centered window (<code class="docutils literal notranslate"><span class="pre">v_half_window</span></code> at
+<code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code>).</p></li>
+<li><p><strong>v_half_window</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">15000.0</span></code>. Half-width (m/s) of the centered uniform velocity window
+(±this value around <code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code> or the auto-scout center).</p></li>
+<li><p><strong>ccf_zb</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">0.0</span></code>. <strong>Both algorithms:</strong> barycentric factor <span class="math notranslate nohighlight">\(z_b\)</span>. For <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code>
+it enters <span class="math notranslate nohighlight">\(\lambda_{\rm obs} = \lambda_{\rm rest}(1+v/c)/(1+z_b)\)</span> (<code class="docutils literal notranslate"><span class="pre">zb</span></code> in
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber" title="hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber"><code class="xref py py-func docutils literal notranslate"><span class="pre">run_ccf_line_mask_for_fiber()</span></code></a> /
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask" title="hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask"><code class="xref py py-func docutils literal notranslate"><span class="pre">rv_per_chunks_line_mask()</span></code></a>). For <code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>
+it applies the same multiplicative shift in <span class="math notranslate nohighlight">\(\ln\lambda\)</span> template evaluation as in
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba" title="hispecdrp.primitives.utils.ccf.ccf_utils._ccf_chunk_ccf_numba"><code class="xref py py-func docutils literal notranslate"><span class="pre">_ccf_chunk_ccf_numba()</span></code></a>.
+Set by the caller or pipeline (e.g. <a class="reference internal" href="hispecdrp.pipelines.stage2.stage2_pipeline.html#hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline" title="hispecdrp.pipelines.stage2.stage2_pipeline.Stage2Pipeline"><code class="xref py py-class docutils literal notranslate"><span class="pre">Stage2Pipeline</span></code></a>
+populates this from <code class="docutils literal notranslate"><span class="pre">BARYCORR</span></code> <code class="docutils literal notranslate"><span class="pre">BERV</span></code> when not overridden).</p></li>
+<li><p><strong>ccf_min_good_pixels</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">9</span></code>. <strong>Both algorithms:</strong> minimum unmasked finite spectral pixels per
+<strong>wavelength chunk</strong> (chunking from <code class="docutils literal notranslate"><span class="pre">window_size_um</span></code> via
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span" title="hispecdrp.primitives.utils.ccf.ccf_utils.ccf_order_n_chunks_for_span"><code class="xref py py-func docutils literal notranslate"><span class="pre">ccf_order_n_chunks_for_span()</span></code></a>, or from
+<code class="docutils literal notranslate"><span class="pre">window_line_by_line</span></code> Voronoi bins) required to form
+a CCF and fit an RV. For <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code> this is <code class="docutils literal notranslate"><span class="pre">min_good_pixels</span></code> in
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask" title="hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask"><code class="xref py py-func docutils literal notranslate"><span class="pre">rv_per_chunks_line_mask()</span></code></a>; for <code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>
+it gates the Numba per-chunk CCF and the Python per-chunk fit. Overlay debug HTML uses the
+same threshold for chunk inclusion.</p></li>
+<li><p><strong>output_model</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">"L2Model"</span></code>. Datamodel type name passed to
+<a class="reference internal" href="hispecdrp.primitives.base_primitive.html#hispecdrp.primitives.base_primitive.BasePrimitive.get_output_model" title="hispecdrp.primitives.base_primitive.BasePrimitive.get_output_model"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_output_model()</span></code></a> when cloning
+the input to attach RVCCF tables.</p></li>
+<li><p><strong>max_cores</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a><em> or </em><em>None</em>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code>. Upper bound on parallel <strong>Numba</strong> threads: template path uses it for
+echelle-order parallelism; mask path passes it to
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber" title="hispecdrp.primitives.utils.ccf.ccf_utils.run_ccf_line_mask_for_fiber"><code class="xref py py-func docutils literal notranslate"><span class="pre">run_ccf_line_mask_for_fiber()</span></code></a> / chunk loops.
+<code class="docutils literal notranslate"><span class="pre">None</span></code> lets <a class="reference internal" href="hispecdrp.utils.parallelization_utils.html#hispecdrp.utils.parallelization_utils.resolve_numba_threads" title="hispecdrp.utils.parallelization_utils.resolve_numba_threads"><code class="xref py py-func docutils literal notranslate"><span class="pre">resolve_numba_threads()</span></code></a> pick a
+host-appropriate count; <code class="docutils literal notranslate"><span class="pre">1</span></code> forces single-threaded, reproducible runs.</p></li>
+<li><p><strong>debug_ccf</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">False</span></code>. Extra logging and diagnostics. For <code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>, forces
+the slower non-Numba CCF path instead of the parallel driver.</p></li>
+<li><p><strong>preview_write_png</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">True</span></code>. When <code class="docutils literal notranslate"><span class="pre">save_preview</span></code> is True, also write a stacked Kaleido PNG
+alongside the HTML preview. Set False for large line-mask runs (many CCF slots) where
+PNG export can take minutes or hang in headless Chrome.</p></li>
+<li><p><strong>preview_png_scale</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">2.0</span></code>. Pixel scale multiplier for Kaleido PNG exports when <code class="docutils literal notranslate"><span class="pre">save_preview</span></code> and
+<code class="docutils literal notranslate"><span class="pre">preview_write_png</span></code> are True (see <a class="reference internal" href="hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview.html#module-hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview" title="hispecdrp.primitives.stellar_rv.previews.stellar_rv_preview"><code class="xref py py-mod docutils literal notranslate"><span class="pre">stellar_rv_preview</span></code></a>).</p></li>
+<li><p><strong>show_overlay_debug</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">False</span></code>. For <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code>, open mask-overlay debug HTML in a browser; for
+<code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>, open template-overlay debug HTML. Meaning follows <code class="docutils literal notranslate"><span class="pre">algorithm</span></code>.</p></li>
+<li><p><strong>save_overlay_debug</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a>) – <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">False</span></code>. For <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code>, write mask-overlay HTML (<code class="docutils literal notranslate"><span class="pre">_output["mask_overlay_debug"]</span></code>);
+for <code class="docutils literal notranslate"><span class="pre">ccf_stellar_template</span></code>, write template-overlay HTML (<code class="docutils literal notranslate"><span class="pre">_output["template_overlay_debug"]</span></code>).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._combine_chunk_rvs">
+<span class="sig-name descname"><span class="pre">_combine_chunk_rvs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">all_rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">all_rv_errs</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._combine_chunk_rvs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._combine_chunk_rvs" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._combine_chunk_rvs'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Robust per-fiber aggregate from chunk RV arrays (sanity gate + MAD + weighted mean).</p>
+<p>Returns <code class="docutils literal notranslate"><span class="pre">(inlier_mask,</span> <span class="pre">rv_mean_m_s,</span> <span class="pre">rv_std_m_s)</span></code>.</p>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._create_preview">
+<span class="sig-name descname"><span class="pre">_create_preview</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._create_preview"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._create_preview" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._create_preview'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd></dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._get_spectrograph">
+<span class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">_get_spectrograph</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_model</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._get_spectrograph"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._get_spectrograph" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._get_spectrograph'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Return spectrograph name from model metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>input_model</strong> (<a class="reference internal" href="hispecdrp.datamodels.base_model.html#hispecdrp.datamodels.base_model.DataModel" title="hispecdrp.datamodels.base_model.DataModel"><em>DataModel</em></a>) – Input data model with meta.spectrograph.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>str</strong> – “BSPEC” or “RSPEC” if present in metadata; otherwise “BSPEC”.</p>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber">
+<span class="sig-name descname"><span class="pre">_process_fiber</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spectrograph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">do_orders</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">order_vec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_ln</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_flux</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._process_fiber"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Run the configured stellar RV algorithm for one fiber and write RVCCF/RVCCFAVG.</p>
+<p>Dispatches to the algorithm named in <code class="docutils literal notranslate"><span class="pre">self.algorithm</span></code> (see <code class="docutils literal notranslate"><span class="pre">STELLAR_RV_ALGORITHMS</span></code>).
+The algorithm returns per-chunk arrays, aggregate RV, and optional per-chunk CCF
+supplement columns; this method writes <code class="docutils literal notranslate"><span class="pre">RVCCF_FIB{fiber}</span></code> (merged RV + CCF)
+and <code class="docutils literal notranslate"><span class="pre">RVCCFAVG_FIB{fiber}</span></code> to the output model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>input_model</strong> (<a class="reference internal" href="hispecdrp.datamodels.base_model.html#hispecdrp.datamodels.base_model.DataModel" title="hispecdrp.datamodels.base_model.DataModel"><em>DataModel</em></a>) – Open L2 (or compatible) model with per-fiber <code class="docutils literal notranslate"><span class="pre">SPEC_FIB*</span></code> / <code class="docutils literal notranslate"><span class="pre">WAVE_FIB*</span></code> (and
+optional ERR/DQ). Used to read science data for the chosen fiber.</p></li>
+<li><p><strong>output_model</strong> (<a class="reference internal" href="hispecdrp.datamodels.base_model.html#hispecdrp.datamodels.base_model.DataModel" title="hispecdrp.datamodels.base_model.DataModel"><em>DataModel</em></a>) – Cloned L2 output; receives Astropy tables on attributes <code class="docutils literal notranslate"><span class="pre">rvccf_fib*</span></code> /
+<code class="docutils literal notranslate"><span class="pre">rvccfavg_fib*</span></code> (framework naming).</p></li>
+<li><p><strong>fiber</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Fiber id string, e.g. <code class="docutils literal notranslate"><span class="pre">"1"</span></code>, matching attribute suffixes <code class="docutils literal notranslate"><span class="pre">_FIB1</span></code>.</p></li>
+<li><p><strong>spectrograph</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – <code class="docutils literal notranslate"><span class="pre">"BSPEC"</span></code> or <code class="docutils literal notranslate"><span class="pre">"RSPEC"</span></code> from metadata; stored in RV tables for downstream.</p></li>
+<li><p><strong>do_orders</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#list" title="(in Python v3.15)"><em>list</em></a><em> of </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a>) – Echelle order numbers to include in the CCF (subset of <code class="docutils literal notranslate"><span class="pre">order_vec</span></code>).</p></li>
+<li><p><strong>order_vec</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#list" title="(in Python v3.15)"><em>list</em></a><em> of </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a>) – Map from echelle row index to physical order number (one entry per spectral row).</p></li>
+<li><p><strong>template_ln</strong> (<em>np.ndarray</em>) – Natural log of template wavelength in <strong>microns</strong>; used by template algorithm.
+For <code class="docutils literal notranslate"><span class="pre">ccf_line_mask</span></code> this is an empty placeholder array.</p></li>
+<li><p><strong>template_flux</strong> (<em>np.ndarray</em>) – Template flux aligned with <code class="docutils literal notranslate"><span class="pre">template_ln</span></code>; empty for mask-only algorithm.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber_orders">
+<span class="sig-name descname"><span class="pre">_process_fiber_orders</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">order_tasks</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wave</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">err</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">do_not_use</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_ln</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_flux</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_cores</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">want_preview</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v_min_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-500000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v_max_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">500000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v_step_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ccf_center_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ccf_half_window_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">20000.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._process_fiber_orders"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber_orders" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber_orders'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Single driver for per-order chunk RVs: <code class="docutils literal notranslate"><span class="pre">mode</span></code> is <code class="docutils literal notranslate"><span class="pre">debug</span></code> (Python
+<code class="docutils literal notranslate"><span class="pre">masked_ccf_rv</span></code> per chunk) or <code class="docutils literal notranslate"><span class="pre">parallel</span></code> (Numba). When <code class="docutils literal notranslate"><span class="pre">want_preview</span></code> is
+True, the parallel path reuses the flat CCF stack for the preview dict; debug
++ preview uses <code class="xref py py-func docutils literal notranslate"><span class="pre">build_ccf_preview_dict()</span></code> with <code class="docutils literal notranslate"><span class="pre">kind="spectra_orders"</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>order_tasks</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#list" title="(in Python v3.15)"><em>list</em></a><em> of </em><a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple" title="(in Python v3.15)"><em>tuple</em></a>) – <code class="docutils literal notranslate"><span class="pre">(row_index,</span> <span class="pre">order_number)</span></code> for each echelle row to process (already filtered
+by <code class="docutils literal notranslate"><span class="pre">do_orders</span></code>).</p></li>
+<li><p><strong>wave</strong> (<em>np.ndarray</em>) – 2D echelle data for the fiber: wavelength, flux, error, and DQ (same shape).</p></li>
+<li><p><strong>spec</strong> (<em>np.ndarray</em>) – 2D echelle data for the fiber: wavelength, flux, error, and DQ (same shape).</p></li>
+<li><p><strong>err</strong> (<em>np.ndarray</em>) – 2D echelle data for the fiber: wavelength, flux, error, and DQ (same shape).</p></li>
+<li><p><strong>dq</strong> (<em>np.ndarray</em>) – 2D echelle data for the fiber: wavelength, flux, error, and DQ (same shape).</p></li>
+<li><p><strong>do_not_use</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a>) – DQ bitmask for pixels to exclude from CCF (typically <code class="docutils literal notranslate"><span class="pre">DQ_FLAGS["DO_NOT_USE"]</span></code>).</p></li>
+<li><p><strong>template_ln</strong> (<em>np.ndarray</em>) – Template in log(µm) and flux for CCF (same length).</p></li>
+<li><p><strong>template_flux</strong> (<em>np.ndarray</em>) – Template in log(µm) and flux for CCF (same length).</p></li>
+<li><p><strong>fiber</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Fiber id for logging.</p></li>
+<li><p><strong>mode</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – <code class="docutils literal notranslate"><span class="pre">"debug"</span></code> (verbose diagnostics) or <code class="docutils literal notranslate"><span class="pre">"parallel"</span></code> (Numba).</p></li>
+<li><p><strong>max_cores</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a><em> or </em><em>None</em><em>, </em><em>optional</em>) – Effective thread count for parallel mode (already resolved/capped).</p></li>
+<li><p><strong>want_preview</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to build the mean + per-order CCF preview structure for Plotly.</p></li>
+<li><p><strong>v_min_m_s</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Uniform CCF velocity axis (m/s): broad search from the primitive’s
+<code class="docutils literal notranslate"><span class="pre">v_min_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_max_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code> (after defaults).
+When <code class="docutils literal notranslate"><span class="pre">ccf_center_m_s</span></code> is set, <code class="docutils literal notranslate"><span class="pre">v_step_m_s</span></code> samples the centered window.</p></li>
+<li><p><strong>v_max_m_s</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Uniform CCF velocity axis (m/s): broad search from the primitive’s
+<code class="docutils literal notranslate"><span class="pre">v_min_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_max_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code> (after defaults).
+When <code class="docutils literal notranslate"><span class="pre">ccf_center_m_s</span></code> is set, <code class="docutils literal notranslate"><span class="pre">v_step_m_s</span></code> samples the centered window.</p></li>
+<li><p><strong>v_step_m_s</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Uniform CCF velocity axis (m/s): broad search from the primitive’s
+<code class="docutils literal notranslate"><span class="pre">v_min_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_max_coarse</span></code> / <code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code> (after defaults).
+When <code class="docutils literal notranslate"><span class="pre">ccf_center_m_s</span></code> is set, <code class="docutils literal notranslate"><span class="pre">v_step_m_s</span></code> samples the centered window.</p></li>
+<li><p><strong>ccf_center_m_s</strong> – When <code class="docutils literal notranslate"><span class="pre">ccf_center_m_s</span></code> is not <code class="docutils literal notranslate"><span class="pre">None</span></code>, build a uniform window via
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.build_centered_uniform_velocity_grid" title="hispecdrp.primitives.utils.ccf.ccf_utils.build_centered_uniform_velocity_grid"><code class="xref py py-func docutils literal notranslate"><span class="pre">build_centered_uniform_velocity_grid()</span></code></a>
+(<code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code>, <code class="docutils literal notranslate"><span class="pre">v_half_window</span></code>, <code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code> on the primitive).</p></li>
+<li><p><strong>ccf_half_window_m_s</strong> – When <code class="docutils literal notranslate"><span class="pre">ccf_center_m_s</span></code> is not <code class="docutils literal notranslate"><span class="pre">None</span></code>, build a uniform window via
+<a class="reference internal" href="hispecdrp.primitives.utils.ccf.ccf_utils.html#hispecdrp.primitives.utils.ccf.ccf_utils.build_centered_uniform_velocity_grid" title="hispecdrp.primitives.utils.ccf.ccf_utils.build_centered_uniform_velocity_grid"><code class="xref py py-func docutils literal notranslate"><span class="pre">build_centered_uniform_velocity_grid()</span></code></a>
+(<code class="docutils literal notranslate"><span class="pre">ccf_input_velocity</span></code>, <code class="docutils literal notranslate"><span class="pre">v_half_window</span></code>, <code class="docutils literal notranslate"><span class="pre">v_step_coarse</span></code> on the primitive).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>tuple</strong> – <code class="docutils literal notranslate"><span class="pre">(all_rvs,</span> <span class="pre">all_rv_errs,</span> <span class="pre">all_wavelengths,</span> <span class="pre">all_orders,</span> <span class="pre">preview_detail,</span> <span class="pre">rvccf_chunk_supplement)</span></code> —
+lists of per-chunk quantities (same length), optional preview dict, and
+optional CCF supplement table (merged into <code class="docutils literal notranslate"><span class="pre">RVCCF_FIB*</span></code> by <code class="docutils literal notranslate"><span class="pre">_write_rv_tables</span></code>).</p>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s">
+<span class="sig-name descname"><span class="pre">_resolve_chunk_rv_prior_half_width_m_s</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Half-width (m/s) for prior-gated chunk aggregation when a CCF center is set.</p>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask">
+<span class="sig-name descname"><span class="pre">_run_algorithm_ccf_line_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spectrograph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">do_orders</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">order_vec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_ln</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_flux</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._run_algorithm_ccf_line_mask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Line-mask CCF (SPIROU/KPF-inspired) + Gaussian RV fit.</p>
+<p>Minimal delegation to <code class="xref py py-func docutils literal notranslate"><span class="pre">run_ccf_line_mask_for_fiber()</span></code>.</p>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_stellar_template">
+<span class="sig-name descname"><span class="pre">_run_algorithm_ccf_stellar_template</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spectrograph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">do_orders</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">order_vec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_ln</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_flux</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._run_algorithm_ccf_stellar_template"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_stellar_template" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_stellar_template'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Stellar-template cross-correlation + median/MAD + inverse-variance weighted mean.</p>
+<p>Cross-correlates the stellar template spectrum to the input spectrum in
+log(wavelength), producing per-chunk RVs (debug Python or Numba-parallel). Chunk RVs
+are combined with median/MAD outlier rejection and a weighted mean; CCF curves
+may be stored for the preview. Returns the standard 6-tuple for _write_rv_tables.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>all_wavelengths</strong> (<em>np.ndarray</em>) – Chunk center wavelengths (µm).</p></li>
+<li><p><strong>all_rvs</strong> (<em>np.ndarray</em>) – Per-chunk RV (m/s).</p></li>
+<li><p><strong>all_rv_errs</strong> (<em>np.ndarray</em>) – Per-chunk RV uncertainty (m/s).</p></li>
+<li><p><strong>inlier</strong> (<em>np.ndarray</em>) – Boolean mask of chunks used for the aggregate.</p></li>
+<li><p><strong>rv_mean</strong> (<em>float</em>) – Aggregated RV (m/s).</p></li>
+<li><p><strong>rv_std</strong> (<em>float</em>) – Uncertainty of the aggregated RV (m/s).</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._write_rv_tables">
+<span class="sig-name descname"><span class="pre">_write_rv_tables</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">output_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spectrograph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wavelengths</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_errs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_agg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_agg_err</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inlier</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">orders</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">rvccf_chunk_supplement</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive._write_rv_tables"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._write_rv_tables" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._write_rv_tables'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Write RVCCF_FIB{fiber} (per-chunk RV plus optional CCF columns) and RVCCFAVG_FIB{fiber}.</p>
+<p>Creates table extensions on the output L2 model with per-chunk RVs and
+the aggregated RV (mean and std). All velocities are in m/s.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>output_model</strong> (<a class="reference internal" href="hispecdrp.datamodels.base_model.html#hispecdrp.datamodels.base_model.DataModel" title="hispecdrp.datamodels.base_model.DataModel"><em>DataModel</em></a>) – L2 output model to update.</p></li>
+<li><p><strong>fiber</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Fiber number (e.g. “1”).</p></li>
+<li><p><strong>spectrograph</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – “BSPEC” or “RSPEC”.</p></li>
+<li><p><strong>wavelengths</strong> (<em>np.ndarray</em>) – Chunk center wavelengths (µm).</p></li>
+<li><p><strong>rvs</strong> (<em>np.ndarray</em>) – Per-chunk radial velocity (m/s).</p></li>
+<li><p><strong>rv_errs</strong> (<em>np.ndarray</em>) – Per-chunk RV uncertainty (m/s).</p></li>
+<li><p><strong>rv_agg</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Aggregated RV (e.g. weighted mean) in m/s.</p></li>
+<li><p><strong>rv_agg_err</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Uncertainty of the aggregated RV in m/s.</p></li>
+<li><p><strong>inlier</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – Boolean mask of chunks used for the aggregate; used for table only.</p></li>
+<li><p><strong>orders</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – Echelle order number per chunk (same length as <code class="docutils literal notranslate"><span class="pre">rvs</span></code>). -1 if unknown.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive.resolve_ccf_zb_for_fiber">
+<span class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">resolve_ccf_zb_for_fiber</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">primitive</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fiber</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/stellar_rv_primitive.html#StellarRVPrimitive.resolve_ccf_zb_for_fiber"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive.resolve_ccf_zb_for_fiber" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive.resolve_ccf_zb_for_fiber'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Return the uniform CCF <span class="math notranslate nohighlight">\(z_b\)</span> for previews and overlays.</p>
+<p><code class="docutils literal notranslate"><span class="pre">fiber</span></code> is accepted for API compatibility; all fibers share
+<code class="docutils literal notranslate"><span class="pre">primitive.ccf_zb</span></code>.</p>
+</dd></dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted">
+<span class="sig-name descname"><span class="pre">combine_rv_estimates_median_mad_weighted</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_errs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outlier_sigma</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4.0</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">center_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_err_inflation</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3.5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/rv_combine_utils.html#combine_rv_estimates_median_mad_weighted"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Error-aware robust rejection, inverse-variance mean, and IVW uncertainty.</p>
+<p>Outlier rejection uses the <strong>uninflated</strong> per-chunk <code class="docutils literal notranslate"><span class="pre">rv_errs</span></code> with
+<a class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad" title="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad"><code class="xref py py-func docutils literal notranslate"><span class="pre">combine_rvs_median_mad()</span></code></a> (<code class="docutils literal notranslate"><span class="pre">|Δ|</span> <span class="pre">&lt;=</span> <span class="pre">outlier_sigma</span> <span class="pre">*</span> <span class="pre">max(MAD,</span> <span class="pre">σ_i)</span></code>).
+Per-chunk <code class="docutils literal notranslate"><span class="pre">rv_errs</span></code> are scaled by <code class="docutils literal notranslate"><span class="pre">rv_err_inflation</span></code> only for IVW
+<em>weights</em> (default 3.5) so the mean is not dominated by underdispersed
+formal σ. The reported <code class="docutils literal notranslate"><span class="pre">rv_std</span></code> is
+<span class="math notranslate nohighlight">\(\max(\sigma_{\mathrm{IVW}},\,\mathrm{MAD}/\sqrt{N})\)</span> of the
+inliers: photon-weighted IVW when it is honest, and the empirical line
+scatter when formal σ are optimistic or systematics dominate.
+As per-chunk σ → 0 (infinite S/N), this converges to <code class="docutils literal notranslate"><span class="pre">MAD/√N</span></code>.
+If the median formal σ is &gt;10⁶× the inlier MAD (broken Hessian), IVW is
+discarded and <code class="docutils literal notranslate"><span class="pre">MAD/√N</span></code> is reported.
+Inflated IVW SE and empirical <code class="docutils literal notranslate"><span class="pre">MAD/√N</span></code> are returned as <code class="docutils literal notranslate"><span class="pre">rv_std_internal</span></code>
+and <code class="docutils literal notranslate"><span class="pre">scatter_se</span></code> for diagnostics.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad">
+<span class="sig-name descname"><span class="pre">combine_rvs_median_mad</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_errs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outlier_sigma</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4.0</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">center_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/rv_combine_utils.html#combine_rvs_median_mad"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Error-aware robust outlier mask on per-chunk RVs.</p>
+<p>Chunks with finite <code class="docutils literal notranslate"><span class="pre">rvs</span></code> and positive <code class="docutils literal notranslate"><span class="pre">rv_errs</span></code> set the rejection center
+(sample median, or <code class="docutils literal notranslate"><span class="pre">center_m_s</span></code> when finite) and the ensemble MAD. A chunk
+is kept when</p>
+<p><code class="docutils literal notranslate"><span class="pre">|RV</span> <span class="pre">−</span> <span class="pre">center|</span> <span class="pre">&lt;=</span> <span class="pre">outlier_sigma</span> <span class="pre">*</span> <span class="pre">max(MAD,</span> <span class="pre">σ_i)</span></code></p>
+<p>so points that agree within the MAD are never rejected, while points that are
+both outside the MAD envelope and inconsistent with their own formal <code class="docutils literal notranslate"><span class="pre">σ_i</span></code>
+are rejected. Invalid chunks are marked not inlier.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_stellar_rv_chunk_estimates">
+<span class="sig-name descname"><span class="pre">combine_stellar_rv_chunk_estimates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_errs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outlier_sigma</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4.0</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_rv_max_abs_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">120000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_rv_prior_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_rv_prior_half_width_m_s</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">median_fallback_sigma</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/rv_combine_utils.html#combine_stellar_rv_chunk_estimates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_stellar_rv_chunk_estimates" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_stellar_rv_chunk_estimates'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Aggregate per-chunk RVs for <a class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive" title="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive"><code class="xref py py-class docutils literal notranslate"><span class="pre">StellarRVPrimitive</span></code></a>.</p>
+<p>Applies a <strong>sanity gate</strong>, error-aware MAD rejection
+(<code class="docutils literal notranslate"><span class="pre">|Δ|</span> <span class="pre">&lt;=</span> <span class="pre">outlier_sigma</span> <span class="pre">*</span> <span class="pre">max(MAD,</span> <span class="pre">σ_i)</span></code>), and inverse-variance weighting
+(<a class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted" title="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted"><code class="xref py py-func docutils literal notranslate"><span class="pre">combine_rv_estimates_median_mad_weighted()</span></code></a>). The reported aggregate
+<code class="docutils literal notranslate"><span class="pre">rv_std</span></code> is <span class="math notranslate nohighlight">\(\max(\sigma_{\mathrm{IVW}},\,\mathrm{MAD}/\sqrt{N})\)</span>
+of the inliers.</p>
+<p>When <code class="docutils literal notranslate"><span class="pre">chunk_rv_prior_m_s</span></code> is finite, the gate keeps <code class="docutils literal notranslate"><span class="pre">|RV</span> <span class="pre">−</span> <span class="pre">prior|</span> <span class="pre">&lt;=</span> <span class="pre">half_width</span></code> (default
+<code class="docutils literal notranslate"><span class="pre">DEFAULT_CHUNK_RV_PRIOR_HALF_WIDTH_M_S</span></code>) and MAD rejection is anchored to the prior. Otherwise
+the gate uses <code class="docutils literal notranslate"><span class="pre">|RV|</span> <span class="pre">&lt;=</span> <span class="pre">chunk_rv_max_abs_m_s</span></code> and the sample median anchors MAD rejection.</p>
+<p>When the weighted mean disagrees with the inlier median by more than
+<code class="docutils literal notranslate"><span class="pre">median_fallback_sigma</span> <span class="pre">×</span> <span class="pre">MAD</span></code>, the median is used for the aggregate RV (guards against
+alias peaks with underestimated formal errors on coarse CCF grids); the reported
+uncertainty remains the IVW SE.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.weighted_mean_rv">
+<span class="sig-name descname"><span class="pre">weighted_mean_rv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rvs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rv_errs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inlier</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/stellar_rv/rv_combine_utils.html#weighted_mean_rv"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.weighted_mean_rv" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.weighted_mean_rv'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Inverse-variance weighted mean RV and error on the mean.</p>
+</dd></dl>
+</section>
+</div></div><aside class="hidden text-sm xl:block" id="right-sidebar">
+<div class="sticky top-16 -mt-10 max-h-[calc(100vh-5rem)] h-full overflow-y-auto pt-6 space-y-2"><p class="font-medium">On this page</p>
+<ul>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive</span></code></a><ul>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._combine_chunk_rvs'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._combine_chunk_rvs"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._combine_chunk_rvs()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._create_preview'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._create_preview"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._create_preview()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._get_spectrograph'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._get_spectrograph"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._get_spectrograph()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._process_fiber()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber_orders'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._process_fiber_orders"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._process_fiber_orders()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._resolve_chunk_rv_prior_half_width_m_s()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_line_mask"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._run_algorithm_ccf_line_mask()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_stellar_template'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._run_algorithm_ccf_stellar_template"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._run_algorithm_ccf_stellar_template()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._write_rv_tables'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive._write_rv_tables"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive._write_rv_tables()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive.resolve_ccf_zb_for_fiber'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive.resolve_ccf_zb_for_fiber"><code class="docutils literal notranslate"><span class="pre">StellarRVPrimitive.resolve_ccf_zb_for_fiber()</span></code></a></li>
+</ul>
+</li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rv_estimates_median_mad_weighted"><code class="docutils literal notranslate"><span class="pre">combine_rv_estimates_median_mad_weighted()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_rvs_median_mad"><code class="docutils literal notranslate"><span class="pre">combine_rvs_median_mad()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_stellar_rv_chunk_estimates'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.combine_stellar_rv_chunk_estimates"><code class="docutils literal notranslate"><span class="pre">combine_stellar_rv_chunk_estimates()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.weighted_mean_rv'" class="reference internal" href="#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.weighted_mean_rv"><code class="docutils literal notranslate"><span class="pre">weighted_mean_rv()</span></code></a></li>
+</ul>
+</div>
+</aside>
+</main>
+</div>
+</div><footer class="py-6 border-t border-border md:py-0">
+<div class="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+<div class="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+<p class="text-sm leading-loose text-center text-muted-foreground md:text-left">© 2025, HISPEC DRP Team Built with <a class="font-medium underline underline-offset-4" href="https://www.sphinx-doc.org" rel="noreferrer">Sphinx 9.1.0</a></p>
+</div>
+</div>
+</footer>
+</div>
+<script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+<script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+<script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+<script defer="defer" src="../../_static/theme.js?v=582b20c5"></script>
+<script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+<script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+<script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+<script src="../../_static/notebook_embeds.90d683dfd339.js?v=8d1fbc6d"></script>
+<script src="../../_static/download_notebook.js?v=df93580d"></script>
+</body>
+</html>

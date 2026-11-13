@@ -1,0 +1,28 @@
+hispecdrp.primitives.utils.ccf.ccf\_bisector
+============================================
+
+.. automodule:: hispecdrp.primitives.utils.ccf.ccf_bisector
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      _calc_bis
+      _ccf_bisector_cut_m_s
+      _ccf_bisector_discretization_sigma_m_s
+      _ccf_bisector_wing_crossing_m_s
+      _ccf_bisector_wing_velocity_m_s
+      _ccf_bisector_wing_velocity_uncertainty_m_s
+      _find_ccf_level
+      _interp_x_at_y
+      _refine_ccf_rv_bisector_after_gaussian_fit
+      calc_bisector_inverse_slope
+      fit_ccf_rv_bisector
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      CCFBisectorConfig
+   

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+
+<html :class="{ 'dark' : darkMode === true }" data-content_root="../../" lang="en" x-data="{ darkMode: $persist(window.matchMedia('(prefers-color-scheme: dark)').matches), activeSection: ''}">
+<head>
+<script>
+    (function () {
+      // Set initial color scheme
+      if ((localStorage.getItem("_x_darkMode") === "true") || (window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Watch for media preference changes
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+        localStorage.setItem("_x_darkMode", event.matches);
+        document.documentElement.classList.toggle("dark", event.matches);
+      });
+    })();
+  </script>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta charset="utf-8"/>
+<meta content="#ffffff" media="(prefers-color-scheme: light)" name="theme-color"/>
+<meta content="#030711" media="(prefers-color-scheme: dark)" name="theme-color"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>hispecdrp.primitives.utils.spectral_utils | HISPEC DRP  documentation</title>
+<meta content="hispecdrp.primitives.utils.spectral_utils | HISPEC DRP  documentation" property="og:title"/>
+<meta content="hispecdrp.primitives.utils.spectral_utils | HISPEC DRP  documentation" name="twitter:title"/>
+<link href="../../_static/pygments.css?v=d862e8e8" rel="stylesheet" type="text/css"/>
+<link href="../../_static/pygments_dark.css" id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css"/>
+<link href="../../_static/theme.css?v=73505e79" rel="stylesheet" type="text/css"/>
+<link href="../../_static/custom.css?v=228efd53" rel="stylesheet" type="text/css"/>
+<link href="https://oirlab.github.io/HISPEC_DRP/api/generated/hispecdrp.primitives.utils.spectral_utils.html" rel="canonical"/>
+<link href="../../search.html" rel="search" title="Search"/>
+<link href="../../genindex.html" rel="index" title="Index"/>
+<link href="hispecdrp.primitives.utils.stats.html" rel="next" title="hispecdrp.primitives.utils.stats"/>
+<link href="hispecdrp.primitives.utils.linear_interp.html" rel="prev" title="hispecdrp.primitives.utils.linear_interp"/>
+</head>
+<body :class="{ 'overflow-hidden': showSidebar }" class="min-h-screen font-sans antialiased bg-background text-foreground" x-data="{ showSidebar: false, showScrollTop: false }">
+<div @click.self="showSidebar = false" class="fixed inset-0 z-50 overflow-hidden bg-background/80 backdrop-blur-sm md:hidden" x-cloak="" x-show="showSidebar"></div><div class="relative flex flex-col min-h-screen" id="page"><a class="absolute top-0 left-0 z-[100] block bg-background p-4 text-xl transition -translate-x-full opacity-0 focus:translate-x-0 focus:opacity-100" href="#content">
+      Skip to content
+    </a><header class="sticky top-0 z-40 w-full border-b shadow-xs border-border bg-background/90 backdrop-blur"><div class="container flex items-center h-14">
+<div class="hidden mr-4 md:flex">
+<a class="flex items-center mr-6" href="../../index.html"><span class="hidden font-bold sm:inline-block text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a></div><button @click="showSidebar = true" class="inline-flex items-center justify-center h-10 px-0 py-2 mr-2 text-base font-medium transition-colors rounded-md hover:text-accent-foreground hover:bg-transparent md:hidden" type="button">
+<svg aria-hidden="true" fill="currentColor" height="24" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M152.587 825.087q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440Zm0-203.587q-19.152 0-32.326-13.174T107.087 576q0-19.152 13.174-32.326t32.326-13.174h320q19.152 0 32.326 13.174T518.087 576q0 19.152-13.174 32.326T472.587 621.5h-320Zm0-203.587q-19.152 0-32.326-13.174t-13.174-32.326q0-19.152 13.174-32.326t32.326-13.174h440q19.152 0 32.326 13.174t13.174 32.326q0 19.152-13.174 32.326t-32.326 13.174h-440ZM708.913 576l112.174 112.174q12.674 12.674 12.674 31.826t-12.674 31.826Q808.413 764.5 789.261 764.5t-31.826-12.674l-144-144Q600 594.391 600 576t13.435-31.826l144-144q12.674-12.674 31.826-12.674t31.826 12.674q12.674 12.674 12.674 31.826t-12.674 31.826L708.913 576Z"></path>
+</svg>
+<span class="sr-only">Toggle navigation menu</span>
+</button>
+<div class="flex items-center justify-between flex-1 gap-2 sm:gap-4 md:justify-end">
+<div class="flex-1 w-full md:w-auto md:flex-none"><form @keydown.k.window.meta="$refs.search.focus()" action="../../search.html" class="relative flex items-center group" id="searchbox" method="get">
+<input aria-label="Search the docs" class="inline-flex items-center font-medium transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-input hover:bg-accent focus:bg-accent hover:text-accent-foreground focus:text-accent-foreground hover:placeholder-accent-foreground py-2 px-4 relative h-9 w-full justify-start rounded-[0.5rem] text-sm text-muted-foreground sm:pr-12 md:w-40 lg:w-64" id="search-input" name="q" placeholder="Search ..." type="search" x-ref="search"/>
+<kbd class="pointer-events-none absolute right-1.5 top-2 hidden h-5 select-none text-muted-foreground items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex group-hover:bg-accent group-hover:text-accent-foreground">
+<span class="text-xs">⌘</span>
+    K
+  </kbd>
+</form>
+</div>
+<nav class="flex items-center gap-1">
+<button @click="darkMode = !darkMode" class="relative inline-flex items-center justify-center px-0 text-sm font-medium transition-colors rounded-md hover:bg-accent hover:text-accent-foreground h-9 w-9" title="Toggle color scheme" type="button">
+<svg class="absolute transition-all scale-100 rotate-0 dark:-rotate-90 dark:scale-0" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 685q45.456 0 77.228-31.772Q589 621.456 589 576q0-45.456-31.772-77.228Q525.456 467 480 467q-45.456 0-77.228 31.772Q371 530.544 371 576q0 45.456 31.772 77.228Q434.544 685 480 685Zm0 91q-83 0-141.5-58.5T280 576q0-83 58.5-141.5T480 376q83 0 141.5 58.5T680 576q0 83-58.5 141.5T480 776ZM80 621.5q-19.152 0-32.326-13.174T34.5 576q0-19.152 13.174-32.326T80 530.5h80q19.152 0 32.326 13.174T205.5 576q0 19.152-13.174 32.326T160 621.5H80Zm720 0q-19.152 0-32.326-13.174T754.5 576q0-19.152 13.174-32.326T800 530.5h80q19.152 0 32.326 13.174T925.5 576q0 19.152-13.174 32.326T880 621.5h-80Zm-320-320q-19.152 0-32.326-13.174T434.5 256v-80q0-19.152 13.174-32.326T480 130.5q19.152 0 32.326 13.174T525.5 176v80q0 19.152-13.174 32.326T480 301.5Zm0 720q-19.152 0-32.326-13.17Q434.5 995.152 434.5 976v-80q0-19.152 13.174-32.326T480 850.5q19.152 0 32.326 13.174T525.5 896v80q0 19.152-13.174 32.33-13.174 13.17-32.326 13.17ZM222.174 382.065l-43-42Q165.5 327.391 166 308.239t13.174-33.065q13.435-13.674 32.587-13.674t32.065 13.674l42.239 43q12.674 13.435 12.555 31.706-.12 18.272-12.555 31.946-12.674 13.674-31.445 13.413-18.772-.261-32.446-13.174Zm494 494.761-42.239-43q-12.674-13.435-12.674-32.087t12.674-31.565Q686.609 756.5 705.38 757q18.772.5 32.446 13.174l43 41.761Q794.5 824.609 794 843.761t-13.174 33.065Q767.391 890.5 748.239 890.5t-32.065-13.674Zm-42-494.761Q660.5 369.391 661 350.62q.5-18.772 13.174-32.446l41.761-43Q728.609 261.5 747.761 262t33.065 13.174q13.674 13.435 13.674 32.587t-13.674 32.065l-43 42.239q-13.435 12.674-31.706 12.555-18.272-.12-31.946-12.555Zm-495 494.761Q165.5 863.391 165.5 844.239t13.674-32.065l43-42.239q13.435-12.674 32.087-12.674t31.565 12.674Q299.5 782.609 299 801.38q-.5 18.772-13.174 32.446l-41.761 43Q231.391 890.5 212.239 890t-33.065-13.174ZM480 576Z"></path>
+</svg>
+<svg class="absolute transition-all scale-0 rotate-90 dark:rotate-0 dark:scale-100" fill="currentColor" height="16" viewbox="0 96 960 960" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 936q-151 0-255.5-104.5T120 576q0-138 90-239.5T440 218q25-3 39 18t-1 44q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q21-14 43-1.5t19 39.5q-14 138-117.5 229T480 936Zm0-80q88 0 158-48.5T740 681q-20 5-40 8t-40 3q-123 0-209.5-86.5T364 396q0-20 3-40t8-40q-78 32-126.5 102T200 576q0 116 82 198t198 82Zm-10-270Z"></path>
+</svg>
+</button>
+</nav>
+</div>
+</div>
+</header>
+<div class="flex-1"><div class="container md:grid md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10"><aside :aria-hidden="!showSidebar" :class="{ 'translate-x-0': showSidebar }" class="fixed inset-y-0 left-0 md:top-14 z-50 md:z-30 bg-background md:bg-transparent transition-all duration-100 -translate-x-full md:translate-x-0 ml-0 p-6 md:p-0 md:-ml-2 md:h-[calc(100vh-3.5rem)] w-5/6 md:w-full overflow-y-auto border-r border-border md:sticky" id="left-sidebar">
+<a class="justify-start text-sm md:!hidden bg-background" href="../../index.html"><span class="font-bold text-clip whitespace-nowrap">HISPEC DRP  documentation</span>
+</a>
+<div class="relative overflow-hidden md:overflow-auto my-4 md:my-0">
+<div class="overflow-y-auto h-full w-full relative pr-6"><nav class="table w-full min-w-full my-6 lg:my-8">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../quickstart/quickstart.html">Quickstart<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/pipelines_and_primitives.html">Run Pipelines and Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/data_handling.html">Data Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/calibration_examples.html">Working with Calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/create_simulations.html">Create Simulated HISPEC Data</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../data_products/data_products.html">Data Products<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../data_products/data_format.html">HISPEC Data Format</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../simulations/simulations.html">Simulations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/basic_usage.html">Basic Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/examples/examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulations/limitations.html">Limitations and Known Issues</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../pipelines/pipelines.html">Pipelines</a></li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../calibrations/calibrations.html">Calibrations<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/configure.html">Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../calibrations/calibration_database.html">Calibration Database</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../algorithms/algorithms.html">Algorithms<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/stellar_rv.html">Stellar RV primitive (L2)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ccf.html">Cross-correlation (CCF)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/line_mask.html">Line masks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/spectral_extraction.html">Spectral Extraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/ramp_fitting.html">Ramp Fitting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../algorithms/trace_fitting.html">Trace Fitting</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../../development/development.html">Development<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul x-cloak="" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="../../development/datamodels.html">Data Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/pipelines.html">Pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/primitives.html">Primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/selectors.html">Calibration Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../development/configuration.html">Configuration</a></li>
+</ul>
+</li>
+</ul>
+<ul class="current">
+<li class="toctree-l1 current" x-data="{ expanded: $el.classList.contains('current') ? true : false }"><a :class="{ 'expanded' : expanded }" @click="expanded = !expanded" class="reference internal expandable" href="../api.html">API Reference<button @click.prevent.stop="expanded = !expanded" type="button" x-cloak=""><span class="sr-only"></span><svg fill="currentColor" height="18px" stroke="none" viewbox="0 0 24 24" width="18px" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button></a><ul class="current" x-show="expanded">
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.processing_component.html">hispecdrp.processing_component</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="hispecdrp.primitives.html">hispecdrp.primitives</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.pipelines.html">hispecdrp.pipelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.datamodels.html">hispecdrp.datamodels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.calibrations.html">hispecdrp.calibrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.driver.html">hispecdrp.driver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hispecdrp.utils.html">hispecdrp.utils</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<button @click="showSidebar = false" class="absolute md:hidden right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100" type="button">
+<svg class="h-4 w-4" fill="currentColor" height="24" stroke="none" viewbox="0 96 960 960" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M480 632 284 828q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536 576l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480 632Z"></path>
+</svg>
+</button>
+</aside>
+<main class="relative py-6 lg:gap-10 lg:py-8 xl:grid xl:grid-cols-[1fr_300px]">
+<div class="w-full min-w-0 mx-auto">
+<nav aria-label="breadcrumbs" class="flex items-center mb-4 space-x-1 text-sm text-muted-foreground">
+<a class="overflow-hidden text-ellipsis whitespace-nowrap hover:text-foreground" href="../../index.html">
+<span class="hidden md:inline">HISPEC DRP  documentation</span>
+<svg aria-label="Home" class="md:hidden" fill="currentColor" height="18" stroke="none" viewbox="0 96 960 960" width="18" xmlns="http://www.w3.org/2000/svg">
+<path d="M240 856h120V616h240v240h120V496L480 316 240 496v360Zm-80 80V456l320-240 320 240v480H520V696h-80v240H160Zm320-350Z"></path>
+</svg>
+</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="../api.html">API Reference</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="hispecdrp.primitives.html">hispecdrp.primitives</a>
+<div class="mr-1">/</div><a class="hover:text-foreground overflow-hidden text-ellipsis whitespace-nowrap" href="hispecdrp.primitives.utils.html">hispecdrp.primitives.utils</a>
+<div class="mr-1">/</div><span aria-current="page" class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">hispecdrp.primitives.utils.spectral_utils</span>
+</nav>
+<div id="content" role="main">
+<section id="module-hispecdrp.primitives.utils.spectral_utils">
+<span id="hispecdrp-primitives-utils-spectral-utils"></span><h1>hispecdrp.primitives.utils.spectral_utils<a class="headerlink" href="#module-hispecdrp.primitives.utils.spectral_utils" title="Link to this heading"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></h1>
+<p>Spectral utilities: template I/O and wavelength / velocity / pixel conversions.</p>
+<p>Includes BT-Settl template loading for stellar CCF, plus helpers that convert
+between wavelength, velocity, and pixel deltas.</p>
+<p>Loads <strong>BT-Settl</strong>-style HDF5 spectra (<code class="docutils literal notranslate"><span class="pre">lte*.h5</span></code>), resolves paths, converts
+<strong>air ↔ vacuum</strong> wavelengths (see <a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="xref py py-func docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm()</span></code></a> and
+<a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="xref py py-func docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm()</span></code></a>), normalizes to 2MASS AB magnitudes using
+profiles from the <strong>SVO Filter Profile Service</strong>, and builds
+<span class="math notranslate nohighlight">\((\ln\lambda, \mathrm{flux})\)</span> grids for
+<a class="reference internal" href="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.html#hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive" title="hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive"><code class="xref py py-class docutils literal notranslate"><span class="pre">StellarRVPrimitive</span></code></a>.</p>
+<section id="submodules-and-data">
+<h2>Submodules and data<a class="headerlink" href="#submodules-and-data" title="Link to this heading" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#submodules-and-data'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></h2>
+<p>Bundled templates and format notes live under <code class="docutils literal notranslate"><span class="pre">hispecdrp/data/templates/</span></code> (see that
+directory’s <code class="docutils literal notranslate"><span class="pre">README.md</span></code> for BT-Settl CIFIST, air wavelengths, and HDF5 layout).</p>
+<p class="rubric">Notes</p>
+<ul class="simple">
+<li><p><strong>BT-Settl</strong> model grids: cite Allard et al. / BT-Settl papers for the atmosphere
+data, not HISPEC DRP.</p></li>
+<li><p><strong>2MASS filter curves</strong> prefer bundled Cohen/IPAC RSR files under
+<code class="docutils literal notranslate"><span class="pre">hispecdrp/data/filters/</span></code>; SVO (<code class="docutils literal notranslate"><span class="pre">SVO_FILTER_URL</span></code>) is only tried if those are missing.</p></li>
+<li><p><strong>Air–vacuum</strong> conversions use a dry-air refractivity polynomial in
+<code class="xref py py-func docutils literal notranslate"><span class="pre">_edlen_refractivity_ppm_nm()</span></code> (SPIROU / Morton-style Cauchy form); refractivity
+is evaluated at the <strong>air</strong> wavelength, so the inverse uses fixed-point iteration.</p></li>
+<li><p>Wavelength convention for loaded templates matches vacuum L2 axes when
+<code class="docutils literal notranslate"><span class="pre">wavelengths_are_air=True</span></code> in <a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_btsettl_spectrum()</span></code></a>.</p></li>
+</ul>
+<p class="rubric">References</p>
+<ul class="simple">
+<li><p>BT-Settl spectral grid (project home / papers; cite per your file version):
+<a class="reference external" href="http://perso.ens-lyon.fr/france.allard/">http://perso.ens-lyon.fr/france.allard/</a></p></li>
+<li><p>SVO Filter Profile Service: <a class="reference external" href="https://svo2.cab.inta-csic.es/theory/fps3/">https://svo2.cab.inta-csic.es/theory/fps3/</a></p></li>
+<li><p>spirou-ccf (spectral order / CCF context): <a class="reference external" href="https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py">https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py</a></p></li>
+</ul>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="xref py py-func docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm()</span></code></a></dt><dd><p>Air → vacuum (nm).</p>
+</dd>
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="xref py py-func docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm()</span></code></a></dt><dd><p>Vacuum → air (nm), inverse pairing.</p>
+</dd>
+</dl>
+</div>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">_ab_mag_through_filter</span></code>(wavelength_um, ...)</p></td>
+<td><p>Bandpass AB magnitude from <span class="math notranslate nohighlight">\(f_\nu\)</span>-weighted integration.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">_coalesce_existing_spectrum_path</span></code>(resolved)</p></td>
+<td><p>Prefer <code class="docutils literal notranslate"><span class="pre">resolved</span></code> if it exists; else a Dropbox conflicted-copy sibling.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">_edlen_refractivity_ppm_nm</span></code>(wavelength_nm, *)</p></td>
+<td><p>Dry-air refractivity <span class="math notranslate nohighlight">\((n - 1)\)</span> in parts per million (ppm).</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">_load_2mass_filter_table</span></code>(path)</p></td>
+<td><p>Load a 2-column wavelength_Angstrom, transmission table from <code class="docutils literal notranslate"><span class="pre">path</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm</span></code></a>(...[, ...])</p></td>
+<td><p>Convert <strong>air</strong> wavelength to <strong>vacuum</strong> wavelength (nanometers).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave" title="hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave"><code class="xref py py-obj docutils literal notranslate"><span class="pre">delta_pix_to_delta_wave</span></code></a>(delta_pix, x[, ...])</p></td>
+<td><p>Convert a change in pixels to a change in wavelength.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave" title="hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave"><code class="xref py py-obj docutils literal notranslate"><span class="pre">delta_vel_to_delta_wave</span></code></a>(delta_vel, wave)</p></td>
+<td><p>Convert a change in velocity to a change in wavelength.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel" title="hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">delta_wave_to_delta_vel</span></code></a>(delta_wave, wave)</p></td>
+<td><p>Convert a change in wavelength to a change in velocity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter" title="hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fetch_svo_2mass_filter</span></code></a>(band)</p></td>
+<td><p>Return a 2MASS filter bandpass (wavelength Å, transmission).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.get_spectrum_path" title="hispecdrp.primitives.utils.spectral_utils.get_spectrum_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_spectrum_path</span></code></a>(path[, base_dir])</p></td>
+<td><p>Resolve a spectrum file path, optionally relative to a package data directory.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_btsettl_spectrum</span></code></a>(filepath[, wl_min_um, ...])</p></td>
+<td><p>Load wavelength and flux from a BT-Settl spectrum HDF5 file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path" title="hispecdrp.primitives.utils.spectral_utils.load_template_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_template_from_path</span></code></a>(filepath[, ...])</p></td>
+<td><p>Load wavelength and flux as plain numpy arrays from a stellar template file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band" title="hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band"><code class="xref py py-obj docutils literal notranslate"><span class="pre">normalize_2mass_band</span></code></a>(band)</p></td>
+<td><p>Return canonical 2MASS band <code class="docutils literal notranslate"><span class="pre">'J'</span></code>, <code class="docutils literal notranslate"><span class="pre">'H'</span></code>, or <code class="docutils literal notranslate"><span class="pre">'K'</span></code> (<code class="docutils literal notranslate"><span class="pre">'Ks'</span></code> → <code class="docutils literal notranslate"><span class="pre">'K'</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron" title="hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_stellar_template_to_log_micron</span></code></a>(...)</p></td>
+<td><p>Resolve a stellar template to <code class="docutils literal notranslate"><span class="pre">(ln</span> <span class="pre">λ,</span> <span class="pre">flux)</span></code> with λ in microns, for CCF.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab" title="hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_twomass_mag_ab</span></code></a>(*[, mag_ab, ...])</p></td>
+<td><p>Resolve optional AB/Vega magnitudes to <code class="docutils literal notranslate"><span class="pre">(mag_ab,</span> <span class="pre">band)</span></code> for template scaling.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega" title="hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega"><code class="xref py py-obj docutils literal notranslate"><span class="pre">twomass_ab_to_vega</span></code></a>(mag_ab, band)</p></td>
+<td><p>Convert a 2MASS AB magnitude to Vega using a fixed per-band offset.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab" title="hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab"><code class="xref py py-obj docutils literal notranslate"><span class="pre">twomass_vega_to_ab</span></code></a>(mag_vega, band)</p></td>
+<td><p>Convert a 2MASS Vega magnitude to AB using a fixed per-band offset.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm</span></code></a>(...[, ...])</p></td>
+<td><p>Convert <strong>vacuum</strong> wavelength to <strong>air</strong> wavelength (nanometers).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm">
+<span class="sig-name descname"><span class="pre">air_wavelength_nm_to_vacuum_nm</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">air_wavelength_nm</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">air_density</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#air_wavelength_nm_to_vacuum_nm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert <strong>air</strong> wavelength to <strong>vacuum</strong> wavelength (nanometers).</p>
+<p>Uses the standard mapping</p>
+<div class="math notranslate nohighlight">
+\[\lambda_\mathrm{vac} = \lambda_\mathrm{air}\,
+    \bigl(1 + 10^{-6} N(\lambda_\mathrm{air})\bigr),\]</div>
+<p>where <span class="math notranslate nohighlight">\(N\)</span> is <code class="xref py py-func docutils literal notranslate"><span class="pre">_edlen_refractivity_ppm_nm()</span></code> evaluated at
+<span class="math notranslate nohighlight">\(\lambda_\mathrm{air}\)</span>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>air_wavelength_nm</strong> (<em>array_like</em>) – Wavelength(s) in nanometers (air).</p></li>
+<li><p><strong>air_density</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Passed to <code class="xref py py-func docutils literal notranslate"><span class="pre">_edlen_refractivity_ppm_nm()</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>np.ndarray</strong> – Vacuum wavelength(s) in nanometers (same shape as broadcast input).</p>
+</dd>
+</dl>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm</span></code></a></dt><dd><p>Inverse conversion (fixed-point iteration).</p>
+</dd>
+</dl>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave">
+<span class="sig-name descname"><span class="pre">delta_pix_to_delta_wave</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">delta_pix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wavesol</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dispersion</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#delta_pix_to_delta_wave"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert a change in pixels to a change in wavelength.</p>
+<p>The sign follows <code class="docutils literal notranslate"><span class="pre">dλ/dpix</span></code>. On a decreasing WAVE row the result is
+negative; callers that need a width (FWHM, uncertainty) should take
+<code class="docutils literal notranslate"><span class="pre">abs(...)</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>delta_pix</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Change in pixels.</p></li>
+<li><p><strong>x</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Pixel position.</p></li>
+<li><p><strong>wavesol</strong> (<em>np.ndarray</em><em> | </em><em>None</em>) – Wavelength solution used to calculate the dispersion. If None, the dispersion must be provided.</p></li>
+<li><p><strong>dispersion</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Dispersion in wavelength per pixel. If None, it will be calculated from the wavelength solution.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>np.ndarray | float</strong> – Change in wavelength in the same units as the wavelength solution.</p>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave">
+<span class="sig-name descname"><span class="pre">delta_vel_to_delta_wave</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">delta_vel</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wave</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#delta_vel_to_delta_wave"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert a change in velocity to a change in wavelength.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>delta_vel</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Change in velocity in m/s.</p></li>
+<li><p><strong>wave</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Wavelength (any units).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>np.ndarray | float</strong> – Change in wavelength in the same units as wave.</p>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel">
+<span class="sig-name descname"><span class="pre">delta_wave_to_delta_vel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">delta_wave</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wave</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#delta_wave_to_delta_vel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert a change in wavelength to a change in velocity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>delta_wave</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Change in wavelength (any units).</p></li>
+<li><p><strong>wave</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Wavelength (same units as delta_wave).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>np.ndarray | float</strong> – Change in velocity in m/s.</p>
+</dd>
+</dl>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter">
+<span class="sig-name descname"><span class="pre">fetch_svo_2mass_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">band</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#fetch_svo_2mass_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Return a 2MASS filter bandpass (wavelength Å, transmission).</p>
+<p>Prefers the bundled Cohen/IPAC RSR file under <code class="docutils literal notranslate"><span class="pre">hispecdrp/data/filters/</span></code>.
+If that file is missing, falls back to downloading from the SVO Filter
+Profile Service (<code class="xref py py-data docutils literal notranslate"><span class="pre">SVO_FILTER_URL</span></code>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>band</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – One of <code class="docutils literal notranslate"><span class="pre">'J'</span></code>, <code class="docutils literal notranslate"><span class="pre">'H'</span></code>, or <code class="docutils literal notranslate"><span class="pre">'K'</span></code> (case-insensitive).</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>wavelength_angstrom</strong> (<em>np.ndarray</em>) – Wavelength sample points in Angstrom.</p></li>
+<li><p><strong>transmission</strong> (<em>np.ndarray</em>) – Dimensionless transmission, same length as <code class="docutils literal notranslate"><span class="pre">wavelength_angstrom</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="https://docs.python.org/3/builtins/exceptions.html#ValueError" title="(in Python v3.15)"><strong>ValueError</strong></a> – If <code class="docutils literal notranslate"><span class="pre">band</span></code> is not one of J, H, K, or if the table is not 2-column.</p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/urllib.error.html#urllib.error.URLError" title="(in Python v3.15)"><strong>urllib.error.URLError</strong></a> – On network failure or timeout (30 s) when the bundled file is absent.</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">References</p>
+<ul class="simple">
+<li><p>Cohen et al. 2003, AJ 126, 1090 (2MASS absolute calibration / RSR).</p></li>
+<li><p>Spanish Virtual Observatory Filter Profile Service (FPS3):
+<a class="reference external" href="https://svo2.cab.inta-csic.es/theory/fps3/">https://svo2.cab.inta-csic.es/theory/fps3/</a></p></li>
+</ul>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.get_spectrum_path">
+<span class="sig-name descname"><span class="pre">get_spectrum_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">base_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#get_spectrum_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.get_spectrum_path" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.get_spectrum_path'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Resolve a spectrum file path, optionally relative to a package data directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>path</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Absolute path, or a filename / relative path joined to <code class="docutils literal notranslate"><span class="pre">base_dir</span></code>.</p></li>
+<li><p><strong>base_dir</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em><em>, </em><em>optional</em>) – Root directory for relative <code class="docutils literal notranslate"><span class="pre">path</span></code>. If <code class="docutils literal notranslate"><span class="pre">None</span></code>, uses
+<code class="docutils literal notranslate"><span class="pre">hispecdrp/data/templates/</span></code> (see <code class="xref py py-data docutils literal notranslate"><span class="pre">_DEFAULT_SPECTRUM_DATA_DIR</span></code>).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>str</strong> – Absolute filesystem path (<code class="docutils literal notranslate"><span class="pre">os.path.join(base_dir,</span> <span class="pre">path)</span></code> when <code class="docutils literal notranslate"><span class="pre">path</span></code> is
+relative). If that file is missing, a same-stem <code class="docutils literal notranslate"><span class="pre">*.h5</span></code> sibling is used
+when present (Dropbox <code class="docutils literal notranslate"><span class="pre">conflicted</span> <span class="pre">copy</span></code> names).</p>
+</dd>
+</dl>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_btsettl_spectrum</span></code></a></dt><dd><p>Open resolved BT-Settl HDF5 files.</p>
+</dd>
+</dl>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum">
+<span class="sig-name descname"><span class="pre">load_btsettl_spectrum</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filepath</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_min_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_max_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mag_ab</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filter_band</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">wavelengths_are_air</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#load_btsettl_spectrum"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Load wavelength and flux from a BT-Settl spectrum HDF5 file.</p>
+<p>The file is expected to have <code class="docutils literal notranslate"><span class="pre">wavelength</span></code> (in Angstrom) and <code class="docutils literal notranslate"><span class="pre">flux</span></code>
+(in 1e-23 erg/cm^2/s/Angstrom) datasets. SVO BT-Settl (CIFIST) HDF5 files also
+store model parameters on the <strong>root</strong> attributes <code class="docutils literal notranslate"><span class="pre">temperature</span></code> (K),
+<code class="docutils literal notranslate"><span class="pre">surface_gravity</span></code> (log g cgs), and <code class="docutils literal notranslate"><span class="pre">metallicity</span></code>; read them with <code class="docutils literal notranslate"><span class="pre">h5py</span></code>
+if needed (see <code class="docutils literal notranslate"><span class="pre">hispecdrp/data/templates/README.md</span></code>).</p>
+<p>By default (<code class="docutils literal notranslate"><span class="pre">wavelengths_are_air=True</span></code>) the HDF5 wavelength grid is treated as
+<strong>air</strong> Angstrom and converted to <strong>vacuum</strong> microns before return, so the template
+matches vacuum wavelength axes (e.g. HISPEC L2 <code class="docutils literal notranslate"><span class="pre">wave_*</span></code>, SPIROU-style masks in
+vacuum nm). Set <code class="docutils literal notranslate"><span class="pre">wavelengths_are_air=False</span></code> if the file is already on a vacuum grid.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">mag_ab</span></code> and <code class="docutils literal notranslate"><span class="pre">filter_band</span></code> are set, the spectrum is normalized to
+the given AB magnitude in the corresponding 2MASS filter (J, H, or K).
+The 2MASS profile is fetched from the SVO Filter Profile Service.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filepath</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Path to the .h5 file (e.g. lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5).</p></li>
+<li><p><strong>wl_min_um</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Minimum wavelength in microns. Default is 0.8.</p></li>
+<li><p><strong>wl_max_um</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Maximum wavelength in microns. Default is 3.0.</p></li>
+<li><p><strong>mag_ab</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em> or </em><em>None</em><em>, </em><em>optional</em>) – If set with <code class="docutils literal notranslate"><span class="pre">filter_band</span></code>, normalize the spectrum to this AB magnitude
+in that band. Default is None.</p></li>
+<li><p><strong>filter_band</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em><em>, </em><em>optional</em>) – One of ‘J’, ‘H’, ‘K’. Used with <code class="docutils literal notranslate"><span class="pre">mag_ab</span></code> to normalize. Default is None.</p></li>
+<li><p><strong>wavelengths_are_air</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#bool" title="(in Python v3.15)"><em>bool</em></a><em>, </em><em>optional</em>) – If True (default), convert stored wavelengths from air to vacuum before applying
+<code class="docutils literal notranslate"><span class="pre">wl_min_um</span></code> / <code class="docutils literal notranslate"><span class="pre">wl_max_um</span></code> (interpreted as vacuum microns).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>wavelength</strong> (<em>astropy.units.Quantity</em>) – Wavelength array in micron (<strong>vacuum</strong> when <code class="docutils literal notranslate"><span class="pre">wavelengths_are_air</span></code> is True).</p></li>
+<li><p><strong>flux</strong> (<em>astropy.units.Quantity</em>) – Flux density in erg/s/cm^2/Angstrom (same as file).</p></li>
+</ul>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/builtins/exceptions.html#ImportError" title="(in Python v3.15)"><strong>ImportError</strong></a> – If <code class="docutils literal notranslate"><span class="pre">h5py</span></code> is not installed.</p>
+</dd>
+</dl>
+<p class="rubric">References</p>
+<p>BT-Settl atmosphere models; cite the grid publication appropriate to your file.
+See <code class="docutils literal notranslate"><span class="pre">hispecdrp/data/templates/README.md</span></code> for CIFIST / SVO air-wavelength notes.</p>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path" title="hispecdrp.primitives.utils.spectral_utils.load_template_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_template_from_path</span></code></a></dt><dd><p>Same data as plain <code class="docutils literal notranslate"><span class="pre">numpy</span></code> arrays.</p>
+</dd>
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm</span></code></a></dt><dd><p>If you must write vacuum-calibrated grids back to air nm for comparison with archive tables.</p>
+</dd>
+</dl>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.load_template_from_path">
+<span class="sig-name descname"><span class="pre">load_template_from_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filepath</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_min_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_max_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#load_template_from_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.load_template_from_path'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Load wavelength and flux as plain numpy arrays from a stellar template file.</p>
+<p>Currently supports BT-Settl-style HDF5 (e.g. <code class="docutils literal notranslate"><span class="pre">lte*.BT-Settl.spec.*.h5</span></code>) via
+<a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_btsettl_spectrum()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filepath</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a>) – Path to the template spectrum file.</p></li>
+<li><p><strong>wl_min_um</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Wavelength clip in <strong>vacuum</strong> microns (defaults match
+<code class="xref py py-data docutils literal notranslate"><span class="pre">DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM</span></code> /
+<code class="xref py py-data docutils literal notranslate"><span class="pre">DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM</span></code>).</p></li>
+<li><p><strong>wl_max_um</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a>) – Wavelength clip in <strong>vacuum</strong> microns (defaults match
+<code class="xref py py-data docutils literal notranslate"><span class="pre">DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM</span></code> /
+<code class="xref py py-data docutils literal notranslate"><span class="pre">DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM</span></code>).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>wave_um</strong> (<em>np.ndarray</em>) – Wavelength in <strong>vacuum</strong> microns (same convention as <code class="docutils literal notranslate"><span class="pre">load_btsettl_spectrum</span></code>).</p></li>
+<li><p><strong>flux</strong> (<em>np.ndarray</em>) – Flux density in erg/s/cm²/Å (numeric values from the loaded quantity).</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Equivalent to <a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_btsettl_spectrum()</span></code></a> with default <code class="docutils literal notranslate"><span class="pre">wavelengths_are_air=True</span></code>
+and astropy quantities stripped to <code class="docutils literal notranslate"><span class="pre">float64</span></code>.</p>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum" title="hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_btsettl_spectrum</span></code></a></dt><dd><p>Full interface with units and optional photometric norm.</p>
+</dd>
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron" title="hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_stellar_template_to_log_micron</span></code></a></dt><dd><p>Natural log wavelength for CCF.</p>
+</dd>
+</dl>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band">
+<span class="sig-name descname"><span class="pre">normalize_2mass_band</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">band</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#normalize_2mass_band"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Return canonical 2MASS band <code class="docutils literal notranslate"><span class="pre">'J'</span></code>, <code class="docutils literal notranslate"><span class="pre">'H'</span></code>, or <code class="docutils literal notranslate"><span class="pre">'K'</span></code> (<code class="docutils literal notranslate"><span class="pre">'Ks'</span></code> → <code class="docutils literal notranslate"><span class="pre">'K'</span></code>).</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron">
+<span class="sig-name descname"><span class="pre">resolve_stellar_template_to_log_micron</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">template_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_wavelength</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">template_flux</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_min_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wl_max_um</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#resolve_stellar_template_to_log_micron"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Resolve a stellar template to <code class="docutils literal notranslate"><span class="pre">(ln</span> <span class="pre">λ,</span> <span class="pre">flux)</span></code> with λ in microns, for CCF.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">template_path</span></code> is set and either wavelength or flux array is missing, loads
+from disk using <a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path" title="hispecdrp.primitives.utils.spectral_utils.load_template_from_path"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_template_from_path()</span></code></a> over <code class="docutils literal notranslate"><span class="pre">[wl_min_um,</span> <span class="pre">wl_max_um]</span></code>
+(a broad range; finer clipping may be done per fiber/order downstream).</p>
+<p>If both <code class="docutils literal notranslate"><span class="pre">template_wavelength</span></code> and <code class="docutils literal notranslate"><span class="pre">template_flux</span></code> are provided (and not
+overridden by a path-only load), they are validated, sorted in wavelength, and
+converted to natural log wavelength.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>template_path</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/stdtypes.html#str" title="(in Python v3.15)"><em>str</em></a><em> or </em><em>None</em>) – Path to BT-Settl (or supported) file.</p></li>
+<li><p><strong>template_wavelength</strong> – Optional wavelength (microns, linear) and flux arrays.</p></li>
+<li><p><strong>template_flux</strong> – Optional wavelength (microns, linear) and flux arrays.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>template_ln</strong> (<em>np.ndarray or None</em>) – <span class="math notranslate nohighlight">\(\ln(\lambda)\)</span> with <span class="math notranslate nohighlight">\(\lambda\)</span> in microns, or <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+<li><p><strong>template_flux</strong> (<em>np.ndarray or None</em>) – Flux aligned with <code class="docutils literal notranslate"><span class="pre">template_ln</span></code>, or <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>On load failure from <code class="docutils literal notranslate"><span class="pre">template_path</span></code>, logs an exception and returns
+<code class="docutils literal notranslate"><span class="pre">(None,</span> <span class="pre">None)</span></code> without re-raising.</p>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path" title="hispecdrp.primitives.utils.spectral_utils.load_template_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_template_from_path</span></code></a></dt><dd><p>Disk load used when arrays are missing.</p>
+</dd>
+</dl>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab">
+<span class="sig-name descname"><span class="pre">resolve_twomass_mag_ab</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">mag_ab</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mag_vega</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filter_band</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#resolve_twomass_mag_ab"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Resolve optional AB/Vega magnitudes to <code class="docutils literal notranslate"><span class="pre">(mag_ab,</span> <span class="pre">band)</span></code> for template scaling.</p>
+<p><code class="docutils literal notranslate"><span class="pre">mag_vega</span></code> overrides <code class="docutils literal notranslate"><span class="pre">mag_ab</span></code> when both are set. A magnitude requires
+<code class="docutils literal notranslate"><span class="pre">filter_band</span></code> (2MASS <code class="docutils literal notranslate"><span class="pre">J</span></code> / <code class="docutils literal notranslate"><span class="pre">H</span></code> / <code class="docutils literal notranslate"><span class="pre">K</span></code> / <code class="docutils literal notranslate"><span class="pre">Ks</span></code>).</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega">
+<span class="sig-name descname"><span class="pre">twomass_ab_to_vega</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mag_ab</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">band</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#twomass_ab_to_vega"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert a 2MASS AB magnitude to Vega using a fixed per-band offset.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab">
+<span class="sig-name descname"><span class="pre">twomass_vega_to_ab</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mag_vega</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">band</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#twomass_vega_to_ab"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert a 2MASS Vega magnitude to AB using a fixed per-band offset.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm">
+<span class="sig-name descname"><span class="pre">vacuum_wavelength_nm_to_air_nm</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vacuum_wavelength_nm</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">air_density</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_iter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">12</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rtol</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1e-14</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/hispecdrp/primitives/utils/spectral_utils.html#vacuum_wavelength_nm_to_air_nm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm" title="Link to this definition" x-intersect.margin.0%.0%.-70%.0%="activeSection = '#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm'"><svg height="1em" viewbox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></a></dt>
+<dd><p>Convert <strong>vacuum</strong> wavelength to <strong>air</strong> wavelength (nanometers).</p>
+<p>The forward relation <a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="xref py py-func docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm()</span></code></a> depends on refractivity
+evaluated at <strong>air</strong> wavelength, so the inverse is not a single closed-form division
+by a factor evaluated at vacuum λ. This function solves</p>
+<div class="math notranslate nohighlight">
+\[\lambda_\mathrm{vac} = \lambda_\mathrm{air}\,
+    \bigl(1 + 10^{-6} N(\lambda_\mathrm{air})\bigr)\]</div>
+<p>by fixed-point iteration</p>
+<div class="math notranslate nohighlight">
+\[\lambda_\mathrm{air}^{(k+1)} = \frac{\lambda_\mathrm{vac}}
+    {1 + 10^{-6} N\bigl(\lambda_\mathrm{air}^{(k)}\bigr)},\]</div>
+<p>starting from <span class="math notranslate nohighlight">\(\lambda_\mathrm{air}^{(0)} = \lambda_\mathrm{vac}\)</span>.
+Convergence is rapid because <span class="math notranslate nohighlight">\(10^{-6}N\)</span> is <span class="math notranslate nohighlight">\(\mathcal{O}(10^{-4})\)</span>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>vacuum_wavelength_nm</strong> (<em>array_like</em>) – Wavelength(s) in nanometers (vacuum).</p></li>
+<li><p><strong>air_density</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Passed to <code class="xref py py-func docutils literal notranslate"><span class="pre">_edlen_refractivity_ppm_nm()</span></code>.</p></li>
+<li><p><strong>max_iter</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#int" title="(in Python v3.15)"><em>int</em></a><em>, </em><em>optional</em>) – Maximum iterations (default 12 is ample for double precision).</p></li>
+<li><p><strong>rtol</strong> (<a class="reference external" href="https://docs.python.org/3/builtins/functions.html#float" title="(in Python v3.15)"><em>float</em></a><em>, </em><em>optional</em>) – Stop when all finite elements satisfy
+<code class="docutils literal notranslate"><span class="pre">abs(air_new</span> <span class="pre">-</span> <span class="pre">air)</span> <span class="pre">&lt;=</span> <span class="pre">rtol</span> <span class="pre">*</span> <span class="pre">max(abs(air),</span> <span class="pre">1e-30)</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>np.ndarray</strong> – Air wavelength(s) in nanometers. Non-finite or non-positive vacuum inputs
+are mapped to NaN.</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/builtins/exceptions.html#ValueError" title="(in Python v3.15)"><strong>ValueError</strong></a> – If <code class="docutils literal notranslate"><span class="pre">max_iter</span></code> &lt; 1.</p>
+</dd>
+</dl>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm" title="hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm</span></code></a></dt><dd><p>Forward air → vacuum.</p>
+</dd>
+</dl>
+</div>
+<p class="rubric">Notes</p>
+<p>Round-trip <code class="docutils literal notranslate"><span class="pre">air</span> <span class="pre">→</span> <span class="pre">vac</span> <span class="pre">→</span> <span class="pre">air</span></code> matches the original air grid within ~machine
+precision for typical NIR wavelengths when using the same <code class="docutils literal notranslate"><span class="pre">air_density</span></code>.</p>
+</dd></dl>
+</section>
+</div></div><aside class="hidden text-sm xl:block" id="right-sidebar">
+<div class="sticky top-16 -mt-10 max-h-[calc(100vh-5rem)] h-full overflow-y-auto pt-6 space-y-2"><p class="font-medium">On this page</p>
+<ul>
+<li><a :data-current="activeSection === '#submodules-and-data'" class="reference internal" href="#submodules-and-data">Submodules and data</a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm"><code class="docutils literal notranslate"><span class="pre">air_wavelength_nm_to_vacuum_nm()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_pix_to_delta_wave"><code class="docutils literal notranslate"><span class="pre">delta_pix_to_delta_wave()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_vel_to_delta_wave"><code class="docutils literal notranslate"><span class="pre">delta_vel_to_delta_wave()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.delta_wave_to_delta_vel"><code class="docutils literal notranslate"><span class="pre">delta_wave_to_delta_vel()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.fetch_svo_2mass_filter"><code class="docutils literal notranslate"><span class="pre">fetch_svo_2mass_filter()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.get_spectrum_path'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.get_spectrum_path"><code class="docutils literal notranslate"><span class="pre">get_spectrum_path()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum"><code class="docutils literal notranslate"><span class="pre">load_btsettl_spectrum()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.load_template_from_path'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.load_template_from_path"><code class="docutils literal notranslate"><span class="pre">load_template_from_path()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.normalize_2mass_band"><code class="docutils literal notranslate"><span class="pre">normalize_2mass_band()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.resolve_stellar_template_to_log_micron"><code class="docutils literal notranslate"><span class="pre">resolve_stellar_template_to_log_micron()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.resolve_twomass_mag_ab"><code class="docutils literal notranslate"><span class="pre">resolve_twomass_mag_ab()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.twomass_ab_to_vega"><code class="docutils literal notranslate"><span class="pre">twomass_ab_to_vega()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.twomass_vega_to_ab"><code class="docutils literal notranslate"><span class="pre">twomass_vega_to_ab()</span></code></a></li>
+<li><a :data-current="activeSection === '#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm'" class="reference internal" href="#hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm"><code class="docutils literal notranslate"><span class="pre">vacuum_wavelength_nm_to_air_nm()</span></code></a></li>
+</ul>
+</div>
+</aside>
+</main>
+</div>
+</div><footer class="py-6 border-t border-border md:py-0">
+<div class="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+<div class="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+<p class="text-sm leading-loose text-center text-muted-foreground md:text-left">© 2025, HISPEC DRP Team Built with <a class="font-medium underline underline-offset-4" href="https://www.sphinx-doc.org" rel="noreferrer">Sphinx 9.1.0</a></p>
+</div>
+</div>
+</footer>
+</div>
+<script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+<script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+<script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+<script defer="defer" src="../../_static/theme.js?v=582b20c5"></script>
+<script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+<script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+<script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+<script src="../../_static/notebook_embeds.90d683dfd339.js?v=8d1fbc6d"></script>
+<script src="../../_static/download_notebook.js?v=df93580d"></script>
+</body>
+</html>
