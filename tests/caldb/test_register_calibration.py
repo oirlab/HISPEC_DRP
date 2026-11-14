@@ -17,11 +17,8 @@ from tests.utils import SAFE_TEST_MJD, repo_root
 
 
 @pytest.fixture
-def caldb_cache(tmp_path, monkeypatch):
-    cache = tmp_path / "KOA_CALIBRATION_CACHE"
-    cache.mkdir()
-    monkeypatch.setenv("KOA_CALIBRATION_CACHE", str(cache))
-    return cache
+def caldb_cache(standalone_cal_cache):
+    return standalone_cal_cache
 
 
 @pytest.fixture(scope="session")

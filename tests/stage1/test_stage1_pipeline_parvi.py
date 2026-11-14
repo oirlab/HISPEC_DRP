@@ -7,8 +7,6 @@ import os
 # TODO: Update this test to mirror test_stage1_hispec.py but for PARVI data.
 def _test_stage1_pipeline_parvi(tmp_path, datadir):
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-
     fiberflat_filepaths = [
         download_gdrive_file('PARVI/L0/PR.20230901.81619.65_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),
         download_gdrive_file('PARVI/L0/PR.20230901.81656.55_rate-FIBERFLAT-FIB1.fits', output_dir=datadir),

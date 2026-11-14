@@ -23,8 +23,6 @@ def _test_fit_etalon_parvi(tmp_path, datadir):
     do_orders = np.arange(90, 100).astype(int).tolist()
     models = []
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + os.sep
-
     # Assign initial WLS
     for filepath in solar_files:
         prim = SetInitialWLSPrimitive()

@@ -1,14 +1,13 @@
 """Tests for ``ProcessDetFlatsPipeline`` (gain calibration).
 """
 from hispecdrp import ProcessDetFlatsPipeline
-from tests.utils import make_stage0_cals, make_ramp_model
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 import numpy as np
 import os
 
 def test_process_det_flats_pipeline_gain(tmp_path):
     np.random.seed(12345)
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + 'KOA_CALIBRATION_CACHE'
 
     # --- Define parameters for the simulated ramp ---
     max_cores = 1
@@ -36,6 +35,7 @@ def test_process_det_flats_pipeline_gain(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,
@@ -162,8 +162,6 @@ def test_process_det_flats_pipeline_gain(tmp_path):
 def test_process_det_flats_pipeline_gain_stats(tmp_path):
     np.random.seed(12345)
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + 'KOA_CALIBRATION_CACHE'
-
     # --- Define parameters for the simulated ramp ---
     max_cores = 1
     max_slope = 200  # e-/s
@@ -190,6 +188,7 @@ def test_process_det_flats_pipeline_gain_stats(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,

@@ -4,7 +4,8 @@ from hispecdrp import Stage0Pipeline
 import numpy as np
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 
-from tests.utils import make_stage0_cals, make_ramp_model
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 
 def test_stage0_pipeline(tmp_path):
     np.random.seed(12345)
@@ -33,6 +34,7 @@ def test_stage0_pipeline(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,

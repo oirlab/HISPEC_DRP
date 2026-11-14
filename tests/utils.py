@@ -6,6 +6,10 @@ from hispecdrp import datamodels
 from hispecdrp.simulations.utr import create_ramp
 from hispecdrp.simulations.simulate_rate_map import SimulateRateMap
 
+# Module-level generator: reproducible across a test session, but each call draws new noise,
+# without reseeding the global np.random state other tests use.
+RNG = np.random.default_rng(1)
+
 
 def repo_root() -> Path:
     """Repository root (parent of ``tests/``)."""
@@ -41,83 +45,6 @@ def make_ramp_model(
     return ramp_model
 
 
-def make_stage0_cals(
-    shape : tuple[int, int],
-    nonlin_coeffs : np.ndarray | None = None,
-    meta : dict | None = None,
-    read_noise : float | None = 5.0,
-    gain : float | None = 1.1,
-    bias : float | None = 1000.0,
-    kTC_noise : float | None = 50.0,
-    dark_current : float | None = 0.0,
-    flat_level : float | None = 1.0,
-):
-
-    cals = {}
-
-    # --- Create DQ init map ---
-    cals['dq'] = datamodels.DQModel(shape=shape, meta=meta)
-
-    if nonlin_coeffs is not None:
-        nonlin_coeffs = np.broadcast_to(nonlin_coeffs[::-1, None, None], (np.size(nonlin_coeffs), *shape))
-        max = np.full(shape, fill_value=0.9 * np.iinfo(np.uint16).max, dtype=np.uint16)
-        thresh = max
-        cals['nonlin'] = datamodels.NonlinearCorrectionModel(meta=meta)
-        cals['nonlin'].coeffs
-        cals['nonlin'] = datamodels.NonlinearCorrectionModel(
-            coeffs=nonlin_coeffs,
-            nonlin_thresh=thresh,
-            nonlin_max=max,
-            dq=cals['dq'].dq,
-            meta=meta,
-        )
-
-    # --- Create saturation threshold map ---
-    cals['saturation'] = datamodels.SaturationModel(shape=shape, meta=meta)
-
-    # --- Create random gain map ---
-    if gain is not None:
-        cals['gain'] = datamodels.GainModel(
-            gain=np.full(shape, gain, dtype=np.float32),
-            cov=np.zeros((2, 2, *shape), dtype=np.float32),
-            meta=meta,
-        )
-
-    gain_map = cals['gain'].gain if 'gain' in cals else np.ones(shape, dtype=np.float32)
-
-    # --- Create bias map ---
-    if bias is not None:
-        bias_model = datamodels.BiasModel(
-            bias=np.full(shape, bias / gain_map, dtype=np.float32),  # Bias DataModel in DN
-            ktc=np.full(shape, kTC_noise / gain_map, dtype=np.float32),  # KTC noise in DN RMS
-            meta=meta,
-        )
-        cals['bias'] = bias_model
-
-    # --- Create random read noise map ---
-    if read_noise is not None:
-        rn_model = datamodels.ReadNoiseModel(
-            rn=np.full(shape, read_noise, dtype=np.float32) / gain_map,  # read noise DataModel in DN RMS
-            meta=meta,
-        )
-        cals['rn'] = rn_model
-
-    # --- Create random dark current map ---
-    if dark_current is not None:
-        cals['dark'] = datamodels.DarkModel(
-            rate=np.full(shape, dark_current / gain_map, dtype=np.float32),  # dark current DataModel in DN RMS
-            meta=meta,
-        )
-
-    if flat_level is not None:
-        cals['detflat'] = datamodels.DetectorFlatModel(
-            flat=np.full(shape, flat_level, dtype=np.float32),
-            meta=meta,
-        )
-
-    return cals
-
-
 def fast_ccf_orders(spectrograph: str) -> list[int]:
     """Three mid-band echelle orders for fast RV-recovery unit tests."""
     from hispecdrp.datamodels import hispec_config
@@ -129,36 +56,80 @@ def fast_ccf_orders(spectrograph: str) -> list[int]:
     return [orders[mid - 1], orders[mid], orders[mid + 1]]
 
 
-def make_sim_wavecal(spectrograph: str, meta: dict | None = None):
-    """Build a SimulatedWavesolModel from the pyechelle HDF wavelength solution."""
-    sim = SimulateRateMap()
-    ws = sim.get_wavelength_solution(spectrograph)
-    # ws[fiber][order]["pixel"]      -> np.arange(4096)
-    # ws[fiber][order]["wavelength"] -> wavelength in microns per pixel
+def add_noise_L0(
+    model : datamodels.DataModel,
+    max_snr : float,
+    exposure_time : float | None = None,
+    rn : float = 1.0,
+    copy : bool = True,
+    solve_for : str = 'rate',
+):
+    """
+    Bring a noiseless L0 rate map to a peak SNR, then add Poisson and read noise.
 
-    fibers = list(ws.keys())
-    orders = list(ws[1].keys())
-    n_orders = len(orders)
-    npix = 4096
+    The brightest pixel is given SNR ``max_snr`` for the read noise ``rn``, either by
+    rescaling the rate at a fixed exposure time (``solve_for='rate'``) or by keeping the
+    rate and solving for the exposure time (``solve_for='exposure_time'``). The variances
+    are computed from the noiseless rate, and ``rate_err = sqrt(var_poisson + var_rnoise)``,
+    the same convention as ramp fitting. A Gaussian draw with that error is then added
+    to the rate.
 
-    meta = meta or {}
-    meta.update({
-        "origin": "KECK",
-        "spectrograph": spectrograph,
-        "object_fiber1": "NONE",
-        "object_fiber2": "NONE",
-        "object_fiber3": "NONE",
-    })
+    Parameters
+    ----------
+    model : datamodels.DataModel
+        L0 model with a noiseless ``rate`` in e-/s.
+    max_snr : float
+        SNR of the brightest pixel.
+    exposure_time : float | None
+        Exposure time in s for ``solve_for='rate'``. Defaults to ``model.meta.exposure_time``,
+        or 60 s if unset. Must be None for ``solve_for='exposure_time'``.
+    rn : float
+        Effective read noise of the exposure in e-.
+    copy : bool
+        If True, modify a copy of the input model; otherwise modify it in place.
+    solve_for : str
+        What to change to reach ``max_snr``:
 
-    waves = {}
+        - ``'rate'``: rescale the rate at the given exposure time.
+        - ``'exposure_time'``: keep the rate, solve for the exposure time and write it to
+          ``model.meta.exposure_time``.
 
-    for fiber in fibers:
-        waves[fiber] = np.zeros((n_orders, npix))
-        for j, order in enumerate(orders):
-            waves[fiber][j, :] = ws[fiber][order]["wavelength"]
+    Returns
+    -------
+    datamodels.DataModel
+        Model with noisy ``rate``, ``rate_err`` in e-/s, and ``rate_var_poisson`` and
+        ``rate_var_rnoise`` in (e-/s)^2.
+    """
+    if solve_for not in ('rate', 'exposure_time'):
+        raise ValueError(f"solve_for must be 'rate' or 'exposure_time', got {solve_for!r}")
+    if solve_for == 'exposure_time' and exposure_time is not None:
+        raise ValueError("exposure_time is solved for with solve_for='exposure_time'; don't pass it")
+    if copy:
+        model = model.copy()
+    rate = np.asarray(model.rate, dtype=np.float64)
+    peak_rate = np.nanmax(rate)
 
-    model = datamodels.SimulatedWavesolModel(meta=meta)
-    for fiber in fibers:
-        setattr(model, f"wave_fib{fiber}", waves[fiber])
+    # Peak counts N with N / sqrt(N + rn^2) = max_snr
+    snr2 = float(max_snr)**2
+    peak_counts = (snr2 + np.sqrt(snr2**2 + 4 * snr2 * rn**2)) / 2
 
+    # Reach the peak counts by scaling the rate, or by choosing the exposure time
+    if solve_for == 'rate':
+        if exposure_time is None:
+            exposure_time = model.meta.exposure_time or 60.0
+        t = float(exposure_time)
+        rate = rate * peak_counts / (peak_rate * t)
+    else:
+        t = peak_counts / peak_rate
+        model.meta.exposure_time = t
+
+    # Variances of the rate (e-/s)^2: Poisson N/t^2 = rate/t, read noise rn^2/t^2
+    var_poisson = np.clip(rate, 0, None) / t
+    var_rnoise = np.full(rate.shape, rn**2 / t**2)
+    rate_err = np.sqrt(var_poisson + var_rnoise)
+
+    model.rate = (rate + RNG.normal(0.0, rate_err)).astype(np.float32)
+    model.rate_err = rate_err.astype(np.float32)
+    model.rate_var_poisson = var_poisson.astype(np.float32)
+    model.rate_var_rnoise = var_rnoise.astype(np.float32)
     return model

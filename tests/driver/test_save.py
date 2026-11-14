@@ -6,7 +6,8 @@ import os
 import copy
 import numpy as np
 
-from tests.utils import make_stage0_cals, make_ramp_model
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 
 def test_save_result_primitive(tmp_path, datadir):
     
@@ -115,6 +116,7 @@ def test_save_result_pipeline(tmp_path, datadir):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,

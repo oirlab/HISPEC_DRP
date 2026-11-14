@@ -1,14 +1,13 @@
 """Tests for ``ProcessSatFlatsPipeline`` (saturation / non-linearity).
 """
 from hispecdrp import ProcessSatFlatsPipeline
-from tests.utils import make_stage0_cals, make_ramp_model
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 import numpy as np
 import os
 
 def test_process_sat_flats_pipeline(tmp_path):
     np.random.seed(12345)
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + 'KOA_CALIBRATION_CACHE'
 
     # --- Define parameters for the simulated ramp ---
     # max_cores=1: spawn pools dominate wall time on a 2x2 toy detector (~20s → ~1s).
@@ -42,6 +41,7 @@ def test_process_sat_flats_pipeline(tmp_path):
     nonlin_corrected_ramp = np.polyval(nonlin_correction_coefs, ramp_nonlinear)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=None,
         read_noise=read_noise,

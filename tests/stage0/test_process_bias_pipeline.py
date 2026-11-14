@@ -2,15 +2,14 @@
 """
 from hispecdrp import ProcessBiasPipeline
 from hispecdrp import datamodels
-from tests.utils import make_stage0_cals, make_ramp_model
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 import numpy as np
 import os
 from hispecdrp.primitives.bias_subtraction.master_bias_primitive import MakeMasterBiasPrimitive
 
 def test_process_bias_pipeline(tmp_path):
     np.random.seed(12345)
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + 'KOA_CALIBRATION_CACHE'
 
     # --- Define parameters for the simulated ramp ---
     max_cores = 1
@@ -38,6 +37,7 @@ def test_process_bias_pipeline(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,
@@ -100,7 +100,6 @@ def test_process_bias_pipeline(tmp_path):
 
 def test_make_master_bias_primitive(tmp_path):
     tmp_path = str(tmp_path)
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + 'KOA_CALIBRATION_CACHE'
 
     # --- Create bias map ---
     shape = (10, 10)  # size of the detector

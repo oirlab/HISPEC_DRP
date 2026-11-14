@@ -5,7 +5,8 @@ from hispecdrp import datamodels
 
 from hispecdrp.driver import ConfigFile
 
-from tests.utils import save_config_yaml, make_ramp_model, make_stage0_cals
+from tests.utils import save_config_yaml, make_ramp_model
+from tests.sim_cals import make_stage0_cals
 
 import numpy as np
 import os
@@ -204,6 +205,7 @@ def test_pipeline_call_interface(tmp_path):
     read_noise = 1
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs,
         read_noise=read_noise,

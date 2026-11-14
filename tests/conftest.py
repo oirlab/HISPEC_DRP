@@ -1,5 +1,6 @@
 import glob
 import os
+from unittest import mock
 
 import pytest
 
@@ -30,6 +31,21 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="Directory to store test data"
+    )
+    parser.addoption(
+        "--cal-db-dir",
+        action="store",
+        default=None,
+        help=(
+            "Directory for the shared simulated cal DB (built for tests marked cal_db). It is kept after the "
+            "run and reused while complete. Default: <pytest cache dir>/d/hispec_cal_db."
+        ),
+    )
+    parser.addoption(
+        "--remake-cal-db",
+        action="store_true",
+        default=False,
+        help="Rebuild the shared simulated cal DB (for tests marked cal_db) even if a complete one exists.",
     )
     parser.addoption(
         "--bspec-all-orders",
@@ -65,6 +81,10 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "cal_db: test needs the shared simulated cal DB; it is built before the test if missing.",
+    )
     if config.getoption("--bspec-all-orders", default=False):
         os.environ["HISPEC_DRP_BSPEC_BTSETTL_ORDER"] = "all"
     w_um = config.getoption("--bspec-window-um", default=None)
@@ -72,6 +92,48 @@ def pytest_configure(config):
         os.environ["HISPEC_DRP_BSPEC_BTSETTL_WINDOW_UM"] = str(w_um).strip()
     if config.getoption("--bspec-relax-parallel-asserts", default=False):
         os.environ["HISPEC_DRP_BSPEC_BTSETTL_RELAX_PARALLEL_ASSERTS"] = "1"
+
+
+def _cal_db_root(config) -> str:
+    root = config.getoption("--cal-db-dir")
+    if root is None:
+        root = str(config.cache.mkdir("hispec_cal_db"))
+    return os.path.abspath(root)
+
+
+def pytest_sessionstart(session):
+    """Point the calibration store at the shared simulated cal DB, with remote KOA off.
+
+    Every test then finds the shared cals through the store (e.g. ``Primitive.get_calibration``).
+    The DB itself is only built for tests marked ``cal_db`` (see `pytest_runtest_setup`).
+    Tests that register cals themselves use ``standalone_cal_cache``.
+    """
+    from tests.sim_cals import CAL_DB_CACHE
+
+    root = _cal_db_root(session.config)
+    os.makedirs(root, exist_ok=True)
+    os.environ["KOA_CALIBRATION_CACHE"] = os.path.join(root, CAL_DB_CACHE) + os.sep
+    os.environ["HISPEC_KOA_CONNECT_REMOTE"] = "false"
+
+
+_CAL_DB_READY = False
+
+
+def pytest_runtest_setup(item):
+    """Before the first test marked ``cal_db``, build the shared cal DB if it is missing or incomplete.
+
+    The DB is kept after the run and reused while complete (see ``tests/sim_cals.py`` for what is
+    built). Use --remake-cal-db to rebuild it and --cal-db-dir to choose where it lives.
+    """
+    global _CAL_DB_READY
+    if _CAL_DB_READY or item.get_closest_marker("cal_db") is None:
+        return
+    from tests.sim_cals import load_cal_db, make_cal_db
+
+    root = _cal_db_root(item.config)
+    if item.config.getoption("--remake-cal-db") or load_cal_db(root) is None:
+        make_cal_db(root)
+    _CAL_DB_READY = True
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -89,3 +151,15 @@ def datadir(request):
     #default = os.path.abspath("test_data_cache")
     #os.makedirs(default, exist_ok=True)
     return None
+
+
+@pytest.fixture
+def standalone_cal_cache(tmp_path):
+    """Point KOA_CALIBRATION_CACHE at a fresh, empty cache under tmp_path for one test.
+
+    Only for tests that register calibrations themselves; the previous value is restored after.
+    """
+    cache = tmp_path / "KOA_CALIBRATION_CACHE"
+    cache.mkdir()
+    with mock.patch.dict(os.environ, {"KOA_CALIBRATION_CACHE": str(cache) + os.sep}):
+        yield cache

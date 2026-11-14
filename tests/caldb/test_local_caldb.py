@@ -8,7 +8,6 @@ from koa_middleware.utils import generate_md5_file
 
 import astropy.time
 import numpy as np
-import os
 
 from tests.utils import SAFE_TEST_MJD
 
@@ -17,10 +16,7 @@ from tests.utils import SAFE_TEST_MJD
 _CALDB_TEST_BASE_MJD = 60200.0  # 2023-10-27 UTC
 
 
-def test_local_caldb(tmp_path, datadir, monkeypatch):
-
-    # Calibration cache
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+def test_local_caldb(standalone_cal_cache, datadir, monkeypatch):
 
     # Store 5 files in the local cache
     N = 5
@@ -87,10 +83,7 @@ def test_local_caldb(tmp_path, datadir, monkeypatch):
             assert file_md5_from_record == generate_md5_file(dark_model._filepath), "MD5 checksum mismatch between record and live file"
 
 
-def test_sync_db_from_existing_files(tmp_path, datadir):
-
-    # Calibration cache
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
+def test_sync_db_from_existing_files(standalone_cal_cache, datadir):
 
     # Store 5 files in the local cache without registering them.
     N = 5
@@ -126,11 +119,9 @@ def test_sync_db_from_existing_files(tmp_path, datadir):
         assert len(results) == N, f"Expected {N} files in the local DB, but found {len(results)}"
 
 
-def test_calibration_versioning_with_datamodels(tmp_path):
+def test_calibration_versioning_with_datamodels(standalone_cal_cache):
     N = 3
     dark_models = []
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # Create N dark models
     mjd = SAFE_TEST_MJD

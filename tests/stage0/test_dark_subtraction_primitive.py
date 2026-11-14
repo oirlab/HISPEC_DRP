@@ -8,8 +8,6 @@ import os
 
 def test_dark_subtraction_primitive(tmp_path, datadir):
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-
     shape = (10, 10)
 
     # Science

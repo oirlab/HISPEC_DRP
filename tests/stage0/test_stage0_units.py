@@ -18,8 +18,6 @@ JUMP_DET_FLAG_uint8 = np.uint8(DQ_FLAGS["JUMP_DET"])
 def test_stage0_units(tmp_path):
     np.random.seed(12345)
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-
     if 1:
         dq_raw = np.zeros((3, 2, 2), dtype=np.uint8)
         dq_model = np.zeros((2, 2), dtype=np.uint32)

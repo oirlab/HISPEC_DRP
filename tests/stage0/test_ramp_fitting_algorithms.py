@@ -5,12 +5,11 @@ import numpy as np
 import os
 from hispecdrp.datamodels.dqflags import DQ_FLAGS
 from hispecdrp.primitives.ramp_fitting.utils import get_mid_delta_times_ramp,get_ramp_chunks
-from tests.utils import make_ramp_model, make_stage0_cals
+from tests.utils import make_ramp_model
+from tests.sim_cals import make_stage0_cals
 
 def test_ramp_fitting_readnoise_dominated(tmp_path):
     np.random.seed(12345)
-
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
 
     # --- Define parameters for the simulated ramp ---
     max_slope = 0  # e-/s
@@ -35,6 +34,7 @@ def test_ramp_fitting_readnoise_dominated(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,
@@ -130,8 +130,6 @@ def test_ramp_fitting_readnoise_dominated(tmp_path):
 def test_ramp_fitting_photon_dominated(tmp_path):
     np.random.seed(12345)
 
-    os.environ['KOA_CALIBRATION_CACHE'] = str(tmp_path) + '/KOA_CALIBRATION_CACHE/'
-
     # --- Define parameters for the simulated ramp ---
     max_slope = 2000  # e-/s
     readtime = 1.7  # seconds
@@ -155,6 +153,7 @@ def test_ramp_fitting_photon_dominated(tmp_path):
     nonlin_coeffs_correct = np.polyfit(ramp_nonlinear, ideal_ramp, 5)
 
     cals = make_stage0_cals(
+        register=False,
         shape=shape,
         nonlin_coeffs=nonlin_coeffs_correct,
         read_noise=read_noise,

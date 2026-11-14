@@ -114,7 +114,6 @@ addopts = [
     # Print every test duration (matches CI; useful when comparing local vs GHA logs).
     "--durations=0",
     "--ignore=tests/stage1/test_etalon_drift.py",
-    "--ignore=tests/stage1/test_process_lfc_pipeline.py",
     "--ignore=tests/stage1/test_stage1_pipeline_hispec.py",
     "--ignore=tests/stage1/test_stage1_pipeline_parvi.py",
     "--ignore=tests/stage1/test_wavesol_geometry.py",

@@ -1,41 +1,33 @@
 """Tests for ``Stage1Pipeline`` (HISPEC; ignored in default pytest).
 """
 import numpy as np
-import matplotlib.pyplot as plt
+import pytest
+
 from hispecdrp import Stage1Pipeline
-from hispecdrp.utils import download_gdrive_file
+from tests.sim_cals import make_fiberflat_L0
+from tests.utils import add_noise_L0
 
-def test_stage1_pipeline_hispec(tmp_path, datadir):
 
-    trace_pos_cal = download_gdrive_file('HR.20260606.00000.00.mastercal-tracepos.001.fits', output_dir=datadir)
-    trace_prof_cal = download_gdrive_file('HR.20260606.00000.00.mastercal-traceprof.001.fits', output_dir=datadir)
-    wave_cal = download_gdrive_file('HR.20260606.00000.00.mastercal-sim_wavesol.001.fits', output_dir=datadir)
-    telluric_L0_file = download_gdrive_file('HR.20231006.00000.00_rate-TELLURICS-FIB1.fits', output_dir=datadir)
+@pytest.mark.cal_db
+def test_stage1_pipeline_hispec(tmp_path):
 
-    for method in ('box', 'optimal'):
-        primitives = {
-            'spec_extract' : {
-                'method' : method,
-                'tracepos' : trace_pos_cal,
-                'traceprof' : trace_prof_cal,
-            },
-            'set_wavesol' : {
-                'wavesol' : wave_cal,
-            },
-        }
+    # The trace positions, trace profiles and wavelength solution come from the cal DB
+    spectrograph = 'RSPEC'
+    fiber = 1
+    # The same 1000 K white-light L0 that the cal DB fiberflats are made from
+    L0_model = add_noise_L0(make_fiberflat_L0(spectrograph, fiber, str(tmp_path)), max_snr=200)
+    methods = ('box', 'optimal')
+    snr_thresh = 90
+
+    for method in methods:
         spec_model = Stage1Pipeline.call(
-            telluric_L0_file,
-            primitives=primitives,
-            save_result=False
+            L0_model,
+            primitives={'spec_extract': {'method': method}},
+            save_result=False,
         )
-        fiber = '1'
-        do_orders = spec_model.make_order_vec()
-        for i, order in enumerate(do_orders):
-            
-            spec = getattr(spec_model, f'spec_uncal_fib{fiber}')[i, :]
-            err = getattr(spec_model, f'spec_uncal_err_fib{fiber}')[i, :]
+        for i, order in enumerate(spec_model.orders):
+            spec = spec_model.spec_uncal[fiber][i]
+            err = spec_model.spec_uncal_err[fiber][i]
             snr = np.nanmean(spec / err)
-            
-            print(f"Fiber {fiber} Order {order}: OPT SNR = {snr:.2f}")
-            thresh = 0
-            assert snr > thresh, f"Fiber {fiber} Order {order}: {method} SNR <= {thresh}"
+            print(f"Fiber {fiber} Order {order}: {method} SNR = {snr:.2f}")
+            assert snr > snr_thresh, f"Fiber {fiber} Order {order}: {method} SNR <= {snr_thresh}"
