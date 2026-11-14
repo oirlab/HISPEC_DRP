@@ -1,4 +1,4 @@
-"""Helpers for wavelength-solution primitives."""
+"""Helpers for the gas cell wavelength solution."""
 from __future__ import annotations
 
 import h5py

@@ -9,7 +9,7 @@ from .fit_gascell import (
     make_fit_context, coeffs_from_wavelength_grid, fit_wavelength_solution, evaluate_forward_model,
     build_continuum_1d,
 )
-from .utils import read_gascell_fts
+from .gascell_utils import read_gascell_fts
 from ..utils.array_utils import auto_deg_inter_order
 from .wavesol_cheb2d_primitive import _build_wavesol_poly2d_structured
 import numpy as np
