@@ -64,6 +64,11 @@ class HISPECConfig:
         }
     }
 
+    xdisp_range : dict[str, tuple[int, int]] = {
+        'BSPEC' : (70, 3935),
+        'RSPEC' : (210, 4030)
+    }
+
     @classmethod
     def get_order_list(cls, spectrograph: str) -> list[int]:
         """
