@@ -22,7 +22,9 @@ class Stage1Pipeline(BasePipeline):
     }
 
     def _perform(self):
-        input_model = datamodels.open(self.dataset)
-        result = self.spec_extract.apply(input_model)
-        result = self.set_wavesol.apply(result)
-        return dict(output=result)
+        results = []
+        for i, _input in self._wrap_dataset():
+            model = self.spec_extract.apply(_input)
+            model = self.set_wavesol.apply(model)
+            results.append(model)
+        return dict(output=self._unwrap_dataset(results))
