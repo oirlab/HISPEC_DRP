@@ -52,6 +52,7 @@ def test_datamodel_default_extensions():
         datamodels.L2Model,
         datamodels.ReferenceEtalonModel,
         datamodels.FiberflatModel,
+        datamodels.GasCellWavesolModel,
     ]
     for cls in multi_fiber_models:
         assert 'primary_extension_name' in cls.__dict__, (

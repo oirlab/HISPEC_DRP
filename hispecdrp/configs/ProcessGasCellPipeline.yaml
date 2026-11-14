@@ -1,0 +1,5 @@
+class: ProcessGasCellPipeline
+description: Standard process gas cell pipeline configuration.
+context: {}
+parameters: {}
+primitives: {}

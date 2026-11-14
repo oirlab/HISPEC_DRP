@@ -1,0 +1,4 @@
+class: FitGasCellWavesolPrimitive
+description: Standard gas cell wavelength solution configuration.
+context: {}
+parameters: {}
