@@ -56,8 +56,8 @@ class TracePositionPrimitive(BasePrimitive):
     """
 
     PARAMETERS = {
-        'deg_pos' : None,
-        'deg_width' : None,
+        'deg_pos' : 4,
+        'deg_width' : 2,
         'window_size' : 8,
         'xdisp_range' : None,
         'disp_range' : None,
@@ -113,8 +113,8 @@ class TracePositionPrimitive(BasePrimitive):
             input_model = datamodels.open(self._input_by_fiber[fiber])
 
             # Get xdisp_range, disp_range, and prominence for this fiber.
-            xdisp_range = self.xdisp_range[fiber] if isinstance(self.xdisp_range, dict) else self.xdisp_range
-            disp_range = self.disp_range[fiber] if isinstance(self.disp_range, dict) else self.disp_range
+            xdisp_range = self._get_xdisp_range(input_model)
+            disp_range = self.disp_range
             if isinstance(self.prominence_factor, dict):
                 prominence_factor = self.prominence_factor[fiber]
             else:
@@ -150,13 +150,13 @@ class TracePositionPrimitive(BasePrimitive):
             pos = np.full((n_orders, len(pixel_arr)), np.nan)
             fwhm = np.full((n_orders, len(pixel_arr)), np.nan)
             for i in range(num_orders_found):
-                cent_row = r['trace_centroids'][i, : len(pixel_arr)]
-                width_row = r['trace_widths'][i, : len(pixel_arr)]
+                #cent_row = r['trace_centroids'][i, : len(pixel_arr)]
+                #width_row = r['trace_widths'][i, : len(pixel_arr)]
                 pos[i, :] = np.polyval(r['coeffs_pos'][i, :], pixel_arr)
                 fwhm[i, :] = np.polyval(r['coeffs_width'][i, :], pixel_arr)
                 # Do not extrapolate trace polynomials into rows where the walker failed.
-                pos[i, ~np.isfinite(cent_row)] = np.nan
-                fwhm[i, ~np.isfinite(width_row)] = np.nan
+                #pos[i, ~np.isfinite(cent_row)] = np.nan
+                #fwhm[i, ~np.isfinite(width_row)] = np.nan
             setattr(output_model, f'COEFF_POS_FIB{fiber}', r['coeffs_pos'])
             setattr(output_model, f'COEFF_FWHM_FIB{fiber}', r['coeffs_width'])
             setattr(output_model, f'POS_FIB{fiber}', pos)
@@ -164,6 +164,11 @@ class TracePositionPrimitive(BasePrimitive):
 
         # Return
         return dict(output=output_model, trace_results=trace_results)
+
+    def _get_xdisp_range(self, input_model : datamodels.DataModel) -> tuple[int, int]:
+        return self.xdisp_range or \
+            input_model.config.xdisp_range[input_model.meta.spectrograph]
+
         
     def _create_preview(self):
 
