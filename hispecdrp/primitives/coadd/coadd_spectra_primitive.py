@@ -126,6 +126,10 @@ def coadd_spectra(
     # Loop over fibers/orders, coadding each spectral trace separately
     for fiber in do_fibers:
 
+        # Frames are coadded pixel by pixel, so they share the wavelength grid of the first frame
+        if input_models[0].has_extension_value(f'wave_fib{fiber}'):
+            setattr(model_out, f'wave_fib{fiber}', np.array(getattr(input_models[0], f'wave_fib{fiber}'), copy=True))
+
         attrs = _get_spec_data_attrs(input_models[0], fiber=fiber)
 
         for order in do_orders:
@@ -181,21 +185,20 @@ def _make_spec_batch(
 def _get_spec_data_attrs(input_model : datamodels.DataModel, fiber : str | int) -> dict[str, str]:
     attrs = {}
 
-    # Data and error attributes; fall back to the uncalibrated spectrum if the
+    # Data, error and DQ attributes; fall back to the uncalibrated spectrum if the
     # calibrated one hasn't been populated yet.
     if input_model.has_extension_value(f'spec_fib{fiber}'):
         attrs['data'] = f'spec_fib{fiber}'
         attrs['err'] = f'spec_err_fib{fiber}'
         attrs['var_poisson'] = f'spec_var_poisson_fib{fiber}'
         attrs['var_rnoise'] = f'spec_var_rnoise_fib{fiber}'
+        attrs['dq'] = f'spec_dq_fib{fiber}'
     else:
         attrs['data'] = f'spec_uncal_fib{fiber}'
         attrs['err'] = f'spec_uncal_err_fib{fiber}'
         attrs['var_poisson'] = f'spec_uncal_var_poisson_fib{fiber}'
         attrs['var_rnoise'] = f'spec_uncal_var_rnoise_fib{fiber}'
-
-    # DQ
-    attrs['dq'] = f'spec_dq_fib{fiber}'
+        attrs['dq'] = f'spec_uncal_dq_fib{fiber}'
 
     # Mid-time
     attrs['mid_time'] = f'mid_time_fib{fiber}'
@@ -252,8 +255,11 @@ def _coadd_spectra(
     if 'dq' in input_frames:
         mask &= dq_2d == 0
 
+    # All-zero errors carry no information: coadd unweighted and take the error from the scatter
+    unweighted = err_2d is not None and bool(np.all(err_2d[mask] == 0))
+
     # Weights from error
-    if 'err' in input_frames:
+    if 'err' in input_frames and not unweighted:
         weights = 1 / err_2d**2
     else:
         weights = np.ones_like(data_2d, dtype=np.float32)
@@ -312,6 +318,7 @@ def _coadd_spectra(
         var_poisson_out=var_poisson_out, var_rnoise_out=var_rnoise_out,
         dq_out=dq_out,
         mid_times_out=mid_times_out,
+        unweighted=unweighted,
     )
 
     return dict(
@@ -337,7 +344,14 @@ def _coadd_spectra_numba(
     var_rnoise_out : np.ndarray | None = None,
     dq_out : np.ndarray | None = None,
     mid_times_out : np.ndarray | None = None,
+    unweighted : bool = False,
 ):
+    """Coadd each pixel over its good frames (dq == 0) into the output arrays in place.
+
+    With unweighted=True (all input errors zero), the mean is unweighted and err_out is the
+    standard error of the mean from the scatter between frames; var_poisson_out and
+    var_rnoise_out are then zero.
+    """
     n_frames, n_pix = spec_2d.shape
     for i in range(n_pix):
 
@@ -373,6 +387,19 @@ def _coadd_spectra_numba(
             if mid_times_out is not None:
                 mid_times_out[i] = mid_time_2d[k, i]
         # Case 3: Multiple good pixels, weighted mean
+        elif unweighted:
+            spec_out[i] = np.mean(spec_2d[good, i])
+            if err_out is not None:
+                resid = spec_2d[good, i] - spec_out[i]
+                err_out[i] = np.sqrt(np.sum(resid**2) / (n_good - 1) / n_good)
+            if var_poisson_out is not None:
+                var_poisson_out[i] = 0.0
+            if var_rnoise_out is not None:
+                var_rnoise_out[i] = 0.0
+            if dq_out is not None:
+                dq_out[i] = bitwise_or_reduce_uint32(dq_2d[good, i])
+            if mid_times_out is not None:
+                mid_times_out[i] = np.mean(mid_time_2d[good, i])
         else:
             if err_2d is None:
                 w = np.ones(n_good, dtype=np.float32)
