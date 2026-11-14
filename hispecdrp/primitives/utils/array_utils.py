@@ -10,6 +10,7 @@ from numba import njit
 from numpy.polynomial.chebyshev import chebvander2d
 
 __all__ = [
+    "auto_deg_inter_order",
     "all_sc",
     "any_sc",
     "bitwise_or_reduce_uint32",
@@ -33,6 +34,32 @@ def polyval1d(coeffs : np.ndarray, x : np.ndarray) -> np.ndarray:
     for coeff in coeffs[::-1]:
         v = v * x + coeff
     return v
+
+# 'auto' degree in order for 1-5 orders; the log rule takes over from 6 orders
+_AUTO_DEG_INTER_ORDER_FEW = {1: 0, 2: 1, 3: 2, 4: 3, 5: 3}
+
+
+def auto_deg_inter_order(
+    Norders,
+    anchor_degree=6,
+    anchor_orders=10,
+    max_degree=10,
+):
+    """Choose a Chebyshev degree in order from the number of fit orders.
+
+    1, 2, 3, 4 and 5 orders give 0, 1, 2, 3 and 3. From 6 orders the degree is
+    ``round(anchor_degree * log(Norders) / log(anchor_orders))``. Both are capped at max_degree.
+
+    Uses ``np.minimum`` (element-wise cap), not ``np.min(..., max_degree)``.
+    The latter is parsed as ``axis=max_degree`` and raises ``AxisError``.
+    """
+    Norders = int(Norders)
+    if Norders <= 5:
+        deg = _AUTO_DEG_INTER_ORDER_FEW.get(Norders, 0)
+    else:
+        deg = np.round(anchor_degree * np.log(Norders) / np.log(anchor_orders))
+    return int(np.minimum(deg, max_degree))
+
 
 def solve_chebyshev2d_ols(
     x : np.ndarray, y : np.ndarray, z : np.ndarray,

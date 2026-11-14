@@ -3,7 +3,7 @@ from ... import datamodels
 import logging
 
 import numpy as np
-from ..utils.array_utils import solve_chebyshev2d_ols
+from ..utils.array_utils import auto_deg_inter_order, solve_chebyshev2d_ols
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +65,7 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
         # Default inter order deg
         if self.deg_inter_order == 'auto':
-            if len(fit_orders) == 1:
-                deg_inter_order = 0
-            elif len(fit_orders) == 2:
-                deg_inter_order = 1
-            else:
-                anchor_degree = 4
-                anchor_orders = 10
-                max_degree = 6
-                deg_inter_order = int(np.minimum(np.round(anchor_degree * np.log(len(fit_orders)) / np.log(anchor_orders)), max_degree))
+            deg_inter_order = auto_deg_inter_order(len(fit_orders), anchor_degree=4, max_degree=6)
             logger.info(f"deg_inter_order='auto', using {deg_inter_order=}.")
         else:
             deg_inter_order = self.deg_inter_order

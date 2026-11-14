@@ -19,6 +19,13 @@ def test_auto_deg_inter_order_caps_with_minimum_not_axis():
     assert auto_deg_inter_order(40) == 10
 
 
+def test_auto_deg_inter_order_few_orders():
+    """1-5 orders use the table, then the log rule; the cap applies to both."""
+    assert [auto_deg_inter_order(Norders) for Norders in range(1, 7)] == [0, 1, 2, 3, 3, 5]
+    assert [auto_deg_inter_order(Norders, anchor_degree=4, max_degree=6) for Norders in range(1, 8)] == [0, 1, 2, 3, 3, 3, 3]
+    assert auto_deg_inter_order(5, max_degree=2) == 2
+
+
 def _many_order_line_table(n_orders=8, n_pix=128, n_lines=16):
     order_start = 110
     orders = np.arange(order_start, order_start + n_orders)

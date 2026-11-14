@@ -3,7 +3,7 @@ from ..base_primitive import BasePrimitive
 import logging
 
 from ..utils.spectral_utils import delta_wave_to_delta_vel
-from ..utils.array_utils import solve_chebyshev2d_ols
+from ..utils.array_utils import auto_deg_inter_order, solve_chebyshev2d_ols
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -14,30 +14,6 @@ WAVE_MODEL_CHEBYSHEV2D = "chebyshev2d"
 WAVE_MODEL_CUBIC_SPLINE_1D = "cubic_spline_1d"
 WAVE_MODELS = (WAVE_MODEL_CHEBYSHEV2D, WAVE_MODEL_CUBIC_SPLINE_1D)
 DEFAULT_DEG_INTRA_ORDER = 9
-
-
-def auto_deg_inter_order(
-    n_orders,
-    anchor_degree=6,
-    anchor_orders=10,
-    max_degree=10,
-):
-    """Choose a Chebyshev inter-order degree from the number of fit orders.
-
-    Uses ``np.minimum`` (element-wise cap), not ``np.min(..., max_degree)``.
-    The latter is parsed as ``axis=max_degree`` and raises ``AxisError``.
-    """
-    n_orders = int(n_orders)
-    if n_orders <= 1:
-        return 0
-    if n_orders == 2:
-        return 1
-    return int(
-        np.minimum(
-            np.round(anchor_degree * np.log(n_orders) / np.log(anchor_orders)),
-            max_degree,
-        )
-    )
 
 
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
