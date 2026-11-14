@@ -430,18 +430,37 @@ class ProcessingComponent(_BasePrimitive):
     #     else:
     #         raise ValueError(f"Unsupported input type: {type(dataset)}")
 
-    # def _wrap_outputs(self, keyed_outputs: dict, dataset=None):
-    #     """
-    #     Reconstruct a keyed_outputs dict (built via _iter_inputs) into the original container shape.
-    #     """
-    #     if dataset is None:
-    #         dataset = self.dataset
-    #     if isinstance(dataset, (DataModel, str)):
-    #         return keyed_outputs[None]
-    #     elif isinstance(dataset, dict):
-    #         return keyed_outputs
-    #     else:  # Sequence
-    #         return [keyed_outputs[i] for i in range(len(keyed_outputs))]
+    def _wrap_dataset(self, dataset=None):
+        """
+        Yields (counter, item) pairs from self.dataset, for any input type.
+        """
+        if dataset is None:
+            dataset = self.dataset
+
+        if isinstance(dataset, (DataModel, str)):
+            yield 0, dataset
+        elif isinstance(dataset, Sequence):
+            for i, item in enumerate(dataset):
+                yield i, item
+        elif isinstance(dataset, dict):
+            for i, val in enumerate(dataset.values()):
+                yield i, val
+        else:
+            raise ValueError(f"Unsupported input type: {type(dataset)}")
+
+    def _unwrap_dataset(self, outputs: Sequence, dataset=None):
+        """
+        Put outputs (one per item from `_wrap_dataset`, in order) back into the dataset's container shape:
+        a single output for a single input, a list for a sequence, and a dict with the same keys for a dict.
+        """
+        if dataset is None:
+            dataset = self.dataset
+        if isinstance(dataset, (DataModel, str)):
+            return outputs[0]
+        elif isinstance(dataset, dict):
+            return dict(zip(dataset.keys(), outputs))
+        else:
+            return list(outputs)
 
     def _get_first_model(
         self,
