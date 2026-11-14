@@ -62,18 +62,43 @@ def test_unusable_lfc_line_fit_skips_collapsed_and_bound_hits():
     assert _unusable_lfc_line_fit_reason(_fit(fwhm_err=25.0), fwhm_bounds=bounds)
 
 
-def test_fit_line_gauss_masks_zero_and_nan_errors():
+def test_fit_line_gauss_partial_zero_and_nan_errors_fits_unweighted(caplog):
     x = np.arange(21, dtype=float)
     y = np.exp(-0.5 * ((x - 10.0) / 1.2) ** 2)
     y_err = np.full_like(y, 0.05)
     y_err[0] = 0.0
     y_err[1] = np.nan
     dq = np.zeros(21, dtype=np.uint32)
-    out = fit_line_gauss(
-        x, y, y_err, dq, mu_guess=10.0, fwhm_bounds=(1.0, 8.0)
-    )
+    kwargs = dict(mu_guess=10.0, fwhm_bounds=(1.0, 8.0))
+    with caplog.at_level("WARNING"):
+        out = fit_line_gauss(x, y, y_err, dq, **kwargs)
+    assert "fitting unweighted" in caplog.text
     assert np.isfinite(out.mu)
     assert abs(out.mu - 10.0) < 0.5
+    unweighted = fit_line_gauss(x, y, None, dq, **kwargs)
+    assert out.mu == unweighted.mu
+    assert out.mu_err == unweighted.mu_err
+
+
+def test_fit_line_gauss_all_nan_errors_fits_unweighted(caplog):
+    x = np.arange(21, dtype=float)
+    y = np.exp(-0.5 * ((x - 10.0) / 1.2) ** 2)
+    y[:5] = 0.0  # zero data is valid
+    kwargs = dict(mu_guess=10.0, fwhm_bounds=(1.0, 8.0))
+    with caplog.at_level("WARNING"):
+        out = fit_line_gauss(x, y, np.full_like(y, np.nan), None, **kwargs)
+    assert "fitting unweighted" in caplog.text
+    assert abs(out.mu - 10.0) < 0.5
+    assert out.mu == fit_line_gauss(x, y, None, None, **kwargs).mu
+
+
+def test_fit_line_gauss_flat_data_returns_bad_fit():
+    x = np.arange(21, dtype=float)
+    for absorption in (False, True):
+        out = fit_line_gauss(
+            x, np.zeros(21), np.full(21, 0.05), mu_guess=10.0, absorption=absorption
+        )
+        assert np.isnan(out.mu)
 
 
 def test_fit_lfc_lines_skips_nan_centroids():

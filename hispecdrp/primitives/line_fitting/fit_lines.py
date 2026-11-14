@@ -164,7 +164,16 @@ def fit_line_gauss(
     usable = np.isfinite(y)
     if y_err is not None:
         y_err = np.asarray(y_err)
-        usable &= np.isfinite(y_err) & (y_err > 0)
+        # Zero or nan errors carry no information. If any are present, ignore all
+        # errors and fit unweighted. All-zero errors are a silent "no errors" convention.
+        bad_err = ~np.isfinite(y_err) | (y_err <= 0)
+        if np.any(bad_err):
+            if not np.all(y_err == 0):
+                logger.warning(
+                    f"{np.count_nonzero(bad_err)} of {bad_err.size} errors are zero or nan; "
+                    "ignoring all errors and fitting unweighted."
+                )
+            y_err = None
     if dq is None:
         dq = (~usable).astype(np.uint32)
     else:
@@ -196,11 +205,8 @@ def fit_line_gauss(
     else:
         y_err_fit = np.ones_like(y_fit)
 
-    bad_errs = np.where((y_err_fit <= 0) | (~np.isfinite(y_err_fit)))[0]
-    if len(bad_errs) == len(y_fit):
-        y_err_fit = np.ones_like(y_fit)
-    elif len(bad_errs) > 0:
-        return _output_badfit()
+    # Without usable errors, the per-pixel noise is estimated from the fit residuals below
+    unweighted = y_err is None
 
     # Normalize. Emission: anchor peak to ~1 (subtract floor, divide by peak).
     # Absorption: a continuum is present by definition; anchor the continuum to
@@ -224,6 +230,9 @@ def fit_line_gauss(
         w_seed = np.clip(y_fit, 0, None)
     else:
         w_seed = np.clip(np.nanmax(y_fit) - y_fit, 0, None)
+    if not np.any(w_seed > 0):
+        logger.warning("Data in the fit window are flat; no line to fit.")
+        return _output_badfit()
 
     # Default mu guess
     if mu_guess is None:
@@ -284,6 +293,11 @@ def fit_line_gauss(
     except np.linalg.LinAlgError:
         logger.exception("Covariance matrix could not be computed. Fit may be degenerate.")
         return _output_badfit()
+
+    # Unweighted fit: scale the covariance by the residual variance (redchi2 with unit errors),
+    # like scipy.optimize.curve_fit with absolute_sigma=False
+    if unweighted:
+        cov = cov * redchi2 if n_dof > 0 else np.full_like(cov, np.nan)
 
     #breakpoint()
     # import matplotlib.pyplot as plt
