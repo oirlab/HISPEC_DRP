@@ -1,28 +1,28 @@
 """Helpers for the gas cell wavelength solution."""
 from __future__ import annotations
 
+import importlib.resources
+
 import h5py
 
 __all__ = [
-    "GASCELL_FTS_PATH",
+    "GASCELL_FTS_FILENAME",
     "read_gascell_fts",
 ]
 
-# TODO: make the DRP aware of this file instead of hard coding a local path.
-GASCELL_FTS_PATH = (
-    "/Users/cale/Desktop/HISPEC_GasCell_Data/B0216.GasCells2ndFour.Caltech.HISPEC/"
-    "B0216.HISPEC.gascells.JPL-FTS.h5"
-)
+# JPL FTS scans of the HISPEC gas cells, bundled in hispecdrp/data/templates
+GASCELL_FTS_FILENAME = "B0216.HISPEC.gascells.JPL-FTS.h5"
 
 
-def read_gascell_fts(filepath : str = GASCELL_FTS_PATH) -> dict:
+def read_gascell_fts(filepath : str | None = None) -> dict:
     """
     Read the JPL FTS gas-cell transmission spectra from an HDF5 file.
 
     Parameters
     ----------
-    filepath : str
-        Path to the HDF5 file. Default is `GASCELL_FTS_PATH`.
+    filepath : str | None
+        Path to the HDF5 file. Default is the bundled `GASCELL_FTS_FILENAME` in
+        ``hispecdrp/data/templates``.
 
     Returns
     -------
@@ -33,6 +33,14 @@ def read_gascell_fts(filepath : str = GASCELL_FTS_PATH) -> dict:
         ``"transmission"`` (np.ndarray of shape (Nwave,)) and ``"attrs"`` (dict of per-scan metadata,
         e.g. ``gases``, ``pressures_Torr``, ``temperature_K``).
     """
+    if filepath is None:
+        resource = importlib.resources.files("hispecdrp.data.templates") / GASCELL_FTS_FILENAME
+        with importlib.resources.as_file(resource) as path:
+            return _read_gascell_fts(path)
+    return _read_gascell_fts(filepath)
+
+
+def _read_gascell_fts(filepath) -> dict:
     with h5py.File(filepath, "r") as f:
         out = {
             "wavenumber": f["wavenumber"][:],
