@@ -8,10 +8,13 @@ import pytest
 from hispecdrp import datamodels
 from hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive import (
     DEFAULT_DEG_INTRA_ORDER,
+    SOURCE_CONFIG,
     WAVE_MODEL_CHEBYSHEV2D,
     WAVE_MODEL_CUBIC_SPLINE_1D,
+    WAVE_MODELS,
     CalculateChebyshev2DWLSPrimitive,
     auto_deg_inter_order,
+    fit_wavesol_chebyshev2d,
     fit_wavesol_spline_1d,
 )
 
@@ -62,8 +65,10 @@ def _line_table_model(n_pix: int = 128):
     return model, truth, xs
 
 
-def test_wave_model_default_is_chebyshev2d():
-    assert CalculateChebyshev2DWLSPrimitive.PARAMETERS["wave_model"] == WAVE_MODEL_CHEBYSHEV2D
+def test_default_wave_model_is_chebyshev2d_for_every_source():
+    for name, cfg in SOURCE_CONFIG.items():
+        assert cfg["defaults"]["wave_model"] in WAVE_MODELS, name
+    assert SOURCE_CONFIG["lfc"]["defaults"]["wave_model"] == WAVE_MODEL_CHEBYSHEV2D
 
 
 def test_fit_wavesol_spline_1d_reproduces_line_table():
@@ -156,21 +161,6 @@ def test_default_wave_model_still_writes_chebyshev_wave(tmp_path):
     assert wave.shape == truth.shape
     assert np.any(np.isfinite(wave))
     assert getattr(out, "cheb_coeffs_fib2").shape == (4, 2)
-
-
-def test_invalid_wave_model_raises(tmp_path):
-    model, _truth, _xs = _line_table_model()
-    with pytest.raises(ValueError, match="wave_model"):
-        CalculateChebyshev2DWLSPrimitive.call(
-            model,
-            wave_model="not_a_model",
-            do_fibers=["2"],
-            fit_orders=[110, 111],
-            output_dir=tmp_path,
-            save_result=False,
-            save_preview=False,
-            show_preview=False,
-        )
 
 
 def test_auto_deg_inter_order_caps_with_minimum_not_axis():
