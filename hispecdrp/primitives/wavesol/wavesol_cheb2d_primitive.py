@@ -277,6 +277,8 @@ def fit_wavesol_spline_1d(
         coeffs=None,
         good=np.where(good_mask)[0],
         iterations=1,
+        pixels=pixels,
+        wave=waves,
         model=model_at_lines,
         residuals=residuals,
         residuals_vel=residuals_vel,
@@ -376,7 +378,7 @@ def fit_wavesol_chebyshev2d(
 
     return dict(
         coeffs=coeffs, good=good, iterations=i+1,
-        model=model_flat, residuals=residuals, residuals_vel=residuals_vel,
+        pixels=pixels, wave=waves, model=model_flat, residuals=residuals, residuals_vel=residuals_vel,
         order_bounds=order_bounds, pixel_bounds=pixel_bounds
     )
 
