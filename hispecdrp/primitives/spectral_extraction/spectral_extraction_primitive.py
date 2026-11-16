@@ -291,8 +291,9 @@ class SpectralExtractionPrimitive(BasePrimitive):
         do_fibers : np.ndarray,
         do_orders : np.ndarray,
     ):
-        
+
         n_fibers = len(do_fibers)
+        pext_name = input_model.primary_extension_name
         input_data = getattr(input_model, pext_name)
         pext_name = input_model.primary_extension_name
         input_data = getattr(input_model, pext_name)
@@ -314,7 +315,7 @@ class SpectralExtractionPrimitive(BasePrimitive):
             # Trace positions for all fibers but only this order
             trace_positions = np.zeros((n_fibers, npix), dtype=np.float64)
             for j, fiber in enumerate(do_fibers):
-                trace_positions[j, :] = getattr(tracepos_model, f'pos-fib{fiber}')[i, :]
+                trace_positions[j, :] = getattr(tracepos_model, f'pos_fib{fiber}')[i, :]
                 
             logger.info(f"Extracting {input_model} with method {self.method} [Fibers {do_fibers}][Order {order}]")
 

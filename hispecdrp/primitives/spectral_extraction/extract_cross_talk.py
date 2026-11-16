@@ -115,6 +115,7 @@ def extract_spectra_cross_talk(
         input_data=input_data,
         input_err=input_err,
         input_dq=input_dq,
+        input_mid_time=input_mid_time,
         input_var_rnoise=input_var_rnoise,
         input_var_poisson=input_var_poisson,
         trace_positions=trace_positions,
@@ -163,8 +164,12 @@ def _extract_cross_talk_numba(
     n_fibers = trace_positions.shape[0]
     for x in range(pix_range[0], pix_range[1] + 1):
 
+        # Profiles along the cross-dispersion axis at this spectral pixel, shape (Nfibers, Npix_cross)
         trace_positions_x = trace_positions[:, x]
-        profiles_x = profile[:, :, x]
+        if orders_are_vertical:
+            profiles_x = profile[:, x, :] # (Nfibers, Npix_cross)
+        else:
+            profiles_x = profile[:, :, x]
 
         # Build the profile matrix P for this column or row
         P, W, window_full = get_design_matrix(
@@ -186,24 +191,20 @@ def _extract_cross_talk_numba(
             D_var_rnoise = input_var_rnoise[window_full, x].copy()
             D_dq = input_dq[window_full, x].copy()
 
-        # Mask bad pixels
+        # Mask bad pixels from the data and DQ only. The read noise and Poisson
+        # variances are only propagated through the solve, so they don't mask pixels.
         # NOTE: Ignore column if any profile value is bad, keep eye on this behavior
         M = (
             ((D_dq & DO_NOT_USE) == 0)
             & np.isfinite(D)
-            & np.isfinite(D_var)
             & (D > 0)
-            & (D_var > 0)
-            & (D_var_poisson > 0)
-            & (D_var_rnoise > 0)
         )
         for i in range(n_fibers):
             if np.any(~np.isfinite(P[:, i])):
                 M[:] = False
                 break
-        bad = np.where(~M)[0]
-        n_good = len(M) - len(bad)
-        if n_good == 0:
+        good = np.where(M)[0]
+        if len(good) == 0:
             spec_output[:, x] = np.nan
             err_output[:, x] = np.nan
             var_rnoise_output[:, x] = np.nan
@@ -211,21 +212,20 @@ def _extract_cross_talk_numba(
             dq_output[:, x] = DO_NOT_USE
             continue
 
-        # Zero bad pixels (M already excludes them; avoid M*inf → NaN).
-        D[bad] = 0
-        D_var[bad] = 0
-        D_var_poisson[bad] = 0
-        D_var_rnoise[bad] = 0
+        # Weight by inverse variance only if every good pixel has a usable error.
+        # Otherwise errors can't be estimated: solve unweighted (OLS) and report zero errors.
+        use_errors = np.all(np.isfinite(D_var[good]) & (D_var[good] > 0))
 
         # Extract the spectrum at this column
         spec_fibers, err_fibers, var_rnoise_fibers, var_poisson_fibers = solve_cross_talk(
             D=D,
-            D_err=D_var,
+            D_var=D_var,
             D_var_rnoise=D_var_rnoise,
             D_var_poisson=D_var_poisson,
             P=P,
             W=W,
             M=M,
+            use_errors=use_errors,
         )
 
         # Store the results
@@ -253,13 +253,17 @@ def get_design_matrix(
     Build the profile matrix P for cross-talk extraction.
     """
     n_fibers = len(trace_positions_x)
+    # Clip windows to the detector along the cross-dispersion axis
+    n_pixels = profiles_x.shape[1]
     window_first, W_first = get_extraction_window(
         yc=trace_positions_x[0],
-        window_size=extraction_aperture
+        window_size=extraction_aperture,
+        n_pixels=n_pixels,
     )
     window_last, W_last = get_extraction_window(
         yc=trace_positions_x[-1],
-        window_size=extraction_aperture
+        window_size=extraction_aperture,
+        n_pixels=n_pixels,
     )
     if trace_positions_x[0] < trace_positions_x[-1]:
         window_full = np.arange(window_first[0], window_last[-1] + 1, dtype=np.int64)
@@ -272,15 +276,13 @@ def get_design_matrix(
         # NOTE: If i == 0 or i == n_fibers - 1, use first or last window above eventually.
         window_i, W_i = get_extraction_window(
             yc=trace_positions_x[i],
-            window_size=extraction_aperture
+            window_size=extraction_aperture,
+            n_pixels=n_pixels,
         )
         window_sub = window_i - window_full[0]
-        if orders_are_vertical: # NOTE: Confirm this is correct
-            P[window_sub, i] = profiles_x[window_i, i]
-            W[window_sub, i] = W_i
-        else:
-            P[window_sub, i] = profiles_x[i, window_i]
-            W[window_sub, i] = W_i
+        # profiles_x is (Nfibers, Npix_cross) for either orientation
+        P[window_sub, i] = profiles_x[i, window_i]
+        W[window_sub, i] = W_i
     return P, W, window_full
 
 
@@ -288,37 +290,76 @@ def get_design_matrix(
 @njit(nogil=True, parallel=False, cache=False)
 def solve_cross_talk(
     D: np.ndarray,
-    D_err: np.ndarray,
+    D_var: np.ndarray,
     D_var_rnoise: np.ndarray,
     D_var_poisson: np.ndarray,
     P: np.ndarray,
     W: np.ndarray,
     M: np.ndarray,
+    use_errors: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Solve ``D = P_norm @ spec`` for all fibers at one spectral pixel by linear least squares.
 
-    denom = np.sum(P * W, axis=0)
-    P_norm = P / denom[None, :]
+    Parameters
+    ----------
+    D : np.ndarray
+        Data along the cross-dispersion window, shape (Npix,).
+    D_var : np.ndarray
+        Total variance of D, shape (Npix,). Used as weights only if ``use_errors``.
+    D_var_rnoise, D_var_poisson : np.ndarray
+        Read noise and Poisson variances of D, shape (Npix,). Only propagated.
+    P : np.ndarray
+        Fiber profiles, shape (Npix, Nfibers).
+    W : np.ndarray
+        Aperture overlap of each pixel for each fiber, shape (Npix, Nfibers).
+    M : np.ndarray
+        Good pixel mask, shape (Npix,).
+    use_errors : bool
+        Weight by ``1 / D_var`` (WLS) if True, else solve unweighted (OLS) and return zero errors.
 
-    D_var = D_err**2
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        Spectrum, error, read noise variance and Poisson variance per fiber, each shape (Nfibers,).
+    """
+    n_fibers = P.shape[1]
+    nan_out = np.full(n_fibers, np.nan)
 
-    # Inverse variance for each element, INCLUDING W (W is already 2D!)
-    Vinv = M[:, None] * P_norm**2 * W / D_var[:, None]
-    Vinv = np.where(np.isfinite(Vinv), Vinv, np.float32(0))
+    # Normalize each profile to unit flux within its aperture
+    denom = np.sum(P * W, axis=0).astype(np.float64)
+    if np.any(~(denom > 0)):
+        return nan_out, nan_out.copy(), nan_out.copy(), nan_out.copy()
+    P_norm = P.astype(np.float64) / denom
 
-    # Weighted least squares matrix A and vector b
-    A = np.ascontiguousarray(P_norm.T) @ np.ascontiguousarray(Vinv * P_norm)
-    b = np.ascontiguousarray((P_norm * Vinv).T) @ D
+    # Per-pixel weights; masked pixels get zero weight
+    w = np.zeros(D.size)
+    for j in range(D.size):
+        if M[j]:
+            w[j] = 1.0 / D_var[j] if use_errors else 1.0
 
-    # Solve for spectrum
-    spec = np.linalg.pinv(A) @ b
+    # Linear estimator spec = H @ D with H = (X^T w X)^-1 X^T w
+    Xw = np.ascontiguousarray(P_norm * w[:, None])
+    A = np.ascontiguousarray(P_norm.T) @ Xw
+    A_inv = np.linalg.pinv(A)
+    H = A_inv @ np.ascontiguousarray(Xw.T)
 
-    # Covariance and errors
-    cov = np.linalg.pinv(A)
-    spec_err = np.sqrt(np.diag(cov))
-    #spec_err = np.sqrt(np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var[:, None], axis=0))
+    # Zero masked pixels so nan or inf there can't leak through the zero weights
+    D_good = np.where(M, D, 0.0).astype(np.float64)
+    var_rnoise_good = np.where(M, D_var_rnoise, 0.0).astype(np.float64)
+    var_poisson_good = np.where(M, D_var_poisson, 0.0).astype(np.float64)
 
-    # Separate variance contributions
-    spec_var_rnoise = np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_rnoise[:, None], axis=0)
-    spec_var_poisson = np.sum(P_norm * W, axis=0) / np.sum(M[:, None] * P_norm**2 * W / D_var_poisson[:, None], axis=0)
+    spec = H @ D_good
+    # Without input errors there is no error estimate; report zeros, the
+    # "no errors" convention downstream (coadd, line fitting)
+    if use_errors:
+        spec_err = np.sqrt(np.diag(A_inv))
+    else:
+        spec_err = np.zeros(n_fibers)
+
+    # Propagate the separate variance terms through the same linear estimator
+    H2 = np.ascontiguousarray(H**2)
+    spec_var_rnoise = H2 @ var_rnoise_good
+    spec_var_poisson = H2 @ var_poisson_good
 
     return spec, spec_err, spec_var_rnoise, spec_var_poisson
