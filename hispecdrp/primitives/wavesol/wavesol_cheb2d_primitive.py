@@ -4,6 +4,7 @@ import logging
 
 from ..utils.spectral_utils import delta_wave_to_delta_vel
 from ..utils.array_utils import solve_chebyshev2d_ols
+from ..line_fitting.fit_lines import LINE_DQ_FLAGS
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,7 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         'opt_weights' : None,
         'fit_orders' : None,
         'do_fibers' : None,
+        'reject_flags': None,
     }
 
     def _detect_source(self, input_model):
@@ -205,6 +207,15 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
 
         fit_results = []
 
+        # lines to flag out
+        reject_mask = np.uint8(0)
+        if self.reject_flags is None:
+            reject_flags = [name for name in LINE_DQ_FLAGS if name != 'GOOD']
+            self.reject_flags = reject_flags
+        for flag in self.reject_flags:
+            reject_mask |= LINE_DQ_FLAGS[flag]
+
+
         # Output model type depends on the source
         model_cls = getattr(datamodels, cfg['model_class'])
         output_model = model_cls.from_datamodels(
@@ -225,7 +236,12 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
             waves = params_table['WAVE']
-            mask = np.nonzero(np.isin(orders, fit_orders))[0]
+            try:
+                line_dq = np.asarray(params_table['LINE_DQ'], dtype=np.uint8)
+            except (KeyError, ValueError):
+                logger.warning("LINE_DQ column not found; no lines will be rejected by flag.")
+                line_dq = np.zeros(len(params_table), dtype=np.uint8)
+            mask = np.isin(orders, fit_orders) & ((line_dq & reject_mask) == 0)
             pixels = pixels[mask]
             orders = orders[mask]
             waves = waves[mask]
