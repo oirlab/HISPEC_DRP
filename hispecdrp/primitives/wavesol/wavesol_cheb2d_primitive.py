@@ -116,6 +116,8 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
         List of orders to fit. If None, all orders will be fit.
     do_fibers : list of int or None
         List of fibers to fit. If None, all fibers will be fit (separately in series).
+    reject_flags : list of str or None
+        List of LINE_DQ flags (e.g. ['DO_NOT_USE', 'FIT_FAILURE', 'POOR_FIT', 'LOW_SNR']), which will be ignored in line fitting. Rekects all if set to None. Use empty list for no rejection.
 
     Returns
     -------
@@ -214,7 +216,6 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             self.reject_flags = reject_flags
         for flag in self.reject_flags:
             reject_mask |= LINE_DQ_FLAGS[flag]
-
 
         # Output model type depends on the source
         model_cls = getattr(datamodels, cfg['model_class'])

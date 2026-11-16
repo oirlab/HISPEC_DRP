@@ -139,7 +139,8 @@ class FitUraniumLinesPrimitive(BasePrimitive):
                         'REDCHI2' : _fit_results[i].redchi2,
                         'LINE_NUM' : order_line_nums[i],
                     }
-                    r['WAVE'] = np.interp(r['MU_PIX'], xarr, wave[oi, :], left=np.nan, right=np.nan)
+                    r['WAVE'] = lines_wvl[i] 
+                    # r['WAVE'] = np.interp(r['MU_PIX'], xarr, wave[oi, :], left=np.nan, right=np.nan)
                     r['FWHM_WAVE'] = delta_pix_to_delta_wave(r['FWHM_PIX'], r['MU_PIX'], wave[oi, :])
                     r['FWHM_ERR_WAVE'] = delta_pix_to_delta_wave(r['FWHM_ERR_PIX'], r['MU_PIX'], wave[oi, :])
                     r['MU_ERR_WAVE'] = delta_pix_to_delta_wave(r['MU_ERR_PIX'], r['MU_PIX'], wave[oi, :])
