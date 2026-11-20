@@ -51,8 +51,9 @@ class ProcessLFCPipeline(CalibrationPipeline):
             )
 
         # Apply blaze correction to coadded models
+        lfc_models_L2_coadded = {}
         for fiber_group in lfc_groups:
-            lfc_models_L1_coadded[fiber_group] = self.blaze_corr.apply(
+            lfc_models_L2_coadded[fiber_group] = self.blaze_corr.apply(
                 lfc_models_L1_coadded[fiber_group],
                 do_fibers=fiber_group
             )
@@ -61,7 +62,7 @@ class ProcessLFCPipeline(CalibrationPipeline):
         line_fit_models = {}
         for fiber_group in lfc_groups:
             line_fit_models[fiber_group] = self.fit_lfc_lines.apply(
-                lfc_models_L1_coadded[fiber_group],
+                lfc_models_L2_coadded[fiber_group],
                 do_fibers=fiber_group
             )
 
