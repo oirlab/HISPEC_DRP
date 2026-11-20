@@ -7,7 +7,7 @@ The wavelength solution uses the same convention as the LFC solution
 normalized pixel and normalized order, with coefficients of shape (Ncpix, Ncord).
 
     lam(m, s)   = (1/m) sum_ij c_ij T_i(s_n) T_j(m_n)        (linear in c), s on the oversampled pixel grid
-    F_hi(m, s)  = F_ref(lam(m, s))                           (linear interpolation)
+    F_hi(m, s)  = F_ref(lam(m, s))                           (linear interpolation; F_ref is a flux density)
     conv(m, x)  = (chromatic LSF kernels * F_hi)(m, x*osamp + osamp//2)
     cont(m, x)  = sum_q a_mq T_q(x_n)                        (optional; a per-order Chebyshev in pixel)
     model       = cont * conv
@@ -94,8 +94,9 @@ def make_fit_context(orders, flux, sigma, lam_ref, F_ref, kernels, osamp,
     orders  : (O,)    echelle order numbers
     flux    : (O, X)  observed gas-cell spectrum (may be NaN where dq > 0)
     sigma   : (O, X)  1-sigma uncertainties (may be 0 or NaN where dq > 0)
-    lam_ref : (R,)    FTS wavelength grid, strictly increasing
-    F_ref   : (R,)    FTS flux on that grid
+    lam_ref : (R,)    FTS wavelength grid in microns, strictly increasing
+    F_ref   : (R,)    FTS transmission on that grid, a flux density (per unit wavelength),
+                      so interpolating it at arbitrary wavelengths is valid
     kernels : (O, X*osamp, Ks)  chromatic LSF, one kernel row per oversampled sample (Ks odd),
                       in the layout expected by convolve_numba_1d_chromatic
     osamp   : int     oversampling factor of the pixel grid (odd). Oversampled sample s sits at pixel
