@@ -30,23 +30,44 @@ def fit_lines_gauss(
     max_fit_window : int | None = None,
     background_poly_deg : int = 0,
     absorption : bool = False,
+    half_windows : np.ndarray | None = None,
 ) -> list[GaussianLineFitResult]:
+    """Fit each line in ``line_centers``. Always returns one result per input line, in input order
+    (failed fits are NaN), so callers can index results by input position.
+
+    half_windows : optional per-line fit half-widths in pixels. If given they are used instead of
+        the spacing between ``line_centers`` (e.g. computed from a complete line list, including
+        lines that are not being fit). Still clamped by ``min_fit_window`` / ``max_fit_window``.
+    """
 
     nx = len(y)
+    line_centers = np.asarray(line_centers, dtype=float)
     n_lines = len(line_centers)
     if n_lines == 0:
         return []
-    if n_lines == 1:
-        default_spacing = float(max_fit_window) if max_fit_window is not None else 14.0
-        line_spacing = np.array([default_spacing], dtype=float)
+    default_half = (float(max_fit_window) if max_fit_window is not None else 14.0) / 2
+    if half_windows is not None:
+        half_windows = np.asarray(half_windows, dtype=float)
+        if half_windows.shape != line_centers.shape:
+            raise ValueError("half_windows must have the same shape as line_centers")
+    elif n_lines == 1:
+        half_windows = np.array([default_half])
     else:
-        line_spacing = np.gradient(line_centers)
+        # Same spacing rule as before (average of the gaps either side), so LFC / etalon fits are
+        # unchanged. Callers that need nearest-neighbour or full-line-list windows pass half_windows.
+        # abs(): centers in decreasing order gave negative spacings.
+        spacing = np.abs(np.gradient(line_centers))
+        half_windows = np.where(np.isfinite(spacing), spacing / 2, default_half)
 
     fit_results = []
     for i in range(n_lines):
 
-        # Half-window from spacing to neighbors, then clamp to [min, max] (full-window widths in px)
-        half = line_spacing[i] / 2
+        if not np.isfinite(line_centers[i]) or not np.isfinite(half_windows[i]):
+            fit_results.append(_badfit_result(background_poly_deg))
+            continue
+
+        # Half-window, clamped to [min, max] (full-window widths in px)
+        half = half_windows[i]
         if min_fit_window is not None:
             half = max(half, min_fit_window / 2)
         if max_fit_window is not None:
@@ -77,6 +98,16 @@ def fit_lines_gauss(
         fit_results.append(fit_result)
 
     return fit_results
+
+
+def _badfit_result(background_poly_deg: int = 0) -> "GaussianLineFitResult":
+    return GaussianLineFitResult(
+        amplitude=np.nan, amplitude_err=np.nan, mu=np.nan, mu_err=np.nan,
+        fwhm=np.nan, fwhm_err=np.nan,
+        background_coeffs=np.full(background_poly_deg + 1, np.nan),
+        background_coeffs_err=np.full(background_poly_deg + 1, np.nan),
+        redchi2=np.nan,
+    )
 
 
 @dataclass
@@ -183,19 +214,12 @@ def fit_line_gauss(
     good = np.where(dq == 0)[0]
 
     def _output_badfit():
-        return GaussianLineFitResult(
-            amplitude=np.nan,
-            amplitude_err=np.nan,
-            mu=np.nan,
-            mu_err=np.nan,
-            fwhm=np.nan,
-            fwhm_err=np.nan,
-            background_coeffs=np.full(background_poly_deg + 1, np.nan),
-            background_coeffs_err=np.full(background_poly_deg + 1, np.nan),
-            redchi2=np.nan
-        )
+        return _badfit_result(background_poly_deg)
 
-    if len(good) < 3:
+    # Need more points than free parameters (amp, mu, fwhm + background), otherwise
+    # n_dof <= 0, redchi2 is meaningless and the line escapes the redchi2 outlier flag.
+    n_params = 3 + background_poly_deg + 1
+    if len(good) < n_params + 1:
         logger.warning(f"Not enough good data points to perform fit. ({len(good)} good data points)")
         return _output_badfit()
 
@@ -262,7 +286,7 @@ def fit_line_gauss(
     n_bkg_coeff = background_poly_deg + 1
     bkg0 = [0.0] * n_bkg_coeff
     amp0 = 1.0
-    if not absorption:
+    if absorption:  # (was `if not absorption`: emission started with the background at the peak level)
         bkg0[0] = 1.0  # continuum ~1 after normalization
         amp0 = np.clip(1.0 - np.nanmin(y_fit), 0.0, 1.5)  # depth guess
     p0 = np.array([amp0, mu_guess, fwhm0] + bkg0)
