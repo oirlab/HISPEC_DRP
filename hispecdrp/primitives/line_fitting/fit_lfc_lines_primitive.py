@@ -70,7 +70,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
         'lfc_nu0' : None,
         'lfc_delta_nu' : None,
         'background_poly_deg' : 0,
-        'line_source' : 'peaks', # 'wavesol' (all lines) or 'peaks' (only lines found by find_peaks)
+        'line_source' : 'wavesol', # 'wavesol' (all lines, seeded from the existing wavesol) or 'peaks' (only lines found by find_peaks)
         'min_line_spacing' : 10, # Minimum number of pixels between lines
         'background_filter_width' : 31, # Pixels
         'preview_n_lines_per_order' : 25, # Max lines shown per order in the preview slider. None = show all.
@@ -93,7 +93,7 @@ class FitLFCLinesPrimitive(BasePrimitive):
         fit_results = {fiber : [] for fiber in do_fibers}
 
         for fiber in do_fibers:
-            
+
             # Get extensions for this fiber (blaze-corrected preferred when present)
             wave = input_model[fiber].wave
             if input_model.has_extension(f'spec_fib{fiber}'):
