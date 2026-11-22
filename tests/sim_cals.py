@@ -349,7 +349,7 @@ def make_lfc_L0s(
     If output_dir is given, each is saved there with the suffix ``LFC-<i>``.
     """
     model_L0 = make_lfc_L0(spectrograph)
-    models_L0 = [add_noise_L0(model_L0, max_snr=max_snr) for _ in range(Nframes)]
+    models_L0 = [add_noise_L0(model_L0, copy=True, max_snr=max_snr) for _ in range(Nframes)]
     if output_dir is not None:
         for i, model in enumerate(models_L0, start=1):
             model.save(output_dir=output_dir, suffix=f'LFC-{i}')

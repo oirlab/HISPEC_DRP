@@ -61,7 +61,7 @@ def add_noise_L0(
     max_snr : float,
     exposure_time : float | None = None,
     rn : float = 1.0,
-    copy : bool = True,
+    copy : bool = False,
     solve_for : str = 'rate',
 ):
     """
@@ -86,7 +86,7 @@ def add_noise_L0(
     rn : float
         Effective read noise of the exposure in e-.
     copy : bool
-        If True, modify a copy of the input model; otherwise modify it in place.
+        If True, modify a copy of the input model; otherwise modify it in place. Default is False.
     solve_for : str
         What to change to reach ``max_snr``:
 

@@ -14,7 +14,7 @@ def test_process_lfc_pipeline(tmp_path):
     Nframes = 3
     do_fibers = [1, 2, 3]
     lfc_model_L0 = make_lfc_L0(spectrograph, do_fibers=do_fibers)
-    lfc_models_L0 = [add_noise_L0(lfc_model_L0, max_snr=200) for i in range(Nframes)]
+    lfc_models_L0 = [add_noise_L0(lfc_model_L0, copy=True, max_snr=200) for i in range(Nframes)]
 
     lfc_models_L1 = Stage1Pipeline.call(
         lfc_models_L0,
