@@ -32,4 +32,5 @@ Stage 1 Calibration Pipelines
    :glob:
 
    process_lfc
+   process_gascell
    process_fiberflats

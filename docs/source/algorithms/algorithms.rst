@@ -12,3 +12,4 @@ Descriptions, runtime performance, and statistical performance (accuracy/precisi
    spectral_extraction
    ramp_fitting
    trace_fitting
+   wavesol
