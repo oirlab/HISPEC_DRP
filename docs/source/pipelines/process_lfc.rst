@@ -5,7 +5,7 @@ Process LFC Pipeline
 Overview
 --------
 
-Process the 1D laser frequency comb (LFC) data to generate a wavelength calibration model and line spread function (LSF) model.
+Process the level 1 (1D uncalibrated spectra) laser frequency comb (LFC) data to generate a wavelength calibration model and line spread function (LSF) model.
 
 **Class**: :py:class:`~hispecdrp.pipelines.calibration.process_lfc_pipeline.ProcessLFCPipeline`
 
