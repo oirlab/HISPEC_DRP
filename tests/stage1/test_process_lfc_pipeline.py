@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 @pytest.mark.cal_db
 def test_process_lfc_pipeline(tmp_path):
 
-    spectrograph = 'BSPEC'
+    spectrograph = 'RSPEC'
     Nframes = 3
     do_fibers = [1, 2, 3]
     lfc_model_L0 = make_lfc_L0(spectrograph, do_fibers=do_fibers)
