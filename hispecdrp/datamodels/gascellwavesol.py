@@ -34,8 +34,8 @@ class GasCellWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
             title='Best-fit continuum (NaN on orders not fit; ones if no continuum is fit).',
             units='e-/s',
         ),
-        # Real shape is (N_ORDERS, continuum_deg_intra_order + 1), NaN rows for orders not fit, normalized
-        # with CHEB_NORM -- a per-instance fit result, hence ANY and no default.
+        # Real shape is (N_ORDERS, continuum_deg_intra_order + 1), NaN rows for orders not fit, with the
+        # wavelength solution's pixel normalization -- a per-instance fit result, hence ANY and no default.
         'CONT_COEFFS': IMAGE_HDU(
             dtype=np.float64,
             shape=('ANY', 'ANY'), enumerate='FIB',
@@ -44,7 +44,7 @@ class GasCellWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
         'CONT_INFO': TABLE_HDU({
             'MODEL': str,  # '1d', or 'none' if no continuum is fit
         }, enumerate='FIB', title="Continuum model: '1d' (per order, in pixel) or 'none'."),
-        **create_chebyshev_extensions(),
+        **create_chebyshev_extensions(norm=False),
     }
 
     CAL_TYPE = 'gascell_wavesol'

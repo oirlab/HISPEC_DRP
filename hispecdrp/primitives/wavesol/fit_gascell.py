@@ -88,7 +88,8 @@ def _fill_jacobian_numba(J, B, Tm, cont, conv, isig, Tc, nc, Q):
 # helpers
 # ---------------------------------------------------------------------------
 def make_fit_context(orders, flux, sigma, lam_ref, F_ref, kernels, osamp,
-                     deg_intra_order, deg_inter_order, dq=None, continuum_deg_intra_order=None):
+                     deg_intra_order, deg_inter_order, dq=None, continuum_deg_intra_order=None,
+                     order_bounds=None):
     """Precompute everything that does not depend on the parameters.
 
     orders  : (O,)    echelle order numbers
@@ -108,8 +109,10 @@ def make_fit_context(orders, flux, sigma, lam_ref, F_ref, kernels, osamp,
     continuum_deg_intra_order : None for no continuum, else degree of the continuum polynomial in pixel,
                       an independent polynomial for each order
 
-    The normalization bounds follow the LFC solution: the data range padded by 10 on each side,
-    i.e. pixel_bounds = (-10, X - 1 + 10) and order_bounds = (min(orders) - 10, max(orders) + 10).
+    order_bounds : (min, max) order normalization. None uses the fit orders padded by 1 on each side;
+                      the primitive passes the model's full order range (see `wavesol_norm_bounds`).
+
+    The pixel normalization follows the LFC solution: pixel_bounds = (-10, X - 1 + 10).
     """
     orders = np.asarray(orders)
     O, X = flux.shape
@@ -129,7 +132,8 @@ def make_fit_context(orders, flux, sigma, lam_ref, F_ref, kernels, osamp,
     pix = np.arange(X)
     pix_s = (np.arange(S) - osamp // 2) / osamp
     pixel_bounds = (-10.0, X - 1 + 10.0)
-    order_bounds = (int(orders.min()) - 10, int(orders.max()) + 10)
+    if order_bounds is None:
+        order_bounds = (int(orders.min()) - 1, int(orders.max()) + 1)
     Q = 0 if continuum_deg_intra_order is None else continuum_deg_intra_order + 1
     return dict(
         O=O, X=X, S=S, osamp=osamp, shape=(deg_intra_order + 1, deg_inter_order + 1),

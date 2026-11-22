@@ -417,8 +417,12 @@ CHEBYSHEV_NORM_HDU = TABLE_HDU({
     'ORDER_NORM_MAX': np.int16,
 }, enumerate='FIB', title='Chebyshev pixel/order normalization bounds.')
 
-def create_chebyshev_extensions() -> dict[str, dict]:
-    return {
+def create_chebyshev_extensions(norm : bool = True) -> dict[str, dict]:
+    """Chebyshev coefficients, and the normalization bounds table if norm is True.
+
+    The wavelength solutions use fixed bounds (see ``wavesol_norm_bounds``) and pass norm=False.
+    """
+    exts = {
         # Real shape is (n_coeffs_intra_order, n_coeffs_inter_order) -- a
         # per-instance fit result with no symbol, hence ANY for both axes and
         # no default (not auto-initialized without a make_default_array override).
@@ -428,8 +432,10 @@ def create_chebyshev_extensions() -> dict[str, dict]:
             enumerate='FIB',
             title='Chebyshev coefficients for the wavelength solution.'
         ),
-        'CHEB_NORM': CHEBYSHEV_NORM_HDU,
     }
+    if norm:
+        exts['CHEB_NORM'] = CHEBYSHEV_NORM_HDU
+    return exts
 
 #### Wavelength solution drifts
 

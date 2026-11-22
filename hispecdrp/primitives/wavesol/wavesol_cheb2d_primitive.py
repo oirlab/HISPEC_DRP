@@ -8,12 +8,26 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CalculateChebyshev2DWLSPrimitive']
+__all__ = ['CalculateChebyshev2DWLSPrimitive', 'wavesol_norm_bounds']
 
 WAVE_MODEL_CHEBYSHEV2D = "chebyshev2d"
 WAVE_MODEL_CUBIC_SPLINE_1D = "cubic_spline_1d"
 WAVE_MODELS = (WAVE_MODEL_CHEBYSHEV2D, WAVE_MODEL_CUBIC_SPLINE_1D)
-DEFAULT_DEG_INTRA_ORDER = 9
+DEFAULT_DEG_INTRA_ORDER = 6
+
+
+def wavesol_norm_bounds(Ncols : int, order_vec) -> tuple[tuple[float, float], tuple[float, float]]:
+    """
+    Normalization bounds of the 2D Chebyshev wavelength solution, fixed by the detector and the model's orders.
+
+    The pixel range (0, Ncols - 1) is padded by 10 and the full order range of the model (``make_order_vec``)
+    by 1 on each side, so the bounds do not depend on which orders or lines are fit and are not stored.
+
+    Returns
+    -------
+    pixel_bounds, order_bounds : tuple[float, float]
+    """
+    return (-10.0, Ncols - 1 + 10.0), (float(np.min(order_vec)) - 1.0, float(np.max(order_vec)) + 1.0)
 
 
 class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
@@ -109,9 +123,6 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
             # Get the table for the fiber
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
 
-            # Get the wavesol norm table for the fiber
-            chebnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
-
             # Setup input vectors
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
@@ -135,9 +146,11 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                 )
                 wavesol_full = fit_result["wave_grid"]
             else:
+                pixel_bounds, order_bounds = wavesol_norm_bounds(nx, order_vec)
                 fit_result = fit_wavesol_chebyshev2d(
                     pixels, orders, waves,
                     deg_intra_order=deg_intra_order, deg_inter_order=deg_inter_order,
+                    pixel_bounds=pixel_bounds, order_bounds=order_bounds,
                     max_iters=self.max_iters, sigma_cut=self.sigma_cut, max_vel_cut=self.max_vel_cut,
                     weights=weights,
                 )
@@ -150,13 +163,6 @@ class CalculateChebyshev2DWLSPrimitive(BasePrimitive):
                     fit_result['pixel_bounds'], fit_result['order_bounds']
                 )
             fit_results.append(fit_result)
-
-            chebnorm_table.add_row({
-                'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
-                'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
-                'ORDER_NORM_MIN': fit_result['order_bounds'][0],
-                'ORDER_NORM_MAX': fit_result['order_bounds'][1],
-            })
             setattr(output_model, f'wave_fib{fiber}', wavesol_full)
 
             # Set unreliable WLS in DQ
@@ -272,7 +278,7 @@ def fit_wavesol_spline_1d(
         order_bounds = (0.0, 1.0)
     else:
         pixel_bounds = (float(np.nanmin(pixels)) - 10.0, float(np.nanmax(pixels)) + 10.0)
-        order_bounds = (float(np.nanmin(orders)) - 10.0, float(np.nanmax(orders)) + 10.0)
+        order_bounds = (float(np.nanmin(orders)) - 1.0, float(np.nanmax(orders)) + 1.0)
     return dict(
         coeffs=None,
         good=np.where(good_mask)[0],
@@ -334,7 +340,7 @@ def fit_wavesol_chebyshev2d(
     if pixel_bounds is None:
         pixel_bounds = (np.nanmin(pixels) - 10, np.nanmax(pixels) + 10)
     if order_bounds is None:
-        order_bounds = (np.nanmin(orders) - 10, np.nanmax(orders) + 10)
+        order_bounds = (np.nanmin(orders) - 1, np.nanmax(orders) + 1)
 
     # Get normalized vals
     pixels_norm = _normalize_val(pixels, *pixel_bounds)

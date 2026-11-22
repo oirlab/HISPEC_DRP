@@ -217,7 +217,7 @@ they would ahead of a real flat-field correction.
 :class:`~hispecdrp.pipelines.calibration.process_lfc_pipeline.ProcessLFCPipeline`
 then runs with its default line-fit and LSF parameters, but with
 ``wave_model='cubic_spline_1d'`` for the WAVE step instead of the default
-global 2-D Chebyshev (``chebyshev2d``, degree 9 x 10). The HDF solution
+global 2-D Chebyshev (``chebyshev2d``, degree 6 x 10). The HDF solution
 in §3 is a PCHIP through 50 deposit samples per order (knots every
 ~83 pixels); the global Chebyshev cannot represent that piecewise-cubic
 shape and would add its own smooth systematics. A per-order cubic
