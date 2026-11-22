@@ -1065,6 +1065,27 @@ def psf_prf_convolution_rate_map_old(
     return det
 
 
+# PSF stamps (by order and exact stamp wavelength, all three fibers) in
+# HISPEC_HK_20231006B-1_all_traces.hdf that jump relative to the other stamps of their order (iterative
+# leave-one-out degree-5 polynomial in wavelength, per pixel).
+# psf_prf_convolution_rate_map drops them before the wavelength spline.
+_BAD_PSF_WAVELENGTHS = {
+    '61': [2.3925381219430326, 2.3949731390858893],
+    '62': [2.3539856209900343, 2.35460470670432, 2.356380798132891, 2.356999998132891],
+    '63': [2.3166553683212587, 2.317264534035544, 2.3178695397498297, 2.3190119397498297, 2.319621219749829, 2.320226339749829],
+    '64': [2.2758521039055255, 2.2781712353340966, 2.2804903667626677, 2.281089932476953, 2.2816853610483814, 2.2828094981912384, 2.2834091781912385, 2.284004698191238],
+    '65': [2.2385883537355515, 2.2408711651641227, 2.241461542306979, 2.2431539765926938, 2.2437444680212644, 2.2454367880212645, 2.2460273937355493, 2.246613519449835, 2.2477195994498356, 2.2483103194498346, 2.2488965594498347],
+    '66': [2.20245410664432, 2.2047016723586053, 2.2052826552157483, 2.2069492380728906, 2.2075303352157483, 2.208107523787176, 2.209778015215748, 2.2103553409300325, 2.2120256952157473, 2.212603158072889, 2.214273375215747, 2.2148509752157457],
+    '67': [2.165185120660291, 2.167398469231719, 2.169611817803147, 2.170184252088861, 2.1723977378031463, 2.1729662406602888, 2.1746112235174313, 2.175179840660288, 2.1773934406602877, 2.179607040660287, 2.1818206406602867],
+    '68': [2.1290142450203287, 2.1311943593060425, 2.1333744735917564, 2.133938153591757, 2.13555458787747, 2.136118427877471, 2.1382987021631847, 2.138858770734613, 2.1410391593060414, 2.14321954787747],
+    '69': [2.093893572815067, 2.0960414128150666, 2.098189252815066, 2.098744498529351, 2.1003370928150655, 2.100892475672208, 2.1030404528150646, 2.1035919728150647, 2.1051884299579213, 2.1057401099579214, 2.107888247100778],
+    '70': [2.057661593774853, 2.059778096631995, 2.0618945994891376, 2.0640111023462797, 2.0645580737748515, 2.066674713774851, 2.0687913537748504, 2.0693348737748507, 2.07090799377485, 2.0714516737748503, 2.07356847377485, 2.0756852737748495],
+    '71': [2.0287112997780237, 2.0292504997780245, 2.0307973569208806, 2.0313366712065957, 2.0334228426351664, 2.0355090140637375, 2.036044465492308, 2.0381307740637364, 2.0402170826351647, 2.0423033912065924],
+    '72': [2.0010960872811068, 2.001623767281107, 2.003152658709678, 2.0036804758525353, 2.005737184423963, 2.0077938929953913],
+    '73': [1.9742332038936925, 1.9762611124651208],
+}
+
+
 def psf_prf_convolution_rate_map(
     wave: Quantity,
     flux: Quantity,
@@ -1193,8 +1214,12 @@ def psf_prf_convolution_rate_map(
         yc_floor_arr = np.floor(yc_arr).astype(np.int64)
 
         # Effective PSFs on increasing wavelength
-        psf_sort = np.argsort(orders[od]['psf_wavelengths'])
-        psfw = np.asarray(orders[od]['psf_wavelengths'], dtype=np.float64)[psf_sort]
+        # Drop the outlier PSF stamps in _BAD_PSF_WAVELENGTHS so the interpolation goes around them
+        psfw_all = np.asarray(orders[od]['psf_wavelengths'], dtype=np.float64)
+        bad = np.asarray(_BAD_PSF_WAVELENGTHS.get(od, []), dtype=np.float64)
+        keep = np.flatnonzero(~np.isclose(psfw_all[:, None], bad[None, :], rtol=0, atol=1e-9).any(axis=1))
+        psf_sort = keep[np.argsort(psfw_all[keep])]
+        psfw = psfw_all[psf_sort]
         prf_kernel = np.ones((oversample, oversample))
         psf_eff_list = np.ascontiguousarray(fftconvolve(
             np.asarray(orders[od]['psf_stamps'], dtype=np.float64)[psf_sort],
@@ -1216,8 +1241,9 @@ def psf_prf_convolution_rate_map(
         x_psf_eff = np.arange(psf_width, dtype=np.float64) - psf_width // 2
         y_psf_eff = np.arange(psf_height, dtype=np.float64) - psf_height // 2
 
-        # Cubic spline in wavelength through the PSFs, at every effective-PSF grid point
-        psf_a, psf_b, psf_c, psf_d = _build_psf_wavelength_splines_numba(psfw, psf_eff_list)
+        # Linear interpolation in wavelength through the PSFs, at every effective-PSF grid point
+        # (trilinear with the bilinear pixel-phase step)
+        psf_a, psf_b, psf_c, psf_d = _build_psf_wavelength_linear_numba(psfw, psf_eff_list)
 
         # Detector-pixel sample offsets within a stamp, in PSF samples
         max_pixels_x = psf_width // oversample
@@ -1286,6 +1312,29 @@ def _half_sample_shift_numba(z: np.ndarray) -> np.ndarray:
 
 
 @njit(parallel=True, cache=True)
+def _build_psf_wavelength_linear_numba(
+    psfw: np.ndarray, z: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Linear interpolation in wavelength between consecutive PSFs z (Npsf, Nrows, Ncols),
+    in the same per-segment Horner form (a, b, c, d) as `_build_psf_wavelength_splines_numba`, with c = d = 0.
+    `_interp_prf_stamps_numba` uses the first/last segment beyond the end PSFs, so it extrapolates linearly there.
+    """
+    Npsf, Nrows, Ncols = z.shape
+    a = np.empty((Npsf - 1, Nrows, Ncols))
+    b = np.empty((Npsf - 1, Nrows, Ncols))
+    c = np.zeros((Npsf - 1, Nrows, Ncols))
+    d = np.zeros((Npsf - 1, Nrows, Ncols))
+    for k in prange(Npsf - 1):
+        h = psfw[k + 1] - psfw[k]
+        for j in range(Nrows):
+            for i in range(Ncols):
+                a[k, j, i] = z[k, j, i]
+                b[k, j, i] = (z[k + 1, j, i] - z[k, j, i]) / h
+    return a, b, c, d
+
+
+@njit(parallel=True, cache=True)
 def _build_psf_wavelength_splines_numba(
     psfw: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -1327,9 +1376,9 @@ def _interp_prf_stamps_numba(
 
     Stamp n is built in two steps:
 
-    1. The chromatic effective PSF at wavelength lam[n], from the cubic spline in wavelength through
-       the PSFs (za, zb, zc, zd from `_build_psf_wavelength_splines_numba`; the end segments
-       extrapolate), clamped at zero. It is evaluated only on the grid points that bracket each
+    1. The chromatic effective PSF at wavelength lam[n], from the per-segment polynomials in wavelength
+       through the PSFs (za, zb, zc, zd from `_build_psf_wavelength_linear_numba` or
+       `_build_psf_wavelength_splines_numba`; the end segments extrapolate), clamped at zero. It is evaluated only on the grid points that bracket each
        stamp pixel, a (2 Nys, 2 Nxs) block, not the whole PSF grid.
     2. The pixel-phase shift, by bilinear interpolation of that block (`linear_interp2d_eval_cell`)
        at x = pixel_xs - shift_x[n], y = pixel_ys - shift_y[n] in PSF samples.
