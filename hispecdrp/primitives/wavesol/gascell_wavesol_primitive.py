@@ -11,10 +11,11 @@ from .fit_gascell import (
 )
 from .gascell_utils import read_gascell_fts
 from ..utils.array_utils import auto_deg_inter_order
-from .wavesol_cheb2d_primitive import _build_wavesol_poly2d_structured
+from .wavesol_cheb2d_primitive import DEFAULT_DEG_INTRA_ORDER, _build_wavesol_poly2d_structured, wavesol_norm_bounds
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
 
 __all__ = ['FitGasCellWavesolPrimitive']
 
@@ -28,34 +29,34 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
 
     The wavelength solution uses the same 2D Chebyshev convention as :class:`CalculateChebyshev2DWLSPrimitive`: m * lambda is a 2D Chebyshev series in the normalized pixel and normalized echelle order. For each fiber, the forward model is the FTS transmission evaluated at the current wavelength solution on an oversampled pixel grid, convolved with the Gaussian LSF, times a per-order Chebyshev continuum. All orders are fit simultaneously with Levenberg-Marquardt, starting from the input wavelength solution.
 
+    The FTS reference is the total transmission of all gas cells (``transmission_tot`` from :func:`~hispecdrp.primitives.wavesol.gascell_utils.read_gascell_fts`, one scan per cell) on its wavelength grid in microns. The FTS scan is a flux density (per unit wavelength), not a flux integrated over each sample, so it is sampled at the model wavelengths by plain (linear) interpolation; no flux-conserving rebinning is needed.
+
+    The FTS scans are already broadened by the FTS resolution, which is fixed in wavenumber (``fts_resolution``, by default ``meta['resolution']`` in cm-1 from the FTS file). It is treated as the FWHM of a Gaussian, so the LSF kernels are narrowed to FWHM = sqrt(FWHM_lsf^2 - FWHM_fts^2), where FWHM_fts = lambda^2 * resolution / 1E4 (microns) is approximated as linear in pixel across each order.
+
     Parameters
     ----------
     input : str or L2Model
         Input gas cell spectrum with an initial wavelength solution (``wave_fib#``), e.g. from :class:`SetInitialWLSPrimitive`.
     initial_wavesol : str
         Wavelength solution the fit starts from. 'input' uses the input model's ``wave_fib#``. 'simulated' uses the simulated (pyechelle HDF) wavelength solution for the input model's spectrograph and each fiber, from :meth:`~hispecdrp.simulations.SimulateRateMap.get_wavelength_solution`, and ignores ``wave_fib#``. Default is 'input'.
-    wave_deg_intra_order : int
-        Degree of the polynomial within an order.
+    wave_deg_intra_order : int or 'auto'
+        Degree of the polynomial within an order. ``'auto'`` uses :data:`~hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive.DEFAULT_DEG_INTRA_ORDER`, as for the LFC. Default is 'auto'.
     wave_deg_inter_order : int or 'auto'
-        Degree of the polynomial between orders. If 'auto', it will be set based on the number of orders being fit.
+        Degree of the polynomial between orders. If 'auto', it is set from the number of requested orders (``fit_orders``) with the same rule as the LFC (:func:`~hispecdrp.primitives.utils.array_utils.auto_deg_inter_order`). Default is 'auto'.
     continuum_deg_intra_order : int or None
         Degree in pixel of the Chebyshev continuum, fit independently for each order. If None, no continuum is fit. Default is 2.
     osamp : int
         Oversampling factor (odd) of the pixel grid the FTS reference is sampled and convolved on.
     kernel_size_sigma : float
         Half-width of the LSF kernels in units of the largest Gaussian sigma.
-    fts_resolution : float
-        Resolving power R of the FTS scans. The FTS reference is assumed to be the true transmission convolved with
-        a Gaussian of FWHM lambda / R, so the LSF kernels are narrowed to FWHM = sqrt(FWHM_lsf^2 - (lambda / R)^2).
-        Use ``np.inf`` (or None) for no correction, e.g. for data simulated from the FTS reference itself. Default is 300,000.
+    fts_resolution : float, None or bool
+        FTS resolution in wavenumber (cm-1), removed from the LSF kernels in quadrature. If None or True, it is read from the FTS file (``meta['resolution']``). If False, the FTS broadening is not removed, e.g. for data simulated from the FTS reference itself. Default is None.
     max_iters : int
         Maximum number of residual evaluations of the Levenberg-Marquardt fit (``max_nfev`` of ``scipy.optimize.least_squares``).
     ftol : float
         Relative decrease in chi^2 below which the fit is considered converged (``ftol`` of ``scipy.optimize.least_squares``).
     use_opt_weights : bool
         Whether to weight each pixel by the inverse variance from ``spec_err``. If False, all unmasked pixels are weighted equally. Default is True.
-    fts_scans : list of str or None
-        FTS scans to include, e.g. ``['B0216.1a', 'B0216.3b']``. The reference transmission is the product of the selected scans, and each gas cell may appear only once. If None, the 'a' scan of every cell is used.
     fit_orders : list of int or None
         List of orders to fit. If None, all orders will be fit. Orders with no pixels inside the FTS wavelength range are skipped.
     do_fibers : list of int or None
@@ -69,22 +70,21 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
     Returns
     -------
     output : GasCellWavesolModel
-        The wavelength solution model. Besides the wavelength solution (``wave_fib#``, ``cheb_coeffs_fib#``, ``cheb_norm_fib#``), it holds the best-fit forward model (``model_fib#``) and its residuals (``model_resid_fib#``), the best-fit continuum (``cont_fib#``), its Chebyshev coefficients (``cont_coeffs_fib#``, normalized with ``cheb_norm_fib#``) and its model type (``cont_info_fib#``, '1d' or 'none'). The arrays are on the pixel grid and NaN on orders not fit. The continuum coefficients have one row per order (NaN for orders not fit); evaluate them with :func:`~hispecdrp.primitives.wavesol.fit_gascell.build_continuum_1d`.
+        The wavelength solution model. Besides the wavelength solution (``wave_fib#``, ``cheb_coeffs_fib#``, normalized with :func:`~hispecdrp.primitives.wavesol.wavesol_cheb2d_primitive.wavesol_norm_bounds`), it holds the best-fit forward model (``model_fib#``) and its residuals (``model_resid_fib#``), the best-fit continuum (``cont_fib#``), its Chebyshev coefficients (``cont_coeffs_fib#``, with the same pixel normalization) and its model type (``cont_info_fib#``, '1d' or 'none'). The arrays are on the pixel grid and NaN on orders not fit. The continuum coefficients have one row per order (NaN for orders not fit); evaluate them with :func:`~hispecdrp.primitives.wavesol.fit_gascell.build_continuum_1d`.
 
     """
 
     PARAMETERS = {
         'initial_wavesol' : 'input',
-        'wave_deg_intra_order' : 4,
+        'wave_deg_intra_order' : 'auto',
         'wave_deg_inter_order' : 'auto',
         'continuum_deg_intra_order' : 2,
         'osamp' : 5,
         'kernel_size_sigma' : 5.0,
-        'fts_resolution' : 300_000,
+        'fts_resolution' : None,
         'max_iters' : 50,
         'ftol' : 1E-9,
         'use_opt_weights' : True,
-        'fts_scans' : None,
         'fit_orders' : None,
         'do_fibers' : None,
     }
@@ -112,9 +112,29 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
         do_fibers, fit_orders = self.get_do_traces(input_model, self.do_fibers, self.fit_orders)
         order_vec = input_model.make_order_vec()
 
-        # FTS reference transmission on an increasing wavelength grid (microns)
-        lam_ref, F_ref, fts_scans = _load_fts_reference(self.fts_scans)
-        logger.info(f"Using FTS scans {fts_scans}.")
+        # Polynomial degrees, with the same 'auto' rules as CalculateChebyshev2DWLSPrimitive
+        if self.wave_deg_intra_order == 'auto':
+            deg_intra_order = DEFAULT_DEG_INTRA_ORDER
+            logger.info(f"wave_deg_intra_order='auto', using {deg_intra_order=}.")
+        else:
+            deg_intra_order = self.wave_deg_intra_order
+        if self.wave_deg_inter_order == 'auto':
+            deg_inter_order = auto_deg_inter_order(len(fit_orders))
+            logger.info(f"wave_deg_inter_order='auto', using {deg_inter_order=}.")
+        else:
+            deg_inter_order = self.wave_deg_inter_order
+
+        # FTS reference: total transmission of all gas cells on an increasing wavelength grid (microns)
+        fts = read_gascell_fts()
+        lam_ref, F_ref = fts['wavelength'], fts['transmission_tot']
+        logger.info(f"Using FTS gas cells {fts['meta']['cells']}.")
+        if self.fts_resolution is None or self.fts_resolution is True:
+            fts_resolution = fts['meta']['resolution']
+        elif self.fts_resolution is False:
+            fts_resolution = 0.0
+        else:
+            fts_resolution = float(self.fts_resolution)
+        logger.info(f"FTS resolution removed from the LSF: {fts_resolution:g} cm-1.")
 
         # Simulated wavelength solution for every fiber, read once
         if self.initial_wavesol == 'simulated':
@@ -155,11 +175,11 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
             if len(orders) == 0:
                 logger.warning(f"Fiber {fiber}: no orders to fit.")
                 continue
-            deg_inter_order = _resolve_deg_inter_order(self.wave_deg_inter_order, len(orders), name='wave_deg_inter_order')
 
             # Forward model setup
             kernels = _make_gaussian_lsf_kernels(
-                lsf_model, fiber, orders, nx, self.osamp, self.kernel_size_sigma, fts_resolution=self.fts_resolution,
+                lsf_model, fiber, orders, nx, self.osamp, self.kernel_size_sigma,
+                fts_resolution=fts_resolution,
             )
             sigma = spec_err[oi_fit].astype(np.float64)
             if not self.use_opt_weights:
@@ -168,9 +188,10 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
             ctx = make_fit_context(
                 orders, spec[oi_fit].astype(np.float64), sigma,
                 lam_ref, F_ref, kernels, self.osamp,
-                self.wave_deg_intra_order, deg_inter_order,
+                deg_intra_order, deg_inter_order,
                 dq=np.where(in_ref[oi_fit], spec_dq[oi_fit], 1),
                 continuum_deg_intra_order=self.continuum_deg_intra_order,
+                order_bounds=wavesol_norm_bounds(nx, order_vec)[1],
             )
 
             # Fit, starting from the starting wavelength solution (wave0)
@@ -186,28 +207,39 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
             else:
                 continuum_model = '1d'
                 continuum = build_continuum_1d(amat, np.arange(nx), ctx['pixel_bounds'])
+            residuals = spec[oi_fit] - model
+            residuals_norm = residuals / spec_err[oi_fit]
+            # Reduced chi2 per order with the fit's weights and mask. Each order has its own
+            # continuum coefficients and an equal share of the shared wavelength coefficients,
+            # so the per-order degrees of freedom sum to the fiber's.
+            isig = ctx['isig']
+            chi2_orders = np.sum(np.where(isig > 0, residuals * isig, 0.0)**2, axis=1)
+            dof_orders = np.count_nonzero(isig, axis=1) - ctx['Q'] - ctx['nc'] / len(orders)
+            chi2_red_orders = np.where(dof_orders > 0, chi2_orders / np.where(dof_orders > 0, dof_orders, 1), np.nan)
+            # Mean of the starting wavelength grid per fit order (NaN where it has no finite values)
+            wave0_fit = np.asarray(wave0[oi_fit], dtype=np.float64)
+            n_finite = np.count_nonzero(np.isfinite(wave0_fit), axis=1)
+            mean_wave_start = np.where(
+                n_finite > 0, np.nansum(wave0_fit, axis=1) / np.maximum(n_finite, 1), np.nan,
+            )
             fit_results.append(dict(
+                mean_wave_start=mean_wave_start,
                 fiber=fiber, orders=orders, coeffs=cmat, continuum_coeffs=amat, continuum_model=continuum_model,
-                model=model, continuum=continuum,  # (Norders fit, Ncols) on the pixel grid
-                cov=cov, chi2_red=chi2_red, info=info,
+                # (Norders fit, Ncols) on the pixel grid
+                model=model, continuum=continuum, residuals=residuals, residuals_norm=residuals_norm,
+                cov=cov, chi2_red=chi2_red, chi2_red_orders=chi2_red_orders, info=info,
                 pixel_bounds=ctx['pixel_bounds'], order_bounds=ctx['order_bounds'],
             ))
 
             # Set results in model
             setattr(output_model, f'cheb_coeffs_fib{fiber}', cmat)
-            getattr(output_model, f'cheb_norm_fib{fiber}').add_row({
-                'PIXEL_NORM_MIN': ctx['pixel_bounds'][0],
-                'PIXEL_NORM_MAX': ctx['pixel_bounds'][1],
-                'ORDER_NORM_MIN': ctx['order_bounds'][0],
-                'ORDER_NORM_MAX': ctx['order_bounds'][1],
-            })
             wavesol_full = _build_wavesol_poly2d_structured(
                 cmat, np.arange(nx), order_vec,
                 ctx['pixel_bounds'], ctx['order_bounds'],
             )
             setattr(output_model, f'wave_fib{fiber}', wavesol_full)
             resid = np.full(spec.shape, np.nan, dtype=np.float32)
-            resid[oi_fit] = spec[oi_fit] - model
+            resid[oi_fit] = residuals
             setattr(output_model, f'model_resid_fib{fiber}', resid)
             model_full = np.full(spec.shape, np.nan, dtype=np.float32)
             model_full[oi_fit] = model
@@ -234,46 +266,33 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
 
         return dict(output=output_model, fit_results=fit_results)
 
+    def _create_preview(self):
+        """
+        Interactive preview of the gas cell fit: the data and the best-fit forward model (top) and
+        their residuals (bottom) against the fitted wavelength, one fit order at a time.
 
-def _resolve_deg_inter_order(deg_inter_order, n_orders, name='deg_inter_order'):
-    """Same 'auto' rule as CalculateChebyshev2DWLSPrimitive. name is the parameter name used in the log message."""
-    if deg_inter_order != 'auto':
-        return deg_inter_order
-    deg = auto_deg_inter_order(n_orders)
-    logger.info(f"{name}='auto', using {name}={deg}.")
-    return deg
-
-
-def _load_fts_reference(fts_scans=None):
-    """
-    Product of the selected FTS transmission scans on an increasing wavelength grid.
-
-    Returns (wave in microns, transmission, scan names). Scan names look like 'B0216.3a',
-    where the number is the gas cell and the letter the series; each cell may be used once.
-    """
-    fts = read_gascell_fts()
-    if fts_scans is None:
-        fts_scans = [name for name in fts['scans'] if name.endswith('a')]
-    unknown = set(fts_scans) - set(fts['scans'])
-    if unknown:
-        raise ValueError(f"Unknown FTS scans {sorted(unknown)}; available scans are {list(fts['scans'])}.")
-    cells = [name.rsplit('.', 1)[1][:-1] for name in fts_scans]
-    if len(set(cells)) != len(cells):
-        raise ValueError(f"Each gas cell may be used once; got scans {fts_scans}.")
-    transmission = np.prod([fts['scans'][name]['transmission'] for name in fts_scans], axis=0)
-    wave = 1E4 / fts['wavenumber']  # cm-1 -> microns
-    return wave[::-1].copy(), transmission[::-1].copy(), list(fts_scans)
+        A slider steps through the fitted orders in increasing wavelength (decreasing order number).
+        Each tick shows the order number above the rail and the order's mean wavelength below it
+        (from the starting wavelength grid where available, otherwise from the fit). With more than
+        one fitted fiber, a dropdown left of the slider selects the fiber and rebuilds the slider
+        for it. Each (fiber, order) combination has its own three traces, and the controls only
+        toggle their visibility. Built by :func:`.gascell_preview.create_gascell_preview`.
+        """
+        from .gascell_preview import create_gascell_preview
+        create_gascell_preview(self)
 
 
-def _make_gaussian_lsf_kernels(lsf_model, fiber, orders, nx, osamp, kernel_size_sigma, fts_resolution=np.inf):
+def _make_gaussian_lsf_kernels(lsf_model, fiber, orders, nx, osamp, kernel_size_sigma, fts_resolution=0.0):
     """
     Gaussian LSF kernels (Norders, nx*osamp, Ks) on the oversampled pixel grid, in the layout of make_fit_context.
 
     The LSF FWHM (microns) is evaluated at each oversampled pixel from the GaussianLSFModel coefficients
     and converted to pixels with the dispersion of the LSF model's own wavelength grid. If fts_resolution
-    is finite, the FTS broadening lambda / fts_resolution (FWHM) is removed from it in quadrature.
+    (the FTS resolution in cm-1, fixed in wavenumber) is > 0, the FTS broadening is removed from it in
+    quadrature. The FTS FWHM in microns is lambda^2 * fts_resolution / 1E4, approximated as linear in pixel
+    across each order.
     """
-    correct_fts = fts_resolution is not None and np.isfinite(fts_resolution)
+    correct_fts = fts_resolution is not None and fts_resolution > 0
     coeffs = getattr(lsf_model, f'cheb_coeffs_fib{fiber}')
     norm_table = getattr(lsf_model, f'cheb_norm_fib{fiber}')
     pixel_bounds = (norm_table['PIXEL_NORM_MIN'][0], norm_table['PIXEL_NORM_MAX'][0])
@@ -287,11 +306,13 @@ def _make_gaussian_lsf_kernels(lsf_model, fiber, orders, nx, osamp, kernel_size_
         fwhm_wave = _build_lsf_poly2d_unstructured(coeffs, pix_s, np.full(len(pix_s), order), pixel_bounds, order_bounds)
         wave_o = lsf_wave[lsf_model.order_index(order)]
         if correct_fts:
-            fwhm2 = fwhm_wave**2 - (np.interp(pix_s, pix, wave_o) / fts_resolution)**2
+            # FTS FWHM in microns, linear in pixel across the order
+            fts_fwhm_wave = np.polyval(np.polyfit(pix, wave_o**2 * fts_resolution / 1E4, 1), pix_s)
+            fwhm2 = fwhm_wave**2 - fts_fwhm_wave**2
             if not np.all(fwhm2 > 0):
                 raise ValueError(
                     f"Fiber {fiber} order {order}: the LSF is not wider than the FTS resolution "
-                    f"R={fts_resolution:g} everywhere, so the FTS broadening can't be removed."
+                    f"({fts_resolution:g} cm-1) everywhere, so the FTS broadening can't be removed."
                 )
             fwhm_wave = np.sqrt(fwhm2)
         dispersion = np.interp(pix_s, pix, np.abs(np.gradient(wave_o)))

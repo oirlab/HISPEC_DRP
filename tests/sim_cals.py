@@ -37,7 +37,7 @@ from hispecdrp.primitives.blaze_correction.blaze_correction_primitive import (
     lamp_spectrum_shape,
 )
 from hispecdrp.primitives.line_fitting.fit_lfc_lines_primitive import gen_lfc_modes
-from hispecdrp.primitives.wavesol.gascell_wavesol_primitive import _load_fts_reference
+from hispecdrp.primitives.wavesol.gascell_utils import read_gascell_fts
 from hispecdrp.simulations.simulate_rate_map import SimulateRateMap
 from tests.utils import add_noise_L0
 
@@ -385,11 +385,12 @@ def make_gascell_L0(do_fibers: int | list[int] | None = None) -> datamodels.L0Mo
     """Simulate a noiseless RSPEC rate map of a 1000 K white light through the gas cells in the fibers do_fibers
     (default all three).
 
-    The transmission is the product of the FTS scans that FitGasCellWavesolPrimitive uses by default.
-    The gas cell is only used with RSPEC.
+    The transmission is the total FTS transmission of all gas cells, the same reference
+    FitGasCellWavesolPrimitive fits with. The gas cell is only used with RSPEC.
     """
     spectrograph = 'RSPEC'
-    wave, transmission, _ = _load_fts_reference()
+    fts = read_gascell_fts()
+    wave, transmission = fts['wavelength'], fts['transmission_tot']
     flux = normalize_whitelight(wave, lamp_spectrum_shape(wave, temperature_k=1000.0)) * transmission
     srm = SimulateRateMap()
     if do_fibers is None:
