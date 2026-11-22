@@ -39,7 +39,7 @@ def test_process_gascell_pipeline():
                 'wave_deg_intra_order': 6,
                 'wave_deg_inter_order' : 6,
                 'fts_resolution': False,
-                'show_preview': True,
+                'show_preview': False,
             },
         },
         save_result=False,
