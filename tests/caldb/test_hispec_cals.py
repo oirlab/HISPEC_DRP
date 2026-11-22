@@ -6,7 +6,10 @@ import pytest
 from hispecdrp import Stage1Pipeline, datamodels
 from tests.sim_cals import get_cal_db_paths
 
-CALS = ['sim_wavesol', 'tracepos', 'traceprof', 'fiberflat', 'lfc_wavesol', 'lsf']
+CALS = [
+    'dq', 'saturation', 'gain', 'bias', 'rn', 'dark', 'detflat',
+    'sim_wavesol', 'tracepos', 'traceprof', 'fiberflat', 'lfc_wavesol', 'lsf',
+]
 
 
 @pytest.mark.cal_db

@@ -6,13 +6,14 @@ registered in the calibration store at ``KOA_CALIBRATION_CACHE``, which writes i
 only file paths are kept. ``pytest_sessionstart`` in ``tests/conftest.py`` points the store at this
 cal DB, building it if needed, so tests find the cals through the store.
 
-Calibrations built by `build_hispec_cals`, in dependency order:
+Calibrations built by `build_hispec_cals` for BSPEC and RSPEC, in dependency order:
 
-1. Simulated wavelength solution from the HDF model (BSPEC and RSPEC), needed by the fiberflat pipeline.
-2. Trace positions, trace profiles and fiberflat (BSPEC and RSPEC) from simulated fiberflat rate maps.
-3. LFC wavesol and LSF (BSPEC and RSPEC) from noisy simulated LFC rate maps, extracted with the cals above.
+1. Detector cals (`make_stage0_cals` defaults at full detector size, reference pixels flagged in the DQ).
+2. Simulated wavelength solution from the HDF model, needed by the fiberflat pipeline.
+3. Trace positions, trace profiles and fiberflat from simulated fiberflat rate maps.
+4. LFC wavesol and LSF from noisy simulated LFC rate maps, extracted with the cals above.
 
-Not built yet: the detector cals (`make_stage0_cals`, BSPEC).
+The stage0 tests call `make_stage0_cals` with their own small shapes and ``register=False``.
 
 `make_gascell_L0` simulates gas cell inputs for tests; nothing from it goes in the cal DB.
 """
@@ -427,13 +428,18 @@ def make_gascell_L0(do_fibers: int | list[int] | None = None) -> datamodels.L0Mo
 def build_hispec_cals(output_dir: str) -> dict[str, dict[str, str]]:
     """Build and register all shared calibrations; L0/L1 inputs are saved under output_dir.
 
-    For now this is the simulated wavesol, the fiberflat cals and the LFC wavesol and LSF for BSPEC and
-    RSPEC. The detector cal functions above are not built yet. Returns ``{spectrograph: {name: path}}``.
+    For BSPEC and RSPEC: the detector cals, the simulated wavesol, the fiberflat cals and the LFC wavesol
+    and LSF. Returns ``{spectrograph: {name: path}}``.
     """
     os.makedirs(output_dir, exist_ok=True)
     paths = {}
     for spectrograph in ('BSPEC', 'RSPEC'):
         out = paths[spectrograph] = {}
+        out.update(make_stage0_cals(
+            shape=SHAPE,
+            dq=make_dq_array_refchan(),
+            meta={'spectrograph': spectrograph, 'datetime_obs': DATETIME_OBS, 'origin': 'KECK'},
+        ))
         out['sim_wavesol'] = make_sim_wavesol(spectrograph)
         ff_models_L0 = [make_fiberflat_L0(spectrograph, fiber, output_dir) for fiber in FIBERS]
         out['fiberflat_L0'] = [model._filepath for model in ff_models_L0]
