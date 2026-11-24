@@ -39,6 +39,8 @@ from scipy.interpolate import PchipInterpolator
 from scipy.interpolate import RegularGridInterpolator
 from scipy.signal import fftconvolve
 
+from .blaze import blaze_efficiency_sinc
+
 import astropy.units as u
 import astropy.constants as const
 from astropy.units import Quantity
@@ -779,7 +781,7 @@ def bilinear_weights_rate_map(
         if apply_blaze and blaze_angle is not None and groove_spacing is not None:
             if blaze_angle.value < 0:
                 blaze_angle *= -1
-            blaze_eff = _blaze_efficiency_sinc(
+            blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
                 int(od),
                 1.0 / groove_spacing,
@@ -975,7 +977,7 @@ def psf_prf_convolution_rate_map_old(
         if apply_blaze and blaze_angle is not None and groove_spacing is not None:
             if blaze_angle.value < 0:
                 blaze_angle *= -1
-            blaze_eff = _blaze_efficiency_sinc(
+            blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
                 int(od),
                 1.0 / groove_spacing,
@@ -1189,7 +1191,7 @@ def psf_prf_convolution_rate_map(
         if apply_blaze and blaze_angle is not None and groove_spacing is not None:
             if blaze_angle.value < 0:
                 blaze_angle *= -1
-            blaze_eff = _blaze_efficiency_sinc(
+            blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
                 int(od),
                 1.0 / groove_spacing,
@@ -1681,32 +1683,9 @@ def _parse_order(
     """
     Parse a regular trace dataset like 'order59' into X, Y and wavelength arrays.
     """
-
     order = key.replace("order", "")
     arr = np.vstack([list(k) for k in dataset])
     fiber_dict[order]["xy_wavelengths"] = arr[:, -1]
     fiber_dict[order]["x"] = arr[:, 4]
     fiber_dict[order]["y"] = arr[:, 5]
 
-
-def _diffracted_angle(blaze_angle, order, groove_spacing, wavelength):
-    """Calculate diffracted angle using grating equation. Used for blaze efficiency calculation. Assume incidence angle = blaze angle."""
-    return np.arcsin(-np.sin(blaze_angle) + order * wavelength / groove_spacing)
-
-
-def _blaze_phase(blaze_angle, order, groove_spacing, wavelength):
-    """Calculate blaze phase for blaze efficiency calculation. Assume incidence angle = blaze angle."""
-    # assume blaze and incidence angles are equal
-    beta = _diffracted_angle(blaze_angle, order, groove_spacing, wavelength)
-    one = order * np.cos(blaze_angle)
-    two = np.cos(blaze_angle) - np.sin(blaze_angle) / np.tan((beta + blaze_angle)/2)
-    return one * two
-
-
-def _blaze_efficiency_sinc(blaze_angle, order, groove_spacing, wavelength):
-    """Calculate blaze efficiency using sinc^2 approximation. Assume incidence angle = blaze angle."""
-    # assume blaze and incidence angles are equal
-    bp = _blaze_phase(blaze_angle, order, groove_spacing, wavelength)
-    sinc = np.sinc(bp*u.rad)
-    sinc[np.abs(bp) > 1.0] = 0.0  # put all values outside +/- pi in sinc to zero
-    return sinc**2
