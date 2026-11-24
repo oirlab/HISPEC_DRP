@@ -89,7 +89,6 @@ def _assert_basic_output(out, prim):
     assert wave.shape == (N_ORDERS, N_PIX)
     assert np.all(np.isfinite(wave[:, 20:N_PIX - 20]))
     assert np.asarray(out.cheb_coeffs_fib2).ndim == 2
-    assert len(out.cheb_norm_fib2) == 1
     assert len(prim._output["fit_results"]) == 1
 
 

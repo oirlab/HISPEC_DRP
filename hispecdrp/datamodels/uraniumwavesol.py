@@ -14,7 +14,7 @@ class UraniumWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
         **create_dataspec_extensions(prefix='SPEC', title='Uranium spectrum.', units='e-/s'),
         **create_specdq_extensions(title='Uranium spectrum data quality.'),
         **create_wave_extensions(title='Uranium spectrum wavelength grid.'),
-        **create_chebyshev_extensions(),
+        **create_chebyshev_extensions(norm=False),
         **create_uraniumfitparam_extensions(),
     }
 
