@@ -133,6 +133,7 @@ def test_spline_flags_boundary_intervals_unreliable(tmp_path):
         model,
         deg_intra_order=3,
         deg_inter_order=1,
+        sigma_cut=float("inf"),  # noise-free data: don't clip on round-off residuals
         do_fibers=["2"],
         fit_orders=[110, 111],
         output_dir=tmp_path,
@@ -150,6 +151,7 @@ def test_default_wave_model_still_writes_chebyshev_wave(tmp_path):
         model,
         deg_intra_order=3,
         deg_inter_order=1,
+        sigma_cut=float("inf"),  # noise-free data: don't clip on round-off residuals
         do_fibers=["2"],
         fit_orders=[110, 111],
         output_dir=tmp_path,
