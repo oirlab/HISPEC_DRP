@@ -14,7 +14,7 @@ class EtalonWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
         **create_dataspec_extensions(prefix='SPEC', title='Etalon spectrum.', units='e-/s'),
         **create_specdq_extensions(title='Etalon spectrum data quality.'),
         **create_wave_extensions(title='Etalon spectrum wavelength grid.'),
-        **create_chebyshev_extensions(norm=False),
+        **create_chebyshev_extensions(),
         **create_etalonfitparam_extensions(),
     }
 

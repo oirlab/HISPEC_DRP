@@ -294,10 +294,8 @@ def _make_gaussian_lsf_kernels(lsf_model, fiber, orders, nx, osamp, kernel_size_
     """
     correct_fts = fts_resolution is not None and fts_resolution > 0
     coeffs = getattr(lsf_model, f'cheb_coeffs_fib{fiber}')
-    norm_table = getattr(lsf_model, f'cheb_norm_fib{fiber}')
-    pixel_bounds = (norm_table['PIXEL_NORM_MIN'][0], norm_table['PIXEL_NORM_MAX'][0])
-    order_bounds = (norm_table['ORDER_NORM_MIN'][0], norm_table['ORDER_NORM_MAX'][0])
     lsf_wave = getattr(lsf_model, f'wave_fib{fiber}')
+    pixel_bounds, order_bounds = wavesol_norm_bounds(lsf_wave.shape[1], lsf_model.make_order_vec())
 
     pix = np.arange(nx)
     pix_s = (np.arange(nx * osamp) - osamp // 2) / osamp

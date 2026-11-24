@@ -4,6 +4,7 @@ import logging
 
 import numpy as np
 from ..utils.array_utils import auto_deg_inter_order, solve_chebyshev2d_ols
+from ..wavesol.wavesol_cheb2d_primitive import wavesol_norm_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,6 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
         for fiber in do_fibers:
             params_table = getattr(input_model, f'lfc_fitparams_fib{fiber}')
-            lsfnorm_table = getattr(output_model, f'cheb_norm_fib{fiber}')
             waves = params_table['WAVE']
             pixels = params_table['MU_PIX']
             orders = params_table['ORDER']
@@ -96,9 +96,14 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
                 weights = 1 / fwhm_errs**2
             else:
                 weights = None
+            nx = input_model[fiber].spec.shape[1]
+            pixel_vec = np.arange(nx)
+            order_vec = input_model.make_order_vec()
+            pixel_bounds, order_bounds = wavesol_norm_bounds(nx, order_vec)
             fit_result = fit_gausslsf_chebyshev2d(
                 pixels, orders, fwhms,
                 deg_intra_order=self.deg_intra_order, deg_inter_order=deg_inter_order,
+                pixel_bounds=pixel_bounds, order_bounds=order_bounds,
                 max_iters=self.max_iters, sigma_cut=self.sigma_cut,
                 weights=weights,
             )
@@ -106,15 +111,6 @@ class CalculateGaussianLSFPrimitive(BasePrimitive):
 
             output_model[fiber].cheb_coeffs = fit_result['coeffs']
 
-            nx = input_model[fiber].spec.shape[1]
-            pixel_vec = np.arange(nx)
-            order_vec = input_model.make_order_vec()
-            lsfnorm_table.add_row({
-                'PIXEL_NORM_MIN': fit_result['pixel_bounds'][0],
-                'PIXEL_NORM_MAX': fit_result['pixel_bounds'][1],
-                'ORDER_NORM_MIN': fit_result['order_bounds'][0],
-                'ORDER_NORM_MAX': fit_result['order_bounds'][1],
-            })
             lsf_fwhms_full = _build_lsf_poly2d_structured(
                 fit_result['coeffs'],
                 pixel_vec,

@@ -44,7 +44,7 @@ class GasCellWavesolModel(FiberAttributeProxyMixin, CalibrationModel):
         'CONT_INFO': TABLE_HDU({
             'MODEL': str,  # '1d', or 'none' if no continuum is fit
         }, enumerate='FIB', title="Continuum model: '1d' (per order, in pixel) or 'none'."),
-        **create_chebyshev_extensions(norm=False),
+        **create_chebyshev_extensions(),
     }
 
     CAL_TYPE = 'gascell_wavesol'

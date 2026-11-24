@@ -26,15 +26,6 @@ def _constant_fwhm_lsf_model(wave_2d, *, order_start, order_end, fwhm_um, fiber=
     lsf_model.meta.order_end = order_end
     setattr(lsf_model, f"WAVE_FIB{fiber}", np.asarray(wave_2d, dtype=np.float64))
     setattr(lsf_model, f"CHEB_COEFFS_FIB{fiber}", np.array([[float(fwhm_um)]], dtype=np.float64))
-    n_pix = int(np.asarray(wave_2d).shape[1])
-    getattr(lsf_model, f"cheb_norm_fib{fiber}").add_row(
-        {
-            "PIXEL_NORM_MIN": 0.0,
-            "PIXEL_NORM_MAX": float(n_pix - 1),
-            "ORDER_NORM_MIN": int(order_start),
-            "ORDER_NORM_MAX": int(order_end),
-        }
-    )
     return lsf_model
 
 

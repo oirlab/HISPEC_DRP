@@ -87,6 +87,7 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
             has shape ``(len(wave), n_kernel)`` and is row-normalized.
         """
         from ..primitives.lsf.lsf_gauss_primitive import _build_lsf_poly2d_unstructured
+        from ..primitives.wavesol.wavesol_cheb2d_primitive import wavesol_norm_bounds
 
         wave = np.asarray(wave, dtype=np.float64).ravel()
         if wave.size < 2:
@@ -100,19 +101,9 @@ class GaussianLSFModel(FiberAttributeProxyMixin, CalibrationModel):
                 f"GaussianLSFModel has no cheb_coeffs_fib{fiber}; "
                 "run CalculateGaussianLSFPrimitive or load an LFC LSF cal."
             )
-        norm = self.cheb_norm[fiber]
-        if norm is None or len(norm) == 0:
-            raise ValueError(f"GaussianLSFModel has no cheb_norm_fib{fiber}")
-        pixel_bounds = (
-            float(norm['PIXEL_NORM_MIN'][0]),
-            float(norm['PIXEL_NORM_MAX'][0]),
-        )
-        order_bounds = (
-            float(norm['ORDER_NORM_MIN'][0]),
-            float(norm['ORDER_NORM_MAX'][0]),
-        )
         idx_ord = self.order_index(order)
         w_ord = np.asarray(self.wave[fiber][idx_ord], dtype=np.float64)
+        pixel_bounds, order_bounds = wavesol_norm_bounds(w_ord.size, self.make_order_vec())
         pixels = _interp_pixel_from_wave(wave, w_ord)
         orders = np.full(wave.shape, int(order), dtype=np.float64)
         fwhms = np.asarray(
