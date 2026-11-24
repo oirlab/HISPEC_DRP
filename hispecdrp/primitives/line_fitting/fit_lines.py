@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 import scipy.optimize
+from scipy.stats import median_abs_deviation
 from numba import njit
 from hispecdrp.primitives.utils.array_utils import polyval1d
 
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 SIGMA_TO_FWHM = 2 * np.sqrt(2 * np.log(2))
 
+LINE_DQ_FLAGS = {
+    'GOOD': np.uint8(0),
+    'DO_NOT_USE': np.uint8(2**0),
+    'FIT_FAILURE': np.uint8(2**1),
+    'POOR_FIT': np.uint8(2**2),
+    'LOW_SNR': np.uint8(2**3),
+}
 
 def fit_lines_gauss(
     x : np.ndarray,
@@ -22,23 +30,44 @@ def fit_lines_gauss(
     max_fit_window : int | None = None,
     background_poly_deg : int = 0,
     absorption : bool = False,
+    half_windows : np.ndarray | None = None,
 ) -> list[GaussianLineFitResult]:
+    """Fit each line in ``line_centers``. Always returns one result per input line, in input order
+    (failed fits are NaN), so callers can index results by input position.
+
+    half_windows : optional per-line fit half-widths in pixels. If given they are used instead of
+        the spacing between ``line_centers`` (e.g. computed from a complete line list, including
+        lines that are not being fit). Still clamped by ``min_fit_window`` / ``max_fit_window``.
+    """
 
     nx = len(y)
+    line_centers = np.asarray(line_centers, dtype=float)
     n_lines = len(line_centers)
     if n_lines == 0:
         return []
-    if n_lines == 1:
-        default_spacing = float(max_fit_window) if max_fit_window is not None else 14.0
-        line_spacing = np.array([default_spacing], dtype=float)
+    default_half = (float(max_fit_window) if max_fit_window is not None else 14.0) / 2
+    if half_windows is not None:
+        half_windows = np.asarray(half_windows, dtype=float)
+        if half_windows.shape != line_centers.shape:
+            raise ValueError("half_windows must have the same shape as line_centers")
+    elif n_lines == 1:
+        half_windows = np.array([default_half])
     else:
-        line_spacing = np.gradient(line_centers)
+        # Same spacing rule as before (average of the gaps either side), so LFC / etalon fits are
+        # unchanged. Callers that need nearest-neighbour or full-line-list windows pass half_windows.
+        # abs(): centers in decreasing order gave negative spacings.
+        spacing = np.abs(np.gradient(line_centers))
+        half_windows = np.where(np.isfinite(spacing), spacing / 2, default_half)
 
     fit_results = []
     for i in range(n_lines):
 
-        # Half-window from spacing to neighbors, then clamp to [min, max] (full-window widths in px)
-        half = line_spacing[i] / 2
+        if not np.isfinite(line_centers[i]) or not np.isfinite(half_windows[i]):
+            fit_results.append(_badfit_result(background_poly_deg))
+            continue
+
+        # Half-window, clamped to [min, max] (full-window widths in px)
+        half = half_windows[i]
         if min_fit_window is not None:
             half = max(half, min_fit_window / 2)
         if max_fit_window is not None:
@@ -48,6 +77,8 @@ def fit_lines_gauss(
         # Only pass data in the fitting window
         ki = max(0, int(np.round(line_centers[i] + fit_window[0])))
         kf = min(nx - 1, int(np.round(line_centers[i] + fit_window[1])))
+        if kf < ki: # swap if these have somehow gotten backwards
+            ki, kf = kf, ki
         x_fit = x[ki:kf+1].copy()
         y_fit = y[ki:kf+1].copy()
         y_err_fit = y_err[ki:kf+1].copy() if y_err is not None else None
@@ -67,6 +98,16 @@ def fit_lines_gauss(
         fit_results.append(fit_result)
 
     return fit_results
+
+
+def _badfit_result(background_poly_deg: int = 0) -> "GaussianLineFitResult":
+    return GaussianLineFitResult(
+        amplitude=np.nan, amplitude_err=np.nan, mu=np.nan, mu_err=np.nan,
+        fwhm=np.nan, fwhm_err=np.nan,
+        background_coeffs=np.full(background_poly_deg + 1, np.nan),
+        background_coeffs_err=np.full(background_poly_deg + 1, np.nan),
+        redchi2=np.nan,
+    )
 
 
 @dataclass
@@ -182,20 +223,13 @@ def fit_line_gauss(
     good = np.where(dq == 0)[0]
 
     def _output_badfit():
-        return GaussianLineFitResult(
-            amplitude=np.nan,
-            amplitude_err=np.nan,
-            mu=np.nan,
-            mu_err=np.nan,
-            fwhm=np.nan,
-            fwhm_err=np.nan,
-            background_coeffs=np.full(background_poly_deg + 1, np.nan),
-            background_coeffs_err=np.full(background_poly_deg + 1, np.nan),
-            redchi2=np.nan
-        )
+        return _badfit_result(background_poly_deg)
 
-    if len(good) < 3:
-        logger.warning("Not enough good data points to perform fit.")
+    # Need more points than free parameters (amp, mu, fwhm + background), otherwise
+    # n_dof <= 0, redchi2 is meaningless and the line escapes the redchi2 outlier flag.
+    n_params = 3 + background_poly_deg + 1
+    if len(good) < n_params + 1:
+        logger.warning(f"Not enough good data points to perform fit. ({len(good)} good data points)")
         return _output_badfit()
 
     x_fit = x[good]
@@ -234,6 +268,10 @@ def fit_line_gauss(
         logger.warning("Data in the fit window are flat; no line to fit.")
         return _output_badfit()
 
+    if np.sum(w_seed) == 0. or ~np.isfinite(np.sum(w_seed)):
+        logger.warning(f"Seed weights sum to zero or are not finite, cannot fit line.")
+        return _output_badfit()
+
     # Default mu guess
     if mu_guess is None:
         mu_guess = np.average(x_fit, weights=w_seed)
@@ -257,7 +295,7 @@ def fit_line_gauss(
     n_bkg_coeff = background_poly_deg + 1
     bkg0 = [0.0] * n_bkg_coeff
     amp0 = 1.0
-    if not absorption:
+    if absorption:  # (was `if not absorption`: emission started with the background at the peak level)
         bkg0[0] = 1.0  # continuum ~1 after normalization
         amp0 = np.clip(1.0 - np.nanmin(y_fit), 0.0, 1.5)  # depth guess
     p0 = np.array([amp0, mu_guess, fwhm0] + bkg0)
@@ -415,3 +453,131 @@ def _gauss_absorption_jac(params, x, y, yerr):
         J[:, 3 + k] = -p / yerr                      # d/d(coeff_k)
         p = p * xc
     return J
+
+
+# --- line fit flagging utility functions ---
+
+def flag_low_amplitude_lines(
+    orders, mu_pix, amplitude, fwhm_pix, spec, spec_dq, order_start,
+    snr_threshold=3.0, window_fwhm=15.0, min_window_pix=20,
+    exclude_fwhm=3.0, min_pixels=10,
+):
+    """
+    Flag fitted lines whose amplitude is low relative to the local noise.
+
+    The noise for each line is estimated as the robust scatter (1.4826 * MAD)
+    of good pixels in a window around the line, excluding the line core. Using
+    MAD makes the estimate insensitive to neighboring lines in the window.
+
+    Parameters
+    ----------
+    orders, mu_pix, amplitude, fwhm_pix : array-like
+        Columns from the fit-params table (ORDER, MU_PIX, AMPLITUDE, FWHM_PIX).
+    spec : ndarray (n_orders, n_pix)
+        Extracted spectrum for this fiber.
+    spec_dq : ndarray (n_orders, n_pix)
+        DQ array for this fiber. Pixels with nonzero DQ are ignored.
+    order_start : int
+        ``input_model.meta.order_start``, used to map order number -> row index.
+    snr_threshold : float
+        Lines with amplitude / local noise below this are flagged.
+    window_fwhm : float
+        Half-width of the noise window, in units of the line FWHM.
+    min_window_pix : int
+        Minimum half-width of the noise window in pixels.
+    exclude_fwhm : float
+        Half-width, in FWHM, of the region around the line excluded from the
+        noise estimate.
+    min_pixels : int
+        Minimum number of good pixels required to estimate the noise. Lines
+        with fewer are left unflagged (noise can't be assessed).
+
+    Returns
+    -------
+    mask : ndarray of bool
+        True where the line has low amplitude relative to the surrounding noise.
+    """
+    orders = np.asarray(orders)
+    mu_pix = np.asarray(mu_pix, dtype=float)
+    amplitude = np.asarray(amplitude, dtype=float)
+    fwhm_pix = np.asarray(fwhm_pix, dtype=float)
+
+    mask = np.zeros(len(orders), dtype=bool)
+    xarr = np.arange(spec.shape[1])
+
+    for k in range(len(orders)):
+        mu, amp, fwhm = mu_pix[k], amplitude[k], fwhm_pix[k]
+
+        # failed fits are handled by the FIT_FAILURE flag
+        if not (np.isfinite(mu) and np.isfinite(amp) and np.isfinite(fwhm)):
+            continue
+
+        oi = np.abs(int(orders[k]) - order_start)
+        dist = np.abs(xarr - mu)
+        half_window = max(window_fwhm * fwhm, min_window_pix)
+
+        sel = (
+            (dist > exclude_fwhm * fwhm)
+            & (dist < half_window)
+            & (spec_dq[oi, :] == 0)
+            & np.isfinite(spec[oi, :])
+        )
+        if sel.sum() < min_pixels:
+            continue
+
+        vals = spec[oi, sel]
+        noise = 1.4826 * np.median(np.abs(vals - np.median(vals)))
+        if not np.isfinite(noise) or noise <= 0:
+            continue
+
+        mask[k] = (amp / noise) < snr_threshold
+
+    return mask
+
+
+def flag_redchi2_outliers(redchi2, amplitude, nsigma=3.0, deg=1, max_iter=5):
+    """Flag lines whose redchi2 is high relative to the redchi2-amplitude trend."""
+    redchi2 = np.asarray(redchi2, dtype=float)
+    amp = np.asarray(amplitude, dtype=float)
+    outlier = np.zeros(len(redchi2), dtype=bool)
+
+    ok = np.isfinite(redchi2) & np.isfinite(amp) & (redchi2 > 0) & (amp > 0)
+    if ok.sum() < deg + 5:
+        return outlier
+
+    x, y = np.log10(amp[ok]), np.log10(redchi2[ok])
+    keep = np.ones(len(x), dtype=bool)
+    for _ in range(max_iter):
+        coeffs = np.polyfit(x[keep], y[keep], deg)
+        resid = y - np.polyval(coeffs, x)
+        sigma = median_abs_deviation(resid[keep], scale='normal')
+        new_keep = np.abs(resid) < nsigma * sigma
+        if np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+
+    outlier[ok] = resid > nsigma * sigma   # one-sided: only worse-than-trend fits
+    return outlier
+
+def flag_fwhm_outliers(fwhm, line_wavelength, nsigma=3.0, deg=1, max_iter=5):
+    """Flag lines whose fwhm is an outlier relative to the fwhm-wavelength trend."""
+    fwhm = np.asarray(fwhm, dtype=float)
+    outlier = np.zeros(len(fwhm), dtype=bool)
+
+    ok = np.isfinite(fwhm) & np.isfinite(line_wavelength) & (fwhm > 0) & (line_wavelength > 0)
+    if ok.sum() < deg + 5:
+        return outlier
+
+    x, y = line_wavelength[ok], fwhm[ok]
+    keep = np.ones(len(x), dtype=bool)
+    for _ in range(max_iter):
+        coeffs = np.polyfit(x[keep], y[keep], deg)
+        resid = y - np.polyval(coeffs, x)
+        sigma = median_abs_deviation(resid[keep], scale='normal')
+        new_keep = np.abs(resid) < nsigma * sigma
+        if np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+
+    outlier[ok] = resid > nsigma * sigma   # one-sided: only worse-than-trend fits
+    return outlier
