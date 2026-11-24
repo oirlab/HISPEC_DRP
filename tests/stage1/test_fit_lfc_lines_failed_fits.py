@@ -139,6 +139,7 @@ def test_fit_lfc_lines_skips_nan_centroids():
         save_preview=False,
         show_preview=False,
         save_result=False,
+        line_source="peaks",
     )
     table = out.lfc_fitparams_fib2
     assert len(table) >= 1
