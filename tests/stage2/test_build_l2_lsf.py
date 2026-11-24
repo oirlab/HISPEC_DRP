@@ -22,7 +22,7 @@ def test_lsf_matched_line_shallower_than_native_synthetic():
 
 @pytest.mark.slow
 def test_build_l2_apply_lsf_runs_smoke():
-    from hispecdrp.simulations.spectra import build_l2
+    from hispecdrp.simulations.simulate_spectra import build_l2
 
     # Two-order smoke (HDF LSF load). Skipped in default CI via -m "not slow".
     model = build_l2(

@@ -37,7 +37,7 @@ logging.basicConfig(
 
 
 def main() -> None:
-    from hispecdrp.simulations.spectra import build_ccfopt_mask_lsf_matched
+    from hispecdrp.simulations.simulate_spectra import build_ccfopt_mask_lsf_matched
 
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(

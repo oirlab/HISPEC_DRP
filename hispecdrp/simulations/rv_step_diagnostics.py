@@ -27,7 +27,7 @@ from .ideal_spectrum_rv import (
     recover_rv_from_rate_map,
 )
 from .simulate_rate_map import _upsample_spectrum
-from .spectra import (
+from .simulate_spectra import (
     _instrument_wavelength_solution,
     _resolve_order_bounds,
     build_ccfopt_mask,

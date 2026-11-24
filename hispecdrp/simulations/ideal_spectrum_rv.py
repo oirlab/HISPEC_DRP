@@ -19,7 +19,7 @@ from ..primitives.utils.spectral_utils import (
 from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
-from .spectra import quiet_pipeline_logging, recover_stellar_rv
+from .simulate_spectra import quiet_pipeline_logging, recover_stellar_rv
 
 __all__ = [
     "build_template_rate_map",

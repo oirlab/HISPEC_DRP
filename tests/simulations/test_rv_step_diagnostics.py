@@ -28,7 +28,7 @@ from hispecdrp.simulations.rv_step_diagnostics import (
     saved_rate_map_path,
     summarize_step_grid,
 )
-from hispecdrp.simulations.spectra import build_ccfopt_mask, stellar_rv_kwargs_for_ideal_spectrum
+from hispecdrp.simulations.simulate_spectra import build_ccfopt_mask, stellar_rv_kwargs_for_ideal_spectrum
 
 
 def test_step_grid_and_no_reject_defaults():

@@ -9,7 +9,7 @@ For an arbitrary stellar template (here **BT-Settl lte040**, 4000 K):
 
 1. **Seed mask** — gradient-based line detection on the 1D template
    (``build_line_mask_from_template`` / ``RELAXED_TEMPLATE_MASK_BUILD_KW``).
-2. **Ideal L2** — :func:`~hispecdrp.simulations.spectra.build_l2` paints the template
+2. **Ideal L2** — :func:`~hispecdrp.simulations.simulate_spectra.build_l2` paints the template
    onto a native BSPEC L2, then convolves each order with the HDF PSF→1-D LSF
    (``apply_lsf=True``) so line shapes match the instrument.
 3. **Re-zero + reweight** — line-by-line ``StellarRVPrimitive`` on that
@@ -58,13 +58,13 @@ Imports and output directory
 2. Build seed mask, ideal L2, and CCF-opt mask
 ----------------------------------------------
 
-:func:`~hispecdrp.simulations.spectra.build_ccfopt_mask` with ``apply_lsf=True``
+:func:`~hispecdrp.simulations.simulate_spectra.build_ccfopt_mask` with ``apply_lsf=True``
 runs the three-step pipeline on an LSF-matched ideal L2 (full BSPEC echelle
-range). Equivalent helper: :func:`~hispecdrp.simulations.spectra.build_ccfopt_mask_lsf_matched`.
+range). Equivalent helper: :func:`~hispecdrp.simulations.simulate_spectra.build_ccfopt_mask_lsf_matched`.
 
 .. code-block:: python
 
-   from hispecdrp.simulations.spectra import build_ccfopt_mask, quiet_pipeline_logging
+   from hispecdrp.simulations.simulate_spectra import build_ccfopt_mask, quiet_pipeline_logging
    from hispecdrp.utils.line_mask_utils import read_mask_generation_meta
 
    # This suppresses logging from the pipeline so the output is cleaner

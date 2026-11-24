@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from hispecdrp.simulations.spectra import (
+from hispecdrp.simulations.simulate_spectra import (
     build_ccfopt_mask,
     build_l2,
     ensure_lsf_ccfopt_mask,

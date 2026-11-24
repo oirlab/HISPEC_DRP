@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from hispecdrp.primitives import StellarRVPrimitive
-from hispecdrp.simulations.spectra import (
+from hispecdrp.simulations.simulate_spectra import (
     build_l2,
     paint_order_list,
     quiet_pipeline_logging,

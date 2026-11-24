@@ -2519,7 +2519,7 @@ def build_e2e_ccfopt_mask_from_blaze_l2(
     Build a static ``*.ccfopt.delta.mas`` mask on an E2E blaze L2 at inject RV = 0.
 
     Re-zeros seed line centers from a line-by-line ``RVCCF`` table on the blaze
-    spectrum (same path as :func:`hispecdrp.simulations.spectra.build_ccfopt_mask`
+    spectrum (same path as :func:`hispecdrp.simulations.simulate_spectra.build_ccfopt_mask`
     but for ZEMAX+extraction L2 rather than ideal native-WAVE L2).
     """
     from pathlib import Path

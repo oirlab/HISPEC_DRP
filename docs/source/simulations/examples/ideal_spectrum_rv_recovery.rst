@@ -3,14 +3,14 @@ Ideal-Spectrum RV Recovery
 
 Recover an injected RV from the rest-frame **BT-Settl lte040** (4000 K)
 template using the packaged full-band ``*.ccfopt.delta.mas`` mask (~887 lines)
-and :func:`~hispecdrp.simulations.spectra.recover_stellar_rv`. The same
+and :func:`~hispecdrp.simulations.simulate_spectra.recover_stellar_rv`. The same
 -50...+50 km/s grid (1 km/s, 101 samples) is run on three independent paths.
 Run the preamble and section 1 first, then any of sections 2–4. Each path
 prints the same recovery table and residual plot (cm/s; mean and ``np.std``
 with ``ddof=0``).
 
 1. **Native L2** (section 2):
-   :func:`~hispecdrp.simulations.spectra.build_l2` onto the echelle WAVE
+   :func:`~hispecdrp.simulations.simulate_spectra.build_l2` onto the echelle WAVE
    grid. Fast; no KOA cache.
 2. **Rate map → Stage 1** (section 3): native rate map, wrap as L0, extract
    and blaze.
@@ -19,7 +19,7 @@ with ``ddof=0``).
 
 Pipeline logs are suppressed during each sweep. For an LSF-matched closed loop,
 set ``APPLY_LSF = True`` and pass a full-band ``*.lsf.ccfopt.delta.mas`` from
-:func:`~hispecdrp.simulations.spectra.ensure_lsf_ccfopt_mask`. The packaged
+:func:`~hispecdrp.simulations.simulate_spectra.ensure_lsf_ccfopt_mask`. The packaged
 ``lte040...lsf.ccfopt.delta.mas`` is a two-order smoke file and is not used
 here.
 
@@ -63,7 +63,7 @@ used by sections 2–4.
    import numpy as np
 
    from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery
-   from hispecdrp.simulations.spectra import quiet_pipeline_logging
+   from hispecdrp.simulations.simulate_spectra import quiet_pipeline_logging
    from hispecdrp.utils.line_mask_utils import (
        paired_line_mask_path_for_template,
        read_mask_generation_meta,
@@ -138,14 +138,14 @@ used by sections 2–4.
 2. Native L2 injection
 ----------------------
 
-:func:`~hispecdrp.simulations.spectra.build_l2` paints the Doppler-shifted
+:func:`~hispecdrp.simulations.simulate_spectra.build_l2` paints the Doppler-shifted
 template onto a native BSPEC L2, then
-:func:`~hispecdrp.simulations.spectra.recover_stellar_rv` recovers the RV.
+:func:`~hispecdrp.simulations.simulate_spectra.recover_stellar_rv` recovers the RV.
 Requires the preamble and section 1 only.
 
 .. code-block:: python
 
-   from hispecdrp.simulations.spectra import build_l2, recover_stellar_rv
+   from hispecdrp.simulations.simulate_spectra import build_l2, recover_stellar_rv
 
 
    def recover_native(bulk):
