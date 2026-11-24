@@ -1624,12 +1624,12 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
 
         for fiber_key in ccd1_data:
             if "fiber" in fiber_key:
-                base_dict[fiber_key] = _parse_fiber(ccd1_data[fiber_key])
+                base_dict[fiber_key] = _read_fiber(ccd1_data[fiber_key])
 
         return base_dict
 
 
-def _parse_fiber(fiber_group: h5py.Group) -> dict:
+def _read_fiber(fiber_group: h5py.Group) -> dict:
     """
     Parse one fiber group and return its orders & PSF data.
     """
@@ -1645,20 +1645,20 @@ def _parse_fiber(fiber_group: h5py.Group) -> dict:
     # Fill in data for each entry
     for key in fiber_group:
         if "psf_order_" in key:
-            _parse_psf_order(key, fiber_group[key], fiber_dict)
+            _read_order_psfs(key, fiber_group[key], fiber_dict)
         else:
-            _parse_order(key, fiber_group[key], fiber_dict)
+            _read_order_trace(key, fiber_group[key], fiber_dict)
 
     return fiber_dict
 
 
-def _parse_psf_order(
+def _read_order_psfs(
     key: str,
     group: h5py.Group,
     fiber_dict: dict
 ) -> None:
     """
-    Parse a PSF order group like 'psf_order_59' into arrays.
+    Read the PSF stamps of a group like 'psf_order_59' into fiber_dict[order].
     """
 
     order = key.replace("psf_order_", "")
@@ -1675,13 +1675,13 @@ def _parse_psf_order(
     ][0]
 
 
-def _parse_order(
+def _read_order_trace(
     key: str,
     dataset: h5py.Dataset,
     fiber_dict: dict
 ) -> None:
     """
-    Parse a regular trace dataset like 'order59' into X, Y and wavelength arrays.
+    Read a trace dataset like 'order59' into fiber_dict[order] as x, y and wavelength arrays.
     """
     order = key.replace("order", "")
     arr = np.vstack([list(k) for k in dataset])
