@@ -1318,8 +1318,9 @@ def _build_psf_wavelength_linear_numba(
     psfw: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Linear interpolation in wavelength between consecutive PSFs z (Npsf, Nrows, Ncols),
-    in the same per-segment Horner form (a, b, c, d) as `_build_psf_wavelength_splines_numba`, with c = d = 0.
+    Linear interpolation in wavelength between consecutive PSFs z (Npsf, Nrows, Ncols), as per-segment
+    Horner coefficients (a, b, c, d), each (Npsf - 1, Nrows, Ncols), with c = d = 0: on segment k,
+    z(lam) = a + t*(b + t*(c + t*d)) with t = lam - psfw[k].
     `_interp_prf_stamps_numba` uses the first/last segment beyond the end PSFs, so it extrapolates linearly there.
     """
     Npsf, Nrows, Ncols = z.shape
@@ -1333,27 +1334,6 @@ def _build_psf_wavelength_linear_numba(
             for i in range(Ncols):
                 a[k, j, i] = z[k, j, i]
                 b[k, j, i] = (z[k + 1, j, i] - z[k, j, i]) / h
-    return a, b, c, d
-
-
-@njit(parallel=True, cache=True)
-def _build_psf_wavelength_splines_numba(
-    psfw: np.ndarray, z: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Not-a-knot cubic spline in wavelength through the PSFs z (Npsf, Nrows, Ncols) at every grid point.
-
-    Returns the per-segment Horner coefficients (a, b, c, d) of `cubic_spline_build`, each
-    (Npsf - 1, Nrows, Ncols): on segment k, z(lam) = a + t*(b + t*(c + t*d)) with t = lam - psfw[k].
-    """
-    Npsf, Nrows, Ncols = z.shape
-    a = np.empty((Npsf - 1, Nrows, Ncols))
-    b = np.empty((Npsf - 1, Nrows, Ncols))
-    c = np.empty((Npsf - 1, Nrows, Ncols))
-    d = np.empty((Npsf - 1, Nrows, Ncols))
-    for j in prange(Nrows):
-        for i in range(Ncols):
-            _, a[:, j, i], b[:, j, i], c[:, j, i], d[:, j, i] = cubic_spline_build(psfw, z[:, j, i].copy())
     return a, b, c, d
 
 
@@ -1379,8 +1359,8 @@ def _interp_prf_stamps_numba(
     Stamp n is built in two steps:
 
     1. The chromatic effective PSF at wavelength lam[n], from the per-segment polynomials in wavelength
-       through the PSFs (za, zb, zc, zd from `_build_psf_wavelength_linear_numba` or
-       `_build_psf_wavelength_splines_numba`; the end segments extrapolate), clamped at zero. It is evaluated only on the grid points that bracket each
+       through the PSFs (za, zb, zc, zd from `_build_psf_wavelength_linear_numba`; the end segments
+       extrapolate), clamped at zero. It is evaluated only on the grid points that bracket each
        stamp pixel, a (2 Nys, 2 Nxs) block, not the whole PSF grid.
     2. The pixel-phase shift, by bilinear interpolation of that block (`linear_interp2d_eval_cell`)
        at x = pixel_xs - shift_x[n], y = pixel_ys - shift_y[n] in PSF samples.
