@@ -108,10 +108,9 @@ class SimulateRateMap:
             )
         self.hdf_file_directory += os.sep
 
-        self.bspec_hdf_model: str = 'HISPEC_yJ_20231006A-1_all_traces.hdf'
-        self.rspec_hdf_model: str = 'HISPEC_HK_20231006B-1_all_traces.hdf'
+        self.bspec_hdf_model: str = default_bspec_hdf
+        self.rspec_hdf_model: str = default_rspec_hdf
         self.output_directory: str = os.getcwd()
-        self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
         self.pyechelle_outname: str = DEFAULT_PYECHELLE_FILENAME
         self.rate_map_outname: str = DEFAULT_RATE_MAP_FILENAME
 
@@ -277,7 +276,6 @@ class SimulateRateMap:
             self.wavelength_solution[fiber] = {}
             fiber_key = f"fiber_{fiber}"
             for od in order_list:
-                self.wavelength_solution[fiber][od] = {}
                 ow = model_data[fiber_key][od]['xy_wavelengths']
                 ox = model_data[fiber_key][od]["x"]
 
@@ -435,7 +433,7 @@ class SimulateRateMap:
             If True, saves the resulting rate map to output_directory. Default is True.
         method : str
             Method to use for rate map generation. Options are 'bilinear_weights', 'prf_convolution' or 'prf_convolution_old'.
-            'prf_convolution_old' is the previous, much slower 'prf_convolution' implementation (linear in wavelength between PSFs, PCHIP trace).
+            'prf_convolution_old' is the previous, much slower 'prf_convolution' implementation (PCHIP trace, one interpolator call per sample).
         apply_blaze : bool
             If True, applies a sinc^2 blaze efficiency to the fiber flux to each order before simulation. Default is True.
         sampling_factor : float or None
@@ -999,49 +997,47 @@ def psf_prf_convolution_rate_map_old(
     return det
 
 
-# PSF stamps in the RSPEC pyechelle HDF model (HISPEC_HK_20231006B-1_all_traces.hdf) that jump relative
-# to the other stamps of their order and fiber (iterative leave-one-out degree-5 polynomial in
-# wavelength, per pixel), as {fiber: {order: [stamp indices]}}. Indices count the order's stamps sorted by
-# increasing wavelength. psf_prf_convolution_rate_map drops them before interpolating in wavelength.
+# PSF stamps in the RSPEC pyechelle HDF model (HISPEC_HK_20231006B-1_all_traces.hdf) that differ from the
+# rest of their order and fiber, as {fiber: {order: [stamp indices]}}. Indices count the order's stamps
+# sorted by increasing wavelength. A stamp is either entirely good or entirely bad, so whole stamps are
+# compared: with the stamps normalized to unit sum, the distance between two stamps is 0.5 * sum|P_i - P_j|
+# over all pixels. The kept stamps are the longest chain in wavelength order whose consecutive members are
+# within 1.5x the largest distance over the same stamp gaps in clean orders (59-60, 76-98); the rest are
+# listed. The bad stamps lie along a single straight band across the detector.
+# psf_prf_convolution_rate_map drops them before interpolating in wavelength.
 _BAD_ZEMAX_PSFS = {
     1: {
-        63: [13, 14],
-        64: [13, 14],
-        65: [13, 14],
-        66: [11, 12, 13, 14],
-        67: [10, 11, 12, 13, 14],
-        68: [9, 10, 11],
-        69: [7, 8, 9],
-        70: [5, 6, 7, 8],
-        71: [3, 4, 5, 6],
-        72: [0, 1, 2, 3],
-        73: [0, 1],
+        64: [14],
+        65: [13],
+        66: [12],
+        67: [11],
+        68: [9, 10],
+        69: [8],
+        70: [6],
+        71: [3, 4],
+        72: [2],
     },
     2: {
-        62: [13, 14],
-        63: [13, 14],
-        64: [13, 14],
-        65: [11, 12, 13, 14],
-        66: [10, 11, 12, 13, 14],
-        67: [9, 10, 11],
-        68: [7, 8, 9],
-        69: [5, 6, 7, 8],
-        70: [3, 4, 5, 6],
-        71: [0, 1, 2, 3],
-        72: [0, 1],
+        63: [14],
+        64: [13],
+        65: [12],
+        66: [11],
+        67: [9, 10],
+        68: [8],
+        69: [6],
+        70: [3, 4],
+        71: [2],
     },
     3: {
-        61: [13, 14],
-        62: [13, 14],
-        63: [13, 14],
-        64: [11, 12, 13, 14],
-        65: [10, 11, 12, 13, 14],
-        66: [9, 10, 11],
-        67: [7, 8, 9],
-        68: [5, 6, 7, 8],
-        69: [3, 4, 5, 6],
-        70: [0, 1, 2, 3],
-        71: [0, 1],
+        62: [14],
+        63: [13],
+        64: [12],
+        65: [11],
+        66: [9, 10],
+        67: [8],
+        68: [6],
+        69: [4],
+        70: [2],
     },
 }
 
@@ -1070,9 +1066,9 @@ def psf_prf_convolution_rate_map(
     - Stamps are built (in parallel) and deposited in Numba rather than one interpolator call per
       wavelength sample. As before, each stamp is the effective PSF (PSF
       convolved with the PRF) shifted to the sample's pixel phase by bilinear interpolation.
-    - Between PSF wavelengths the effective PSF follows a not-a-knot cubic spline through the PSFs
-      (at every grid point) instead of a linear blend of the two bracketing PSFs, so it varies
-      smoothly with wavelength. Beyond the end PSFs it follows the end cubics.
+    - The PSF stamps in bad_psf_indices are left out. As before, between PSF wavelengths the effective
+      PSF is a linear blend of the two bracketing (kept) PSFs, and beyond the end PSFs it extrapolates
+      linearly from the end pair.
     - For an even oversampling factor, the effective PSFs are bilinearly interpolated by half a PSF
       sample and cropped to an odd size, so they are centred on the trace position. The previous
       implementation leaves them half a PSF sample (0.05 px at 10x) off.
@@ -1348,7 +1344,7 @@ def _interp_prf_stamps_numba(
                 for b in range(Nxs):
                     for c in range(2):
                         i = ii[b] + c
-                        # Clamp at zero in case the spline in wavelength undershoots
+                        # Clamp at zero where the linear extrapolation beyond the end PSFs goes negative
                         psf[2 * a + r, 2 * b + c] = max(a0[j, i] + t * (b0[j, i] + t * (c0[j, i] + t * d0[j, i])), 0.0)
 
         # 2. Pixel-phase shift by bilinear interpolation
