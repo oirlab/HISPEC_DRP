@@ -163,6 +163,16 @@ class StellarRVPrimitive(BasePrimitive):
         :func:`~hispecdrp.primitives.utils.ccf.ccf_utils._calc_mask_ccf_chunks_numba`. Values are clamped
         to ``[1, ccf_utils.MAX_MASK_CCF_PIXEL_INTERP_ORDER]``. Values **greater than 1** use
         Lanczos-*a* (not historical Lagrange polynomials).
+    mask_ccf_resample : bool
+        **Default:** ``True``. **Mask algorithm only.** When ``True``, each trial velocity
+        samples the spectrum with the Lanczos kernel onto the uniform velocity grid.
+        When ``False``, a chunk that holds one delta line uses the pixel fluxes at
+        ``v = c ((λ/λ_line)(1+z_b) - 1)`` with no interpolator. Finite-width mask
+        lines and chunks with more than one line still require resampling.
+    mask_ccf_fit_baseline_free : bool
+        **Default:** ``False``. When ``True``, the line-mask Gaussian centroid fits
+        the continuum as a free parameter (the existing LevMar model) instead of
+        holding it at the sigma-clipped median. The fixed median is the default.
     window_size_um : float
         **Default:** ``0.25``. Approximate wavelength span (µm) of each **chunk** along an order:
         spectra are split into contiguous bins of roughly this width for per-chunk RVs (template
@@ -270,6 +280,8 @@ class StellarRVPrimitive(BasePrimitive):
         "mask_wavelength": None,
         "mask_weight": None,
         "mask_ccf_pixel_interp_order": 3,
+        "mask_ccf_resample": True,
+        "mask_ccf_fit_baseline_free": False,
         # --- Shared chunking & chunk RV aggregation (both algorithms) ---
         "window_size_um": 0.25,
         "outlier_sigma": 3.0,
@@ -834,6 +846,10 @@ class StellarRVPrimitive(BasePrimitive):
             min_good_pixels=int(getattr(self, "ccf_min_good_pixels", 9)),
             mask_ccf_pixel_interp_order=int(
                 getattr(self, "mask_ccf_pixel_interp_order", 3)
+            ),
+            mask_ccf_resample=bool(getattr(self, "mask_ccf_resample", True)),
+            mask_ccf_fit_baseline_free=bool(
+                getattr(self, "mask_ccf_fit_baseline_free", False)
             ),
             window_line_by_line=bool(getattr(self, "window_line_by_line", False)),
         )

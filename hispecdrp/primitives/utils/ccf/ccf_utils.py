@@ -1536,7 +1536,12 @@ def fit_ccf_rv(
       minimum on ``rv_err`` (no 200 km/s-style floor from ``max(rv_err, σ_slope)``).
     """
     cfg = config or CCFFitConfig()
-    if bool(ccf_line_mask_stored_negated):
+    free_bl_requested = _line_mask_ccf_fit_free_baseline_requested(
+        fit_ccf_baseline_free=fit_ccf_baseline_free,
+        line_mask_line_window_by_line=line_mask_line_window_by_line,
+        ccf_line_mask_stored_negated=ccf_line_mask_stored_negated,
+    )
+    if bool(ccf_line_mask_stored_negated) and not free_bl_requested:
         return _fit_ccf_rv_line_mask_stored_negated_via_numba(
             v_grid_m_s,
             ccf,
@@ -1547,11 +1552,7 @@ def fit_ccf_rv(
             config=cfg,
             gaussian_seed_mean_m_s=gaussian_seed_mean_m_s,
         )
-    free_bl = _line_mask_ccf_fit_free_baseline_requested(
-        fit_ccf_baseline_free=fit_ccf_baseline_free,
-        line_mask_line_window_by_line=line_mask_line_window_by_line,
-        ccf_line_mask_stored_negated=ccf_line_mask_stored_negated,
-    )
+    free_bl = free_bl_requested
     _ccf_line_mask_diag: dict[str, bool] = {}
     if ccf_line_mask_stored_negated is not None:
         _ccf_line_mask_diag["ccf_line_mask_stored_negated"] = bool(ccf_line_mask_stored_negated)
@@ -5452,6 +5453,189 @@ def _rv_from_ccf_line_mask_rows_numba(
         out_flip[i] = flipped
 
 
+def _native_pixel_velocities_m_s(
+    wave_um: np.ndarray,
+    lam_rest_um: float,
+    zb: float,
+) -> np.ndarray:
+    """Doppler velocity of each pixel for one rest wavelength.
+
+    Inverse of :func:`doppler_shift_from_barycenter`:
+    ``v = c ((λ/λ_rest)(1+z_b) - 1)``.
+    """
+    zb1 = 1.0 + float(zb)
+    if not np.isfinite(zb1) or zb1 == 0.0:
+        zb1 = 1.0
+    return C_M_S * ((np.asarray(wave_um, dtype=np.float64) / float(lam_rest_um)) * zb1 - 1.0)
+
+
+def _chunk_native_delta_line_um(line_lam: np.ndarray, line_lo: np.ndarray, line_hi: np.ndarray, line_w: np.ndarray) -> float:
+    """Rest wavelength of the single delta line in a chunk, or NaN."""
+    found = np.nan
+    n_delta = 0
+    for j in range(int(line_lam.size)):
+        wj = float(line_w[j])
+        lam = float(line_lam[j])
+        if not (np.isfinite(wj) and wj > 0.0 and np.isfinite(lam) and lam > 0.0):
+            continue
+        lo = float(line_lo[j])
+        hi = float(line_hi[j])
+        finite_width = (
+            np.isfinite(lo) and np.isfinite(hi) and hi > lo and lo > 0.0
+        )
+        if finite_width:
+            raise ValueError(
+                "mask_ccf_resample=False does not support finite-width mask lines"
+            )
+        found = lam
+        n_delta += 1
+    if n_delta != 1:
+        raise ValueError(
+            "mask_ccf_resample=False requires exactly one delta line in each chunk "
+            f"(found {n_delta})"
+        )
+    return float(found)
+
+
+def _rv_chunks_from_native_pixels(
+    chunk_payloads: list,
+    native_waves: list[np.ndarray],
+    *,
+    zb: float,
+    v_lo: float,
+    v_hi: float,
+    seed_m_s: float | None,
+    wave_um: np.ndarray,
+    return_ccf: bool,
+    min_good_pixels: int,
+    fit_baseline_free: bool,
+):
+    """Gaussian centroid of one delta line sampled on the pixel velocities."""
+    rows_v: list[np.ndarray] = []
+    rows_y: list[np.ndarray] = []
+    rows_e: list[np.ndarray] = []
+    rows_meta: list[tuple[float, float, float, int]] = []
+    for payload, wave in zip(chunk_payloads, native_waves):
+        s_use = np.asarray(payload[2], dtype=np.float64)
+        e_use = np.asarray(payload[4], dtype=np.float64)
+        lam = _chunk_native_delta_line_um(payload[5], payload[6], payload[7], payload[8])
+        v = _native_pixel_velocities_m_s(wave, lam, zb)
+        keep = (
+            (v >= float(v_lo))
+            & (v <= float(v_hi))
+            & np.isfinite(v)
+            & np.isfinite(s_use)
+            & np.isfinite(e_use)
+            & (e_use > 0.0)
+        )
+        n_keep = int(np.count_nonzero(keep))
+        if n_keep < int(min_good_pixels):
+            continue
+        rows_v.append(np.ascontiguousarray(v[keep], dtype=np.float64))
+        # Peak-up convention used by the line-mask Gaussian fit: absorption is a maximum.
+        rows_y.append(np.ascontiguousarray(-s_use[keep], dtype=np.float64))
+        rows_e.append(np.ascontiguousarray(e_use[keep], dtype=np.float64))
+        rows_meta.append((float(payload[11]), float(payload[9]), float(payload[10]), n_keep))
+
+    if not rows_v:
+        return None
+
+    pix_dv = median_pixel_dv_m_s(wave_um)
+    cfg = CCF_PREVIEW_SLOT_FIT_CONFIG
+    pix_size = float(pix_dv) if math.isfinite(pix_dv) and pix_dv > 0.0 else None
+    kept_v: list[np.ndarray] = []
+    kept_y: list[np.ndarray] = []
+    kept_e: list[np.ndarray] = []
+    kept_meta: list[tuple[float, float, float, int]] = []
+    rvs: list[float] = []
+    errs: list[float] = []
+    bis: list[float] = []
+    bis_e: list[float] = []
+    for v, y, e, meta in zip(rows_v, rows_y, rows_e, rows_meta):
+        if fit_baseline_free:
+            step = float(np.median(np.diff(v))) if v.size > 1 else 1.0
+            rv_py, err_py, _params, diag = fit_ccf_rv(
+                v,
+                y,
+                step,
+                n_good=int(v.size),
+                return_params=True,
+                ccf_err=e,
+                ccf_line_mask_stored_negated=True,
+                line_mask_line_window_by_line=True,
+                fit_ccf_baseline_free=True,
+                gaussian_seed_mean_m_s=seed_m_s,
+            )
+            ok_py = bool(diag.get("fit_ok")) and np.isfinite(rv_py) and float(err_py) > 0.0
+            rv_hat = np.array([rv_py if ok_py else np.nan])
+            err_hat = np.array([err_py if ok_py else np.nan])
+            ok = np.array([1 if ok_py else 0])
+        else:
+            rv_hat, err_hat, ok = fit_ccf_rv_rows_numba(
+                v,
+                y.reshape(1, -1),
+                ccf_err_rows=e.reshape(1, -1),
+                gaussian_seed_mean_m_s=seed_m_s,
+                pass1_half_width_m_s=float(cfg.pass1_half_width_km_s) * 1000.0,
+                pass2_half_width_m_s=float(cfg.pass2_half_width_km_s) * 1000.0,
+                initial_stddev_m_s=float(cfg.initial_stddev_km_s) * 1000.0,
+                levmar_maxiter=int(cfg.levmar_maxiter),
+                min_points=int(cfg.min_points),
+                max_cores=1,
+                pix_size_m_s=pix_size,
+            )
+        if int(ok[0]) != 1 or not np.isfinite(rv_hat[0]) or not (float(err_hat[0]) > 0.0):
+            continue
+        try:
+            bv, be, *_rest = calc_bisector_inverse_slope(v, y, e)
+            bv_f = float(bv) if math.isfinite(float(bv)) else float("nan")
+            be_f = float(be) if math.isfinite(float(be)) else float("nan")
+        except Exception:
+            bv_f = float("nan")
+            be_f = float("nan")
+        kept_v.append(v)
+        kept_y.append(y)
+        kept_e.append(e)
+        kept_meta.append(meta)
+        rvs.append(float(rv_hat[0]))
+        errs.append(float(err_hat[0]))
+        bis.append(bv_f)
+        bis_e.append(be_f)
+
+    if not rvs:
+        return None
+
+    n_v = max(int(v.size) for v in kept_v)
+    v_grid = np.full(n_v, np.nan, dtype=np.float64)
+    longest = int(np.argmax([v.size for v in kept_v]))
+    v_grid[: kept_v[longest].size] = kept_v[longest]
+    ccf_2d = None
+    ccf_std_2d = None
+    ccf_preview_2d = None
+    if return_ccf:
+        ccf_2d = np.full((len(kept_y), n_v), np.nan, dtype=np.float64)
+        ccf_preview_2d = np.full_like(ccf_2d, np.nan)
+        ccf_std_2d = np.full_like(ccf_2d, np.nan)
+        for i, (y, e) in enumerate(zip(kept_y, kept_e)):
+            ccf_2d[i, : y.size] = y
+            ccf_preview_2d[i, : y.size] = -y
+            ccf_std_2d[i, : e.size] = e
+    return (
+        np.asarray(rvs, dtype=np.float64),
+        np.asarray(errs, dtype=np.float64),
+        np.asarray([m[0] for m in kept_meta], dtype=np.float64),
+        v_grid,
+        ccf_2d,
+        np.asarray([m[1] for m in kept_meta], dtype=np.float64),
+        np.asarray([m[2] for m in kept_meta], dtype=np.float64),
+        np.asarray([m[3] for m in kept_meta], dtype=np.int32),
+        ccf_std_2d,
+        ccf_preview_2d,
+        np.asarray(bis, dtype=np.float64),
+        np.asarray(bis_e, dtype=np.float64),
+    )
+
+
 def rv_per_chunks_line_mask(
     wave_um: np.ndarray,
     spec: np.ndarray,
@@ -5469,6 +5653,8 @@ def rv_per_chunks_line_mask(
     return_ccf: bool = False,
     min_good_pixels: int = 10,
     mask_ccf_pixel_interp_order: int = 3,
+    mask_ccf_resample: bool = True,
+    mask_ccf_fit_baseline_free: bool = False,
     window_line_by_line: bool = False,
     line_mask_line_chunk_v_center_m_s: float | None = None,
     gaussian_seed_mean_m_s: float | None = None,
@@ -5546,6 +5732,10 @@ def rv_per_chunks_line_mask(
         Lanczos parameter *a* for sampling flux onto Doppler-shifted mask
         wavelengths (``1`` = linear; default ``3`` = Lanczos-3). Clamped to
         ``[1, MAX_MASK_CCF_PIXEL_INTERP_ORDER]``.
+    mask_ccf_resample : bool, optional
+        When ``True`` (default), sample the spectrum onto ``v_grid`` with Lanczos.
+        When ``False``, use pixel fluxes at their native Doppler velocities for a
+        chunk that contains exactly one delta line. No interpolator is applied.
     window_line_by_line : bool, optional
         When true, chunk by mask lines (requires finite
         ``line_mask_line_chunk_v_center_m_s``).
@@ -5687,6 +5877,7 @@ def rv_per_chunks_line_mask(
     all_ccf_rows: list[np.ndarray] = []
     all_ccf_preview_rows: list[np.ndarray] = []
     all_ccf_std_rows: list[np.ndarray] = []
+    native_waves: list[np.ndarray] = []
     chunk_payloads: list[
         tuple[
             np.ndarray,
@@ -5793,9 +5984,37 @@ def rv_per_chunks_line_mask(
                 int(np.sum(in_chunk)),
             )
         )
+        if not mask_ccf_resample:
+            native_waves.append(np.asarray(w_c, dtype=np.float64).copy())
 
     if not chunk_payloads:
         return _empty(v_grid)
+
+    if not mask_ccf_resample:
+        if (
+            line_mask_line_chunk_v_center_m_s is not None
+            and math.isfinite(float(line_mask_line_chunk_v_center_m_s))
+        ):
+            native_seed: float | None = float(line_mask_line_chunk_v_center_m_s)
+        elif gaussian_seed_mean_m_s is not None and math.isfinite(float(gaussian_seed_mean_m_s)):
+            native_seed = float(gaussian_seed_mean_m_s)
+        else:
+            native_seed = None
+        native = _rv_chunks_from_native_pixels(
+            chunk_payloads,
+            native_waves,
+            zb=float(zb),
+            v_lo=float(v_grid[0]),
+            v_hi=float(v_grid[-1]),
+            seed_m_s=native_seed,
+            wave_um=w,
+            return_ccf=bool(return_ccf),
+            min_good_pixels=int(min_good_pixels),
+            fit_baseline_free=bool(mask_ccf_fit_baseline_free),
+        )
+        if native is None:
+            return _empty(v_grid)
+        return native
 
     n_chunk_valid = len(chunk_payloads)
     n_pix_max = max(len(t[0]) for t in chunk_payloads)
@@ -6081,6 +6300,8 @@ def run_ccf_line_mask_for_fiber(
     debug_ccf: bool = False,
     min_good_pixels: int = 10,
     mask_ccf_pixel_interp_order: int = 3,
+    mask_ccf_resample: bool = True,
+    mask_ccf_fit_baseline_free: bool = False,
     window_line_by_line: bool = False,
 ) -> tuple[
     np.ndarray,
@@ -6141,10 +6362,15 @@ def run_ccf_line_mask_for_fiber(
         Extra logging per order.
     min_good_pixels : int, optional
         Minimum unmasked finite spectral pixels required per chunk (see ``rv_per_chunks_line_mask``).
-    mask_ccf_pixel_interp_order : int, optional
+        mask_ccf_pixel_interp_order : int, optional
         Lanczos parameter *a* on the echelle wavelength axis when evaluating mask
         CCFs (``1`` = linear; default ``3`` = Lanczos-3). Forwarded to
-        :func:`rv_per_chunks_line_mask`.
+        :func:`rv_per_chunks_line_mask`. Ignored for the centroid when
+        ``mask_ccf_resample`` is ``False``.
+    mask_ccf_resample : bool, optional
+        When ``False``, one delta line per chunk is read at the pixel velocities
+        with no interpolator. Default ``True`` keeps Lanczos sampling on the
+        uniform velocity grid.
     window_line_by_line : bool, optional
         When true, spectral chunks follow mask lines in the observed frame at
         ``ccf_center_m_s`` (requires finite ``ccf_center_m_s``).
@@ -6445,6 +6671,8 @@ def run_ccf_line_mask_for_fiber(
         kw_rv = {
             "min_good_pixels": int(min_good_pixels),
             "mask_ccf_pixel_interp_order": int(mask_ccf_pixel_interp_order),
+            "mask_ccf_resample": bool(mask_ccf_resample),
+            "mask_ccf_fit_baseline_free": bool(mask_ccf_fit_baseline_free),
             **kw_rv_line_chunking,
         }
         if centered and ccf_center_m_s is not None and math.isfinite(float(ccf_center_m_s)):
@@ -6696,6 +6924,7 @@ def run_ccf_line_mask_for_fiber(
                     ccf_err=ccf_err_fit,
                     ccf_line_mask_stored_negated=LINE_MASK_CCF_STORED_NEGATED_FROM_RAW,
                     line_mask_line_window_by_line=bool(window_line_by_line),
+                    fit_ccf_baseline_free=bool(mask_ccf_fit_baseline_free),
                     gaussian_seed_mean_m_s=_gauss_seed,
                 )
                 if (
