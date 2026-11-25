@@ -165,7 +165,7 @@ def _spectrograph_wavelength_clip_um(
 ) -> tuple[float, float]:
     """Vacuum-µm clip spanning echelle orders (± padding) for template line search."""
     ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
-    ws_all = _instrument_wavelength_solution(spectrograph)[int(fiber)]
+    ws_all = SimulateRateMap._instrument_wavelength_solution(spectrograph)[int(fiber)]
     all_orders = sorted(int(o) for o in ws_all.keys())
     orders = [o for o in all_orders if ost <= o <= oen]
     if not orders:
@@ -179,12 +179,6 @@ def _spectrograph_wavelength_clip_um(
     return float(np.nanmin(lam)) - padding_um, float(np.nanmax(lam)) + padding_um
 
 
-@lru_cache(maxsize=4)
-def _instrument_wavelength_solution(spectrograph: str) -> dict[int, dict[int, dict[str, np.ndarray]]]:
-    """Cached pyechelle WAVE grid per spectrograph (expensive HDF read)."""
-    return SimulateRateMap().get_wavelength_solution(spectrograph=spectrograph)
-
-
 @lru_cache(maxsize=16)
 def _paint_context(
     template_path: str,
@@ -193,7 +187,7 @@ def _paint_context(
     order_start: int,
     order_end: int,
 ) -> _PaintContext:
-    ws_all = _instrument_wavelength_solution(spectrograph)[fiber]
+    ws_all = SimulateRateMap._instrument_wavelength_solution(spectrograph)[fiber]
     all_orders = sorted(int(o) for o in ws_all.keys())
     orders = [o for o in all_orders if order_start <= o <= order_end]
     if not orders:

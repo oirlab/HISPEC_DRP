@@ -26,9 +26,8 @@ from .ideal_spectrum_rv import (
     recover_rv_from_ramp,
     recover_rv_from_rate_map,
 )
-from .simulate_rate_map import _upsample_spectrum
+from .simulate_rate_map import SimulateRateMap, _upsample_spectrum
 from .simulate_spectra import (
-    _instrument_wavelength_solution,
     _resolve_order_bounds,
     build_ccfopt_mask,
     build_l2,
@@ -112,7 +111,7 @@ def paint_spectrum_onto_l2(
     from .e2e_gaia import resolve_e2e_mjd_start
 
     ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
-    ws_all = _instrument_wavelength_solution(spectrograph)[int(fiber)]
+    ws_all = SimulateRateMap._instrument_wavelength_solution(spectrograph)[int(fiber)]
     orders = [o for o in sorted(int(o) for o in ws_all.keys()) if ost <= o <= oen]
     if not orders:
         raise ValueError(f"No echelle orders in [{ost}, {oen}]")

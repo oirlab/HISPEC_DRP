@@ -14,6 +14,7 @@ except ImportError:
 
 import logging
 import os
+from functools import lru_cache
 import importlib.resources
 import h5py
 
@@ -307,6 +308,12 @@ class SimulateRateMap:
                     self.wavelength_solution[fiber][od]['wavelength'] = self.wavelength_solution[fiber][od]['wavelength'][::-1]
 
         return self.wavelength_solution
+
+    @staticmethod
+    @lru_cache(maxsize=4)
+    def _instrument_wavelength_solution(spectrograph: str) -> dict[int, dict[int, dict[str, np.ndarray]]]:
+        """Cached `get_wavelength_solution` of a default SimulateRateMap, per spectrograph (expensive HDF read)."""
+        return SimulateRateMap().get_wavelength_solution(spectrograph=spectrograph)
 
     def create_pyechelle_rate_map(
         self,
