@@ -1192,10 +1192,9 @@ def get_sim_hdf_trace_grids(
         out[fiber] = {}
         fiber_key = f"fiber_{fiber}"
         for od in order_list:
-            od_s = str(od)
-            if od_s not in model_data.get(fiber_key, {}):
+            if od not in model_data.get(fiber_key, {}):
                 continue
-            block = model_data[fiber_key][od_s]
+            block = model_data[fiber_key][od]
             ow = np.asarray(block["xy_wavelengths"], dtype=np.float64)
             ox = np.asarray(block["x"], dtype=np.float64)
             oy = np.asarray(block["y"], dtype=np.float64)
@@ -2856,7 +2855,7 @@ def _hdf_deposit_xy_interpolators(
     Returns ``(fx, fy, ow)`` or ``None`` if the order is unavailable.
     """
     spectrograph, model_data = _load_hdf_model_data(spectrograph)
-    block = model_data.get(f"fiber_{int(fiber)}", {}).get(str(int(order)))
+    block = model_data.get(f"fiber_{int(fiber)}", {}).get(int(order))
     if block is None:
         return None
     ow = np.asarray(block["xy_wavelengths"], dtype=np.float64)

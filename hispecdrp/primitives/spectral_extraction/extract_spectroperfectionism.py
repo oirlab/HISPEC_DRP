@@ -481,7 +481,7 @@ def extract_order_spectroperfectionism_from_hdf(
     _, model_data = _load_hdf_model_data(spectrograph)
     pixelsize = float(model_data.get("pixelsize", 1.0))
     nx = int(model_data.get("nx", rate.shape[0]))
-    block = model_data[f"fiber_{fiber}"][str(order)]
+    block = model_data[f"fiber_{fiber}"][order]
     ow = np.asarray(block["xy_wavelengths"], dtype=np.float64)
     ox = np.asarray(block["x"], dtype=np.float64)
     oy = np.asarray(block["y"], dtype=np.float64)

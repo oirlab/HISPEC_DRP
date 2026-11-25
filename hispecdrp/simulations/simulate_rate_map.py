@@ -334,14 +334,13 @@ class SimulateRateMap:
         order_list = (
             self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
         )
-        order_list_str = [str(o) for o in order_list]
 
         self.wavelength_solution = {}
         for fiber in [*range(1,4)]:
             self.wavelength_solution[fiber] = {}
             fiber_key = f"fiber_{fiber}"
-            for od in order_list_str:
-                self.wavelength_solution[fiber][int(od)] = {}
+            for od in order_list:
+                self.wavelength_solution[fiber][od] = {}
                 ow = model_data[fiber_key][od]['xy_wavelengths']
                 ox = model_data[fiber_key][od]["x"]
 
@@ -365,12 +364,12 @@ class SimulateRateMap:
                 # Not-a-knot cubic spline; pixels outside the trace samples are extrapolated with the end cubics
                 inv_w = cubic_spline_eval(cubic_spline_build(ox, ow), np.arange(4096, dtype=np.float64))
 
-                self.wavelength_solution[fiber][int(od)] = {
+                self.wavelength_solution[fiber][od] = {
                     "pixel": np.arange(4096),
                     "wavelength": inv_w[::-1] # reverse to match detector orientation
                 }
                 if reverse_spectral_axis:
-                    self.wavelength_solution[fiber][int(od)]['wavelength'] = self.wavelength_solution[fiber][int(od)]['wavelength'][::-1]
+                    self.wavelength_solution[fiber][od]['wavelength'] = self.wavelength_solution[fiber][od]['wavelength'][::-1]
 
         return self.wavelength_solution
 
@@ -541,7 +540,6 @@ class SimulateRateMap:
         order_list = (
             self.bspec_orders if spectrograph == "BSPEC" else self.rspec_orders
         )
-        order_list_str = [str(o) for o in order_list]
 
         logger.info("Creating native rate map (spectrograph=%s, method=%s).", spectrograph, method)
         detector_shape = (model_data["nx"], model_data["ny"])
@@ -554,9 +552,9 @@ class SimulateRateMap:
             fiber_key = f"fiber_{fiber}"
 
             # remove orders in hdf model that will not be used
-            for key in list(model_data[fiber_key]):
-                if key not in order_list_str:
-                    del model_data[fiber_key][key]
+            for od in list(model_data[fiber_key]):
+                if od not in order_list:
+                    del model_data[fiber_key][od]
 
             wavelength = self.fibers[fiber]["wavelength"].to(u.micron)
             continuous = self.fibers[fiber]["continuous"]
@@ -616,7 +614,7 @@ class SimulateRateMap:
                     groove_spacing=groove_spacing,
                     continuous=continuous,
                     sampling_factor=sampling_factor,
-                    bad_psf_indices=_BAD_ZEMAX_PSFS.get(model, {}).get(fiber),
+                    bad_psf_indices=_BAD_ZEMAX_PSFS.get(fiber),
                 )
 
             rate_map_array[i, :, :] = self.rate_map
@@ -714,7 +712,7 @@ class SimulateRateMap:
 def bilinear_weights_rate_map(
     wave: Quantity,
     flux: Quantity,
-    orders: dict[str, dict],
+    orders: dict[int, dict],
     detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
@@ -737,7 +735,7 @@ def bilinear_weights_rate_map(
         line and is used directly, with no bin-width integration.
     orders : dict
         Nested structure containing wavelength trace and PSF stamps for orders. 
-        Top level keys are order numbers (str).
+        Top level keys are order numbers (int).
     detector_shape : tuple of int, optional
         Detector (ny, nx) pixel size, default = (4096, 4160).
     pixelsize : float, optional
@@ -784,7 +782,7 @@ def bilinear_weights_rate_map(
                 blaze_angle *= -1
             blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
-                int(od),
+                od,
                 1.0 / groove_spacing,
                 order_wave
             )
@@ -894,7 +892,7 @@ def _deposit_oversampled_psf_numba(
 def psf_prf_convolution_rate_map_old(
     wave: Quantity,
     flux: Quantity,
-    orders: dict[str, dict],
+    orders: dict[int, dict],
     detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
@@ -918,7 +916,7 @@ def psf_prf_convolution_rate_map_old(
         discrete line and used directly, with no bin-width integration.
     orders : dict
         Nested dictionary containing trace coordinates and PSF stamps.
-        Top level keys are order numbers (str).
+        Top level keys are order numbers (int).
     detector_shape : tuple of int, optional
         Detector pixels (ny, nx). Default = (4096, 4160).
     pixelsize : float, optional
@@ -980,7 +978,7 @@ def psf_prf_convolution_rate_map_old(
                 blaze_angle *= -1
             blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
-                int(od),
+                od,
                 1.0 / groove_spacing,
                 order_wave
             )
@@ -1068,27 +1066,49 @@ def psf_prf_convolution_rate_map_old(
     return det
 
 
-# PSF stamps in the pyechelle HDF models that jump relative to the other stamps of their order and
-# fiber (iterative leave-one-out degree-5 polynomial in wavelength, per pixel), as
-# {HDF filename: {fiber: {order: [stamp indices]}}}. Indices count the order's stamps sorted by
+# PSF stamps in the RSPEC pyechelle HDF model (HISPEC_HK_20231006B-1_all_traces.hdf) that jump relative
+# to the other stamps of their order and fiber (iterative leave-one-out degree-5 polynomial in
+# wavelength, per pixel), as {fiber: {order: [stamp indices]}}. Indices count the order's stamps sorted by
 # increasing wavelength. psf_prf_convolution_rate_map drops them before interpolating in wavelength.
 _BAD_ZEMAX_PSFS = {
-    'HISPEC_HK_20231006B-1_all_traces.hdf': {
-        1: {
-            '63': [13, 14], '64': [13, 14], '65': [13, 14], '66': [11, 12, 13, 14],
-            '67': [10, 11, 12, 13, 14], '68': [9, 10, 11], '69': [7, 8, 9], '70': [5, 6, 7, 8],
-            '71': [3, 4, 5, 6], '72': [0, 1, 2, 3], '73': [0, 1],
-        },
-        2: {
-            '62': [13, 14], '63': [13, 14], '64': [13, 14], '65': [11, 12, 13, 14],
-            '66': [10, 11, 12, 13, 14], '67': [9, 10, 11], '68': [7, 8, 9], '69': [5, 6, 7, 8],
-            '70': [3, 4, 5, 6], '71': [0, 1, 2, 3], '72': [0, 1],
-        },
-        3: {
-            '61': [13, 14], '62': [13, 14], '63': [13, 14], '64': [11, 12, 13, 14],
-            '65': [10, 11, 12, 13, 14], '66': [9, 10, 11], '67': [7, 8, 9], '68': [5, 6, 7, 8],
-            '69': [3, 4, 5, 6], '70': [0, 1, 2, 3], '71': [0, 1],
-        },
+    1: {
+        63: [13, 14],
+        64: [13, 14],
+        65: [13, 14],
+        66: [11, 12, 13, 14],
+        67: [10, 11, 12, 13, 14],
+        68: [9, 10, 11],
+        69: [7, 8, 9],
+        70: [5, 6, 7, 8],
+        71: [3, 4, 5, 6],
+        72: [0, 1, 2, 3],
+        73: [0, 1],
+    },
+    2: {
+        62: [13, 14],
+        63: [13, 14],
+        64: [13, 14],
+        65: [11, 12, 13, 14],
+        66: [10, 11, 12, 13, 14],
+        67: [9, 10, 11],
+        68: [7, 8, 9],
+        69: [5, 6, 7, 8],
+        70: [3, 4, 5, 6],
+        71: [0, 1, 2, 3],
+        72: [0, 1],
+    },
+    3: {
+        61: [13, 14],
+        62: [13, 14],
+        63: [13, 14],
+        64: [11, 12, 13, 14],
+        65: [10, 11, 12, 13, 14],
+        66: [9, 10, 11],
+        67: [7, 8, 9],
+        68: [5, 6, 7, 8],
+        69: [3, 4, 5, 6],
+        70: [0, 1, 2, 3],
+        71: [0, 1],
     },
 }
 
@@ -1096,7 +1116,7 @@ _BAD_ZEMAX_PSFS = {
 def psf_prf_convolution_rate_map(
     wave: Quantity,
     flux: Quantity,
-    orders: dict[str, dict],
+    orders: dict[int, dict],
     detector_shape: tuple[int, int] = (4096, 4160),
     pixelsize: float = 10.0,
     apply_blaze: bool = True,
@@ -1104,7 +1124,7 @@ def psf_prf_convolution_rate_map(
     groove_spacing: Quantity = None,
     continuous: bool = True,
     sampling_factor: float | None = 4,
-    bad_psf_indices: dict[str, list[int]] | None = None,
+    bad_psf_indices: dict[int, list[int]] | None = None,
 ) -> np.ndarray[np.float64]:
     """
     Generate a detector rate map by convolving oversampled PSFs with the pixel response function (PRF),
@@ -1137,7 +1157,7 @@ def psf_prf_convolution_rate_map(
         discrete line and used directly, with no bin-width integration.
     orders : dict
         Nested dictionary containing trace coordinates and PSF stamps.
-        Top level keys are order numbers (str).
+        Top level keys are order numbers (int).
     detector_shape : tuple of int, optional
         Detector pixels (ny, nx). Default = (4096, 4160).
     pixelsize : float, optional
@@ -1204,7 +1224,7 @@ def psf_prf_convolution_rate_map(
                 blaze_angle *= -1
             blaze_eff = blaze_efficiency_sinc(
                 blaze_angle,
-                int(od),
+                od,
                 1.0 / groove_spacing,
                 order_wave
             )
@@ -1585,7 +1605,7 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
         "blaze_angle": float,
         "groove_spacing": float,
         "fiber_1": {
-            "59": {
+            59: {
                 "x": ndarray,
                 "y": ndarray,
                 "xy_wavelengths": ndarray,
@@ -1620,7 +1640,7 @@ def read_pyechelle_hdf(hdf_model_path: str) -> dict:
 
 def _read_fiber(fiber_group: h5py.Group) -> dict:
     """
-    Parse one fiber group and return its orders & PSF data.
+    Read one fiber group into {order: trace and PSF data}, with integer orders.
     """
 
     fiber_dict = {}
@@ -1628,7 +1648,7 @@ def _read_fiber(fiber_group: h5py.Group) -> dict:
     # Create order placeholders (non-PSF groups)
     for key in fiber_group:
         if "psf" not in key:
-            order = key.replace("order", "")
+            order = int(key.replace("order", ""))
             fiber_dict[order] = {}
 
     # Fill in data for each entry
@@ -1650,7 +1670,7 @@ def _read_order_psfs(
     Read the PSF stamps of a group like 'psf_order_59' into fiber_dict[order].
     """
 
-    order = key.replace("psf_order_", "")
+    order = int(key.replace("psf_order_", ""))
 
     wavelengths = np.array([
         float(k.replace("wavelength_", "")) for k in group
@@ -1672,7 +1692,7 @@ def _read_order_trace(
     """
     Read a trace dataset like 'order59' into fiber_dict[order] as x, y and wavelength arrays.
     """
-    order = key.replace("order", "")
+    order = int(key.replace("order", ""))
     arr = np.vstack([list(k) for k in dataset])
     fiber_dict[order]["xy_wavelengths"] = arr[:, -1]
     fiber_dict[order]["x"] = arr[:, 4]

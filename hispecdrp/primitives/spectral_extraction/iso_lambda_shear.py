@@ -83,10 +83,9 @@ def create_trace_shear_from_sim_hdf(
     fiber_block = model_data.get(fiber_key, {})
 
     for k, od in enumerate(order_list):
-        od_s = str(od)
-        if od_s not in fiber_block:
+        if od not in fiber_block:
             continue
-        block = fiber_block[od_s]
+        block = fiber_block[od]
         if "psf_stamps" not in block or "psf_wavelengths" not in block:
             continue
         stamps = block["psf_stamps"]
