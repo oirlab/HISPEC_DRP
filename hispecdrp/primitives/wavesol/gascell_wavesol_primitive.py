@@ -224,7 +224,7 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
             )
             fit_results.append(dict(
                 mean_wave_start=mean_wave_start,
-                fiber=fiber, orders=orders, coeffs=cmat, continuum_coeffs=amat, continuum_model=continuum_model,
+                fiber=fiber, orders=orders, wave_coeffs=cmat, continuum_coeffs=amat, continuum_model=continuum_model,
                 # (Norders fit, Ncols) on the pixel grid
                 model=model, continuum=continuum, residuals=residuals, residuals_norm=residuals_norm,
                 cov=cov, chi2_red=chi2_red, chi2_red_orders=chi2_red_orders, info=info,
