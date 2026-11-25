@@ -33,6 +33,7 @@ from . import e2e_support
 from .utr import create_ramp
 from ..calibrations.run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
+from .simulate_spectra import add_sky_background, apply_radial_velocity
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 # Default output filenames for simulated products
@@ -2185,9 +2186,9 @@ def create_ramp_and_calibrations(
                 float(rv_km_s),
             )
 
-            srm.apply_radial_velocity(
-                fiber_number=f,
-                rv=rv_quantity,
+            srm.fibers[f]["wavelength"] = apply_radial_velocity(
+                srm.fibers[f]["wavelength"],
+                rv_quantity,
             )
 
         # ==============================================================
@@ -2203,10 +2204,20 @@ def create_ramp_and_calibrations(
                     f,
                 )
 
-                srm.add_sky_background(
-                    fiber_number=f,
-                    sky_filename=sky_filename,
-                )
+                if f in srm.fibers:
+                    srm.fibers[f]["wavelength"], srm.fibers[f]["flux"] = add_sky_background(
+                        srm.fibers[f]["wavelength"],
+                        srm.fibers[f]["flux"],
+                        sky_filename=sky_filename,
+                    )
+                else:
+                    # Sky-only fiber
+                    sky_wl, sky_flux = add_sky_background(sky_filename=sky_filename)
+                    srm.fibers[f] = {
+                        "wavelength": sky_wl,
+                        "flux": sky_flux,
+                        "continuous": True,
+                    }
 
         # ==============================================================
         # Apply end-to-end throughput

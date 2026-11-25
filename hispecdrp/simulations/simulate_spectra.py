@@ -3,6 +3,9 @@ Simulated L2 spectra from stellar templates on the instrument wavelength grid.
 
 Doppler-shift a rest-frame template onto native echelle WAVE with the same Lanczos
 kernel as ``ccf_line_mask``, for noiseless injection / RV validation workflows.
+
+Also spectrum-level effects applied to an input spectrum before it is simulated on the detector:
+`apply_radial_velocity`, `apply_tellurics` and `add_sky_background`.
 """
 
 from __future__ import annotations
@@ -13,7 +16,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import astropy.constants as const
+import astropy.units as u
 import numpy as np
+from astropy.units import Quantity
 
 from .. import datamodels
 from ..datamodels import hispec_config
@@ -34,9 +40,12 @@ from ..utils.line_mask_utils import (
 from ..primitives import StellarRVPrimitive
 from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
-from .simulate_rate_map import SimulateRateMap
+from .simulate_rate_map import SimulateRateMap, _upsample_spectrum
 
 __all__ = [
+    "add_sky_background",
+    "apply_radial_velocity",
+    "apply_tellurics",
     "build_ccfopt_mask",
     "build_ccfopt_mask_lsf_matched",
     "ensure_lsf_ccfopt_mask",
@@ -53,6 +62,59 @@ __all__ = [
 
 # Suppress INFO/WARNING hispecdrp stdout (e.g. StellarRVPrimitive parameter dumps).
 QUIET_PIPELINE_LOG_CONFIG = {"level": "ERROR", "enable_stdout": False}
+
+
+def apply_radial_velocity(wavelength: Quantity, rv: Quantity) -> Quantity:
+    """
+    Doppler-shift wavelengths by rv: wavelength * (1 + rv / c).
+
+    Apply it BEFORE tellurics, sky and throughput, which are in the observer frame.
+    """
+    return wavelength * (1 + (rv / const.c).to(u.dimensionless_unscaled))
+
+
+def apply_tellurics(wavelength: Quantity, flux: Quantity) -> Quantity:
+    """Placeholder for atmospheric absorption effects."""
+    raise NotImplementedError("Telluric application not yet implemented.")
+
+
+def add_sky_background(
+    wavelength: Quantity | None = None,
+    flux: Quantity | None = None,
+    sky_filename: str = 'mk_skybg_zm_1.0_1.0_ph.dat',
+) -> tuple[Quantity, Quantity]:
+    """
+    Add the sky background to a spectrum, or return the sky alone.
+
+    Apply it AFTER tellurics but BEFORE throughput.
+
+    Parameters
+    ----------
+    wavelength, flux : Quantity or None
+        Spectrum to add the sky to. The sky is interpolated onto wavelength and converted to the
+        unit of flux. If None, the sky spectrum itself is returned, upsampled to R >= 3e5.
+    sky_filename : str
+        Sky background file in the atmosphere data directory.
+
+    Returns
+    -------
+    wavelength, flux : Quantity
+    """
+    if sky_filename is None:
+        raise ValueError("Sky background filename must be provided.")
+
+    from . import e2e_support
+    from ..utils.spectral_templates_utils import get_skybackground_path, load_sky_spectrum
+
+    sky_template_path = get_skybackground_path(sky_filename, base_dir=e2e_support.atmosphere_data_dir())
+    sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
+
+    if wavelength is None:
+        return _upsample_spectrum(sky_wl, sky_flux, desired_sampling_resolution=3e5)
+
+    sky_flux = sky_flux.to(flux.unit)
+    sky_flux_interp = np.interp(wavelength.value, sky_wl.value, sky_flux.value) * sky_flux.unit
+    return wavelength, flux + sky_flux_interp
 
 
 @contextmanager

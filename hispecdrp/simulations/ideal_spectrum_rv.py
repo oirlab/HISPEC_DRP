@@ -19,7 +19,7 @@ from ..primitives.utils.spectral_utils import (
 from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
-from .simulate_spectra import quiet_pipeline_logging, recover_stellar_rv
+from .simulate_spectra import apply_radial_velocity, quiet_pipeline_logging, recover_stellar_rv
 
 __all__ = [
     "build_template_rate_map",
@@ -86,7 +86,8 @@ def build_template_rate_map(
         continuous=False,
     )
     if apply_rv:
-        srm.apply_radial_velocity(fiber_number=int(fiber), rv=float(rv_km_s) * u.km / u.s)
+        fib = srm.fibers[int(fiber)]
+        fib["wavelength"] = apply_radial_velocity(fib["wavelength"], float(rv_km_s) * u.km / u.s)
     return srm.create_native_rate_map(
         spectrograph=str(spectrograph).upper(),
         method=method,

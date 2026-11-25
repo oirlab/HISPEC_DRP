@@ -123,7 +123,6 @@ class SimulateRateMap:
 
         self.rate_map: np.ndarray[np.float64] = None
 
-
     def set_fiber_spectrum(
         self,
         fiber_number: int = 1,
@@ -179,7 +178,6 @@ class SimulateRateMap:
             "flux": spectrum_flux,
             "continuous": continuous
         }
-
 
     def apply_throughput_total(
         self,
@@ -241,67 +239,6 @@ class SimulateRateMap:
         self.fibers[fiber_number]["flux"] *= total_throughput_wo_blaze
 
         return wavelengths, self.fibers[fiber_number]["flux"]
-
-
-    def apply_tellurics(self, fiber_number: int = 1) -> None:
-        """Placeholder for atmospheric absorption effects."""
-        raise NotImplementedError("Telluric application not yet implemented.")
-
-
-    def add_sky_background(self,
-                        fiber_number: int = 1,
-                        sky_filename: str = 'mk_skybg_zm_1.0_1.0_ph.dat'
-                        ) ->  tuple[Quantity, Quantity]:
-        """Add sky background to fiber flux. Sky background should be applied AFTER telluric application but BEFORE throughput application."""
-        if sky_filename is None:
-            raise ValueError("Sky background filename must be provided.")
-
-        from hispecdrp.simulations import e2e_support
-        from ..utils.spectral_templates_utils import (
-            get_skybackground_path,
-            load_sky_spectrum,
-        )
-
-        sky_template_path = get_skybackground_path(sky_filename, base_dir=e2e_support.atmosphere_data_dir())
-        sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
-
-        # check if fiber exists already or not
-        try:
-            sky_flux = sky_flux.to(self.fibers[fiber_number]["flux"].unit)
-            fiber_wavelengths = self.fibers[fiber_number]["wavelength"]
-            # Interpolate sky flux onto fiber wavelengths
-            sky_flux_interp = np.interp(fiber_wavelengths.value, sky_wl.value, sky_flux.value)  *sky_flux.unit
-            self.fibers[fiber_number]["flux"] += sky_flux_interp
-        except KeyError: 
-            sky_flux = sky_flux
-            fiber_wavelengths = sky_wl
-            sky_wl, sky_flux = _upsample_spectrum(sky_wl, sky_flux, desired_sampling_resolution=3e5)
-            self.fibers[fiber_number] = {
-                "wavelength": sky_wl,
-                "flux": sky_flux,
-                "continuous": True
-            }
-
-        return fiber_wavelengths, self.fibers[fiber_number]["flux"]
-
-
-    def apply_radial_velocity(
-        self,
-        fiber_number: int = 1,
-        rv: Quantity = 0 * u.km / u.s
-    ) -> tuple[Quantity, Quantity]:
-        """Apply Doppler shift to wavelengths.
-        
-        Must be applied BEFORE throughput/telluric application."""
-
-        factor = (1 + (rv / const.c).to(u.dimensionless_unscaled))
-        self.fibers[fiber_number]["wavelength"] *= factor
-
-        return (
-            self.fibers[fiber_number]["wavelength"],
-            self.fibers[fiber_number]["flux"],
-        )
-    
 
     def get_wavelength_solution(self,
                                 spectrograph: str = "BSPEC",
@@ -372,7 +309,6 @@ class SimulateRateMap:
                     self.wavelength_solution[fiber][od]['wavelength'] = self.wavelength_solution[fiber][od]['wavelength'][::-1]
 
         return self.wavelength_solution
-
 
     def create_pyechelle_rate_map(
         self,
@@ -481,7 +417,6 @@ class SimulateRateMap:
 
         return self.rate_map
     
-
     def create_native_rate_map(
         self,
         spectrograph: str = "BSPEC",
@@ -638,7 +573,6 @@ class SimulateRateMap:
 
         return self.rate_map
 
-
     def write_fiber_spectrum_to_pyechelle_csv(
         self,
         fiber: int
@@ -678,7 +612,6 @@ class SimulateRateMap:
 
         np.savetxt(out_path, arr, delimiter=",")
         return os.path.abspath(out_path)
-
     
     def flip_rate_map_horizontal(self):
         """Flip the rate map horizontally to correct for backwards hdf file"""

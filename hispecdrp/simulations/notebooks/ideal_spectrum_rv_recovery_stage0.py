@@ -7,7 +7,7 @@ to start from raw data instead of a Level-0 product.
 
 Like the Stage-1-only variant, this simulates a native BSPEC rate map (e-/s)
 for each injected RV by Doppler-shifting the BT-Settl lte040 template
-(``SimulateRateMap.apply_radial_velocity``) and painting it onto the detector
+(``simulate_spectra.apply_radial_velocity``) and painting it onto the detector
 (``SimulateRateMap.create_native_rate_map``). But instead of wrapping that
 rate map directly as a Level-0 product, this version treats it as the true
 photon flux and synthesizes a raw up-the-ramp readout from it
@@ -83,7 +83,7 @@ from hispecdrp.simulations.simulate_up_the_ramp import (
     get_default_stage0_primitives,
     run_stage0_simulation,
 )
-from hispecdrp.simulations.simulate_spectra import quiet_pipeline_logging, recover_stellar_rv
+from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, quiet_pipeline_logging, recover_stellar_rv
 from hispecdrp.utils.line_mask_utils import (
     paired_line_mask_path_for_template,
     read_mask_generation_meta,
@@ -221,7 +221,7 @@ def build_native_rate_map(bulk_km_s: float, *, output_dir: str) -> np.ndarray:
         continuous=False,
     )
     if bulk_km_s != 0.0:
-        srm.apply_radial_velocity(fiber_number=FIBER, rv=bulk_km_s * u.km / u.s)
+        srm.fibers[FIBER]["wavelength"] = apply_radial_velocity(srm.fibers[FIBER]["wavelength"], bulk_km_s * u.km / u.s)
 
     return srm.create_native_rate_map(
         spectrograph=SPECTROGRAPH,
