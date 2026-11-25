@@ -216,14 +216,7 @@ class FitGasCellWavesolPrimitive(BasePrimitive):
             chi2_orders = np.sum(np.where(isig > 0, residuals * isig, 0.0)**2, axis=1)
             dof_orders = np.count_nonzero(isig, axis=1) - ctx['Q'] - ctx['nc'] / len(orders)
             chi2_red_orders = np.where(dof_orders > 0, chi2_orders / np.where(dof_orders > 0, dof_orders, 1), np.nan)
-            # Mean of the starting wavelength grid per fit order (NaN where it has no finite values)
-            wave0_fit = np.asarray(wave0[oi_fit], dtype=np.float64)
-            n_finite = np.count_nonzero(np.isfinite(wave0_fit), axis=1)
-            mean_wave_start = np.where(
-                n_finite > 0, np.nansum(wave0_fit, axis=1) / np.maximum(n_finite, 1), np.nan,
-            )
             fit_results.append(dict(
-                mean_wave_start=mean_wave_start,
                 fiber=fiber, orders=orders, wave_coeffs=cmat, continuum_coeffs=amat, continuum_model=continuum_model,
                 # (Norders fit, Ncols) on the pixel grid
                 model=model, continuum=continuum, residuals=residuals, residuals_norm=residuals_norm,

@@ -214,17 +214,12 @@ def create_gascell_preview(primitive):
     order_vec = output_model.make_order_vec()
     traces_per_order = 3  # data, model, residuals
 
-    # Mean wavelength of each fit order: from the starting wavelength grid where it has one,
-    # otherwise from the fitted solution
+    # Mean wavelength of each fit order, from the model's wavelength grid
     mean_waves_all = []
     for fit_result in fit_results:
         wave = getattr(output_model, f"wave_fib{fit_result['fiber']}")
         oi_fit = [np.flatnonzero(order_vec == order)[0] for order in fit_result['orders']]
-        mean_fit = np.array([np.nanmean(wave[oi]) for oi in oi_fit])
-        mean_start = fit_result.get('mean_wave_start')
-        if mean_start is None:
-            mean_start = np.full(len(oi_fit), np.nan)
-        mean_waves_all.append(np.where(np.isfinite(mean_start), mean_start, mean_fit))
+        mean_waves_all.append(np.array([np.nanmean(wave[oi]) for oi in oi_fit]))
     wave_decimals = _order_wavelength_decimals(fit_results, mean_waves_all)
 
     # Hover shows the pixel (0-indexed): each trace holds a full order row, so the point index
