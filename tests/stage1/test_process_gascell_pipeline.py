@@ -3,6 +3,7 @@ import pytest
 import scipy.constants
 
 from hispecdrp import ProcessGasCellPipeline, Stage1Pipeline, datamodels
+from hispecdrp.primitives import wavesol
 from hispecdrp.simulations.simulate_rate_map import SimulateRateMap
 from hispecdrp.simulations.simulate_up_the_ramp import stack_wavelength_solution_rows
 from tests.sim_cals import make_gascell_L0
@@ -39,7 +40,6 @@ def test_process_gascell_pipeline():
                 'wave_deg_intra_order': 6,
                 'wave_deg_inter_order' : 6,
                 'fts_resolution': False,
-                'show_preview': False,
             },
         },
         save_result=False,
@@ -54,23 +54,28 @@ def test_process_gascell_pipeline():
 
     # HDF5 wavelength solution for comparison
     sim_wavesol = SimulateRateMap().get_wavelength_solution(spectrograph=spectrograph)
-    order_vec = wavesol_model.make_order_vec()
-    Ncols = wavesol_model.wave_fib1.shape[1]
 
     fit_results = pipe.gascell_wavesol._output['fit_results']
     assert len(fit_results) == len(do_fibers)
-    # The HDF solution clamps the first pixel(s) of some orders, so leave out the edge pixels
-    edge = slice(4, -4)
-    RED_CHI2_TOL = 12.0  # |chi2_red - 1|
-    RMS_LIMIT = 75.0  # m/s
+    use_pix = slice(4, -4)
+    RED_CHI2_THRESH = 6.5
+    RMS_THRESH = 80.0  # m/s
     for fiber, fit_result in zip(do_fibers, fit_results):
-        #assert fit_result['info']['converged'], f"Fiber {fiber} fit did not converge"
-        #assert abs(fit_result['chi2_red'] - 1) < RED_CHI2_TOL, f"Fiber {fiber} chi2_red {fit_result['chi2_red']:.3f}"
 
-        # RMS of the fitted minus true velocity on the fitted orders
-        oi = np.array([np.flatnonzero(order_vec == order)[0] for order in fit_result['orders']])
-        wave_true = stack_wavelength_solution_rows(sim_wavesol[fiber], order_vec, n_pix=Ncols)[oi, edge]
-        wave = getattr(wavesol_model, f'wave_fib{fiber}')[oi, edge]
-        dv = (wave - wave_true) / wave_true * scipy.constants.c
-        rms = np.sqrt(np.mean(dv**2))
-        # assert rms < RMS_LIMIT, f"Fiber {fiber} wavelength RMS vs. truth {rms:.2f} m/s >= {RMS_LIMIT} m/s"
+        # Fit converged
+        assert fit_result['info']['converged'], f"Fiber {fiber} fit did not converge"
+
+        # Check each order
+        for order in fit_result['orders']:
+            oi = np.where(fit_result['orders'] == order)[0][0]
+            wave_gascell = wavesol_model.wave[fiber][oi][use_pix]
+            wave_zemax = sim_wavesol[fiber][order]['wavelength'][use_pix]
+
+            # Reduced chi2 for this order
+            red_chi2 = fit_result['chi2_red_orders'][oi]
+            assert red_chi2 < RED_CHI2_THRESH, f"Fiber {fiber} order {order} reduced chi2 {red_chi2} >= {RED_CHI2_THRESH}"
+
+            # Check the accuracy relative to Zemax
+            res_vel = (wave_gascell - wave_zemax) / wave_zemax * scipy.constants.c
+            rms_vel = np.sqrt(np.mean(res_vel**2))
+            assert rms_vel < RMS_THRESH, f"Fiber {fiber} order {order} wavelength RMS vs. truth {rms_vel} m/s >= {RMS_THRESH} m/s"
