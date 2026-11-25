@@ -19,6 +19,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def echelle_order_list(
+    first : int,
+    last : int,
+    order_start : int | None = None,
+    order_end : int | None = None,
+) -> list[int]:
+    """
+    Echelle order numbers from first to last (inclusive, decreasing if last < first), optionally
+    cut to the part from order_start to order_end.
+
+    order_start and order_end default to first and last. They must be orders in the list, with
+    order_start not after order_end in its direction; otherwise a ValueError is raised.
+    """
+    step = 1 if last >= first else -1
+    orders = list(range(first, last + step, step))
+    order_start = first if order_start is None else int(order_start)
+    order_end = last if order_end is None else int(order_end)
+    for name, o in (('order_start', order_start), ('order_end', order_end)):
+        if o not in orders:
+            raise ValueError(f"{name}={o} is not an order in {first}..{last}")
+    i0, i1 = orders.index(order_start), orders.index(order_end)
+    if i0 > i1:
+        raise ValueError(f"order_start={order_start} comes after order_end={order_end} in {first}..{last}")
+    return orders[i0:i1 + 1]
+
+
 def open(
     init,
     copy : bool = False,

@@ -3,6 +3,7 @@ import importlib.resources
 import copy
 from .base_model import DataModel
 from .meta_data import read_meta_schema
+from .utils import echelle_order_list
 
 import scipy.constants
 from typing import ClassVar
@@ -18,6 +19,31 @@ class PARVIConfig:
     instrument_name : ClassVar[str] = 'PARVI'
     num_fibers : ClassVar[int] = 4
     metadata_schema_filename : ClassVar[str] = 'hispec_metadata_schema.yaml'
+
+    # Echelle orders of the one PARVI spectrograph ('JH'). Decreasing from order_start to order_end is correct.
+    echelle_orders : ClassVar[dict[str, dict[str, int]]] = {
+        'JH': {
+            'order_start' : 128,
+            'order_end' : 84
+        },
+    }
+
+    @classmethod
+    def get_order_list(
+        cls, spectrograph: str = 'JH', order_start: int | None = None, order_end: int | None = None,
+    ) -> list[int]:
+        """
+        Return the list of echelle order numbers for a spectrograph, 128 down to 84 for 'JH'.
+
+        If order_start and/or order_end are given, only the orders from order_start to order_end
+        (inclusive, in decreasing order) are returned; they must be orders of the spectrograph
+        (ValueError otherwise). Returns an empty list for an unknown spectrograph.
+        """
+        sp = (spectrograph or "").strip().upper()
+        if sp not in cls.echelle_orders:
+            return []
+        o = cls.echelle_orders[sp]
+        return echelle_order_list(o['order_start'], o['order_end'], order_start, order_end)
 
     @classmethod
     def get_metadata_schema(cls) -> dict:
@@ -87,9 +113,9 @@ class PARVIConfig:
 
         # Instrument
         if model.meta.order_start is None:
-            model.meta.order_start = 128
+            model.meta.order_start = cls.echelle_orders['JH']['order_start']
         if model.meta.order_end is None:
-            model.meta.order_end = 84
+            model.meta.order_end = cls.echelle_orders['JH']['order_end']
         if model.meta.clock_rate is None:
             model.meta.clock_rate = 150_000
         if model.meta.lfc_nu0 is None:

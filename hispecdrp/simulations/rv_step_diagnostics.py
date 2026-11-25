@@ -9,6 +9,7 @@ import astropy.constants as const
 import astropy.units as u
 import numpy as np
 
+from ..datamodels import hispec_config
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.spectral_utils import (
     get_spectrum_path,
@@ -28,7 +29,6 @@ from .ideal_spectrum_rv import (
 )
 from .simulate_rate_map import SimulateRateMap, _upsample_spectrum
 from .simulate_spectra import (
-    _resolve_order_bounds,
     build_ccfopt_mask,
     build_l2,
     quiet_pipeline_logging,
@@ -110,7 +110,8 @@ def paint_spectrum_onto_l2(
     from .. import datamodels
     from .e2e_gaia import resolve_e2e_mjd_start
 
-    ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
+    orders = hispec_config.HISPECConfig.get_order_list(spectrograph, order_start, order_end)
+    ost, oen = orders[0], orders[-1]
     ws_all = SimulateRateMap._instrument_wavelength_solution(spectrograph)[int(fiber)]
     orders = [o for o in sorted(int(o) for o in ws_all.keys()) if ost <= o <= oen]
     if not orders:

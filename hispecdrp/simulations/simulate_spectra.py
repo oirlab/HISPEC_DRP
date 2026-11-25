@@ -52,7 +52,6 @@ __all__ = [
     "build_l2",
     "build_l2_lsf_matched",
     "build_l2_and_recover_rv",
-    "paint_order_list",
     "recover_stellar_rv",
     "IDEAL_SPECTRUM_STELLAR_RV_KW",
     "QUIET_PIPELINE_LOG_CONFIG",
@@ -139,22 +138,6 @@ class _PaintContext:
     orders: tuple[int, ...]
 
 
-def _resolve_order_bounds(
-    spectrograph: str,
-    order_start: int | None,
-    order_end: int | None,
-) -> tuple[int, int]:
-    """Inclusive echelle order range from config (no HDF I/O)."""
-    all_orders = hispec_config.HISPECConfig.get_order_list(spectrograph)
-    if not all_orders:
-        raise ValueError(f"Unknown or empty order list for spectrograph={spectrograph!r}")
-    ost = int(all_orders[0] if order_start is None else order_start)
-    oen = int(all_orders[-1] if order_end is None else order_end)
-    if ost > oen:
-        raise ValueError(f"order_start={ost} > order_end={oen}")
-    return ost, oen
-
-
 def _spectrograph_wavelength_clip_um(
     spectrograph: str,
     fiber: int,
@@ -164,7 +147,8 @@ def _spectrograph_wavelength_clip_um(
     padding_um: float = 0.01,
 ) -> tuple[float, float]:
     """Vacuum-µm clip spanning echelle orders (± padding) for template line search."""
-    ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
+    orders = hispec_config.HISPECConfig.get_order_list(spectrograph, order_start, order_end)
+    ost, oen = orders[0], orders[-1]
     ws_all = SimulateRateMap._instrument_wavelength_solution(spectrograph)[int(fiber)]
     all_orders = sorted(int(o) for o in ws_all.keys())
     orders = [o for o in all_orders if ost <= o <= oen]
@@ -303,7 +287,8 @@ def build_l2(
     base_dir = templates_data_dir() if templates_base_dir is None else templates_base_dir
     template_path = get_spectrum_path(template, base_dir=base_dir)
 
-    ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
+    orders = hispec_config.HISPECConfig.get_order_list(spectrograph, order_start, order_end)
+    ost, oen = orders[0], orders[-1]
 
     if mask_ccf_pixel_interp_order is None:
         mask_ccf_pixel_interp_order = int(
@@ -541,26 +526,6 @@ def build_ccfopt_mask_lsf_matched(
     )
 
 
-def paint_order_list(
-    spectrograph: str,
-    fiber: int,
-    order_start: int | None = None,
-    order_end: int | None = None,
-) -> tuple[int, ...]:
-    """
-    Return echelle order numbers for ``build_l2`` (helper for notebooks).
-
-    Uses :meth:`~hispecdrp.datamodels.hispec_config.HISPECConfig.get_order_list`
-    so notebooks do not pay the pyechelle HDF wavelength-solution load cost.
-    ``fiber`` is accepted for API symmetry with ``build_l2`` but does not affect
-    the order list (all fibers share the same echelle order numbering).
-    """
-    _ = int(fiber)
-    ost, oen = _resolve_order_bounds(spectrograph, order_start, order_end)
-    all_orders = hispec_config.HISPECConfig.get_order_list(spectrograph)
-    return tuple(o for o in all_orders if ost <= o <= oen)
-
-
 def stellar_rv_kwargs_for_ideal_spectrum(
     bulk_rv_km_s: float,
     *,
@@ -583,7 +548,7 @@ def stellar_rv_kwargs_for_ideal_spectrum(
     """
     kw = dict(IDEAL_SPECTRUM_STELLAR_RV_KW)
     inj_m_s = float(bulk_rv_km_s) * 1000.0
-    orders = list(paint_order_list(spectrograph, fiber, order_start, order_end))
+    orders = hispec_config.HISPECConfig.get_order_list(spectrograph, order_start, order_end)
     if mask_path is None:
         mask_path = paired_line_mask_path_for_template(template, mask_style=mask_style)
     pars = {

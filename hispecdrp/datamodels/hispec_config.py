@@ -4,6 +4,7 @@ import logging
 from astropy.units import Hz
 from .base_model import DataModel
 from .meta_data import read_meta_schema
+from .utils import echelle_order_list
 
 import scipy.constants
 from typing import ClassVar
@@ -70,18 +71,22 @@ class HISPECConfig:
     }
 
     @classmethod
-    def get_order_list(cls, spectrograph: str) -> list[int]:
+    def get_order_list(
+        cls, spectrograph: str, order_start: int | None = None, order_end: int | None = None,
+    ) -> list[int]:
         """
         Return the list of echelle order numbers for a spectrograph (single source of truth).
         Used by benchmarks and trace finding so order count and indices match model meta.
+
+        If order_start and/or order_end are given, only the orders from order_start to order_end
+        (inclusive) are returned; they must be orders of the spectrograph (ValueError otherwise).
+        Returns an empty list for an unknown spectrograph.
         """
         sp = (spectrograph or "").strip().upper()
         if sp not in cls.echelle_orders:
             return []
         o = cls.echelle_orders[sp]
-        start, end = o['order_start'], o['order_end']
-        step = 1 if end >= start else -1
-        return list(range(start, end + step, step))
+        return echelle_order_list(o['order_start'], o['order_end'], order_start, order_end)
 
     @classmethod
     def sync_echelle_orders_for_spectrograph(cls, model: 'DataModel', spectrograph: str) -> None:

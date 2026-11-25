@@ -19,10 +19,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from hispecdrp.datamodels import HISPECConfig
 from hispecdrp.primitives import StellarRVPrimitive
 from hispecdrp.simulations.simulate_spectra import (
     build_l2,
-    paint_order_list,
     quiet_pipeline_logging,
 )
 from hispecdrp.utils.line_mask_utils import (
@@ -75,8 +75,8 @@ def _mask_path() -> str:
     return paired_line_mask_path_for_template(LTE040, mask_style="ccfopt.delta")
 
 
-def _orders() -> tuple[int, ...]:
-    return paint_order_list(SPECTROGRAPH, FIBER, None, None)
+def _orders() -> list[int]:
+    return HISPECConfig.get_order_list(SPECTROGRAPH)
 
 
 def _recover_bias_m_s(bulk_km_s: float, config: IdealRvRecoveryConfig) -> float:

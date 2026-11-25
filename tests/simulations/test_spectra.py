@@ -2,18 +2,18 @@
 
 from pathlib import Path
 
+from hispecdrp.datamodels import HISPECConfig
 from hispecdrp.simulations.simulate_spectra import (
     build_ccfopt_mask,
     build_l2,
     ensure_lsf_ccfopt_mask,
-    paint_order_list,
 )
 
 LTE040 = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5"
 
 
-def test_paint_order_list_bspec_defaults_no_hdf():
-    orders = paint_order_list("BSPEC", 1, None, None)
+def test_get_order_list_bspec_defaults_no_hdf():
+    orders = HISPECConfig.get_order_list("BSPEC")
     assert orders[0] == 110
     assert orders[-1] == 148
     assert len(orders) == 39
@@ -47,8 +47,8 @@ def test_apply_ccfopt_defaults_for_line_by_line():
 
 
 def test_build_l2_single_order_shape():
-    orders = paint_order_list("BSPEC", 1, 130, 130)
-    assert orders == (130,)
+    orders = HISPECConfig.get_order_list("BSPEC", 130, 130)
+    assert orders == [130]
     l2 = build_l2(
         10.0,
         spectrograph="BSPEC",
