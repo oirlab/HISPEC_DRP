@@ -30,7 +30,7 @@ from numba import njit, prange
 from hispecdrp.primitives.utils.cubic_spline import (
     cubic_spline_build,
     cubic_spline_eval,
-    cubic_spline_eval_scalar_arrays,
+    cubic_spline_eval_unsorted,
 )
 from hispecdrp.primitives.utils.linear_interp import linear_interp2d_eval_cell
 
@@ -1241,8 +1241,8 @@ def psf_prf_convolution_rate_map(
 
         # Trace positions
         lam = order_wave.to_value(u.micron)[:n_samples]
-        xc_arr = _cubic_spline_eval_numba(*cubic_spline_build(ow, ox), lam)
-        yc_arr = _cubic_spline_eval_numba(*cubic_spline_build(ow, oy), lam)
+        xc_arr = cubic_spline_eval_unsorted(cubic_spline_build(ow, ox), lam)
+        yc_arr = cubic_spline_eval_unsorted(cubic_spline_build(ow, oy), lam)
         xc_floor_arr = np.floor(xc_arr).astype(np.int64)
         yc_floor_arr = np.floor(yc_arr).astype(np.int64)
 
@@ -1317,17 +1317,6 @@ def _resample_order_spectrum(
         return lam[:0] * u.micron, f[:0] * flux.unit
     fl = cubic_spline_eval(cubic_spline_build(w[i0:i1], f[i0:i1]), lam)
     return lam * u.micron, fl * flux.unit
-
-
-@njit(cache=True)
-def _cubic_spline_eval_numba(
-    xk: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray, xq: np.ndarray
-) -> np.ndarray:
-    """Evaluate a 1D cubic spline (unpacked from `cubic_spline_build`) at unsorted query points."""
-    out = np.empty(xq.shape[0])
-    for i in range(xq.shape[0]):
-        out[i] = cubic_spline_eval_scalar_arrays(xk, a, b, c, d, xq[i])
-    return out
 
 
 @njit(parallel=True, cache=True)

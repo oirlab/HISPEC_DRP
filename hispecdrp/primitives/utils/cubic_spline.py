@@ -8,6 +8,7 @@ __all__ = [
     "cubic_spline_eval",
     "cubic_spline_eval_scalar",
     "cubic_spline_eval_scalar_arrays",
+    "cubic_spline_eval_unsorted",
     "cubic_spline2d_build",
     "cubic_spline2d_eval",
     "cubic_spline2d_eval_cell",
@@ -257,6 +258,34 @@ def cubic_spline_eval(cache : tuple, xq : np.ndarray):
         # (no need to walk backwards: xq is sorted ascending)
         t = xx - xk[i]
         out[k] = a[i] + t * (b[i] + t * (c[i] + t * d[i]))
+    return out
+
+
+@njit(cache=True)
+def cubic_spline_eval_unsorted(cache : tuple, xq : np.ndarray):
+    """
+    Evaluate the cached spline at an array of query points in any order.
+    Points outside the knot range are extrapolated with the end cubics.
+
+    Same as `cubic_spline_eval`, but each point's segment is found by bisection, so xq need not
+    be sorted.
+
+    Parameters
+    ----------
+    cache : tuple
+        The tuple returned by `cubic_spline_build`.
+    xq : np.ndarray
+        The query points at which to evaluate the spline.
+
+    Returns
+    -------
+    np.ndarray
+        The spline values at the query points.
+    """
+    xk, a, b, c, d = cache
+    out = np.empty(xq.shape[0])
+    for k in range(xq.shape[0]):
+        out[k] = cubic_spline_eval_scalar_arrays(xk, a, b, c, d, xq[k])
     return out
 
 
