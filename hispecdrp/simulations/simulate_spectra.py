@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-import astropy.constants as const
 import astropy.units as u
 import numpy as np
 from astropy.units import Quantity
@@ -24,7 +23,7 @@ from ..datamodels import hispec_config
 from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.ccf.ccf_utils import prepare_template_for_doppler_paint
-from ..primitives.utils.spectral_utils import get_spectrum_path
+from ..primitives.utils.spectral_utils import doppler_shift_wave, get_spectrum_path
 from ..utils.spectral_templates_utils import load_template_from_path
 from ..utils.line_mask_utils import (
     CCFOPT_SINGLE_LINE_STELLAR_RV_KW,
@@ -56,13 +55,15 @@ __all__ = [
 ]
 
 
-def apply_radial_velocity(wavelength: Quantity, rv: Quantity) -> Quantity:
+def apply_radial_velocity(wavelength: Quantity, rv: Quantity, vel_bc: Quantity | None = None) -> Quantity:
     """
-    Doppler-shift wavelengths by rv: wavelength * (1 + rv / c).
+    Doppler-shift wavelengths by the stellar rv and an optional barycentric velocity vel_bc,
+    with :func:`~hispecdrp.primitives.utils.spectral_utils.doppler_shift_wave`.
 
     Apply it BEFORE tellurics, sky and throughput, which are in the observer frame.
     """
-    return wavelength * (1 + (rv / const.c).to(u.dimensionless_unscaled))
+    vel_bc_m_s = 0.0 if vel_bc is None else vel_bc.to_value(u.m / u.s)
+    return doppler_shift_wave(wavelength, rv.to_value(u.m / u.s), vel_bc_m_s)
 
 
 def apply_tellurics(wavelength: Quantity, flux: Quantity) -> Quantity:

@@ -82,6 +82,7 @@ __all__ = [
     "delta_pix_to_delta_wave",
     "delta_vel_to_delta_wave",
     "delta_wave_to_delta_vel",
+    "doppler_shift_wave",
     "fetch_svo_2mass_filter",
     "get_spectrum_path",
     "load_btsettl_spectrum",
@@ -731,6 +732,23 @@ def delta_vel_to_delta_wave(delta_vel : np.ndarray | float, wave : np.ndarray | 
         np.ndarray | float: Change in wavelength in the same units as wave.
     """
     return delta_vel / scipy.constants.c * wave
+
+def doppler_shift_wave(wave, vel_star : float = 0.0, vel_bc : float = 0.0):
+    """
+    Doppler-shift wavelengths by a stellar and a barycentric velocity.
+
+    Returns ``wave * (1 + vel_star / c) * (1 + vel_bc / c)``. This is the Doppler equation used to model data.
+
+    Args:
+        wave (np.ndarray | float | Quantity): Wavelength(s), any units (returned in the same units).
+        vel_star (float): Stellar radial velocity in m/s.
+        vel_bc (float): Barycentric velocity in m/s.
+
+    Returns:
+        Shifted wavelength(s), same type and units as ``wave``.
+    """
+    c = scipy.constants.c
+    return wave * (1 + vel_star / c) * (1 + vel_bc / c)
 
 def delta_pix_to_delta_wave(
     delta_pix : float,

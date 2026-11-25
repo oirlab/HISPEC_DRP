@@ -31,6 +31,7 @@ from astropy.stats import mad_std
 from pathlib import Path
 
 from hispecdrp.utils.physical_constants import C_M_S
+from ..spectral_utils import doppler_shift_wave
 from hispecdrp.utils.line_mask_utils import (
     MaskLineStyle,
     MaskLines,
@@ -4700,7 +4701,7 @@ def doppler_paint_lanczos(
     elif pio > MAX_MASK_CCF_PIXEL_INTERP_ORDER:
         pio = MAX_MASK_CCF_PIXEL_INTERP_ORDER
 
-    beta = (1.0 + float(zb)) / (1.0 + float(rv_m_s) / float(C_M_S))
+    beta = (1.0 + float(zb)) / doppler_shift_wave(1.0, float(rv_m_s))
     xq = w_obs * beta
     n = int(w_rest.size)
     out = np.empty(xq.size, dtype=np.float64)

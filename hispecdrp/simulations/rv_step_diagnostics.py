@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-import astropy.constants as const
 import astropy.units as u
 import numpy as np
 
@@ -13,6 +12,7 @@ from ..datamodels import hispec_config
 from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.spectral_utils import (
+    doppler_shift_wave,
     get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
@@ -88,9 +88,8 @@ def load_densified_template(
 
 
 def doppler_shift_spectrum(wavelengths, flux, rv_km_s: float):
-    """Shift a 1D spectrum by ``λ' = λ (1 + RV/c)``. Flux is unchanged."""
-    factor = (1.0 + (float(rv_km_s) * u.km / u.s) / const.c).to(u.dimensionless_unscaled)
-    return wavelengths * factor, flux
+    """Shift a 1D spectrum by ``λ' = λ (1 + RV/c)`` (:func:`doppler_shift_wave`). Flux is unchanged."""
+    return doppler_shift_wave(wavelengths, float(rv_km_s) * 1000.0), flux
 
 
 def paint_spectrum_onto_l2(

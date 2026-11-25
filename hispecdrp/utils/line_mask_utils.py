@@ -20,6 +20,7 @@ from scipy.ndimage import maximum_filter1d
 from scipy.signal import argrelextrema
 
 from hispecdrp.utils.physical_constants import C_M_S
+from hispecdrp.primitives.utils.spectral_utils import doppler_shift_wave
 from hispecdrp.utils.spectral_templates_utils import load_template_from_path
 
 logger = logging.getLogger(__name__)
@@ -1767,7 +1768,7 @@ def _ccfopt_search_line_center_um(
         best_lam = float("nan")
         best_dv = 0.0
         for dv in dvs:
-            lam = float(lam0_um) * (1.0 + float(dv) / C_M_S)
+            lam = float(doppler_shift_wave(float(lam0_um), float(dv)))
             c_abs, _rv = _ccfopt_single_line_gaussian_contrast(
                 wave_um,
                 flux,
@@ -2141,7 +2142,7 @@ def build_ccfopt_line_mask_from_rvccf_table(
         j = int(idx_cand[np.argmin(np.abs(dv[idx_cand]))])
         used_chunk[j] = True
         rv_j = float(chunk_rv[j])
-        lam_new = lam0_f * (1.0 + rv_j / C_M_S)
+        lam_new = doppler_shift_wave(lam0_f, rv_j)
         if not np.isfinite(lam_new) or lam_new <= 0.0:
             n_drop += 1
             continue
@@ -2510,7 +2511,7 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             continue
 
         # Zero the measured bias relative to the injected CCF center.
-        lam_new = lam0_f * (1.0 + (rv - center) / C_M_S)
+        lam_new = doppler_shift_wave(lam0_f, rv - center)
         if not np.isfinite(lam_new) or lam_new <= 0.0:
             n_drop += 1
             continue

@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 
-from hispecdrp.utils.physical_constants import C_M_S
+from .spectral_utils import doppler_shift_wave
 
 __all__ = [
     "cubic_spline_build",
@@ -523,5 +523,5 @@ def doppler_paint_cubic_spline(
         raise ValueError("wave_rest_um must be strictly ascending")
 
     cache = cubic_spline_build(w_rest, f_rest)
-    beta = (1.0 + float(zb)) / (1.0 + float(rv_m_s) / float(C_M_S))
+    beta = (1.0 + float(zb)) / doppler_shift_wave(1.0, float(rv_m_s))
     return cubic_spline_eval(cache, w_obs * beta)

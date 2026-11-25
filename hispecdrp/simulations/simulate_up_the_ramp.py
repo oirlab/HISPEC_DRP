@@ -2887,13 +2887,12 @@ def _scale_wavesol_for_injected_rv(wavesol_model, radial_velocity_km_s: float) -
     (effective recovered RV is systematically low). Injecting via WAVE matches the
     validated ``WAVE × (1+z)`` closed-loop path used in WAVE bake / RV tests.
     """
-    import astropy.constants as const
-    import astropy.units as u
+    from ..primitives.utils.spectral_utils import doppler_shift_wave
 
     rv = float(radial_velocity_km_s)
     if rv == 0.0:
         return
-    factor = float((1.0 + (rv * u.km / u.s) / const.c).decompose().value)
+    factor = float(doppler_shift_wave(1.0, rv * 1000.0))
     for fiber in (1, 2, 3):
         attr = f"wave_fib{fiber}"
         wave = getattr(wavesol_model, attr, None)
