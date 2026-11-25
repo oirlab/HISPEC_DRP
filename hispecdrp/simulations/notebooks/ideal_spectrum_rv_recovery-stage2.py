@@ -42,7 +42,8 @@ print(f"mask: {MASK_PATH}")
 import numpy as np
 
 from hispecdrp.primitives import StellarRVPrimitive
-from hispecdrp.simulations.simulate_spectra import build_l2, quiet_pipeline_logging
+from hispecdrp.driver.logging import quiet_pipeline_logging
+from hispecdrp.simulations.simulate_spectra import build_l2
 
 hdr = (
     f"{'bulk_km/s':>10}  {'injected_m/s':>14}  {'recovered_m/s':>16}  "

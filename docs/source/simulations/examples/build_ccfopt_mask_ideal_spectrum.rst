@@ -64,7 +64,8 @@ range). Equivalent helper: :func:`~hispecdrp.simulations.simulate_spectra.build_
 
 .. code-block:: python
 
-   from hispecdrp.simulations.simulate_spectra import build_ccfopt_mask, quiet_pipeline_logging
+   from hispecdrp.driver.logging import quiet_pipeline_logging
+   from hispecdrp.simulations.simulate_spectra import build_ccfopt_mask
    from hispecdrp.utils.line_mask_utils import read_mask_generation_meta
 
    # This suppresses logging from the pipeline so the output is cleaner

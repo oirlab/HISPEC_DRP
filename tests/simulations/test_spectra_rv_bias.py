@@ -20,10 +20,10 @@ import numpy as np
 import pytest
 
 from hispecdrp.datamodels import HISPECConfig
+from hispecdrp.driver.logging import quiet_pipeline_logging
 from hispecdrp.primitives import StellarRVPrimitive
 from hispecdrp.simulations.simulate_spectra import (
     build_l2,
-    quiet_pipeline_logging,
 )
 from hispecdrp.utils.line_mask_utils import (
     CCFOPT_SINGLE_LINE_STELLAR_RV_KW,

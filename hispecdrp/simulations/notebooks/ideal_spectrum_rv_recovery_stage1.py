@@ -72,7 +72,8 @@ from hispecdrp.simulations.e2e_gaia import resolve_e2e_mjd_start
 from hispecdrp.simulations.e2e_support import templates_data_dir
 from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery
 from hispecdrp.simulations.simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
-from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, quiet_pipeline_logging, recover_stellar_rv
+from hispecdrp.driver.logging import quiet_pipeline_logging
+from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, recover_stellar_rv
 from hispecdrp.utils.line_mask_utils import (
     paired_line_mask_path_for_template,
     read_mask_generation_meta,

@@ -6,7 +6,7 @@ from logging.handlers import (
     QueueListener,
     RotatingFileHandler,
 )
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime
 import os
 import sys
@@ -278,3 +278,21 @@ def setup_default_logging() -> None:
 
 def get_queue() -> mp.queues.Queue | None:
     return _QUEUE
+
+
+# Logging config for quiet_pipeline_logging: errors only, nothing on stdout.
+QUIET_PIPELINE_LOG_CONFIG = {"level": "ERROR", "enable_stdout": False}
+
+
+@contextmanager
+def quiet_pipeline_logging():
+    """Silence pipeline logging and stray progress prints.
+
+    Stage-0 JWST ramp fitting still uses ``print`` for per-row progress, which
+    floods notebook cells even when the logger is quiet. Redirect stdout/stderr
+    to ``os.devnull`` for the duration so recovery tables stay readable.
+    """
+    with logging_context(QUIET_PIPELINE_LOG_CONFIG):
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            with redirect_stdout(devnull), redirect_stderr(devnull):
+                yield

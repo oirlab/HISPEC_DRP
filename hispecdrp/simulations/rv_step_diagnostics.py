@@ -10,6 +10,7 @@ import astropy.units as u
 import numpy as np
 
 from ..datamodels import hispec_config
+from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.spectral_utils import (
     get_spectrum_path,
@@ -31,7 +32,6 @@ from .simulate_rate_map import SimulateRateMap, _upsample_spectrum
 from .simulate_spectra import (
     build_ccfopt_mask,
     build_l2,
-    quiet_pipeline_logging,
     recover_stellar_rv,
 )
 

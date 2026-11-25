@@ -83,7 +83,8 @@ from hispecdrp.simulations.simulate_up_the_ramp import (
     get_default_stage0_primitives,
     run_stage0_simulation,
 )
-from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, quiet_pipeline_logging, recover_stellar_rv
+from hispecdrp.driver.logging import quiet_pipeline_logging
+from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, recover_stellar_rv
 from hispecdrp.utils.line_mask_utils import (
     paired_line_mask_path_for_template,
     read_mask_generation_meta,

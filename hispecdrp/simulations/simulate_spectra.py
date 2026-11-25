@@ -10,8 +10,6 @@ Also spectrum-level effects applied to an input spectrum before it is simulated 
 
 from __future__ import annotations
 
-import os
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,7 +21,7 @@ from astropy.units import Quantity
 
 from .. import datamodels
 from ..datamodels import hispec_config
-from ..driver.logging import logging_context
+from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.ccf.ccf_utils import prepare_template_for_doppler_paint
 from ..primitives.utils.spectral_utils import get_spectrum_path
@@ -54,13 +52,8 @@ __all__ = [
     "build_l2_and_recover_rv",
     "recover_stellar_rv",
     "IDEAL_SPECTRUM_STELLAR_RV_KW",
-    "QUIET_PIPELINE_LOG_CONFIG",
-    "quiet_pipeline_logging",
     "stellar_rv_kwargs_for_ideal_spectrum",
 ]
-
-# Suppress INFO/WARNING hispecdrp stdout (e.g. StellarRVPrimitive parameter dumps).
-QUIET_PIPELINE_LOG_CONFIG = {"level": "ERROR", "enable_stdout": False}
 
 
 def apply_radial_velocity(wavelength: Quantity, rv: Quantity) -> Quantity:
@@ -114,20 +107,6 @@ def add_sky_background(
     sky_flux = sky_flux.to(flux.unit)
     sky_flux_interp = np.interp(wavelength.value, sky_wl.value, sky_flux.value) * sky_flux.unit
     return wavelength, flux + sky_flux_interp
-
-
-@contextmanager
-def quiet_pipeline_logging():
-    """Silence pipeline logging and stray progress prints.
-
-    Stage-0 JWST ramp fitting still uses ``print`` for per-row progress, which
-    floods notebook cells even when the logger is quiet. Redirect stdout/stderr
-    to ``os.devnull`` for the duration so recovery tables stay readable.
-    """
-    with logging_context(QUIET_PIPELINE_LOG_CONFIG):
-        with open(os.devnull, "w", encoding="utf-8") as devnull:
-            with redirect_stdout(devnull), redirect_stderr(devnull):
-                yield
 
 
 @dataclass

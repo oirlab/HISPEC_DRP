@@ -63,7 +63,7 @@ used by sections 2–4.
    import numpy as np
 
    from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery
-   from hispecdrp.simulations.simulate_spectra import quiet_pipeline_logging
+   from hispecdrp.driver.logging import quiet_pipeline_logging
    from hispecdrp.utils.line_mask_utils import (
        paired_line_mask_path_for_template,
        read_mask_generation_meta,
