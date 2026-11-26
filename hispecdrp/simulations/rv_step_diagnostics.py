@@ -106,8 +106,15 @@ def paint_spectrum_onto_l2(
     mask_ccf_pixel_interp_order: int = 3,
     spec_err_floor: float = 1.0e-6,
     spec_err_relative: float = 1.0e-6,
+    apply_lsf: bool = False,
+    lsf_model=None,
 ):
-    """Resample an already-shifted 1D spectrum onto the native echelle WAVE grid."""
+    """Resample an already-shifted densified 1D spectrum onto the native echelle WAVE grid.
+
+    When ``lsf_model`` is set (or ``apply_lsf=True``), convolve each painted order
+    with the empirical LFC / HDF LSF after paint so line shapes match the ccfopt
+    LSF-matched mask path (:func:`~hispecdrp.simulations.spectra.build_l2`).
+    """
     from .. import datamodels
     from .e2e_gaia import resolve_e2e_mjd_start
 
@@ -130,6 +137,27 @@ def paint_spectrum_onto_l2(
             f_src,
             float(rv_m_s),
             order=int(mask_ccf_pixel_interp_order),
+        )
+    if lsf_model is not None:
+        from .lsf import convolve_l2_with_gaussian_lsf_model
+
+        spec = convolve_l2_with_gaussian_lsf_model(
+            wave_2d,
+            spec,
+            lsf_model,
+            fiber=int(fiber),
+            order_start=int(orders[0]),
+            spectrograph=spectrograph,
+        )
+    elif apply_lsf:
+        from .lsf import convolve_l2_with_hdf_lsf
+
+        spec = convolve_l2_with_hdf_lsf(
+            wave_2d,
+            spec,
+            spectrograph=spectrograph,
+            fiber=int(fiber),
+            order_start=int(orders[0]),
         )
     model = datamodels.L2Model(
         meta={
@@ -182,20 +210,37 @@ def recover_rv_keep_all_lines(
 def recover_rv_from_truth_l2(
     rv_km_s: float,
     *,
-    wavelengths,
-    flux,
     template: str,
     mask_path: str,
     fiber: int = 1,
     spectrograph: str = "BSPEC",
+    order_start: int | None = None,
+    order_end: int | None = None,
+    apply_lsf: bool = False,
+    lsf_model=None,
+    n_fine: int = 1,
+    wavelengths=None,
+    flux=None,
 ) -> tuple[float, float, float]:
-    """Paint the Doppler-shifted truth 1D onto L2 and recover RV."""
-    l2 = paint_spectrum_onto_l2(
-        wavelengths,
-        flux,
+    """Recover RV from an ideal L2 built with :func:`~hispecdrp.simulations.spectra.build_l2`.
+
+    With ``n_fine > 1``, uses the fine-paint → regrid → native WAVE path (same
+    construction as the packaged ``nfine*`` ccfopt masks). ``wavelengths`` /
+    ``flux`` are ignored (kept for call-site compatibility with older notebooks).
+    """
+    _ = wavelengths, flux
+    from .spectra import build_l2
+
+    l2 = build_l2(
+        float(rv_km_s),
         spectrograph=spectrograph,
+        template=template,
         fiber=fiber,
-        rv_m_s=0.0,
+        order_start=order_start,
+        order_end=order_end,
+        apply_lsf=bool(apply_lsf) and lsf_model is None,
+        lsf_model=lsf_model,
+        n_fine=int(n_fine),
     )
     return recover_rv_keep_all_lines(
         l2,
@@ -512,6 +557,8 @@ def derive_lfc_wavesol(
     rate[int(y_max) :] = 0
 
     do_fibers = [str(int(fiber))]
+    # ProcessLFCPipeline.group_lfc_spectra keys off object_fiberN ∈ {lfc,lfc-b,lfc-r}.
+    fiber_object = str(lfc_meta["fiber_object"])
     l0 = datamodels.L0Model(
         rate=rate,
         meta={
@@ -521,7 +568,8 @@ def derive_lfc_wavesol(
             "exposure_type": "SPEC",
             "lfc_nu0": lfc_meta["nu0"],
             "lfc_delta_nu": lfc_meta["delta_nu"],
-            "target_name": lfc_meta["fiber_object"],
+            "target_name": fiber_object,
+            f"object_fiber{int(fiber)}": fiber_object,
         },
     )
     l0.rate_err = np.sqrt(np.maximum(l0.rate, 0.0)).astype(np.float32)
@@ -564,7 +612,12 @@ def derive_lfc_wavesol(
         )
         l2.meta.lfc_nu0 = l0.meta.lfc_nu0
         l2.meta.lfc_delta_nu = l0.meta.lfc_delta_nu
+        l2.meta.target_name = fiber_object
+        setattr(l2.meta, f"object_fiber{int(fiber)}", fiber_object)
+        # ProcessLFCPipeline re-runs blaze_corr after coadd; pass the identity
+        # fiberflat explicitly so it does not query an empty local caldb.
         lfc_prims = {
+            "blaze_corr": {"do_fibers": do_fibers, "fiberflat": fiberflat},
             "fit_lfc_lines": {"do_fibers": do_fibers, "fwhm_bounds": (1.0, 7.0)},
             "lfc_wavesol": {"do_fibers": do_fibers},
             "register_lsf_cal": {"run": False},
@@ -680,10 +733,14 @@ def build_extract_matched_ccfopt_mask(
     extraction_aperture: float = 8.0,
     lsf_model=None,
     rebuild_seed: bool = True,
+    seed_mask_path: str | Path | None = None,
+    order_start: int | None = None,
+    order_end: int | None = None,
     mag_ab: float = 3.05,
     filter_band: str = "J",
     spectrum_wavelengths=None,
     spectrum_flux=None,
+    mask_suffix: str = ".extract_matched.ccfopt.delta.mas",
     **ccfopt_overrides,
 ) -> tuple[str, str, Any, dict[str, Any]]:
     """Build ccfopt from an RV=0 rate map extracted under the science WAVE/FF.
@@ -697,6 +754,9 @@ def build_extract_matched_ccfopt_mask(
     (``*.lfc_lsf.ccfopt.delta.mas``): line shapes then match the rate-map path.
     LFC WAVE + identity fiberflat remain the main ≪1 m/s bias fix; this mask
     only aligns ccfopt centroids with extract-matched line profiles.
+
+    Pass ``seed_mask_path`` (e.g. a single-order isolated-line delta mask) to
+    rezero those lines only; otherwise a template seed is built/reused.
 
     Returns ``(seed_mask_path, ccfopt_mask_path, extracted_l2, info)`` where
     ``info`` includes the LSF/WAVE fiber-alignment check.
@@ -752,9 +812,12 @@ def build_extract_matched_ccfopt_mask(
         out,
         spectrograph=spectrograph,
         fiber=fiber,
-        rebuild_seed=rebuild_seed,
+        order_start=order_start,
+        order_end=order_end,
+        rebuild_seed=rebuild_seed if seed_mask_path is None else False,
+        seed_mask_path=seed_mask_path,
         l2=l2,
-        mask_suffix=".extract_matched.ccfopt.delta.mas",
+        mask_suffix=mask_suffix,
         **ccfopt_overrides,
     )
     info = {
@@ -763,6 +826,8 @@ def build_extract_matched_ccfopt_mask(
         "extraction_aperture": float(extraction_aperture),
         "work_dir": str(work),
         "l2_path": getattr(getattr(l2_out, "meta", None), "filename", None),
+        "seed_mask_path": str(seed),
+        "ccfopt_mask_path": str(ccfopt),
     }
     return seed, ccfopt, l2_out, info
 

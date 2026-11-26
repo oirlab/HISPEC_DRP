@@ -599,3 +599,70 @@ def test_build_ccfopt_line_mask_recovers_offset_center(tmp_path):
     assert meta is not None
     assert meta.get("mask_weight_definition") == "abs_gaussian_ccf_contrast"
     assert Path(path).name.endswith(".ccfopt.delta.mas")
+
+
+def test_iteratively_rezero_ccfopt_line_mask_converges(tmp_path, monkeypatch):
+    """Full-mask iterative rezero shifts λ until |RV−center| passes verify."""
+    from astropy.table import Table
+
+    from hispecdrp.utils.line_mask_utils import iteratively_rezero_ccfopt_line_mask
+
+    seed_lam = 1.22387
+    # Residual halves each call so a few iterations reach ≪cm/s from 0.1 m/s.
+    state = {"resid": 0.1, "n_calls": 0}
+
+    class _FakeOut:
+        def __init__(self, tbl):
+            self.rvccf_fib1 = tbl
+
+    def _fake_call(model, **kwargs):
+        state["n_calls"] += 1
+        resid = float(state["resid"])
+        state["resid"] = 0.5 * resid
+        mw = np.asarray(kwargs["mask_wavelength"], dtype=np.float64).ravel()
+        tbl = Table(
+            {
+                "RV": np.full(mw.size, resid, dtype=np.float64),
+                "WAVELENGTH": mw.copy(),
+                "ORDER": np.full(mw.size, 119, dtype=np.int32),
+            }
+        )
+        return _FakeOut(tbl)
+
+    monkeypatch.setattr(
+        "hispecdrp.primitives.StellarRVPrimitive.call",
+        _fake_call,
+    )
+
+    class _Meta:
+        order_start = 119
+        order_end = 119
+
+    class _Model:
+        meta = _Meta()
+
+    mask_path = tmp_path / "biased.delta.mas"
+    MaskLines.from_delta_centers_um(
+        np.array([seed_lam, seed_lam * 1.001]),
+        np.array([0.6, 0.4]),
+    ).save(output_path=str(mask_path))
+
+    out_path = tmp_path / "rezeroed.ccfopt.delta.mas"
+    path, entries = iteratively_rezero_ccfopt_line_mask(
+        str(mask_path),
+        _Model(),
+        fiber=1,
+        output_path=str(out_path),
+        masks_directory=str(tmp_path),
+        rezero_verify_abs_rv_m_s=0.001,
+        rezero_max_iter=8,
+        rezero_alias_abs_rv_m_s=5_000.0,
+    )
+    assert Path(path).is_file()
+    assert len(entries) == 2
+    assert state["n_calls"] >= 2
+    meta = read_mask_generation_meta(path)
+    assert meta is not None
+    assert "iteratively_rezero_ccfopt_line_mask" in str(meta.get("generator", ""))
+    assert float(meta.get("final_max_abs_rv_minus_center_m_s", 1.0)) < 0.001
+    assert int(meta.get("rezero_iters_used", 0)) >= 2

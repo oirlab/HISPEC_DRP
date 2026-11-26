@@ -6,6 +6,11 @@ loop in :func:`~hispecdrp.primitives.utils.ccf.ccf_utils.rv_per_chunks_line_mask
 ``prange`` over chunks. Model matches the line-mask stored (peak-up) convention:
 fixed baseline + positive-amplitude Gaussian; two velocity passes; optional
 inverse-variance weights from ``ccf_err``.
+
+The LM mean is clamped to the fit-sample velocity domain (plus a small pad), and
+centroids that still land off the CCF grid or with a vanishing amplitude are
+rejected (``ok=False``). That prevents singular / flat-CCF runaways from returning
+~10⁹–10¹⁰ m/s RVs with a collapsed formal error.
 """
 from __future__ import annotations
 
@@ -167,6 +172,32 @@ def _lm_gauss_fixed_baseline(
     if amp < 0.0:
         amp = abs(amp)
 
+    # Domain of the fit samples (same units as ``v`` / ``mu``). LM must not walk
+    # ``μ`` far off-grid: on flat / blended CCFs an unconstrained step can reach
+    # ~10^7–10^10 m/s while still reporting ok with a collapsed formal error.
+    v_min = 1e300
+    v_max = -1e300
+    n_fin_v = 0
+    for i in range(n):
+        vi = v[i]
+        if np.isfinite(vi) and np.isfinite(y[i]):
+            if vi < v_min:
+                v_min = vi
+            if vi > v_max:
+                v_max = vi
+            n_fin_v += 1
+    if n_fin_v < 5 or not (np.isfinite(v_min) and np.isfinite(v_max) and v_max > v_min):
+        return np.nan, np.nan, np.nan, np.nan, False
+    v_span = v_max - v_min
+    # Allow a small edge pad so a peak near the window edge can still refine.
+    mu_pad = max(1.0e-3 * max(abs(v_min), abs(v_max), 1.0), 0.05 * v_span)
+    mu_lo = v_min - mu_pad
+    mu_hi = v_max + mu_pad
+    if mu < mu_lo:
+        mu = mu_lo
+    elif mu > mu_hi:
+        mu = mu_hi
+
     # Scale y for numerical stability (same idea as Astropy path).
     ymax = 0.0
     for i in range(n):
@@ -272,6 +303,11 @@ def _lm_gauss_fixed_baseline(
             amp_try = 0.5 * amp
         if sig_try <= 1e-30:
             sig_try = 0.5 * sig
+        # Keep μ inside the sample domain (plus pad).
+        if mu_try < mu_lo:
+            mu_try = mu_lo
+        elif mu_try > mu_hi:
+            mu_try = mu_hi
 
         chi2_try = 0.0
         for i in range(n):
@@ -307,6 +343,9 @@ def _lm_gauss_fixed_baseline(
 
     # Finite params are usable even if LM never improved (perfect seed).
     if not (np.isfinite(mu) and np.isfinite(amp) and np.isfinite(sig) and sig > 0.0):
+        return np.nan, np.nan, np.nan, np.nan, False
+    # Final domain guard (in case of a perfect-seed early exit with bad mu0).
+    if mu < mu_lo or mu > mu_hi:
         return np.nan, np.nan, np.nan, np.nan, False
     ok = True
 
@@ -552,22 +591,39 @@ def _fit_one_ccf_row(
     hw1 = min(pass1_hw_k, max(eps, 0.48 * span))
     hw2 = min(pass2_hw_k, max(eps, 0.42 * span))
 
-    mu1, err1, _amp1, sig1, ok1 = _window_gauss_fit(
+    mu1, err1, amp1, sig1, ok1 = _window_gauss_fit(
         v_k, ccf, ccf_err, use_err, mu0, hw1, init_sig_k, maxiter, min_points
     )
     if not ok1:
         return np.nan, np.nan, False
     sig2 = sig1 if np.isfinite(sig1) and sig1 > 0.0 else init_sig_k
-    mu2, err2, _a2, _s2, ok2 = _window_gauss_fit(
+    mu2, err2, amp2, _sig2_out, ok2 = _window_gauss_fit(
         v_k, ccf, ccf_err, use_err, mu1, hw2, sig2, maxiter, min_points
     )
     if ok2 and np.isfinite(mu2):
-        mu_f, err_f = mu2, err2
+        mu_f, err_f, amp_f = mu2, err2, amp2
     else:
-        mu_f, err_f = mu1, err1
+        mu_f, err_f, amp_f = mu1, err1, amp1
 
     if not np.isfinite(mu_f):
         return np.nan, np.nan, False
+    # Reject centroids outside the CCF velocity grid (plus a small pad). The LM
+    # step above also clamps, but keep an explicit post-condition so a singular
+    # / degenerate fit cannot return ~c-scale RVs with ok=True.
+    mu_pad_k = max(1.0e-3 * max(abs(v_lo), abs(v_hi), 1.0), 0.05 * span)
+    if mu_f < (v_lo - mu_pad_k) or mu_f > (v_hi + mu_pad_k):
+        return np.nan, np.nan, False
+    # Degenerate amplitude: unconstrained μ on a flat residual (ill-conditioned).
+    y_abs_max = 0.0
+    for i in range(n):
+        yi = ccf[i]
+        if np.isfinite(yi):
+            ay = abs(yi)
+            if ay > y_abs_max:
+                y_abs_max = ay
+    if not (np.isfinite(amp_f) and amp_f > 1.0e-12 * max(y_abs_max, 1.0e-30)):
+        return np.nan, np.nan, False
+
     # Convert km/s → m/s. Oversampled CCF bins that share detector pixels are
     # not independent: inflate σ_μ by √nsp. Keep only a tiny numerical floor.
     mu_m = float(mu_f) * 1000.0

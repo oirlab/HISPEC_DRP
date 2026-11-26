@@ -102,6 +102,38 @@ def test_fit_ccf_rv_matches_numba_on_clean_gaussian_bump():
     np.testing.assert_allclose(rv_a, true_rv, rtol=0, atol=15.0)
 
 
+def test_numba_fit_rejects_off_grid_runaway_on_flat_ccf():
+    """Flat / weakly sloped CCF must not return |RV| ≫ grid with ok=True."""
+    # Match line-by-line ccfopt velocity span (±20 km/s).
+    v = np.arange(-20_000.0, 20_000.0 + 0.5 * 10.0, 10.0, dtype=np.float64)
+    # Nearly flat peak-up row with a tiny linear tilt (ill-conditioned Gaussian).
+    ccf = 1.0e-6 * (v / 20_000.0) + 1.0e-3
+    cfg = CCF_PREVIEW_SLOT_FIT_CONFIG
+    rv, err, ok = fit_ccf_rv_rows_numba(
+        v,
+        ccf.reshape(1, -1),
+        gaussian_seed_mean_m_s=0.0,
+        pass1_half_width_m_s=float(cfg.pass1_half_width_km_s) * 1000.0,
+        pass2_half_width_m_s=float(cfg.pass2_half_width_km_s) * 1000.0,
+        initial_stddev_m_s=float(cfg.initial_stddev_km_s) * 1000.0,
+        levmar_maxiter=int(cfg.levmar_maxiter),
+        min_points=int(cfg.min_points),
+        max_cores=1,
+    )
+    # Either reject, or accept only an on-grid centroid (never ~c-scale runaway).
+    if int(ok[0]) == 1:
+        assert np.isfinite(rv[0])
+        assert abs(float(rv[0])) <= 1.05 * 20_000.0
+        assert np.isfinite(err[0]) and float(err[0]) > 0.0
+        # Singular floor signature of the old bug: err/|RV| == 1e-9 at huge |RV|.
+        assert not (
+            abs(float(rv[0])) > 1.0e6
+            and abs(float(err[0]) / abs(float(rv[0])) - 1.0e-9) < 0.2e-9
+        )
+    else:
+        assert not np.isfinite(rv[0])
+
+
 def test_rv_per_chunks_line_mask_accepts_decreasing_wavelength():
     """HDF WAVE often decreases along detector rows; pixel-edge CCF needs increasing λ."""
     n = 128

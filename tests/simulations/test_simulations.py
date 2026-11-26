@@ -12,6 +12,7 @@ import hispecdrp.simulations as simulations
 from hispecdrp.primitives.utils.spectral_utils import (
     fetch_svo_2mass_filter,
     get_spectrum_path,
+    interpolate_btsettl_flux_dropouts,
     load_btsettl_spectrum,
 )
 
@@ -139,6 +140,17 @@ def test_get_spectrum_path_dropbox_conflicted_copy(tmp_path):
     assert resolved == str(conflicted)
 
 
+def test_interpolate_btsettl_flux_dropouts():
+    """Single-knot numerical zeros are linearly filled from neighbors."""
+    wave = np.linspace(1.0, 1.01, 101)
+    flux = np.full(wave.shape, 1.0e-17)
+    flux[50] = 1.0e-122
+    filled, n_bad = interpolate_btsettl_flux_dropouts(wave, flux)
+    assert n_bad == 1
+    assert filled[50] == pytest.approx(1.0e-17, rel=1e-6)
+    assert np.all(filled[[49, 51]] == flux[[49, 51]])
+
+
 @pytest.mark.skipif(
     not os.path.isfile(get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
     reason="BT-Settl spectrum file not present",
@@ -152,6 +164,25 @@ def test_load_btsettl_spectrum():
     assert len(wl) == len(flux)
     assert np.all(wl >= 1.0 * u.micron)
     assert np.all(wl <= 2.0 * u.micron)
+
+
+@pytest.mark.skipif(
+    not os.path.isfile(get_spectrum_path("lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5")),
+    reason="BT-Settl spectrum file not present",
+)
+def test_load_btsettl_spectrum_masks_flux_dropouts_by_default():
+    """Default load fills non-physical dropouts; raw load retains them."""
+    path = get_spectrum_path("lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5")
+    wl_raw, flux_raw = load_btsettl_spectrum(
+        path, wl_min_um=1.0, wl_max_um=2.0, mask_flux_dropouts=False
+    )
+    _, n_raw = interpolate_btsettl_flux_dropouts(wl_raw.value, flux_raw.value)
+    assert n_raw >= 1
+
+    wl, flux = load_btsettl_spectrum(path, wl_min_um=1.0, wl_max_um=2.0)
+    _, n_clean = interpolate_btsettl_flux_dropouts(wl.value, flux.value)
+    assert n_clean == 0
+    assert len(wl) == len(wl_raw)
 
 
 def test_fetch_svo_2mass_filter():

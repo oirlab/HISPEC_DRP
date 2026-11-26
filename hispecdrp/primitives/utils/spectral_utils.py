@@ -73,7 +73,15 @@ except ImportError:
 DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM = 0.8
 DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM = 3.0
 
+# BT-Settl HDF5 grids occasionally contain single-knot numerical flux dropouts
+# (~1e-122 vs local continuum ~1e-17). Flag samples below this relative floor of
+# a local median and linearly interpolate over them on load by default.
+DEFAULT_BTSETTL_FLUX_DROPOUT_REL_FLOOR = 1.0e-6
+DEFAULT_BTSETTL_FLUX_DROPOUT_MED_WIN = 51
+
 __all__ = [
+    "DEFAULT_BTSETTL_FLUX_DROPOUT_MED_WIN",
+    "DEFAULT_BTSETTL_FLUX_DROPOUT_REL_FLOOR",
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM",
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM",
     "TWOMASS_VEGA_TO_AB",
@@ -84,6 +92,7 @@ __all__ = [
     "delta_wave_to_delta_vel",
     "fetch_svo_2mass_filter",
     "get_spectrum_path",
+    "interpolate_btsettl_flux_dropouts",
     "load_btsettl_spectrum",
     "load_template_from_path",
     "normalize_2mass_band",
@@ -475,6 +484,71 @@ def _ab_mag_through_filter(
     return float(-2.5 * np.log10(f_nu_band) - 48.60)
 
 
+def interpolate_btsettl_flux_dropouts(
+    wave,
+    flux,
+    *,
+    rel_floor: float = DEFAULT_BTSETTL_FLUX_DROPOUT_REL_FLOOR,
+    med_win: int = DEFAULT_BTSETTL_FLUX_DROPOUT_MED_WIN,
+) -> tuple[np.ndarray, int]:
+    """
+    Replace non-physical near-zero flux knots by linear interpolation in wavelength.
+
+    BT-Settl HDF5 grids occasionally contain single-sample numerical dropouts
+    (flux ~1e-122 while the local continuum is ~1e-17). Samples with
+    ``flux < rel_floor * local_median`` are treated as bad and filled from
+    neighboring good knots along the wavelength-sorted grid.
+
+    Parameters
+    ----------
+    wave, flux : array-like
+        Wavelength and flux samples (same length). Wavelength need not be sorted.
+    rel_floor : float, optional
+        Relative floor vs the local median (default
+        :data:`DEFAULT_BTSETTL_FLUX_DROPOUT_REL_FLOOR`).
+    med_win : int, optional
+        Odd-ish window length for the local median filter (default
+        :data:`DEFAULT_BTSETTL_FLUX_DROPOUT_MED_WIN`).
+
+    Returns
+    -------
+    flux_out : np.ndarray
+        Copy of ``flux`` with dropouts replaced (``float64``).
+    n_bad : int
+        Number of samples that were interpolated.
+    """
+    from scipy.ndimage import median_filter
+
+    w = np.asarray(wave, dtype=np.float64).ravel()
+    f = np.asarray(flux, dtype=np.float64).ravel().copy()
+    if w.size != f.size:
+        raise ValueError(
+            f"wave and flux length mismatch: {w.size} vs {f.size}"
+        )
+    if f.size == 0:
+        return f, 0
+
+    order = np.argsort(w, kind="mergesort")
+    w_s = w[order]
+    f_s = f[order]
+    win = max(3, int(med_win) | 1)  # odd, at least 3
+    med = median_filter(f_s, size=win, mode="nearest")
+    bad = np.isfinite(f_s) & np.isfinite(med) & (med > 0.0) & (
+        f_s < float(rel_floor) * med
+    )
+    n_bad = int(bad.sum())
+    if n_bad:
+        good = ~bad & np.isfinite(f_s) & np.isfinite(w_s)
+        if int(good.sum()) < 2:
+            raise ValueError(
+                "Too few finite good samples to interpolate BT-Settl flux dropouts"
+            )
+        f_s[bad] = np.interp(w_s[bad], w_s[good], f_s[good])
+    out = np.empty_like(f)
+    out[order] = f_s
+    return out, n_bad
+
+
 def load_btsettl_spectrum(
     filepath: str,
     wl_min_um: float = 0.8,
@@ -483,6 +557,9 @@ def load_btsettl_spectrum(
     filter_band: str | None = None,
     *,
     wavelengths_are_air: bool = True,
+    mask_flux_dropouts: bool = True,
+    flux_dropout_rel_floor: float = DEFAULT_BTSETTL_FLUX_DROPOUT_REL_FLOOR,
+    flux_dropout_med_win: int = DEFAULT_BTSETTL_FLUX_DROPOUT_MED_WIN,
 ):
     """
     Load wavelength and flux from a BT-Settl spectrum HDF5 file.
@@ -497,6 +574,10 @@ def load_btsettl_spectrum(
     **air** Angstrom and converted to **vacuum** microns before return, so the template
     matches vacuum wavelength axes (e.g. HISPEC L2 ``wave_*``, SPIROU-style masks in
     vacuum nm). Set ``wavelengths_are_air=False`` if the file is already on a vacuum grid.
+
+    By default (``mask_flux_dropouts=True``), non-physical single-knot flux dropouts
+    (numerical ~zeros far below the local continuum) are linearly interpolated over;
+    see :func:`interpolate_btsettl_flux_dropouts`.
 
     If ``mag_ab`` and ``filter_band`` are set, the spectrum is normalized to
     the given AB magnitude in the corresponding 2MASS filter (J, H, or K).
@@ -518,6 +599,10 @@ def load_btsettl_spectrum(
     wavelengths_are_air : bool, optional
         If True (default), convert stored wavelengths from air to vacuum before applying
         ``wl_min_um`` / ``wl_max_um`` (interpreted as vacuum microns).
+    mask_flux_dropouts : bool, optional
+        If True (default), interpolate non-physical near-zero flux knots.
+    flux_dropout_rel_floor, flux_dropout_med_win :
+        Passed to :func:`interpolate_btsettl_flux_dropouts` when masking.
 
     Returns
     -------
@@ -539,6 +624,7 @@ def load_btsettl_spectrum(
     See Also
     --------
     load_template_from_path : Same data as plain ``numpy`` arrays.
+    interpolate_btsettl_flux_dropouts : Standalone dropout fill used by this loader.
     vacuum_wavelength_nm_to_air_nm : If you must write vacuum-calibrated grids back
         to air nm for comparison with archive tables.
     """
@@ -573,6 +659,21 @@ def load_btsettl_spectrum(
     wavelength = wavelength[mask]
     flux = flux[mask]
     logger.debug("Loaded %d wavelength points from %s", len(wavelength), filepath)
+
+    if mask_flux_dropouts and len(wavelength):
+        flux_val, n_bad = interpolate_btsettl_flux_dropouts(
+            wavelength.value,
+            flux.value,
+            rel_floor=flux_dropout_rel_floor,
+            med_win=flux_dropout_med_win,
+        )
+        if n_bad:
+            logger.info(
+                "Interpolated %d non-physical BT-Settl flux dropout(s) in %s",
+                n_bad,
+                filepath,
+            )
+        flux = flux_val * flux.unit
 
     if mag_ab is not None and filter_band is not None:
         filter_wl_A, filter_trans = fetch_svo_2mass_filter(filter_band)

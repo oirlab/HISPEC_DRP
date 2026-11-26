@@ -49,6 +49,7 @@ __all__ = [
     "build_ccfopt_line_mask_from_rvccf_table",
     "build_ccfopt_line_mask_from_l2_line_by_line_rv",
     "build_ccfopt_line_mask_from_l2_single_line_ccf",
+    "iteratively_rezero_ccfopt_line_mask",
     "build_e2erv_line_mask_from_template",
     "compare_line_center_lists_um",
     "detect_template_line_centers_gradient_um",
@@ -161,9 +162,16 @@ CCFOPT_SINGLE_LINE_STELLAR_RV_KW: dict[str, Any] = {
     "ccf_min_good_pixels": 9,
     "max_abs_rv_m_s": CCFOPT_MAX_ABS_RV_M_S,
     "min_contrast": 0.0,
-    # After λ' shift, re-run single-line CCF and drop lines with |RV − center|
+    # After λ' shift, re-run CCF and drop lines with |RV − center|
     # at or above this (m/s). Default 0.001 m/s = 0.1 cm/s.
     "rezero_verify_abs_rv_m_s": 0.001,
+    # Iterative full-mask / per-line rezero: shift λ ← λ(1+(RV−center)/c) until
+    # every kept line satisfies the verify gate (or hit max iterations).
+    "rezero_max_iter": 8,
+    # During iteration, treat |RV−center| above this as an unrecoverable alias
+    # and drop the line immediately (m/s). Softer than a hard first-pass gate so
+    # blend residuals of a few×100 m/s can still converge.
+    "rezero_alias_abs_rv_m_s": 5_000.0,
     # Drop lines whose formal single-line RV uncertainty is at or above this (m/s).
     # Removes aliases / shallow lines with tens-of-m/s (or worse) error bars.
     "max_rv_err_m_s": 10.0,
@@ -2008,6 +2016,347 @@ def build_ccfopt_line_mask_from_template_and_seed(
     return path_written, entries
 
 
+def iteratively_rezero_ccfopt_line_mask(
+    mask_path: str,
+    input_model,
+    *,
+    fiber: str | int = 1,
+    template_path: str | None = None,
+    output_path: str | None = None,
+    masks_directory: str | None = None,
+    ccf_input_velocity_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "ccf_input_velocity_m_s"
+    ],
+    window_size_um: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["window_size_um"],
+    window_line_by_line: bool = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["window_line_by_line"],
+    v_half_window_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_half_window_m_s"],
+    v_step_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["v_step_m_s"],
+    mask_ccf_pixel_interp_order: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "mask_ccf_pixel_interp_order"
+    ],
+    ccf_min_good_pixels: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["ccf_min_good_pixels"],
+    rezero_verify_abs_rv_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "rezero_verify_abs_rv_m_s"
+    ],
+    rezero_max_iter: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["rezero_max_iter"],
+    rezero_alias_abs_rv_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "rezero_alias_abs_rv_m_s"
+    ],
+    match_half_m_s: float = 5000.0,
+    outlier_sigma: float = 1.0e30,
+    zb: float = 0.0,
+) -> tuple[str, list[LineMaskEntry]]:
+    """
+    Iteratively rezero a delta mask so each line's CCF centroid is at the prior.
+
+    At ``ccf_input_velocity_m_s`` (typically 0), run the full-mask line-by-line
+    CCF, shift every surviving line
+
+    ``λ ← λ × (1 + (RV − center) / c)``,
+
+    and repeat until ``max |RV − center| < rezero_verify_abs_rv_m_s`` (default
+    0.001 m/s = 0.1 cm/s) or ``rezero_max_iter`` is reached. Lines that remain
+    above the verify gate, fail to match a chunk, or exceed
+    ``rezero_alias_abs_rv_m_s`` are dropped. Weights are renormalized to sum to 1.
+
+    This is the runtime-matched path (all mask lines together), so blend
+    residuals that survive a single linear ccfopt shift can still converge
+    without requiring a per-line isolated CCF.
+    """
+    from hispecdrp.primitives import StellarRVPrimitive
+
+    if rezero_verify_abs_rv_m_s is None or not (
+        np.isfinite(float(rezero_verify_abs_rv_m_s)) and float(rezero_verify_abs_rv_m_s) > 0.0
+    ):
+        raise ValueError("rezero_verify_abs_rv_m_s must be a positive finite value")
+    max_iter = max(1, int(rezero_max_iter))
+    verify = float(rezero_verify_abs_rv_m_s)
+    alias = float(rezero_alias_abs_rv_m_s)
+    center = float(ccf_input_velocity_m_s)
+    match_half = float(match_half_m_s)
+    fiber_s = str(fiber)
+
+    ml0 = MaskLines.load(str(mask_path))
+    if str(ml0.mask_style) != MASK_STYLE_DELTA:
+        raise ValueError(
+            f"iterative rezero requires a delta mask; got style={ml0.mask_style!r}"
+        )
+    centers = np.asarray(ml0.line_lambda_um, dtype=np.float64).ravel().copy()
+    weights = np.asarray(ml0.weight, dtype=np.float64).ravel().copy()
+    keep = np.isfinite(centers) & (centers > 0.0) & np.isfinite(weights) & (weights > 0.0)
+    centers = centers[keep]
+    weights = weights[keep]
+    if centers.size == 0:
+        raise ValueError(f"No positive-weight lines in {mask_path}")
+    # Preserve relative weights across iterations; renormalize only at write.
+    weights = weights / float(np.sum(weights))
+
+    ost = int(getattr(input_model.meta, "order_start", 0))
+    oen = int(getattr(input_model.meta, "order_end", ost))
+    do_orders = list(range(ost, oen + 1))
+
+    n_alias_drop = 0
+    n_match_drop = 0
+    n_verify_drop = 0
+    n_iters_used = 0
+    max_abs_residual_hist: list[float] = []
+    n_lines_hist: list[int] = []
+
+    def _run_full_mask(lam_um: np.ndarray, wts: np.ndarray):
+        out = StellarRVPrimitive.call(
+            input_model,
+            algorithm="ccf_line_mask",
+            mask_path=None,
+            mask_wavelength=np.asarray(lam_um, dtype=np.float64),
+            mask_weight=np.asarray(wts, dtype=np.float64),
+            ccf_input_velocity=center,
+            do_fibers=[fiber_s],
+            do_orders=do_orders,
+            window_line_by_line=bool(window_line_by_line),
+            window_size_um=float(window_size_um),
+            v_half_window=float(v_half_window_m_s),
+            v_step_coarse=float(v_step_m_s),
+            mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
+            ccf_min_good_pixels=int(ccf_min_good_pixels),
+            ccf_zb=float(zb),
+            outlier_sigma=float(outlier_sigma),
+            save_result=False,
+            save_preview=False,
+            show_preview=False,
+        )
+        tbl = getattr(out, f"rvccf_fib{fiber_s}", None)
+        if tbl is None or len(tbl) == 0:
+            raise ValueError("iterative rezero: empty RVCCF from full-mask CCF")
+        return tbl
+
+    def _match_line_residual(
+        lc_f: float,
+        chunk_rest: np.ndarray,
+        chunk_rv: np.ndarray,
+        chunk_err: np.ndarray | None,
+    ) -> tuple[float, bool]:
+        """
+        Combine all RVCCF chunks within ``match_half`` of ``lc_f``.
+
+        Returns ``(residual, ok)`` where residual is the inverse-variance mean
+        of ``RV − center`` across matched orders (or nearest-chunk RV when
+        errors are unavailable). ``ok`` is False on match failure / alias.
+        """
+        dv = C_M_S * (chunk_rest - lc_f) / max(lc_f, 1.0e-30)
+        ok = np.isfinite(dv) & np.isfinite(chunk_rv) & (np.abs(dv) <= match_half)
+        if not np.any(ok):
+            return np.nan, False
+        rvs = chunk_rv[ok]
+        if float(np.nanmax(np.abs(rvs - center))) > alias:
+            return np.nan, False
+        if chunk_err is not None:
+            errs = chunk_err[ok]
+            good = np.isfinite(errs) & (errs > 0.0)
+            if np.any(good):
+                w_inv = 1.0 / np.maximum(errs[good], 1.0e-30) ** 2
+                rv_mean = float(np.average(rvs[good], weights=w_inv))
+                return rv_mean - center, True
+        # Fall back to nearest chunk in velocity.
+        j_loc = int(np.argmin(np.abs(dv[ok])))
+        return float(rvs[j_loc]) - center, True
+
+    residuals = np.full(centers.size, np.nan, dtype=np.float64)
+    for it in range(max_iter):
+        n_iters_used = it + 1
+        tbl = _run_full_mask(centers, weights)
+        chunk_wl = np.asarray(tbl["WAVELENGTH"], dtype=np.float64).ravel()
+        chunk_rv = np.asarray(tbl["RV"], dtype=np.float64).ravel()
+        chunk_err = (
+            np.asarray(tbl["RV_ERR"], dtype=np.float64).ravel()
+            if "RV_ERR" in getattr(tbl, "colnames", [])
+            else None
+        )
+        # Observed chunk λ → rest at the CCF center (inj) for matching.
+        chunk_rest = chunk_wl / (1.0 + center / C_M_S)
+
+        new_centers: list[float] = []
+        new_weights: list[float] = []
+        for i, lc in enumerate(centers):
+            lc_f = float(lc)
+            resid, ok = _match_line_residual(lc_f, chunk_rest, chunk_rv, chunk_err)
+            if not ok or not np.isfinite(resid):
+                # Distinguish alias vs match using a second nearest-only probe.
+                dv = C_M_S * (chunk_rest - lc_f) / max(lc_f, 1.0e-30)
+                any_match = np.any(
+                    np.isfinite(dv) & np.isfinite(chunk_rv) & (np.abs(dv) <= match_half)
+                )
+                if any_match:
+                    n_alias_drop += 1
+                else:
+                    n_match_drop += 1
+                continue
+            lam_new = lc_f * (1.0 + resid / C_M_S)
+            if not np.isfinite(lam_new) or lam_new <= 0.0:
+                n_match_drop += 1
+                continue
+            new_centers.append(float(lam_new))
+            new_weights.append(float(weights[i]))
+
+        if not new_centers:
+            raise ValueError(
+                "iterative rezero kept no lines; check alias/match gates or L2 coverage"
+            )
+        centers = np.asarray(new_centers, dtype=np.float64)
+        w_arr = np.asarray(new_weights, dtype=np.float64)
+        weights = w_arr / float(np.sum(w_arr))
+
+        # Post-shift measurement: verify / decide whether another shift is needed.
+        tbl2 = _run_full_mask(centers, weights)
+        chunk_wl2 = np.asarray(tbl2["WAVELENGTH"], dtype=np.float64).ravel()
+        chunk_rv2 = np.asarray(tbl2["RV"], dtype=np.float64).ravel()
+        chunk_err2 = (
+            np.asarray(tbl2["RV_ERR"], dtype=np.float64).ravel()
+            if "RV_ERR" in getattr(tbl2, "colnames", [])
+            else None
+        )
+        chunk_rest2 = chunk_wl2 / (1.0 + center / C_M_S)
+        post: list[float] = []
+        keep_mask = np.ones(centers.size, dtype=bool)
+        for i, lc in enumerate(centers):
+            resid, ok = _match_line_residual(
+                float(lc), chunk_rest2, chunk_rv2, chunk_err2
+            )
+            if not ok or not np.isfinite(resid):
+                keep_mask[i] = False
+                n_alias_drop += 1
+                post.append(np.nan)
+                continue
+            post.append(float(resid))
+        residuals = np.asarray(post, dtype=np.float64)
+        if np.any(~keep_mask):
+            centers = centers[keep_mask]
+            weights = weights[keep_mask]
+            residuals = residuals[keep_mask]
+            if centers.size == 0:
+                raise ValueError(
+                    "iterative rezero kept no lines after post-shift alias filter"
+                )
+            weights = weights / float(np.sum(weights))
+        max_abs = float(np.nanmax(np.abs(residuals))) if residuals.size else np.nan
+        max_abs_residual_hist.append(max_abs)
+        n_lines_hist.append(int(centers.size))
+        logger.info(
+            "CCF-opt iterative rezero iter %d/%d: n_lines=%d max|RV-center|=%.6g m/s "
+            "(verify=%.6g)",
+            n_iters_used,
+            max_iter,
+            centers.size,
+            max_abs,
+            verify,
+        )
+        if np.isfinite(max_abs) and max_abs < verify:
+            break
+
+    # Final verify gate on post-shift residuals.
+    keep_final = np.isfinite(residuals) & (np.abs(residuals) < verify)
+    n_verify_drop += int(np.size(keep_final) - int(np.count_nonzero(keep_final)))
+    if not np.any(keep_final):
+        raise ValueError(
+            "iterative rezero: no lines passed final verify gate "
+            f"(|RV-center| < {verify} m/s) after {n_iters_used} iteration(s)"
+        )
+    centers = centers[keep_final]
+    weights = weights[keep_final]
+    residuals = residuals[keep_final]
+    weights = weights / float(np.sum(weights))
+
+    order = np.argsort(centers)
+    centers = centers[order]
+    weights = weights[order]
+    residuals = residuals[order]
+
+    entries: list[LineMaskEntry] = [
+        LineMaskEntry(wavelength_nm=float(centers[i] * 1000.0), weight=float(weights[i]))
+        for i in range(centers.size)
+    ]
+
+    if masks_directory is None:
+        masks_directory = str(package_data_masks_dir())
+    os.makedirs(masks_directory, exist_ok=True)
+    if output_path is not None:
+        out = output_path
+    else:
+        base = Path(mask_path).name
+        for suffix in (
+            ".ccfopt.delta.mas",
+            ".delta.mas",
+            ".mas",
+        ):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        out = os.path.join(masks_directory, f"{base}.ccfopt.delta.mas")
+
+    parent_meta = dict(getattr(ml0, "metadata", {}) or {})
+    meta: dict[str, Any] = {
+        **parent_meta,
+        "schema_version": 2,
+        "mask_style": MASK_STYLE_DELTA,
+        "generator": (
+            "hispecdrp.utils.line_mask_utils.iteratively_rezero_ccfopt_line_mask"
+        ),
+        "parent_mask_path": os.path.abspath(str(mask_path)),
+        "template_path": (
+            os.path.abspath(template_path)
+            if template_path is not None
+            else parent_meta.get("template_path")
+        ),
+        "fiber": fiber_s,
+        "window_size_um": float(window_size_um),
+        "window_line_by_line": bool(window_line_by_line),
+        "v_half_window_m_s": float(v_half_window_m_s),
+        "v_step_m_s": float(v_step_m_s),
+        "ccf_input_velocity_m_s": float(center),
+        "rezero_verify_abs_rv_m_s": float(verify),
+        "rezero_max_iter": int(max_iter),
+        "rezero_alias_abs_rv_m_s": float(alias),
+        "rezero_iters_used": int(n_iters_used),
+        "rezero_max_abs_residual_m_s_per_iter": [float(x) for x in max_abs_residual_hist],
+        "rezero_n_lines_per_iter": [int(x) for x in n_lines_hist],
+        "n_dropped_alias": int(n_alias_drop),
+        "n_dropped_match": int(n_match_drop),
+        "n_dropped_verify": int(n_verify_drop),
+        "n_lines": int(len(entries)),
+        "injected_rv_m_s": float(center),
+        "mask_line_geometry": "delta_two_column",
+        "wavelength_offset_definition": (
+            "iterative full-mask: lambda <- lambda * (1 + (RV - ccf_input_velocity)/c) "
+            f"until max|RV-center| < {verify} m/s"
+        ),
+        "weights_sum_normalized_to": 1.0,
+        "final_max_abs_rv_minus_center_m_s": float(np.nanmax(np.abs(residuals))),
+        "final_median_abs_rv_minus_center_m_s": float(np.nanmedian(np.abs(residuals))),
+        "disk_wavelength_columns": {
+            "column0_line_center": "vacuum_nanometer",
+            "column1_weight": "dimensionless",
+        },
+        "hispecdrp_wavelength_columns": {
+            "line_center": masklines_wavelength_unit_meta(u.nm),
+            "line_left_edge": masklines_wavelength_unit_meta(u.nm),
+            "line_right_edge": masklines_wavelength_unit_meta(u.nm),
+            "line_width": masklines_wavelength_unit_meta(u.nm),
+        },
+    }
+    ml = MaskLines.from_delta_centers_um(centers, weights, metadata=meta)
+    path_written = ml.save(output_path=out)
+    logger.info(
+        "Wrote %d iteratively rezeroed CCF-opt lines "
+        "(alias_drop=%d match_drop=%d verify_drop=%d iters=%d) to %s",
+        len(entries),
+        n_alias_drop,
+        n_match_drop,
+        n_verify_drop,
+        n_iters_used,
+        path_written,
+    )
+    return path_written, entries
+
+
 def build_ccfopt_line_mask_from_rvccf_table(
     seed_mask_path: str,
     rvccf_table,
@@ -2032,6 +2381,10 @@ def build_ccfopt_line_mask_from_rvccf_table(
 
     and set the weight proportional to ``|Gaussian contrast|`` of that chunk's
     stored CCF. Weights are renormalized to sum to 1.
+
+    Prefer :func:`build_ccfopt_line_mask_from_l2_line_by_line_rv` (or
+    :func:`iteratively_rezero_ccfopt_line_mask`) when a post-shift rezero verify
+    at ≪cm/s is required — this helper performs a single linear shift only.
 
     Parameters
     ----------
@@ -2249,11 +2602,19 @@ def build_ccfopt_line_mask_from_l2_line_by_line_rv(
     ],
     zb: float = 0.0,
     max_seed_lines: int | None = None,
+    iterative_rezero: bool = True,
+    rezero_verify_abs_rv_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "rezero_verify_abs_rv_m_s"
+    ],
+    rezero_max_iter: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["rezero_max_iter"],
+    rezero_alias_abs_rv_m_s: float = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
+        "rezero_alias_abs_rv_m_s"
+    ],
 ) -> tuple[str, list[LineMaskEntry]]:
     """
     Build a CCF-opt delta mask from an injected-RV=0 L2 via line-by-line stellar RV.
 
-    Two-step workflow (default ``use_single_line_builder=False``):
+    Default workflow (``use_single_line_builder=False``):
 
     1. Run ``StellarRVPrimitive(algorithm="ccf_line_mask")`` on ``input_model`` with
        the seed mask and **line-by-line** windowing at ``ccf_input_velocity_m_s``
@@ -2264,6 +2625,10 @@ def build_ccfopt_line_mask_from_l2_line_by_line_rv(
        any matching per-order calibration RV exceeds ``max_abs_rv_m_s`` (default
        :data:`CCFOPT_MAX_ABS_RV_M_S`), then shifts each kept line
        ``λ' = λ × (1 + RV/c)`` and sets weights proportional to ``|Gaussian contrast|``.
+    3. When ``iterative_rezero=True`` (default), call
+       :func:`iteratively_rezero_ccfopt_line_mask` so every kept line is verified
+       at ``|RV − center| < rezero_verify_abs_rv_m_s`` (default 0.1 cm/s),
+       maximizing the number of lines that contribute to the bulk RV scatter.
 
     When ``use_single_line_builder=True``, delegate to the slower per-line CCF path
     :func:`build_ccfopt_line_mask_from_l2_single_line_ccf` (gold-standard).
@@ -2284,8 +2649,10 @@ def build_ccfopt_line_mask_from_l2_line_by_line_rv(
             mask_ccf_pixel_interp_order=mask_ccf_pixel_interp_order,
             max_abs_rv_m_s=max_abs_rv_m_s,
             min_contrast=min_contrast,
+            rezero_verify_abs_rv_m_s=rezero_verify_abs_rv_m_s,
             zb=zb,
             max_seed_lines=max_seed_lines,
+            rezero_max_iter=rezero_max_iter,
         )
 
     from hispecdrp.primitives import StellarRVPrimitive
@@ -2318,7 +2685,7 @@ def build_ccfopt_line_mask_from_l2_line_by_line_rv(
         raise ValueError(
             "line-by-line StellarRV produced empty RVCCF; check seed mask and L2"
         )
-    return build_ccfopt_line_mask_from_rvccf_table(
+    path, entries = build_ccfopt_line_mask_from_rvccf_table(
         seed_mask_path,
         tbl,
         template_path=template_path,
@@ -2327,6 +2694,28 @@ def build_ccfopt_line_mask_from_l2_line_by_line_rv(
         match_half_m_s=match_half_m_s,
         max_abs_rv_m_s=max_abs_rv_m_s,
         min_contrast=min_contrast,
+    )
+    if not iterative_rezero:
+        return path, entries
+    return iteratively_rezero_ccfopt_line_mask(
+        path,
+        input_model,
+        fiber=fiber,
+        template_path=template_path,
+        output_path=path,
+        masks_directory=masks_directory,
+        ccf_input_velocity_m_s=float(ccf_input_velocity_m_s),
+        window_size_um=float(window_size_um),
+        window_line_by_line=bool(window_line_by_line),
+        v_half_window_m_s=float(v_half_window_m_s),
+        v_step_m_s=float(v_step_m_s),
+        mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
+        rezero_verify_abs_rv_m_s=float(rezero_verify_abs_rv_m_s),
+        rezero_max_iter=int(rezero_max_iter),
+        rezero_alias_abs_rv_m_s=float(rezero_alias_abs_rv_m_s),
+        match_half_m_s=float(match_half_m_s),
+        outlier_sigma=float(outlier_sigma),
+        zb=float(zb),
     )
 
 
@@ -2354,6 +2743,7 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
     rezero_verify_abs_rv_m_s: float | None = CCFOPT_SINGLE_LINE_STELLAR_RV_KW[
         "rezero_verify_abs_rv_m_s"
     ],
+    rezero_max_iter: int = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["rezero_max_iter"],
     max_rv_err_m_s: float | None = CCFOPT_SINGLE_LINE_STELLAR_RV_KW["max_rv_err_m_s"],
     zb: float = 0.0,
     max_seed_lines: int | None = None,
@@ -2365,10 +2755,13 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
     ``StellarRVPrimitive(algorithm="ccf_line_mask")`` with **line-by-line**
     settings (:data:`CCFOPT_SINGLE_LINE_STELLAR_RV_KW`, matching
     ``rv_recovery_sim.ipynb``) but with a mask containing **only that line**.
-    Shift the line center so the recovered RV equals the injected prior
+    Iteratively shift the line center so the recovered RV equals the injected prior
     (``ccf_input_velocity_m_s``, typically 0):
 
-    ``λ' = λ_seed × (1 + (RV − ccf_input_velocity) / c)``
+    ``λ' = λ × (1 + (RV − ccf_input_velocity) / c)``
+
+    until ``|RV − center| < rezero_verify_abs_rv_m_s`` (default 0.001 m/s) or
+    ``rezero_max_iter`` is exhausted.
 
     The output ``.mas`` is a fixed rest-frame list (does not vary with bulk RV).
     Weights are proportional to ``|Gaussian CCF contrast|`` at the measured
@@ -2379,7 +2772,7 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
     - no valid chunk RV, ``|RV|`` above ``max_abs_rv_m_s``, or contrast at/below
       ``min_contrast``;
     - formal RV uncertainty ``≥ max_rv_err_m_s`` (default 10 m/s);
-    - after the λ shift, re-measured ``|RV − center| ≥ rezero_verify_abs_rv_m_s``
+    - after iterative λ shifts, re-measured ``|RV − center| ≥ rezero_verify_abs_rv_m_s``
       (default 0.001 m/s = 0.1 cm/s), or the re-measured uncertainty fails the
       same ``max_rv_err_m_s`` gate.
 
@@ -2509,13 +2902,7 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             n_drop += 1
             continue
 
-        # Zero the measured bias relative to the injected CCF center.
-        lam_new = lam0_f * (1.0 + (rv - center) / C_M_S)
-        if not np.isfinite(lam_new) or lam_new <= 0.0:
-            n_drop += 1
-            continue
-
-        # Require post-shift re-zero (default 0.1 cm/s) and uncertainty gate.
+        # Iteratively zero the measured bias relative to the injected CCF center.
         need_rezero = (
             rezero_verify_abs_rv_m_s is not None
             and np.isfinite(float(rezero_verify_abs_rv_m_s))
@@ -2526,51 +2913,67 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
             and np.isfinite(float(max_rv_err_m_s))
             and float(max_rv_err_m_s) > 0.0
         )
+        lam_new = lam0_f * (1.0 + (rv - center) / C_M_S)
+        if not np.isfinite(lam_new) or lam_new <= 0.0:
+            n_drop += 1
+            continue
+        rv_chk = float(rv)
+        rv_err_chk = float(rv_err)
         if need_rezero or need_err_gate:
-            _wl2, rvs2, errs2, _o2, _p2, _s2 = run_ccf_line_mask_for_fiber(
-                input_model=input_model,
-                fiber=fiber_s,
-                do_orders=do_orders,
-                order_vec=order_vec,
-                window_size_um=float(window_size_um),
-                mask_path=None,
-                mask_wavelength=np.asarray([lam_new], dtype=np.float64),
-                mask_weight=np.asarray([1.0], dtype=np.float64),
-                v_min_m_s=float(vm),
-                v_max_m_s=float(vx),
-                v_step_m_s=v_step,
-                ccf_center_m_s=center,
-                ccf_half_window_m_s=half,
-                zb=float(zb),
-                want_preview=False,
-                min_good_pixels=int(ccf_min_good_pixels),
-                mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
-                window_line_by_line=bool(window_line_by_line),
-            )
-            rvs2_a = np.asarray(rvs2, dtype=np.float64).ravel()
-            errs2_a = np.asarray(errs2, dtype=np.float64).ravel()
-            valid2 = np.isfinite(rvs2_a) & np.isfinite(errs2_a) & (errs2_a > 0.0)
-            if not np.any(valid2):
-                n_drop += 1
-                continue
-            w2 = 1.0 / np.maximum(errs2_a[valid2], 1.0e-30) ** 2
-            rv_chk = float(np.average(rvs2_a[valid2], weights=w2))
-            rv_err_chk = float(np.sqrt(1.0 / np.sum(w2)))
-            if need_rezero and (
-                not np.isfinite(rv_chk)
-                or abs(rv_chk - center) >= float(rezero_verify_abs_rv_m_s)
-            ):
-                n_drop += 1
-                continue
-            if need_err_gate and (
-                not np.isfinite(rv_err_chk) or rv_err_chk >= float(max_rv_err_m_s)
-            ):
+            n_rezero_iter = max(1, int(rezero_max_iter))
+            converged = not need_rezero
+            for _rezero_it in range(n_rezero_iter):
+                _wl2, rvs2, errs2, _o2, _p2, _s2 = run_ccf_line_mask_for_fiber(
+                    input_model=input_model,
+                    fiber=fiber_s,
+                    do_orders=do_orders,
+                    order_vec=order_vec,
+                    window_size_um=float(window_size_um),
+                    mask_path=None,
+                    mask_wavelength=np.asarray([lam_new], dtype=np.float64),
+                    mask_weight=np.asarray([1.0], dtype=np.float64),
+                    v_min_m_s=float(vm),
+                    v_max_m_s=float(vx),
+                    v_step_m_s=v_step,
+                    ccf_center_m_s=center,
+                    ccf_half_window_m_s=half,
+                    zb=float(zb),
+                    want_preview=False,
+                    min_good_pixels=int(ccf_min_good_pixels),
+                    mask_ccf_pixel_interp_order=int(mask_ccf_pixel_interp_order),
+                    window_line_by_line=bool(window_line_by_line),
+                )
+                rvs2_a = np.asarray(rvs2, dtype=np.float64).ravel()
+                errs2_a = np.asarray(errs2, dtype=np.float64).ravel()
+                valid2 = np.isfinite(rvs2_a) & np.isfinite(errs2_a) & (errs2_a > 0.0)
+                if not np.any(valid2):
+                    lam_new = np.nan
+                    break
+                w2 = 1.0 / np.maximum(errs2_a[valid2], 1.0e-30) ** 2
+                rv_chk = float(np.average(rvs2_a[valid2], weights=w2))
+                rv_err_chk = float(np.sqrt(1.0 / np.sum(w2)))
+                if need_err_gate and (
+                    not np.isfinite(rv_err_chk) or rv_err_chk >= float(max_rv_err_m_s)
+                ):
+                    lam_new = np.nan
+                    break
+                if (not need_rezero) or abs(rv_chk - center) < float(
+                    rezero_verify_abs_rv_m_s
+                ):
+                    converged = True
+                    break
+                lam_try = float(lam_new) * (1.0 + (rv_chk - center) / C_M_S)
+                if not np.isfinite(lam_try) or lam_try <= 0.0:
+                    lam_new = np.nan
+                    break
+                lam_new = lam_try
+            if not np.isfinite(lam_new) or (need_rezero and not converged):
                 n_drop += 1
                 continue
 
         out_lam.append(float(lam_new))
         out_contrast.append(float(contrast))
-        out_rv.append(float(rv))
+        out_rv.append(float(rv_chk))
 
     if not out_lam:
         raise ValueError(
@@ -2730,9 +3133,11 @@ def build_ccfopt_line_mask_from_l2_single_line_ccf(
         "mask_line_geometry": "delta_two_column",
         "mask_weight_definition": "abs_gaussian_ccf_contrast",
         "wavelength_offset_definition": (
-            "lambda_prime = lambda_seed * (1 + (RV - ccf_input_velocity) / c); "
-            "single-line line-by-line CCF, then full-mask rezero/err filter"
+            "iterative: lambda <- lambda * (1 + (RV - ccf_input_velocity) / c) "
+            "per single-line CCF until |RV-center| < rezero_verify; "
+            "then full-mask rezero/err filter"
         ),
+        "rezero_max_iter": int(rezero_max_iter),
         "weights_sum_normalized_to": 1.0,
         "n_seed_lines": int(n_seed),
         "n_dropped_lines": int(n_drop),

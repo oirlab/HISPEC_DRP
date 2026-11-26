@@ -81,6 +81,22 @@ range (110–111) for CI / fidelity wiring; regenerate without ``--order-start``
 Use LSF masks for ideal-spectrum / fidelity diagnostics; keep E2E
 ``*.ccfopt.delta.mas`` (from blaze L2) as the on-sky-like science mask.
 
+### Order-136 fine-paint ccfopt (``rv_recovery`` notebook)
+
+For the docs ``rv_recovery.ipynb`` single-order fidelity path, regenerate an
+iso14 mask rezeroed on a WAVE grid oversampled by ``N_FINE=512`` (no LSF)::
+
+```bash
+python hispecdrp/data/masks/regenerate_order136_nfine_ccfopt_mask.py --n-fine 512
+```
+
+| File pattern | Role |
+|--------------|------|
+| `<stem>.order136.iso14.nfine512.ccfopt.delta.mas` | 14 isolated order-136 lines; iterative δ-mask CCF rezero at RV=0 on fine observed sampling. |
+
+This is **not** the default full-band science mask; it is packaged for that
+notebook / fine-paint recovery checks.
+
 Each file includes a `# HISPEC_DRP_MASK_META` JSON line; parse it with
 :func:`hispecdrp.utils.line_mask_utils.read_mask_generation_meta`.
 

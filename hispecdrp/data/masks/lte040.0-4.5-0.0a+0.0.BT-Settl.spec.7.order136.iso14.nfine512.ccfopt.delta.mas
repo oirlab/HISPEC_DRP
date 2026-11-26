@@ -1,0 +1,18 @@
+# HISPEC DRP CCF line mask (columns: wavelength_vac_nm, weight).
+# mask_style: delta
+# Metadata JSON on the next line (parse with read_mask_generation_meta).
+# HISPEC_DRP_MASK_META {"disk_wavelength_columns":{"column0_line_center":"vacuum_nanometer","column1_weight":"dimensionless"},"fiber":1,"hispecdrp_wavelength_columns":{"line_center":{"astropy_unit_string":"um","fits_unit_string":"um"},"line_left_edge":{"astropy_unit_string":"um","fits_unit_string":"um"},"line_right_edge":{"astropy_unit_string":"um","fits_unit_string":"um"},"line_width":{"astropy_unit_string":"um","fits_unit_string":"um"}},"mask_style":"delta","n_fine":512,"n_lines":14,"order":136,"schema_version":2,"source":"regenerate_order136_nfine_ccfopt_mask","spectrograph":"BSPEC","template":"lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7.h5","v_half_m_s":4000.0,"v_step_m_s":2.0}
+   1.0688445953109331e+03        8.2000504051616560e-02
+   1.0699002122681798e+03        5.4738034178414885e-02
+   1.0705323018858610e+03        4.4623891796588259e-02
+   1.0708076871260339e+03        1.1541050519439258e-01
+   1.0710951058007142e+03        7.9248589586028886e-02
+   1.0713672825026792e+03        4.5548722291626549e-02
+   1.0739721375338829e+03        7.8018362132202562e-02
+   1.0742858007332636e+03        8.3587737747212953e-02
+   1.0745470364287437e+03        5.0627981595523668e-02
+   1.0749375222465965e+03        7.2012892593532232e-02
+   1.0752297957900237e+03        1.1414883485712404e-01
+   1.0765919641811854e+03        8.2335009809521451e-02
+   1.0767798911284037e+03        4.7303631097282785e-02
+   1.0771536892944125e+03        5.0395303068932619e-02

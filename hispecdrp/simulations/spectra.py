@@ -19,7 +19,10 @@ from .. import datamodels
 from ..datamodels import hispec_config
 from ..driver.logging import logging_context
 from ..primitives.utils.ccf import doppler_paint_lanczos
-from ..primitives.utils.ccf.ccf_utils import prepare_template_for_doppler_paint
+from ..primitives.utils.ccf.ccf_utils import (
+    _poly_interp_sorted_1d,
+    prepare_template_for_doppler_paint,
+)
 from ..primitives.utils.spectral_utils import get_spectrum_path
 from ..utils.spectral_templates_utils import load_template_from_path
 from ..utils.line_mask_utils import (
@@ -75,6 +78,43 @@ class _PaintContext:
     w_dense_per_order: tuple[np.ndarray, ...]
     f_dense_per_order: tuple[np.ndarray, ...]
     orders: tuple[int, ...]
+    wave_fine_per_order: tuple[np.ndarray, ...] | None = None
+    n_fine: int = 1
+
+
+def _oversample_wave(wave_um: np.ndarray, n: int) -> np.ndarray:
+    """Subdivide each native WAVE interval into ``n`` equal λ samples."""
+    w = np.sort(np.asarray(wave_um, dtype=np.float64).ravel())
+    n = int(n)
+    if n <= 1:
+        return w.copy()
+    segs = [
+        np.linspace(w[i], w[i + 1], n + 1, endpoint=True)[:-1]
+        for i in range(w.size - 1)
+    ]
+    segs.append(w[-1:])
+    return np.concatenate(segs)
+
+
+def _regrid_to_wave(
+    wave_fine: np.ndarray,
+    flux_fine: np.ndarray,
+    wave_native: np.ndarray,
+    *,
+    order: int = 3,
+) -> np.ndarray:
+    """Lanczos-sample fine flux onto native BSPEC WAVE pixel centers."""
+    wf = np.asarray(wave_fine, dtype=np.float64).ravel()
+    ff = np.asarray(flux_fine, dtype=np.float64).ravel()
+    wn = np.asarray(wave_native, dtype=np.float64).ravel()
+    o = np.argsort(wf)
+    ws, fs = wf[o], ff[o]
+    n = int(ws.size)
+    a = int(order)
+    return np.asarray(
+        [_poly_interp_sorted_1d(float(x), ws, fs, n, a) for x in wn],
+        dtype=np.float64,
+    )
 
 
 def _resolve_order_bounds(
@@ -130,6 +170,7 @@ def _paint_context(
     fiber: int,
     order_start: int,
     order_end: int,
+    n_fine: int = 1,
 ) -> _PaintContext:
     ws_all = _instrument_wavelength_solution(spectrograph)[fiber]
     all_orders = sorted(int(o) for o in ws_all.keys())
@@ -141,8 +182,10 @@ def _paint_context(
         )
 
     n_pix = int(np.asarray(ws_all[orders[0]]["wavelength"]).size)
+    n_fine = max(1, int(n_fine))
     wave_2d = np.zeros((len(orders), n_pix), dtype=np.float64)
-    w_obs_inc_rows: list[np.ndarray] = []
+    w_paint_rows: list[np.ndarray] = []
+    wave_fine_rows: list[np.ndarray] | None = [] if n_fine > 1 else None
     for i, od in enumerate(orders):
         w = np.asarray(ws_all[od]["wavelength"], dtype=np.float64)
         if w.size != n_pix:
@@ -153,7 +196,12 @@ def _paint_context(
         if w_obs_inc.size < 2:
             raise ValueError(f"order {od}: wavelength grid has no span")
         wave_2d[i] = w
-        w_obs_inc_rows.append(w_obs_inc)
+        if n_fine > 1:
+            w_fine = _oversample_wave(w_obs_inc, n_fine)
+            wave_fine_rows.append(w_fine)
+            w_paint_rows.append(w_fine)
+        else:
+            w_paint_rows.append(w_obs_inc)
 
     w_native, f_native = load_template_from_path(template_path)
     order = np.argsort(w_native)
@@ -164,7 +212,7 @@ def _paint_context(
     f_dense: list[np.ndarray] = []
     for i in range(wave_2d.shape[0]):
         wd, fd = prepare_template_for_doppler_paint(
-            w_native, f_native, w_obs_inc_rows[i]
+            w_native, f_native, w_paint_rows[i]
         )
         w_dense.append(wd)
         f_dense.append(fd)
@@ -174,6 +222,10 @@ def _paint_context(
         w_dense_per_order=tuple(w_dense),
         f_dense_per_order=tuple(f_dense),
         orders=tuple(orders),
+        wave_fine_per_order=(
+            None if wave_fine_rows is None else tuple(wave_fine_rows)
+        ),
+        n_fine=n_fine,
     )
 
 
@@ -192,15 +244,17 @@ def build_l2(
     apply_lsf: bool = False,
     lsf_model=None,
     mjd_start: float | None = None,
+    n_fine: int = 1,
 ) -> datamodels.L2Model:
     """
     Build a noiseless L2 with a Doppler-shifted template on the instrument grid.
 
-    The first call for a given ``(template, spectrograph, fiber, order range)``
-    pays a one-time cost to load the WAVE solution, read the template, and
-    densify it per echelle order (``prepare_template_for_doppler_paint``).
-    Subsequent calls with different ``rv_km_s`` reuse that cache and only run
-    the Lanczos paint.
+    The first call for a given
+    ``(template, spectrograph, fiber, order range, n_fine)`` pays a one-time
+    cost to load the WAVE solution, read the template, and densify it per
+    echelle order (``prepare_template_for_doppler_paint``). Subsequent calls
+    with different ``rv_km_s`` reuse that cache and only run the Lanczos paint
+    (and optional fine→native regrid).
 
     Parameters
     ----------
@@ -238,6 +292,12 @@ def build_l2(
         Observation start MJD. Default is the E2E / UTR simulation epoch
         (:data:`~hispecdrp.simulations.e2e_gaia.DEFAULT_E2E_MJD_START`) so
         datamodel init does not warn and invent wall-clock time.
+    n_fine
+        Observed-WAVE oversample factor. ``1`` (default) paints directly onto
+        native BSPEC WAVE. ``n_fine > 1`` densifies + Lanczos-paints onto a
+        fine observed grid (``N`` samples per native pixel), then Lanczos-
+        regrids onto native WAVE so the L2 product still lives on the
+        realistic detector wavelength grid.
 
     Returns
     -------
@@ -254,17 +314,36 @@ def build_l2(
             IDEAL_SPECTRUM_STELLAR_RV_KW["mask_ccf_pixel_interp_order"]
         )
 
-    ctx = _paint_context(template_path, spectrograph, int(fiber), ost, oen)
+    n_fine = max(1, int(n_fine))
+    ctx = _paint_context(
+        template_path, spectrograph, int(fiber), ost, oen, n_fine
+    )
     inj_m_s = float(rv_km_s) * 1000.0
+    paint_order = int(mask_ccf_pixel_interp_order)
     spec = np.empty_like(ctx.wave_2d, dtype=np.float64)
     for i in range(ctx.wave_2d.shape[0]):
-        spec[i] = doppler_paint_lanczos(
-            ctx.wave_2d[i],
-            ctx.w_dense_per_order[i],
-            ctx.f_dense_per_order[i],
-            inj_m_s,
-            order=int(mask_ccf_pixel_interp_order),
-        )
+        if ctx.wave_fine_per_order is None:
+            spec[i] = doppler_paint_lanczos(
+                ctx.wave_2d[i],
+                ctx.w_dense_per_order[i],
+                ctx.f_dense_per_order[i],
+                inj_m_s,
+                order=paint_order,
+            )
+        else:
+            flux_fine = doppler_paint_lanczos(
+                ctx.wave_fine_per_order[i],
+                ctx.w_dense_per_order[i],
+                ctx.f_dense_per_order[i],
+                inj_m_s,
+                order=paint_order,
+            )
+            spec[i] = _regrid_to_wave(
+                ctx.wave_fine_per_order[i],
+                flux_fine,
+                ctx.wave_2d[i],
+                order=paint_order,
+            )
 
     if lsf_model is not None:
         from .lsf import convolve_l2_with_gaussian_lsf_model
@@ -274,6 +353,8 @@ def build_l2(
             spec,
             lsf_model,
             fiber=int(fiber),
+            order_start=ost,
+            spectrograph=spectrograph,
         )
     elif apply_lsf:
         from .lsf import convolve_l2_with_hdf_lsf
@@ -345,6 +426,7 @@ def build_ccfopt_mask(
     lsf_model=None,
     mask_suffix: str | None = None,
     l2: datamodels.L2Model | None = None,
+    seed_mask_path: str | Path | None = None,
     **ccfopt_overrides,
 ) -> tuple[str, str, datamodels.L2Model]:
     """
@@ -363,6 +445,9 @@ def build_ccfopt_mask(
     under LFC WAVE) with ``mask_suffix=".extract_matched.ccfopt.delta.mas"`` to
     skip painting; ``apply_lsf`` / ``lsf_model`` are ignored in that case.
 
+    Pass ``seed_mask_path`` to rezero an existing delta seed (e.g. a single-order
+    isolated-line subset) instead of regenerating seeds from the template.
+
     Returns ``(seed_mask_path, ccfopt_mask_path, l2_at_zero_rv)``.
     """
     out_dir = Path(output_dir)
@@ -371,7 +456,12 @@ def build_ccfopt_mask(
     template_path = get_spectrum_path(template, base_dir=base_dir)
     stem = Path(template).stem
 
-    seed_mask = out_dir / f"{stem}.delta.mas"
+    if seed_mask_path is not None:
+        seed_mask = Path(seed_mask_path)
+        if not seed_mask.is_file():
+            raise FileNotFoundError(f"seed_mask_path not found: {seed_mask}")
+    else:
+        seed_mask = out_dir / f"{stem}.delta.mas"
     if mask_suffix is None:
         if l2 is not None:
             mask_suffix = ".extract_matched.ccfopt.delta.mas"
@@ -391,7 +481,7 @@ def build_ccfopt_mask(
         order_end=order_end,
     )
 
-    if rebuild_seed or not seed_mask.is_file():
+    if seed_mask_path is None and (rebuild_seed or not seed_mask.is_file()):
         build_line_mask_from_template(
             str(template_path),
             wl_min_um=wl_min,
@@ -594,11 +684,14 @@ def build_l2_and_recover_rv(
     order_end: int | None = None,
     mask_path: str | None = None,
     quiet: bool = True,
+    apply_lsf: bool = False,
+    lsf_model=None,
     **stellar_rv_overrides,
 ) -> tuple[datamodels.L2Model, float, float, float]:
     """
     Paint template onto BSPEC WAVE and recover RV (ideal-spectrum default mode).
 
+    Uses :func:`build_l2` — the same path as :func:`build_ccfopt_mask`.
     Returns ``(l2, injected_m_s, recovered_m_s, rv_err_m_s)``.
     """
     paint_order = stellar_rv_overrides.pop(
@@ -613,6 +706,8 @@ def build_l2_and_recover_rv(
         order_start=order_start,
         order_end=order_end,
         mask_ccf_pixel_interp_order=int(paint_order),
+        apply_lsf=bool(apply_lsf) and lsf_model is None,
+        lsf_model=lsf_model,
     )
     inj_m_s, rec_m_s, err_m_s = recover_stellar_rv(
         l2,

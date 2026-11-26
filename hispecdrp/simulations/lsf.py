@@ -29,23 +29,85 @@ def _fwhm_wave_from_lsf_params(lsf_params) -> np.ndarray:
     return arr
 
 
+def _slice_lsf_fwhm_to_wave(
+    fwhm_wave: np.ndarray,
+    wave_2d: np.ndarray,
+    *,
+    fiber: int,
+    order_start: int | None = None,
+    lsf_order_start: int | None = None,
+    spectrograph: str | None = None,
+) -> np.ndarray:
+    """Align full-band LSF FWHM rows to a (possibly order-subset) ``wave_2d``."""
+    fwhm_wave = np.asarray(fwhm_wave, dtype=np.float64)
+    wave_2d = np.asarray(wave_2d, dtype=np.float64)
+    if fwhm_wave.shape == wave_2d.shape:
+        return fwhm_wave
+    if fwhm_wave.ndim != 2 or wave_2d.ndim != 2:
+        raise ValueError(
+            f"lsf_params_fib{fiber} shape {fwhm_wave.shape} does not match "
+            f"wave_2d shape {wave_2d.shape}"
+        )
+    if fwhm_wave.shape[1] != wave_2d.shape[1]:
+        raise ValueError(
+            f"lsf_params_fib{fiber} n_pix={fwhm_wave.shape[1]} does not match "
+            f"wave_2d n_pix={wave_2d.shape[1]}"
+        )
+    n_ord = int(wave_2d.shape[0])
+    if order_start is None:
+        raise ValueError(
+            f"lsf_params_fib{fiber} has {fwhm_wave.shape[0]} orders but wave_2d "
+            f"has {n_ord}; pass order_start to select the matching LSF rows"
+        )
+    if lsf_order_start is None and spectrograph is not None:
+        sp = str(spectrograph).upper()
+        lsf_order_start = int(hispec_config.HISPECConfig.echelle_orders[sp]["order_start"])
+    if lsf_order_start is None:
+        raise ValueError(
+            "lsf_order_start (or spectrograph) is required when slicing a "
+            "full-band LSF onto a subset of echelle orders"
+        )
+    i0 = int(order_start) - int(lsf_order_start)
+    i1 = i0 + n_ord
+    if i0 < 0 or i1 > fwhm_wave.shape[0]:
+        raise ValueError(
+            f"LSF row slice [{i0}:{i1}] for orders "
+            f"{int(order_start)}..{int(order_start) + n_ord - 1} is outside "
+            f"lsf_params_fib{fiber} with {fwhm_wave.shape[0]} rows "
+            f"(lsf_order_start={int(lsf_order_start)})"
+        )
+    return fwhm_wave[i0:i1]
+
+
 def sigma_pix_from_gaussian_lsf_model(
     lsf_model,
     wave_2d: np.ndarray,
     *,
     fiber: int,
+    order_start: int | None = None,
+    lsf_order_start: int | None = None,
+    spectrograph: str | None = None,
 ) -> np.ndarray:
-    """Map :class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel` FWHM→σ in pixels."""
+    """Map :class:`~hispecdrp.datamodels.gausslsf.GaussianLSFModel` FWHM→σ in pixels.
+
+    When ``wave_2d`` covers a subset of the LSF orders, pass ``order_start`` (first
+    echelle order in ``wave_2d``) and either ``lsf_order_start`` or ``spectrograph``
+    so the matching LSF rows are selected.
+    """
     fiber = int(fiber)
     wave_2d = np.asarray(wave_2d, dtype=np.float64)
-    fwhm_wave = _fwhm_wave_from_lsf_params(
-        getattr(lsf_model, f"lsf_params_fib{fiber}")
+    if lsf_order_start is None and hasattr(lsf_model, "meta"):
+        meta_ost = getattr(lsf_model.meta, "order_start", None)
+        if meta_ost is not None:
+            lsf_order_start = int(meta_ost)
+    fwhm_wave = _slice_lsf_fwhm_to_wave(
+        _fwhm_wave_from_lsf_params(getattr(lsf_model, f"lsf_params_fib{fiber}")),
+        wave_2d,
+        fiber=fiber,
+        order_start=order_start,
+        lsf_order_start=lsf_order_start,
+        spectrograph=spectrograph,
     )
-    if fwhm_wave.shape != wave_2d.shape:
-        raise ValueError(
-            f"lsf_params_fib{fiber} shape {fwhm_wave.shape} does not match "
-            f"wave_2d shape {wave_2d.shape}"
-        )
     # Floor dispersion with a fraction of the per-order median |dλ/dpix| so
     # flat / NaN WAVE edge pixels do not explode σ into terabyte kernels.
     sigma_pix = np.empty_like(wave_2d)
@@ -71,10 +133,18 @@ def convolve_l2_with_gaussian_lsf_model(
     lsf_model,
     *,
     fiber: int,
+    order_start: int | None = None,
+    lsf_order_start: int | None = None,
+    spectrograph: str | None = None,
 ) -> np.ndarray:
     """Convolve a 2-D spectrum with an empirical ProcessLFC ``GaussianLSFModel``."""
     sigma_pix = sigma_pix_from_gaussian_lsf_model(
-        lsf_model, wave_2d, fiber=int(fiber)
+        lsf_model,
+        wave_2d,
+        fiber=int(fiber),
+        order_start=order_start,
+        lsf_order_start=lsf_order_start,
+        spectrograph=spectrograph,
     )
     return convolve_l2_with_gaussian_lsf(
         np.asarray(wave_2d, dtype=np.float64),

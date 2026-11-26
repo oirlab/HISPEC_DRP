@@ -102,6 +102,19 @@ your science wavelengths.
 
 ---
 
+## Non-physical flux dropouts
+
+Some CIFIST HDF5 products contain rare **single-knot numerical flux dropouts**
+(values ~10⁻¹²² while the local continuum is ~10⁻¹⁷). These are not physical
+absorption features. By default,
+:func:`~hispecdrp.primitives.utils.spectral_utils.load_btsettl_spectrum` (and
+:func:`~hispecdrp.utils.spectral_templates_utils.load_btsettl_spectrum`) detects
+samples far below a local median and **linearly interpolates** over them before
+photometric normalization. Disable with ``mask_flux_dropouts=False`` if you need
+the raw archive values.
+
+---
+
 ## Citations
 
 Cite **BT-Settl / CIFIST** and the SVO service appropriately for your work, using the

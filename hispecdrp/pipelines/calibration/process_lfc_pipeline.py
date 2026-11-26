@@ -31,6 +31,13 @@ class ProcessLFCPipeline(CalibrationPipeline):
         'register_lsf_cal' : RegisterCalibrationPrimitive,
     }
 
+    @staticmethod
+    def _do_fibers(fiber_group) -> list[str]:
+        """Normalize a group key (int or tuple of ints) to a ``do_fibers`` list."""
+        if isinstance(fiber_group, tuple):
+            return [str(int(f)) for f in fiber_group]
+        return [str(int(fiber_group))]
+
     def _perform(self):
 
         # Load input models
@@ -45,32 +52,36 @@ class ProcessLFCPipeline(CalibrationPipeline):
         # Coadd models
         lfc_models_L1_coadded = {}
         for fiber_group in lfc_groups:
+            do_fibers = self._do_fibers(fiber_group)
             lfc_models_L1_coadded[fiber_group] = self.coadd_spectra.apply(
                 lfc_groups[fiber_group],
-                do_fibers=fiber_group
+                do_fibers=do_fibers,
             )
 
         # Apply blaze correction to coadded models
         for fiber_group in lfc_groups:
+            do_fibers = self._do_fibers(fiber_group)
             lfc_models_L1_coadded[fiber_group] = self.blaze_corr.apply(
                 lfc_models_L1_coadded[fiber_group],
-                do_fibers=fiber_group
+                do_fibers=do_fibers,
             )
 
         # Fit LFC lines for all models
         line_fit_models = {}
         for fiber_group in lfc_groups:
+            do_fibers = self._do_fibers(fiber_group)
             line_fit_models[fiber_group] = self.fit_lfc_lines.apply(
                 lfc_models_L1_coadded[fiber_group],
-                do_fibers=fiber_group
+                do_fibers=do_fibers,
             )
 
         # Compute wavelength solution
         wavesols = {}
         for fiber_group in lfc_groups:
+            do_fibers = self._do_fibers(fiber_group)
             wavesol_result = self.lfc_wavesol.apply(
                 line_fit_models[fiber_group],
-                do_fibers=fiber_group
+                do_fibers=do_fibers,
             )
             self.register_wave_cal.apply(wavesol_result)
             wavesols[fiber_group] = wavesol_result
@@ -78,9 +89,10 @@ class ProcessLFCPipeline(CalibrationPipeline):
         # Compute LSF
         lsfs = {}
         for fiber_group in lfc_groups:
+            do_fibers = self._do_fibers(fiber_group)
             lsf_result = self.lsf.apply(
                 wavesols[fiber_group],
-                do_fibers=fiber_group
+                do_fibers=do_fibers,
             )
             self.register_lsf_cal.apply(lsf_result)
             lsfs[fiber_group] = lsf_result
