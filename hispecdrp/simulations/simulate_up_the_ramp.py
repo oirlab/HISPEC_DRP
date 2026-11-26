@@ -35,6 +35,7 @@ from .utr import create_ramp
 from ..calibrations.run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
 from .simulate_spectra import add_sky_background
+from .throughput import apply_throughput_total
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 # Default output filenames for simulated products
@@ -2229,8 +2230,9 @@ def create_ramp_and_calibrations(
                 f,
             )
 
-            srm.apply_throughput_total(
-                fiber_number=f,
+            srm.fibers[f]["flux"] = apply_throughput_total(
+                srm.fibers[f]["wavelength"],
+                srm.fibers[f]["flux"],
                 mode="NGS",
             )
 
