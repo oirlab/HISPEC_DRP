@@ -22,10 +22,8 @@ from hispecdrp.primitives.utils.ccf import (
     prepare_template_for_doppler_paint,
     template_min_resolution_for_doppler_paint,
 )
-from hispecdrp.primitives.utils.spectral_utils import (
-    get_spectrum_path,
-    load_btsettl_spectrum,
-)
+from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 from hispecdrp.simulations.e2e_support import (
     DEFAULT_TEMPLATE_FILENAME,
     templates_data_dir,
@@ -56,7 +54,7 @@ def bspec_wave_order130() -> np.ndarray:
 def bt_order_excerpt(bspec_wave_order130):
     """BT-Settl native crop for one BSPEC order + R=3e6 reference."""
     wave = bspec_wave_order130
-    tpl = get_spectrum_path(DEFAULT_TEMPLATE_FILENAME, base_dir=templates_data_dir())
+    tpl = get_spectral_template_path(DEFAULT_TEMPLATE_FILENAME, base_dir=templates_data_dir())
     w_q, f_q = load_btsettl_spectrum(tpl)
     w = np.asarray(w_q.value, dtype=np.float64).ravel()
     f = np.asarray(f_q.value, dtype=np.float64).ravel()

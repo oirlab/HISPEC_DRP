@@ -11,9 +11,9 @@ import pytest
 import hispecdrp.simulations as simulations
 from hispecdrp.primitives.utils.spectral_utils import (
     fetch_svo_2mass_filter,
-    get_spectrum_path,
     load_btsettl_spectrum,
 )
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 
 
 @pytest.mark.slow
@@ -119,33 +119,33 @@ def test_utr_variable_rate_cube():
     assert np.allclose(np.mean(rate_cube, axis=(1, 2)), 100.0 * scaling, rtol=1e-10)
 
 
-def test_get_spectrum_path():
-    """get_spectrum_path resolves relative path under hispecdrp templates dir."""
+def test_get_spectral_template_path():
+    """get_spectral_template_path resolves relative path under hispecdrp templates dir."""
     rel = "lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5"
-    out = get_spectrum_path(rel)
+    out = get_spectral_template_path(rel)
     assert "templates" in out
     assert "data" in out
     assert out.endswith(rel)
     abs_path = "/absolute/path/to/file.h5"
-    assert get_spectrum_path(abs_path) == abs_path
+    assert get_spectral_template_path(abs_path) == abs_path
 
 
-def test_get_spectrum_path_dropbox_conflicted_copy(tmp_path):
+def test_get_spectral_template_path_dropbox_conflicted_copy(tmp_path):
     """If the canonical .h5 is missing, use a same-stem Dropbox conflicted copy."""
     stem = "lte040.0-4.5-0.0a+0.0.BT-Settl.spec.7"
     conflicted = tmp_path / f"{stem} (MacBook Pro's conflicted copy 2026-08-28).h5"
     conflicted.write_bytes(b"ok")
-    resolved = get_spectrum_path(f"{stem}.h5", base_dir=str(tmp_path))
+    resolved = get_spectral_template_path(f"{stem}.h5", base_dir=str(tmp_path))
     assert resolved == str(conflicted)
 
 
 @pytest.mark.skipif(
-    not os.path.isfile(get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
+    not os.path.isfile(get_spectral_template_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")),
     reason="BT-Settl spectrum file not present",
 )
 def test_load_btsettl_spectrum():
     """load_btsettl_spectrum loads wavelength and flux from bundled .h5 if present."""
-    path = get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
+    path = get_spectral_template_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
     wl, flux = load_btsettl_spectrum(path, wl_min_um=1.0, wl_max_um=2.0)
     assert wl is not None
     assert flux is not None

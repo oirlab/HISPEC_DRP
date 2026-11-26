@@ -188,7 +188,8 @@ from hispecdrp.utils.line_mask_utils import (
     package_data_masks_dir,
     packaged_default_line_mask_path,
 )
-from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path, load_btsettl_spectrum
+from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
 # ``examples/data`` (for ``HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_SERIALIZE_RV_CCF`` line-window dumps).
@@ -233,7 +234,7 @@ LTE049_BTSETTL_SPEC_H5 = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.h5"
 LTE049_BTSETTL_MASK_MAS = "lte049.0-2.5-0.0a+0.0.BT-Settl.spec.7.delta.mas"
 
 def _lte049_btsettl_spec_h5_path() -> str:
-    return get_spectrum_path(LTE049_BTSETTL_SPEC_H5, base_dir=TEMPLATE_DIR)
+    return get_spectral_template_path(LTE049_BTSETTL_SPEC_H5, base_dir=TEMPLATE_DIR)
 
 
 def _lte049_btsettl_paired_mask_path() -> str:
@@ -1260,7 +1261,7 @@ def _run_lte049_k2all_line_mask_previews(
             (
                 "lte049: load BT-Settl spectrum (µm)",
                 time.perf_counter() - t0,
-                "get_spectrum_path, load_btsettl_spectrum, _load_btsettl_sorted_micron",
+                "get_spectral_template_path, load_btsettl_spectrum, _load_btsettl_sorted_micron",
                 True,
             )
         )

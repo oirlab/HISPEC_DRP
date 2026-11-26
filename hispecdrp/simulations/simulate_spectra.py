@@ -23,8 +23,7 @@ from ..datamodels import hispec_config
 from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.ccf.ccf_utils import prepare_template_for_doppler_paint
-from ..primitives.utils.spectral_utils import get_spectrum_path
-from ..utils.spectral_templates_utils import load_template_from_path
+from ..utils.spectral_template_utils import get_spectral_template_path, load_template_from_path
 from ..utils.line_mask_utils import (
     CCFOPT_SINGLE_LINE_STELLAR_RV_KW,
     IDEAL_SPECTRUM_STELLAR_RV_KW,
@@ -85,7 +84,7 @@ def add_sky_background(
         raise ValueError("Sky background filename must be provided.")
 
     from . import e2e_support
-    from ..utils.spectral_templates_utils import get_skybackground_path, load_sky_spectrum
+    from ..utils.spectral_template_utils import get_skybackground_path, load_sky_spectrum
 
     sky_template_path = get_skybackground_path(sky_filename, base_dir=e2e_support.atmosphere_data_dir())
     sky_wl, sky_flux = load_sky_spectrum(sky_template_path)
@@ -253,7 +252,7 @@ def build_l2(
         In-memory L2 with one spectrum row per echelle order.
     """
     base_dir = templates_data_dir() if templates_base_dir is None else templates_base_dir
-    template_path = get_spectrum_path(template, base_dir=base_dir)
+    template_path = get_spectral_template_path(template, base_dir=base_dir)
 
     orders = hispec_config.HISPECConfig.get_order_list(spectrograph, order_start, order_end)
     ost, oen = orders[0], orders[-1]
@@ -377,7 +376,7 @@ def build_ccfopt_mask(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     base_dir = templates_data_dir() if templates_base_dir is None else templates_base_dir
-    template_path = get_spectrum_path(template, base_dir=base_dir)
+    template_path = get_spectral_template_path(template, base_dir=base_dir)
     stem = Path(template).stem
 
     seed_mask = out_dir / f"{stem}.delta.mas"

@@ -2041,9 +2041,9 @@ def refine_sim_hdf_wavesol_line_zeropoint(
 
     from ..primitives.utils.spectral_utils import (
         delta_wave_to_delta_vel,
-        get_spectrum_path,
         load_btsettl_spectrum,
     )
+    from ..utils.spectral_template_utils import get_spectral_template_path
     from ..utils.line_mask_utils import (
         _continuum_envelope,
         detect_template_line_centers_parabolic_um,
@@ -2062,7 +2062,7 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     grids = get_sim_hdf_trace_grids(spectrograph)
     order_list = _order_list(spectrograph)
     tw, tf = load_btsettl_spectrum(
-        get_spectrum_path(
+        get_spectral_template_path(
             e2e_support.DEFAULT_TEMPLATE_FILENAME,
             base_dir=e2e_support.templates_data_dir(),
         )

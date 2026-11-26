@@ -13,10 +13,10 @@ from ..pipelines import Stage1Pipeline
 from ..primitives import BlazeCorrectionPrimitive
 from ..primitives.utils.spectral_utils import (
     doppler_shift_wave,
-    get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
+from ..utils.spectral_template_utils import get_spectral_template_path
 from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
@@ -62,7 +62,7 @@ def build_template_rate_map(
     if spectrum_wavelengths is None or spectrum_flux is None:
         if template is None:
             raise ValueError("template is required when no explicit spectrum is given")
-        template_path = get_spectrum_path(template, base_dir=templates_data_dir())
+        template_path = get_spectral_template_path(template, base_dir=templates_data_dir())
         wl, flux = load_btsettl_spectrum(
             template_path,
             mag_ab=mag_ab,

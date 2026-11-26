@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 from .. import datamodels
 from ..primitives.utils.spectral_utils import (
     doppler_shift_wave,
-    get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
     resolve_twomass_mag_ab,
 )
+from ..utils.spectral_template_utils import get_spectral_template_path
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
 from . import e2e_support
@@ -1974,7 +1974,7 @@ def create_ramp_and_calibrations(
                 and f in template_filename
             ):
 
-                template_path = get_spectrum_path(
+                template_path = get_spectral_template_path(
                     template_filename[f],
                     base_dir=e2e_support.templates_data_dir(),
                 )
@@ -2012,7 +2012,7 @@ def create_ramp_and_calibrations(
             # ----------------------------------------------------------
             elif isinstance(template_filename, str):
 
-                template_path = get_spectrum_path(
+                template_path = get_spectral_template_path(
                     template_filename,
                     base_dir=e2e_support.templates_data_dir(),
                 )
@@ -2034,7 +2034,7 @@ def create_ramp_and_calibrations(
             # ----------------------------------------------------------
             elif fiber_spectra is None:
 
-                template_path = get_spectrum_path(
+                template_path = get_spectral_template_path(
                     e2e_support.DEFAULT_TEMPLATE_FILENAME,
                     base_dir=e2e_support.templates_data_dir(),
                 )

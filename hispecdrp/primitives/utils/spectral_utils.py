@@ -4,7 +4,7 @@ Spectral utilities: template I/O and wavelength / velocity / pixel conversions.
 Includes BT-Settl template loading for stellar CCF, plus helpers that convert
 between wavelength, velocity, and pixel deltas.
 
-Loads **BT-Settl**-style HDF5 spectra (``lte*.h5``), resolves paths, converts
+Loads **BT-Settl**-style HDF5 spectra (``lte*.h5``), converts
 **air ↔ vacuum** wavelengths (see :func:`air_wavelength_nm_to_vacuum_nm` and
 :func:`vacuum_wavelength_nm_to_air_nm`), normalizes to 2MASS AB magnitudes using
 profiles from the **SVO Filter Profile Service**, and builds
@@ -59,11 +59,6 @@ _DEFAULT_FILTER_DATA_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "data", "filters"
 )
 
-# Default directory for bundled spectrum templates (BT-Settl .h5 under hispecdrp/data/templates)
-_DEFAULT_SPECTRUM_DATA_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "templates"
-)
-
 try:
     import h5py
 except ImportError:
@@ -84,7 +79,6 @@ __all__ = [
     "delta_wave_to_delta_vel",
     "doppler_shift_wave",
     "fetch_svo_2mass_filter",
-    "get_spectrum_path",
     "load_btsettl_spectrum",
     "load_template_from_path",
     "normalize_2mass_band",
@@ -310,56 +304,6 @@ def vacuum_wavelength_nm_to_air_nm(
         air = air_new
 
     return air.reshape(orig_shape)
-
-
-def _coalesce_existing_spectrum_path(resolved: str) -> str:
-    """Prefer ``resolved`` if it exists; else a Dropbox conflicted-copy sibling."""
-    if os.path.isfile(resolved):
-        return resolved
-    parent = os.path.dirname(resolved)
-    name = os.path.basename(resolved)
-    stem, ext = os.path.splitext(name)
-    if not os.path.isdir(parent) or ext.lower() != ".h5":
-        return resolved
-    candidates = [
-        os.path.join(parent, fn)
-        for fn in os.listdir(parent)
-        if fn != name and fn.startswith(stem) and fn.lower().endswith(".h5")
-    ]
-    if not candidates:
-        return resolved
-    candidates.sort(key=os.path.getmtime, reverse=True)
-    return candidates[0]
-
-
-def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
-    """
-    Resolve a spectrum file path, optionally relative to a package data directory.
-
-    Parameters
-    ----------
-    path : str
-        Absolute path, or a filename / relative path joined to ``base_dir``.
-    base_dir : str or None, optional
-        Root directory for relative ``path``. If ``None``, uses
-        ``hispecdrp/data/templates/`` (see :data:`_DEFAULT_SPECTRUM_DATA_DIR`).
-
-    Returns
-    -------
-    str
-        Absolute filesystem path (``os.path.join(base_dir, path)`` when ``path`` is
-        relative). If that file is missing, a same-stem ``*.h5`` sibling is used
-        when present (Dropbox ``conflicted copy`` names).
-
-    See Also
-    --------
-    load_btsettl_spectrum : Open resolved BT-Settl HDF5 files.
-    """
-    if os.path.isabs(path):
-        return _coalesce_existing_spectrum_path(path)
-    if base_dir is None:
-        base_dir = _DEFAULT_SPECTRUM_DATA_DIR
-    return _coalesce_existing_spectrum_path(os.path.join(base_dir, path))
 
 
 def _load_2mass_filter_table(path: str) -> tuple[np.ndarray, np.ndarray]:

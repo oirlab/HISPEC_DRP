@@ -21,7 +21,7 @@ from scipy.signal import argrelextrema
 
 from hispecdrp.utils.physical_constants import C_M_S
 from hispecdrp.primitives.utils.spectral_utils import doppler_shift_wave
-from hispecdrp.utils.spectral_templates_utils import load_template_from_path
+from hispecdrp.utils.spectral_template_utils import load_template_from_path
 
 logger = logging.getLogger(__name__)
 

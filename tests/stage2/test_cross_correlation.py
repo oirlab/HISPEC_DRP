@@ -13,7 +13,7 @@ import pytest
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.primitives import StellarRVPrimitive
-from hispecdrp.primitives.utils.spectral_utils import get_spectrum_path
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 from tests.utils import fast_ccf_orders
 
 
@@ -248,7 +248,7 @@ def _make_minimal_l2_for_ccf(n_orders: int = 10, n_pix: int = 4096):
 @pytest.fixture(scope="module")
 def template_path():
     """Resolve BT-Settl template path (may skip if file missing)."""
-    path = get_spectrum_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
+    path = get_spectral_template_path("lte025.0-5.5-0.0a+0.0.BT-Settl.spec.7.h5")
     if not os.path.isfile(path):
         pytest.skip(f"Template not found: {path}")
     return path

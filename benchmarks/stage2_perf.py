@@ -6,7 +6,8 @@ from datetime import datetime
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.pipelines import Stage2Pipeline
-from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum, get_spectrum_path
+from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 
 from .utils import _run_pipeline_perf
 
@@ -37,7 +38,7 @@ def _create_stage2_input(
     wl_max_um = max(lam_centers) * 1.05
 
     # Load BT-Settl template
-    template_path = get_spectrum_path(DEFAULT_TEMPLATE_FILENAME, base_dir=TEMPLATES_DATA_DIR)
+    template_path = get_spectral_template_path(DEFAULT_TEMPLATE_FILENAME, base_dir=TEMPLATES_DATA_DIR)
     wl_q, flux_q = load_btsettl_spectrum(template_path, wl_min_um=wl_min_um, wl_max_um=wl_max_um)
     wl_template = np.asarray(wl_q.to_value('micron'), dtype=np.float64)
     flux_template = np.asarray(flux_q.value, dtype=np.float64)

@@ -78,7 +78,7 @@ __all__ = [
     "air_wavelength_nm_to_vacuum_nm",
     "vacuum_wavelength_nm_to_air_nm",
     "fetch_svo_2mass_filter",
-    "get_spectrum_path",
+    "get_spectral_template_path",
     "load_btsettl_spectrum",
     "load_template_from_path",
     "resolve_stellar_template_to_log_micron",
@@ -269,9 +269,9 @@ def _coalesce_existing_spectrum_path(resolved: str) -> str:
     return candidates[0]
 
 
-def get_spectrum_path(path: str, base_dir: str | None = None) -> str:
+def get_spectral_template_path(path: str, base_dir: str | None = None) -> str:
     """
-    Resolve a spectrum file path, optionally relative to a package data directory.
+    Resolve a spectral template file path, optionally relative to a package data directory.
 
     Parameters
     ----------

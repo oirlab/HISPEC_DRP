@@ -82,9 +82,9 @@ def _refine_from_l2_spectrum(
     from hispecdrp.simulations import e2e_support
     from hispecdrp.primitives.utils.spectral_utils import (
         delta_wave_to_delta_vel,
-        get_spectrum_path,
         load_btsettl_spectrum,
     )
+    from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
     from hispecdrp.utils.line_mask_utils import (
         _continuum_envelope,
         detect_template_line_centers_parabolic_um,
@@ -97,7 +97,7 @@ def _refine_from_l2_spectrum(
     order_vec = np.asarray(_order_list(spectrograph), dtype=int)
 
     tw, tf = load_btsettl_spectrum(
-        get_spectrum_path(
+        get_spectral_template_path(
             e2e_support.DEFAULT_TEMPLATE_FILENAME,
             base_dir=e2e_support.templates_data_dir(),
         )

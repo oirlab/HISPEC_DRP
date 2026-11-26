@@ -64,10 +64,10 @@ from hispecdrp.pipelines import Stage1Pipeline
 from hispecdrp.primitives import BlazeCorrectionPrimitive
 from hispecdrp.primitives.utils.spectral_utils import (
     doppler_shift_wave,
-    get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 from hispecdrp.simulations.e2e_gaia import resolve_e2e_mjd_start
 from hispecdrp.simulations.e2e_support import templates_data_dir
 from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery
@@ -152,7 +152,7 @@ def build_native_rate_map(bulk_km_s: float, *, output_dir: str) -> np.ndarray:
     if not (-500.0 <= bulk_km_s <= 500.0):
         raise ValueError(f"bulk_km_s must be in [-500, 500], got {bulk_km_s}")
 
-    template_path = get_spectrum_path(TEMPLATE, base_dir=templates_data_dir())
+    template_path = get_spectral_template_path(TEMPLATE, base_dir=templates_data_dir())
     wl, flux = load_btsettl_spectrum(
         template_path,
         mag_ab=TEMPLATE_MAG_AB,

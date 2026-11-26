@@ -13,10 +13,10 @@ from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
 from ..primitives.utils.spectral_utils import (
     doppler_shift_wave,
-    get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
+from ..utils.spectral_template_utils import get_spectral_template_path
 from .e2e_support import templates_data_dir
 from .ideal_spectrum_rv import (
     FIBERFLAT_IDENTITY,
@@ -76,7 +76,7 @@ def load_densified_template(
     resolution: float = DENSIFY_RESOLUTION,
 ):
     """Load a BT-Settl template, sort it, and densify to ``resolution``."""
-    template_path = get_spectrum_path(template, base_dir=templates_data_dir())
+    template_path = get_spectral_template_path(template, base_dir=templates_data_dir())
     wl, flux = load_btsettl_spectrum(
         template_path,
         mag_ab=float(mag_ab),
