@@ -22,8 +22,7 @@ from hispecdrp.primitives.utils.ccf import (
     prepare_template_for_doppler_paint,
     template_min_resolution_for_doppler_paint,
 )
-from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
-from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path, load_btsettl_spectrum
 from hispecdrp.simulations.e2e_support import (
     DEFAULT_TEMPLATE_FILENAME,
     templates_data_dir,

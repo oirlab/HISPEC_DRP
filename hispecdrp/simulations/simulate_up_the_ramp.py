@@ -21,13 +21,13 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from .. import datamodels
-from ..primitives.utils.spectral_utils import (
-    doppler_shift_wave,
+from ..primitives.utils.spectral_utils import doppler_shift_wave
+from ..utils.spectral_template_utils import (
+    get_spectral_template_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
     resolve_twomass_mag_ab,
 )
-from ..utils.spectral_template_utils import get_spectral_template_path
 from ..datamodels.dqflags import DQ_FLAGS
 from ..pipelines import Stage0Pipeline, ProcessFiberflatsPipeline
 from . import e2e_support

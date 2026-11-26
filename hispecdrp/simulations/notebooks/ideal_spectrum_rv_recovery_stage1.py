@@ -62,12 +62,12 @@ from hispecdrp import datamodels
 from hispecdrp.calibrations import HISPECCalibrationStore
 from hispecdrp.pipelines import Stage1Pipeline
 from hispecdrp.primitives import BlazeCorrectionPrimitive
-from hispecdrp.primitives.utils.spectral_utils import (
-    doppler_shift_wave,
+from hispecdrp.primitives.utils.spectral_utils import doppler_shift_wave
+from hispecdrp.utils.spectral_template_utils import (
+    get_spectral_template_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
-from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 from hispecdrp.simulations.e2e_gaia import resolve_e2e_mjd_start
 from hispecdrp.simulations.e2e_support import templates_data_dir
 from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery

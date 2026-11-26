@@ -11,12 +11,12 @@ import numpy as np
 from ..datamodels import hispec_config
 from ..driver.logging import quiet_pipeline_logging
 from ..primitives.utils.ccf import doppler_paint_lanczos
-from ..primitives.utils.spectral_utils import (
-    doppler_shift_wave,
+from ..primitives.utils.spectral_utils import doppler_shift_wave
+from ..utils.spectral_template_utils import (
+    get_spectral_template_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
-from ..utils.spectral_template_utils import get_spectral_template_path
 from .e2e_support import templates_data_dir
 from .ideal_spectrum_rv import (
     FIBERFLAT_IDENTITY,

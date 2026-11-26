@@ -188,8 +188,7 @@ from hispecdrp.utils.line_mask_utils import (
     package_data_masks_dir,
     packaged_default_line_mask_path,
 )
-from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
-from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path, load_btsettl_spectrum
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(hispecdrp.__file__), "data", "templates")
 # ``examples/data`` (for ``HISPEC_DRP_BSPEC_BTSETTL_LINE_WINDOW_SERIALIZE_RV_CCF`` line-window dumps).

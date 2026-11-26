@@ -9,11 +9,11 @@ import astropy.units as u
 import pytest
 
 import hispecdrp.simulations as simulations
-from hispecdrp.primitives.utils.spectral_utils import (
+from hispecdrp.utils.spectral_template_utils import (
     fetch_svo_2mass_filter,
+    get_spectral_template_path,
     load_btsettl_spectrum,
 )
-from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
 
 
 @pytest.mark.slow

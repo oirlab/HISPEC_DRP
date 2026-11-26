@@ -80,11 +80,11 @@ def _refine_from_l2_spectrum(
         _polyval_scaled,
     )
     from hispecdrp.simulations import e2e_support
-    from hispecdrp.primitives.utils.spectral_utils import (
-        delta_wave_to_delta_vel,
+    from hispecdrp.primitives.utils.spectral_utils import delta_wave_to_delta_vel
+    from hispecdrp.utils.spectral_template_utils import (
+        get_spectral_template_path,
         load_btsettl_spectrum,
     )
-    from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
     from hispecdrp.utils.line_mask_utils import (
         _continuum_envelope,
         detect_template_line_centers_parabolic_um,

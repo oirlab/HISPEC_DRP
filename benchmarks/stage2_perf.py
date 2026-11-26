@@ -6,8 +6,7 @@ from datetime import datetime
 from hispecdrp import datamodels
 from hispecdrp.datamodels import hispec_config
 from hispecdrp.pipelines import Stage2Pipeline
-from hispecdrp.primitives.utils.spectral_utils import load_btsettl_spectrum
-from hispecdrp.utils.spectral_template_utils import get_spectral_template_path
+from hispecdrp.utils.spectral_template_utils import get_spectral_template_path, load_btsettl_spectrum
 
 from .utils import _run_pipeline_perf
 

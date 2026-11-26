@@ -1,12 +1,11 @@
 """
-Spectral template I/O and preparation for stellar CCF.
+Spectral template files: paths, loading, and flux scaling.
 
-Loads **BT-Settl**-style HDF5 spectra (``lte*.h5``), resolves paths, converts
-**air ↔ vacuum** wavelengths (see :func:`air_wavelength_nm_to_vacuum_nm` and
-:func:`vacuum_wavelength_nm_to_air_nm`), normalizes to 2MASS AB magnitudes using
-profiles from the **SVO Filter Profile Service**, and builds
+Resolves template paths, loads **BT-Settl**-style HDF5 spectra (``lte*.h5``) on a
+vacuum wavelength grid, scales them to 2MASS AB magnitudes, and builds
 :math:`(\\ln\\lambda, \\mathrm{flux})` grids for
 :class:`~hispecdrp.primitives.stellar_rv.stellar_rv_primitive.StellarRVPrimitive`.
+Also loads sky background spectra and generates etalon line lists.
 
 Submodules and data
 -------------------
@@ -19,11 +18,11 @@ Notes
   data, not HISPEC DRP.
 - **2MASS filter curves** prefer bundled Cohen/IPAC RSR files under
   ``hispecdrp/data/filters/``; SVO (``SVO_FILTER_URL``) is only tried if those are missing.
-- **Air–vacuum** conversions use a dry-air refractivity polynomial in
-  :func:`_edlen_refractivity_ppm_nm` (SPIROU / Morton-style Cauchy form); refractivity
-  is evaluated at the **air** wavelength, so the inverse uses fixed-point iteration.
+- **2MASS magnitudes** are Vega in the catalog; template normalization uses AB, converted
+  with the fixed offsets in :data:`TWOMASS_VEGA_TO_AB`.
 - Wavelength convention for loaded templates matches vacuum L2 axes when
-  ``wavelengths_are_air=True`` in :func:`load_btsettl_spectrum`.
+  ``wavelengths_are_air=True`` in :func:`load_btsettl_spectrum`. The air → vacuum
+  conversion is :func:`~hispecdrp.primitives.utils.spectral_utils.air_wavelength_nm_to_vacuum_nm`.
 
 References
 ----------
@@ -31,11 +30,6 @@ References
   http://perso.ens-lyon.fr/france.allard/
 * SVO Filter Profile Service: https://svo2.cab.inta-csic.es/theory/fps3/
 * spirou-ccf (spectral order / CCF context): https://github.com/edermartioli/spirou-ccf/blob/main/spiroulib.py
-
-See Also
---------
-:func:`air_wavelength_nm_to_vacuum_nm` : Air → vacuum (nm).
-:func:`vacuum_wavelength_nm_to_air_nm` : Vacuum → air (nm), inverse pairing.
 """
 from __future__ import annotations
 
@@ -44,6 +38,8 @@ import os
 import urllib.request
 
 import numpy as np
+
+from ..primitives.utils.spectral_utils import air_wavelength_nm_to_vacuum_nm
 
 logger = logging.getLogger(__name__)
 
@@ -75,178 +71,76 @@ DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM = 3.0
 __all__ = [
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MAX_UM",
     "DEFAULT_STELLAR_TEMPLATE_LOAD_WL_MIN_UM",
-    "air_wavelength_nm_to_vacuum_nm",
-    "vacuum_wavelength_nm_to_air_nm",
+    "TWOMASS_VEGA_TO_AB",
+    "etalon_line_list",
     "fetch_svo_2mass_filter",
+    "get_skybackground_path",
     "get_spectral_template_path",
     "load_btsettl_spectrum",
-    "load_template_from_path",
-    "resolve_stellar_template_to_log_micron",
-    "get_skybackground_path",
     "load_sky_spectrum",
-    "etalon_line_list",
+    "load_template_from_path",
+    "normalize_2mass_band",
+    "resolve_stellar_template_to_log_micron",
+    "resolve_twomass_mag_ab",
+    "twomass_ab_to_vega",
+    "twomass_vega_to_ab",
 ]
 
-
-def _edlen_refractivity_ppm_nm(wavelength_nm: np.ndarray, *, air_density: float = 1.0) -> np.ndarray:
-    """
-    Dry-air refractivity :math:`(n - 1)` in parts per million (ppm).
-
-    Uses the same Cauchy-style expansion as SPIROU ``spectrumlib.nrefrac`` /
-    Morton (1991)-class dispersion: wavenumber :math:`\\sigma = 1/\\lambda` with
-    :math:`\\lambda` in µm enters a quadratic polynomial in :math:`\\sigma^2`.
-
-    Parameters
-    ----------
-    wavelength_nm : np.ndarray
-        Wavelength in **nanometers** (air), at which :math:`(n-1)` is evaluated.
-        Non-positive values produce inf/nan in wavenumber terms; callers should
-        filter inputs.
-
-    air_density : float, optional
-        Multiplicative scale for refractivity (1.0 = STP dry air in this parameterization).
-
-    Returns
-    -------
-    np.ndarray
-        :math:`(n - 1)` in ppm (i.e. multiply by :math:`10^{-6}` for the fractional index
-        excess used in :func:`air_wavelength_nm_to_vacuum_nm`).
-
-    Notes
-    -----
-    This is an internal helper; public conversions should use
-    :func:`air_wavelength_nm_to_vacuum_nm` / :func:`vacuum_wavelength_nm_to_air_nm`.
-    """
-
-    wl = np.asarray(wavelength_nm, dtype=np.float64)
-    wl2inv = (1.0e3 / wl) ** 2
-    refracstp = 272.643 + 1.2288 * wl2inv + 3.555e-2 * wl2inv**2
-    return float(air_density) * refracstp
+# 2MASS catalog magnitudes are Vega; template normalization uses AB.
+# m_AB = m_Vega + offset (Blanton & Roweis 2007).
+TWOMASS_VEGA_TO_AB = {"J": 0.910, "H": 1.390, "K": 1.850, "KS": 1.850}
 
 
-def air_wavelength_nm_to_vacuum_nm(
-    air_wavelength_nm: np.ndarray | float, *, air_density: float = 1.0
-) -> np.ndarray:
-    """
-    Convert **air** wavelength to **vacuum** wavelength (nanometers).
-
-    Uses the standard mapping
-
-    .. math::
-
-        \\lambda_\\mathrm{vac} = \\lambda_\\mathrm{air}\\,
-            \\bigl(1 + 10^{-6} N(\\lambda_\\mathrm{air})\\bigr),
-
-    where :math:`N` is :func:`_edlen_refractivity_ppm_nm` evaluated at
-    :math:`\\lambda_\\mathrm{air}`.
-
-    Parameters
-    ----------
-    air_wavelength_nm : array_like
-        Wavelength(s) in nanometers (air).
-    air_density : float, optional
-        Passed to :func:`_edlen_refractivity_ppm_nm`.
-
-    Returns
-    -------
-    np.ndarray
-        Vacuum wavelength(s) in nanometers (same shape as broadcast input).
-
-    See Also
-    --------
-    vacuum_wavelength_nm_to_air_nm : Inverse conversion (fixed-point iteration).
-    """
-
-    air = np.asarray(air_wavelength_nm, dtype=np.float64)
-    nppm = _edlen_refractivity_ppm_nm(air, air_density=air_density)
-    return air * (1.0 + 1.0e-6 * nppm)
+def normalize_2mass_band(band: str) -> str:
+    """Return canonical 2MASS band ``'J'``, ``'H'``, or ``'K'`` (``'Ks'`` → ``'K'``)."""
+    b = str(band).strip().upper()
+    if b == "KS":
+        return "K"
+    if b not in ("J", "H", "K"):
+        raise ValueError("band must be one of 'J', 'H', 'K', or 'Ks'")
+    return b
 
 
-def vacuum_wavelength_nm_to_air_nm(
-    vacuum_wavelength_nm: np.ndarray | float,
+def twomass_vega_to_ab(mag_vega: float, band: str) -> float:
+    """Convert a 2MASS Vega magnitude to AB using a fixed per-band offset."""
+    b = normalize_2mass_band(band)
+    return float(mag_vega) + float(TWOMASS_VEGA_TO_AB[b])
+
+
+def twomass_ab_to_vega(mag_ab: float, band: str) -> float:
+    """Convert a 2MASS AB magnitude to Vega using a fixed per-band offset."""
+    b = normalize_2mass_band(band)
+    return float(mag_ab) - float(TWOMASS_VEGA_TO_AB[b])
+
+
+def resolve_twomass_mag_ab(
     *,
-    air_density: float = 1.0,
-    max_iter: int = 12,
-    rtol: float = 1e-14,
-) -> np.ndarray:
+    mag_ab: float | None = None,
+    mag_vega: float | None = None,
+    filter_band: str | None = None,
+) -> tuple[float | None, str | None]:
     """
-    Convert **vacuum** wavelength to **air** wavelength (nanometers).
+    Resolve optional AB/Vega magnitudes to ``(mag_ab, band)`` for template scaling.
 
-    The forward relation :func:`air_wavelength_nm_to_vacuum_nm` depends on refractivity
-    evaluated at **air** wavelength, so the inverse is not a single closed-form division
-    by a factor evaluated at vacuum λ. This function solves
-
-    .. math::
-
-        \\lambda_\\mathrm{vac} = \\lambda_\\mathrm{air}\\,
-            \\bigl(1 + 10^{-6} N(\\lambda_\\mathrm{air})\\bigr)
-
-    by fixed-point iteration
-
-    .. math::
-
-        \\lambda_\\mathrm{air}^{(k+1)} = \\frac{\\lambda_\\mathrm{vac}}
-            {1 + 10^{-6} N\\bigl(\\lambda_\\mathrm{air}^{(k)}\\bigr)},
-
-    starting from :math:`\\lambda_\\mathrm{air}^{(0)} = \\lambda_\\mathrm{vac}`.
-    Convergence is rapid because :math:`10^{-6}N` is :math:`\\mathcal{O}(10^{-4})`.
-
-    Parameters
-    ----------
-    vacuum_wavelength_nm : array_like
-        Wavelength(s) in nanometers (vacuum).
-    air_density : float, optional
-        Passed to :func:`_edlen_refractivity_ppm_nm`.
-    max_iter : int, optional
-        Maximum iterations (default 12 is ample for double precision).
-    rtol : float, optional
-        Stop when all finite elements satisfy
-        ``abs(air_new - air) <= rtol * max(abs(air), 1e-30)``.
-
-    Returns
-    -------
-    np.ndarray
-        Air wavelength(s) in nanometers. Non-finite or non-positive vacuum inputs
-        are mapped to NaN.
-
-    Raises
-    ------
-    ValueError
-        If ``max_iter`` < 1.
-
-    See Also
-    --------
-    air_wavelength_nm_to_vacuum_nm : Forward air → vacuum.
-
-    Notes
-    -----
-    Round-trip ``air → vac → air`` matches the original air grid within ~machine
-    precision for typical NIR wavelengths when using the same ``air_density``.
+    ``mag_vega`` overrides ``mag_ab`` when both are set. A magnitude requires
+    ``filter_band`` (2MASS ``J`` / ``H`` / ``K`` / ``Ks``).
     """
-
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-
-    vac = np.asarray(vacuum_wavelength_nm, dtype=np.float64)
-    orig_shape = vac.shape
-    vac_flat = vac.reshape(-1)
-    air = vac_flat.copy()
-    bad = ~np.isfinite(air) | (air <= 0)
-    air[bad] = np.nan
-
-    for _ in range(max_iter):
-        nppm = _edlen_refractivity_ppm_nm(air, air_density=air_density)
-        factor = 1.0 + 1.0e-6 * nppm
-        air_new = vac_flat / factor
-        air_new[bad] = np.nan
-        shift = np.abs(air_new - air)
-        scale = np.maximum(np.abs(air), 1.0e-30)
-        finite_ok = np.isfinite(air) & np.isfinite(air_new) & np.isfinite(shift)
-        if np.all(~finite_ok | (shift <= rtol * scale)):
-            return air_new.reshape(orig_shape)
-        air = air_new
-
-    return air.reshape(orig_shape)
+    if mag_vega is not None:
+        if filter_band is None:
+            raise ValueError("filter_band is required when mag_vega is set")
+        band = normalize_2mass_band(filter_band)
+        return twomass_vega_to_ab(float(mag_vega), band), band
+    if mag_ab is not None:
+        if filter_band is None:
+            raise ValueError("filter_band is required when mag_ab is set")
+        band = normalize_2mass_band(filter_band)
+        return float(mag_ab), band
+    if filter_band is not None:
+        raise ValueError(
+            "filter_band was set without mag_ab or mag_vega; "
+            "provide a magnitude or set filter_band=None"
+        )
+    return None, None
 
 
 def _coalesce_existing_spectrum_path(resolved: str) -> str:
@@ -307,6 +201,14 @@ def get_skybackground_path(path: str, base_dir: str | None = None) -> str:
     return os.path.join(base_dir, path)
 
 
+def _load_2mass_filter_table(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load a 2-column wavelength_Angstrom, transmission table from ``path``."""
+    data = np.loadtxt(path, dtype=np.float64)
+    if data.ndim != 2 or data.shape[1] < 2:
+        raise ValueError(f"Unexpected 2MASS filter data shape in {path}")
+    return data[:, 0], data[:, 1]
+
+
 def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
     """
     Return a 2MASS filter bandpass (wavelength Å, transmission).
@@ -333,16 +235,17 @@ def fetch_svo_2mass_filter(band: str) -> tuple[np.ndarray, np.ndarray]:
         If ``band`` is not one of J, H, K, or if the table is not 2-column.
     urllib.error.URLError
         On network failure or timeout (30 s) when the bundled file is absent.
+
+    References
+    ----------
+    * Cohen et al. 2003, AJ 126, 1090 (2MASS absolute calibration / RSR).
+    * Spanish Virtual Observatory Filter Profile Service (FPS3):
+      https://svo2.cab.inta-csic.es/theory/fps3/
     """
-    band = band.upper()
-    if band not in ("J", "H", "K"):
-        raise ValueError("band must be one of 'J', 'H', 'K'")
+    band = normalize_2mass_band(band)
     bundled = os.path.join(_DEFAULT_FILTER_DATA_DIR, f"2MASS.{band}.dat")
     if os.path.isfile(bundled):
-        data = np.loadtxt(bundled, dtype=np.float64)
-        if data.ndim != 2 or data.shape[1] < 2:
-            raise ValueError(f"Unexpected 2MASS filter data shape in {bundled}")
-        return data[:, 0], data[:, 1]
+        return _load_2mass_filter_table(bundled)
 
     url = SVO_FILTER_URL.format(band=band)
     with urllib.request.urlopen(url, timeout=30) as resp:
@@ -476,8 +379,8 @@ def load_btsettl_spectrum(
     See Also
     --------
     load_template_from_path : Same data as plain ``numpy`` arrays.
-    vacuum_wavelength_nm_to_air_nm : If you must write vacuum-calibrated grids back
-        to air nm for comparison with archive tables.
+    hispecdrp.primitives.utils.spectral_utils.vacuum_wavelength_nm_to_air_nm : If you
+        must write vacuum-calibrated grids back to air nm for comparison with archive tables.
     """
     if h5py is None:
         raise ImportError(

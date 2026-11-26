@@ -2,7 +2,7 @@
 
 import pytest
 
-from hispecdrp.primitives.utils.spectral_utils import (
+from hispecdrp.utils.spectral_template_utils import (
     TWOMASS_VEGA_TO_AB,
     resolve_twomass_mag_ab,
     twomass_ab_to_vega,

@@ -20,7 +20,7 @@ from ..primitives.utils import (
     get_stellar_data_gaia_from_source_id,
 )
 from ..primitives.utils.gaia_query import GAIA_DR3_VIZIER_ID, query_vizier
-from ..primitives.utils.spectral_utils import twomass_vega_to_ab
+from ..utils.spectral_template_utils import twomass_vega_to_ab
 
 logger = logging.getLogger(__name__)
 

@@ -2039,11 +2039,11 @@ def refine_sim_hdf_wavesol_line_zeropoint(
     """
     import scipy.constants
 
-    from ..primitives.utils.spectral_utils import (
-        delta_wave_to_delta_vel,
+    from ..primitives.utils.spectral_utils import delta_wave_to_delta_vel
+    from ..utils.spectral_template_utils import (
+        get_spectral_template_path,
         load_btsettl_spectrum,
     )
-    from ..utils.spectral_template_utils import get_spectral_template_path
     from ..utils.line_mask_utils import (
         _continuum_envelope,
         detect_template_line_centers_parabolic_um,

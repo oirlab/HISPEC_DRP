@@ -11,12 +11,12 @@ import numpy as np
 from .. import datamodels
 from ..pipelines import Stage1Pipeline
 from ..primitives import BlazeCorrectionPrimitive
-from ..primitives.utils.spectral_utils import (
-    doppler_shift_wave,
+from ..primitives.utils.spectral_utils import doppler_shift_wave
+from ..utils.spectral_template_utils import (
+    get_spectral_template_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
 )
-from ..utils.spectral_template_utils import get_spectral_template_path
 from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
