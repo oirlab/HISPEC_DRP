@@ -7,7 +7,7 @@ to start from raw data instead of a Level-0 product.
 
 Like the Stage-1-only variant, this simulates a native BSPEC rate map (e-/s)
 for each injected RV by Doppler-shifting the BT-Settl lte040 template
-(``simulate_spectra.apply_radial_velocity``) and painting it onto the detector
+(``spectral_utils.doppler_shift_wave``) and painting it onto the detector
 (``SimulateRateMap.create_native_rate_map``). But instead of wrapping that
 rate map directly as a Level-0 product, this version treats it as the true
 photon flux and synthesizes a raw up-the-ramp readout from it
@@ -58,7 +58,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import astropy.units as u
 import numpy as np
 from dotenv import load_dotenv
 from joblib import Parallel, delayed
@@ -70,6 +69,7 @@ from hispecdrp.calibrations.run_caldb import get_master_calibrations
 from hispecdrp.pipelines import Stage1Pipeline
 from hispecdrp.primitives import BlazeCorrectionPrimitive
 from hispecdrp.primitives.utils.spectral_utils import (
+    doppler_shift_wave,
     get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
@@ -84,7 +84,7 @@ from hispecdrp.simulations.simulate_up_the_ramp import (
     run_stage0_simulation,
 )
 from hispecdrp.driver.logging import quiet_pipeline_logging
-from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, recover_stellar_rv
+from hispecdrp.simulations.simulate_spectra import recover_stellar_rv
 from hispecdrp.utils.line_mask_utils import (
     paired_line_mask_path_for_template,
     read_mask_generation_meta,
@@ -222,7 +222,7 @@ def build_native_rate_map(bulk_km_s: float, *, output_dir: str) -> np.ndarray:
         continuous=False,
     )
     if bulk_km_s != 0.0:
-        srm.fibers[FIBER]["wavelength"] = apply_radial_velocity(srm.fibers[FIBER]["wavelength"], bulk_km_s * u.km / u.s)
+        srm.fibers[FIBER]["wavelength"] = doppler_shift_wave(srm.fibers[FIBER]["wavelength"], bulk_km_s * 1000.0)
 
     return srm.create_native_rate_map(
         spectrograph=SPECTROGRAPH,

@@ -15,7 +15,7 @@ mask used in the ideal-spectrum notebook.
 
 No ramp, no detector calibrations, anywhere. A rate map (e-/s) is a pure
 photon/optics simulation: load the template, Doppler-shift it
-(``simulate_spectra.apply_radial_velocity``), and paint it onto the detector
+(``spectral_utils.doppler_shift_wave``), and paint it onto the detector
 (``SimulateRateMap.create_native_rate_map``) -- none of that touches gain,
 bias, dark, read noise, or flat-field models. Those detector calibrations
 only matter if you simulate a synthetic up-the-ramp readout *from* a rate map
@@ -53,7 +53,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import astropy.units as u
 import numpy as np
 from dotenv import load_dotenv
 from joblib import Parallel, delayed
@@ -64,6 +63,7 @@ from hispecdrp.calibrations import HISPECCalibrationStore
 from hispecdrp.pipelines import Stage1Pipeline
 from hispecdrp.primitives import BlazeCorrectionPrimitive
 from hispecdrp.primitives.utils.spectral_utils import (
+    doppler_shift_wave,
     get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
@@ -73,7 +73,7 @@ from hispecdrp.simulations.e2e_support import templates_data_dir
 from hispecdrp.simulations.plotting import plot_ideal_spectrum_rv_recovery
 from hispecdrp.simulations.simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 from hispecdrp.driver.logging import quiet_pipeline_logging
-from hispecdrp.simulations.simulate_spectra import apply_radial_velocity, recover_stellar_rv
+from hispecdrp.simulations.simulate_spectra import recover_stellar_rv
 from hispecdrp.utils.line_mask_utils import (
     paired_line_mask_path_for_template,
     read_mask_generation_meta,
@@ -174,7 +174,7 @@ def build_native_rate_map(bulk_km_s: float, *, output_dir: str) -> np.ndarray:
         continuous=False,
     )
     if bulk_km_s != 0.0:
-        srm.fibers[FIBER]["wavelength"] = apply_radial_velocity(srm.fibers[FIBER]["wavelength"], bulk_km_s * u.km / u.s)
+        srm.fibers[FIBER]["wavelength"] = doppler_shift_wave(srm.fibers[FIBER]["wavelength"], bulk_km_s * 1000.0)
 
     return srm.create_native_rate_map(
         spectrograph=SPECTROGRAPH,

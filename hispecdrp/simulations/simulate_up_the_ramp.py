@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .. import datamodels
 from ..primitives.utils.spectral_utils import (
+    doppler_shift_wave,
     get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
@@ -33,7 +34,7 @@ from . import e2e_support
 from .utr import create_ramp
 from ..calibrations.run_caldb import get_master_calibrations
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap, Simulator
-from .simulate_spectra import add_sky_background, apply_radial_velocity
+from .simulate_spectra import add_sky_background
 
 # Directory containing bundled spectrum data (e.g. BT-Settl .h5 files)
 # Default output filenames for simulated products
@@ -2176,8 +2177,6 @@ def create_ramp_and_calibrations(
             if rv_km_s == 0.0:
                 continue
 
-            rv_quantity = rv_km_s * u.km / u.s
-
             logger.info(
                 "Applying densified-template Doppler shift "
                 "(topocentric) to fiber %s: "
@@ -2186,9 +2185,9 @@ def create_ramp_and_calibrations(
                 float(rv_km_s),
             )
 
-            srm.fibers[f]["wavelength"] = apply_radial_velocity(
+            srm.fibers[f]["wavelength"] = doppler_shift_wave(
                 srm.fibers[f]["wavelength"],
-                rv_quantity,
+                float(rv_km_s) * 1000.0,
             )
 
         # ==============================================================

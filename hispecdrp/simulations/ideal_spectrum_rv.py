@@ -12,6 +12,7 @@ from .. import datamodels
 from ..pipelines import Stage1Pipeline
 from ..primitives import BlazeCorrectionPrimitive
 from ..primitives.utils.spectral_utils import (
+    doppler_shift_wave,
     get_spectrum_path,
     load_btsettl_spectrum,
     normalize_2mass_band,
@@ -20,7 +21,7 @@ from .e2e_gaia import resolve_e2e_mjd_start
 from .e2e_support import templates_data_dir
 from .simulate_rate_map import DEFAULT_RATE_MAP_FILENAME, SimulateRateMap
 from ..driver.logging import quiet_pipeline_logging
-from .simulate_spectra import apply_radial_velocity, recover_stellar_rv
+from .simulate_spectra import recover_stellar_rv
 
 __all__ = [
     "build_template_rate_map",
@@ -56,7 +57,7 @@ def build_template_rate_map(
     """Doppler-shift a BT-Settl template and paint a native rate map.
 
     Pass an already Doppler-shifted ``spectrum_wavelengths`` / ``spectrum_flux``
-    pair to skip the template load and the extra ``apply_radial_velocity`` step.
+    pair to skip the template load and the extra Doppler shift (``doppler_shift_wave``).
     """
     if spectrum_wavelengths is None or spectrum_flux is None:
         if template is None:
@@ -88,7 +89,7 @@ def build_template_rate_map(
     )
     if apply_rv:
         fib = srm.fibers[int(fiber)]
-        fib["wavelength"] = apply_radial_velocity(fib["wavelength"], float(rv_km_s) * u.km / u.s)
+        fib["wavelength"] = doppler_shift_wave(fib["wavelength"], float(rv_km_s) * 1000.0)
     return srm.create_native_rate_map(
         spectrograph=str(spectrograph).upper(),
         method=method,
